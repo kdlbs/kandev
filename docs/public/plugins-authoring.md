@@ -7,8 +7,9 @@ status: experimental
 # Authoring a Plugin
 
 This is the canonical developer entry point for Kandev runtime plugins. Use it
-to choose a supported surface, edit manifest.yaml, implement the backend or
-native UI, package it, and test it against a disposable development instance.
+to choose a supported surface, edit manifest.yaml, implement the backend,
+native UI, or isolated web app, package it, and test it against a disposable
+development instance.
 The [plugin manifest reference](plugins-manifest.md) owns field-by-field schema
 details; [Plugins](plugins.md) covers operator installation and lifecycle.
 
@@ -20,9 +21,10 @@ support, not a starter repository.
 ## Quick workflow
 
 1. Choose the closest recipe in this page.
-2. Copy the template and edit manifest.yaml: identity, runtime executable, UI
-   paths, capabilities, events, webhooks, and config.
-3. Implement only through the Go pluginsdk and the frontend registry/Host API.
+2. Copy the template and edit manifest.yaml: identity, runtime executable or
+   `ui.web_apps`, UI paths, capabilities, events, webhooks, and config.
+3. Implement through the Go pluginsdk, the native frontend registry/Host API,
+   or the relative canvas protocol for an isolated web app.
 4. Run the plugin repository tests, vet/lint, and build.
 5. Stage the package, run plugin-pack, inspect the archive and generated
    checksums, then install it in a disposable Kandev instance.
@@ -31,16 +33,15 @@ support, not a starter repository.
 
 ## Lifecycle
 
-```mermaid
-flowchart LR
-  A[Package install] --> B[Manifest and package validation]
-  B --> C[Safe extraction]
-  C --> D[Runtime subprocess]
-  D <-->|Host gRPC over go-plugin| E[Go plugin backend]
-  C --> F[Frontend bundle and styles]
-  F --> G[Browser bundle loading]
-  G --> H[registerKandevPlugin initialize]
-```
+![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)
+
+[Open full-size SVG diagram][plugin-authoring-diagram]
+
+[plugin-authoring-diagram]: ../../docs/screenshots/plugin-authoring-lifecycle.svg
+
+The two lower paths are intentionally separate: the Go subprocess uses the
+host gRPC connection, while the browser receives static bundle assets and then
+calls `registerKandevPlugin`.
 
 Installation validates the manifest, archive paths, checksums, managed runtime,
 and the current host executable before extraction. Kandev then supervises the
@@ -78,10 +79,14 @@ exactly once; late callbacks from an expired generation are fenced from host sta
 
 runtime.executables maps a platform key such as linux-amd64 to a clean
 package-relative path such as server/plugin-linux-amd64. Windows values must
-end in .exe. The host platform's key must be present at install time. A
-UI-focused plugin still ships a managed backend executable because the current
-installer requires runtime.type: binary; that executable can be a no-op
-pluginsdk.UnimplementedPlugin server.
+end in .exe. The host platform's key must be present at install time.
+A UI-focused native plugin still ships a managed backend executable because the
+current installer requires `runtime.type: binary`. That executable can be a
+no-op pluginsdk.UnimplementedPlugin server.
+
+An isolated web-app package can omit `runtime`. It contains a static entry
+document and the files that document imports. Use the `ui.web_apps` fields in
+the [manifest reference](plugins-manifest.md#isolated-web-applications).
 
 Kandev injects KANDEV_PLUGIN_DATA_DIR into the subprocess. It is the durable,
 per-plugin directory for arbitrary files or a plugin-owned database:
@@ -102,6 +107,55 @@ directory.
 | Backend plugin    | Go binary and manifest                                     | events, webhooks, Host data, state, secrets, or utility-agent calls     | only the capabilities used by the backend              |
 | UI-focused plugin | no-op managed binary, ui/bundle.js, optional styles/assets | routes, nav, named slots, WebSocket handlers, keybindings, shared store | ui.bundle; add ui.keybindings when declaring shortcuts |
 | Combined plugin   | Go binary plus UI bundle                                   | UI calls a declared webhook or backend API; backend uses Host           | union of the two surfaces, kept least-privilege        |
+| Isolated web app  | manifest plus static HTML, CSS, JS, and assets             | task or workspace canvas inside a sandboxed iframe                     | only the Kandev data, event, state, and network access it needs |
+
+## Build an isolated web application
+
+Use this shape for a canvas app that runs packaged browser code. The package
+does not need a Go backend or an injected Kandev JavaScript API.
+
+1. Add one or more `ui.web_apps` entries with a package-relative HTML entry.
+2. Set `placements` to `task-canvas`, `workspace-canvas`, or both.
+3. Build the app with relative `./_kandev/v1` requests.
+4. Declare only the Kandev capabilities and exact HTTPS `network_origins` that
+   the app needs.
+5. Package the manifest and static files as a gzip-compressed tar archive.
+
+For example, a page can read task data with the browser Fetch API:
+
+```js
+const response = await fetch("./_kandev/v1/data/tasks");
+if (!response.ok) {
+  throw new Error("The task data request failed");
+}
+const tasks = await response.json();
+```
+
+Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
+relative so the same package works in task and workspace scope. Do not copy a
+capability URL from the host into the app.
+
+The frame has an opaque browser origin. Do not use `localStorage`,
+`sessionStorage`, IndexedDB, or service workers. Use the state protocol for
+small app-specific shared values and JavaScript memory for temporary values.
+
+Network access uses exact HTTPS origins that a user approves. Wildcards,
+origin paths, query strings, credentials, and remote scripts are not allowed.
+Keep scripts, styles, fonts, and images in the package.
+
+Forms cannot submit to external origins. The runtime sets `form-action 'none'`.
+External requests to approved origins are sent directly by the browser. Kandev
+cannot inspect them after they leave the browser, so a release, grant, scope,
+archive, disable, or removal notification immediately tears down the matching
+iframe. A replacement iframe gets a fresh runtime binding.
+
+The validator rejects unsafe paths and unsupported files. It also limits a
+package to 10 MiB compressed, 25 MiB expanded, 512 files, and 5 MiB per file.
+The manifest limit is 64 KiB and the normalized path limit is 240 bytes.
+
+Build and test the archive outside Kandev. Kandev validates the archive before
+it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
+creation, permission review, promotion, Quick Chat editing, and recovery.
 
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements
@@ -188,12 +242,20 @@ curated React, UI, and app-store surface.
   Host adapters consume the approval receipt/query surface; they do not derive
   authority from plugin IDs, package digests, or workspace state.
 
+An isolated web app has a separate browser boundary. Kandev loads it in a
+sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
+host authentication headers, popups, top-level navigation, or a global Kandev
+JavaScript API. See [Security and trust](security.md#isolated-web-applications)
+for the runtime boundary.
+
 ## Storage decision table
 
 | Need                                      | Use                                                                  | Scope/lifecycle                                                                                       | Capability or rule                                                              |
 | ----------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
+| Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
 | Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Opaque origin blocks browser storage and service workers                        |
 | Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
 | Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |
@@ -202,6 +264,9 @@ Host state is not host.storage: Host state is plugin-scoped backend state with
 no transaction primitive, so design updates to be idempotent; host.storage
 (below) is per-user, per-scope frontend storage with an optional
 ifUnmodifiedSince compare-and-swap.
+
+`host.storage` belongs to the native plugin frontend contract. An isolated web
+app does not receive that API. Use the canvas state protocol instead.
 
 ## Authoritative contracts
 
@@ -261,6 +326,15 @@ state after load or when the workspace list changes. If a required read is
 missing, extend this typed context contract; do not reverse-engineer Zustand
 slice shapes in a released plugin.
 
+Users configure a plugin's declared shortcuts on that installed plugin's detail
+page at **Settings > Plugins > `<plugin>`**. These overrides are personal to
+the signed-in user. The plugin's schema-driven configuration and lifecycle
+controls remain install-wide and administrator-only.
+
+If a bundle registers a component at its exact plugin detail route, Kandev
+keeps that component and renders the host-owned shortcut card alongside it.
+Nested plugin settings routes remain fully plugin-owned.
+
 ### Frontend hook/API matrix
 
 | Surface                         | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
@@ -270,7 +344,7 @@ slice shapes in a released plugin.
 | registerSettingsRoute           | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                                           | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent               | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler               | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
-| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
+| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo on the installed plugin detail page at **Settings > Plugins > `<plugin>`**                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
 | registerIntegrationSettings     | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                                                             | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`          | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle })                                     |
 | registerTranslations            | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider      | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |

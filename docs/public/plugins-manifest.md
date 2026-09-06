@@ -6,16 +6,17 @@ status: experimental
 
 # Plugin Manifest Reference
 
-`manifest.yaml` is the authoritative description of a plugin; identity,
+`manifest.yaml` is the authoritative description of a plugin: identity,
 runtime executables, capabilities, webhooks, agent tools, config schema, and
-optional UI bundle. Kandev parses and validates it **before any plugin code
-runs**. See [Authoring a plugin](plugins-authoring.md) for the build
-workflow and [Plugins](plugins.md) for install/operate.
+optional native UI or isolated web apps. Kandev parses and validates it
+**before any plugin code runs**. See [Authoring a plugin](plugins-authoring.md)
+for the build workflow and [Plugins](plugins.md) for install and operation.
 
 ## Quick path
 
 1. Start from the annotated example.
-2. Set identity, version, runtime executable, and only the capabilities the plugin needs.
+2. Set identity, version, and either a runtime executable or `ui.web_apps`.
+   Add only the capabilities the plugin needs.
 3. Add config, webhooks, events, or UI fields only when the plugin uses them.
 4. Validate the manifest before packaging.
 
@@ -23,7 +24,7 @@ workflow and [Plugins](plugins.md) for install/operate.
 
 ```yaml
 id: "kandev-plugin-slack" # ^[a-z0-9][a-z0-9._-]*$
-api_version: 1 # must be 1 (the only supported value)
+api_version: 2 # use 1 or 2; v2 is recommended for new packages
 version: "1.0.0"
 display_name: "Slack Notifications"
 description: "Post to Slack on task events, relay messages to agents"
@@ -139,6 +140,46 @@ ui: # optional native frontend plugin
       allow_in_editor: false # optional; true lets it fire while typing
 ```
 
+## Isolated web applications
+
+An isolated web application is a packaged static app that Kandev loads in a
+sandboxed iframe. It does not need a backend executable. The package uses the
+relative `./_kandev/v1` protocol and does not receive an injected JavaScript
+API.
+
+```yaml
+id: "acme-task-board"
+api_version: 2
+version: "0.1.0"
+display_name: "Acme Task Board"
+description: "A task board for Kandev canvases"
+author: "Acme"
+
+ui:
+  web_apps:
+    - key: main
+      title: Task board
+      entry: ui/index.html
+      placements: [task-canvas, workspace-canvas]
+      network_origins: [https://api.example.com]
+```
+
+The package contains the declared entry document and its static files:
+
+```text
+acme-task-board-0.1.0.tar.gz
+├── manifest.yaml
+└── ui/
+    ├── index.html
+    ├── app.js
+    └── styles.css
+```
+
+Omit `runtime`, `base_url`, and `endpoints` for a static web-app package. A
+package can declare both `runtime.type: binary` and `ui.web_apps` when its web
+app needs a managed backend. Use [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application)
+for a complete authoring path.
+
 ## Field reference
 
 > **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
@@ -149,7 +190,7 @@ ui: # optional native frontend plugin
 | Field                              | Required                             | Type                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ---------------------------------- | ------------------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                               | yes                                  | string                                | Must match `^[a-z0-9][a-z0-9._-]*$` (lowercase alphanumeric, dots, underscores, hyphens; must start with a lowercase alphanumeric). Directory name under `~/.kandev/plugins/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `api_version`                      | yes                                  | int                                   | Must be exactly `1`. Any other value is rejected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `api_version`                      | yes                                  | int                                   | Supported values are `1` and `2`. Version 1 keeps the legacy public default for omitted webhook access. Version 2 uses authenticated access for omitted webhook access.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `version`                          | yes                                  | string                                | Free-form; used as the version directory name (`~/.kandev/plugins/<id>/<version>/`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `display_name`                     | no                                   | string                                | Shown in Settings > Plugins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `description`                      | no                                   | string                                | Shown in Settings > Plugins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -195,10 +236,15 @@ ui: # optional native frontend plugin
 | `ui.pages[].title`                 | yes\*                                | string                                | Display title.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `ui.pages[].path`                  | yes\*                                | string                                | Route path for the page.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `ui.pages[].surface`               | yes\*                                | string                                | Metadata enum (`settings` · `task-panel` · `main-nav`) validated by the manifest parser. It is not a current frontend mount; use the registry hooks in the authoring guide.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `ui.web_apps`                      | no                                   | object[]                              | Packaged static web apps. Each entry declares one `key`, `title`, package-relative HTML `entry`, and one or more `placements`. Supported placements are `task-canvas` and `workspace-canvas`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ui.web_apps[].key`                | yes\*                                | string                                | Unique plugin-local key. It starts with a lowercase letter or digit, then uses lowercase letters, digits, `.`, `_`, or `-`, with a maximum length of 64 characters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ui.web_apps[].title`              | yes\*                                | string                                | Non-empty web-app title with a maximum length of 200 bytes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ui.web_apps[].entry`              | yes\*                                | string                                | Clean, package-relative path to the entry HTML document. It cannot start with `/` or contain a `..` path segment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ui.web_apps[].placements`         | yes\*                                | string[]                              | Non-empty list with no duplicates. Each value is `task-canvas` or `workspace-canvas`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ui.keybindings`                   | no                                   | object[]                              | Declares plugin keybindings bound at runtime via `registerKeybinding`. Requires `ui.bundle`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `ui.keybindings[].id`              | yes\*                                | string                                | Stable, plugin-local slug (_required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]_$`and be unique within this plugin's own`ui.keybindings`list, not globally; the effective shortcut is namespaced`plugin:{pluginId}:{id}`.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `ui.keybindings[].default`         | yes\*                                | string                                | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key; the browser reports the shifted glyph for those keys, so the combo could never match.                                                                                                                                                                                                                                                                                                                                 |
-| `ui.keybindings[].description`     | yes\*                                | string                                | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `ui.keybindings[].description`     | yes\*                                | string                                | Non-empty, human-readable label shown on the installed plugin's detail page at **Settings > Plugins > `<plugin>`**, where each user can configure a personal shortcut override.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `ui.keybindings[].allow_in_editor` | no                                   | boolean                               | Lets this binding fire while an `input`, `textarea` or contenteditable holds focus. Defaults to `false`, so a plugin cannot shadow ordinary typing. Only accepted on a combo carrying a `ctrl`/`cmd`/`mod`/`alt` modifier; `shift` alone does not count. Kandev re-applies that requirement to the effective combo, so a user override that drops the modifier reverts to skip-while-typing behavior.                                                                                                                                                                                                                                                                            |
 
 `ui.pages` is declarative manifest metadata only and is not currently rendered
@@ -206,6 +252,27 @@ by the frontend. A native bundle's runtime nav items, icons, routes, named
 slots, and per-route title-bar chrome (`registerNavItem`, `registerRoute`, and
 `registerComponent`) are the supported JS SDK surface with no corresponding
 `manifest.yaml` field, see [Authoring a plugin](plugins-authoring.md).
+
+`ui.web_apps` is the manifest surface for isolated static web apps. Kandev
+owns the host label, placement, route, and canvas controls. The web app owns
+the content inside its frame. It uses packaged scripts and styles, relative
+Kandev protocol paths, and only the capabilities and network origins that the
+host grants. Declare exact HTTPS origins in `network_origins` when the app
+needs external network access. Paths, credentials, wildcards, query strings,
+and fragments are rejected.
+
+### Static web app network origins
+
+`ui.web_apps[].network_origins` is optional. Each value must be an exact HTTPS
+origin with no path, credentials, wildcard, query string, or fragment. Kandev
+reviews each declared origin as a separate grant before the app can contact
+it.
+
+The runtime sets `form-action 'none'`, so packaged forms cannot submit to an
+external origin. Requests to an approved `network_origins` value go directly
+from the browser. The host tears down the app iframe immediately after a
+release, grant, scope, archive, disable, or removal authority change, then
+requires a fresh runtime binding before mounting it again.
 
 ## Managed vs. legacy manifests
 

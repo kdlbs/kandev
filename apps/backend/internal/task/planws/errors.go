@@ -72,6 +72,27 @@ func errorResponse(msg *ws.Message, err error, fallback string, recognized []map
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fallback, nil)
 }
 
+// contentTooLargeResponse reports service.PlanContentTooLargeError as a
+// VALIDATION_ERROR. Unlike every other mapping, its message is computed from
+// the request rather than fixed, so it is checked before the sentinel table
+// walk instead of living in it. It is the only site that populates the
+// structured details map: reason is a stable wire token the browser compares
+// with ===, never localized or reworded, and limit/submitted let the browser
+// render the rejection without re-deriving the ceiling.
+func contentTooLargeResponse(msg *ws.Message, err error) (*ws.Message, bool, error) {
+	var sizeErr *service.PlanContentTooLargeError
+	if !errors.As(err, &sizeErr) {
+		return nil, false, nil
+	}
+	out, mapErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, sizeErr.Error(),
+		map[string]interface{}{
+			"reason":    "plan_content_too_large",
+			"limit":     sizeErr.Limit,
+			"submitted": sizeErr.Submitted,
+		})
+	return out, true, mapErr
+}
+
 // CreateError maps a PlanService.CreatePlan failure.
 //
 // ErrTaskPlanNotFound is deliberately absent: CreatePlan only returns it when
@@ -80,6 +101,9 @@ func errorResponse(msg *ws.Message, err error, fallback string, recognized []map
 // repository's ErrTaskNotFound is different: it means the write target task
 // did not exist and is safe to report as a not-found response.
 func CreateError(msg *ws.Message, err error) (*ws.Message, error) {
+	if out, matched, mapErr := contentTooLargeResponse(msg, err); matched {
+		return out, mapErr
+	}
 	return errorResponse(msg, err, "Failed to create task plan: "+err.Error(), []mapping{taskIDRequired, taskNotFound})
 }
 
@@ -92,6 +116,9 @@ func GetError(msg *ws.Message, err error) (*ws.Message, error) {
 
 // UpdateError maps a PlanService.UpdatePlan failure.
 func UpdateError(msg *ws.Message, err error) (*ws.Message, error) {
+	if out, matched, mapErr := contentTooLargeResponse(msg, err); matched {
+		return out, mapErr
+	}
 	return errorResponse(msg, err, "Failed to update task plan: "+err.Error(), []mapping{taskIDRequired, taskNotFound, planNotFound})
 }
 

@@ -564,11 +564,50 @@ func (c *worktreeCutover) mergeSessionWorktrees() {
 			continue // another physical worktree owns this repository slot
 		}
 		targets := c.targetsForTask(c.sessionOwnerTaskID(wt.sessionID))
-		if err := targets.mergeSessionWorktree(wt, c.isSupersededSessionWorktree(wt)); err != nil {
+		historical := c.isSupersededSessionWorktree(wt)
+		if historical && !isLegacyDeletedWorktree(wt) {
+			if winner := c.demotionWinnerForSessionWorktree(wt, targets); winner != "" {
+				c.demoteSessionWorktree(wt, winner)
+				continue
+			}
+		}
+		if err := targets.mergeSessionWorktree(wt, historical); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf(
 				"session %s worktree %s: %v", wt.sessionID, wt.worktreeID, err))
 		}
 	}
+}
+
+// demotionWinnerForSessionWorktree returns the active target that explains why
+// a historical session row is not an ownership source.
+func (c *worktreeCutover) demotionWinnerForSessionWorktree(
+	wt legacySessionWorktree, targets *taskWorktreeTargets,
+) string {
+	if targets.targetForWorktree(wt.worktreeID) != nil {
+		return ""
+	}
+	if target, ok := targets.byKey[envRepoKey(wt.repositoryID, wt.branchSlug)]; ok &&
+		target.worktreeID != "" && target.status != worktreeRepoStatusDeleted && target.deletedAt == nil {
+		return target.worktreeID
+	}
+	session, ok := c.sessions[wt.sessionID]
+	if !ok || !isLegacyHistoricalSession(session.state) {
+		return ""
+	}
+	ownerTaskID := c.sessionOwnerTaskID(wt.sessionID)
+	envID, ok := c.taskEnvIDs[ownerTaskID]
+	if !ok {
+		return ""
+	}
+	env, ok := c.envs[envID]
+	if !ok || env.taskID != ownerTaskID || env.repositoryID != wt.repositoryID || env.worktreeID == "" {
+		return ""
+	}
+	replacement := targets.activeTargetForWorktree(env.worktreeID)
+	if replacement == nil || replacement.worktreeID == wt.worktreeID {
+		return ""
+	}
+	return replacement.worktreeID
 }
 
 func isLegacyDeletedWorktree(wt legacySessionWorktree) bool {
@@ -705,7 +744,7 @@ func (c *worktreeCutover) linkSessions() {
 // longer an ownership source. Rows demoted by the slot election, repository
 // rows, and the surviving flat environment take precedence for the same
 // physical identity regardless of session state. Historical rows with no
-// authoritative replacement remain eligible for backfill.
+// active authoritative replacement remain eligible for backfill.
 func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) bool {
 	cacheKey := sessionWorktreeKey(wt.sessionID, wt.worktreeID)
 	if c.demotedWorktrees[cacheKey] {
@@ -731,7 +770,8 @@ func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) 
 				if !ok || env.taskID != ownerTaskID || row.worktreeID == "" {
 					continue
 				}
-				if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
+				if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug &&
+					row.status != worktreeRepoStatusDeleted && row.deletedAt == nil {
 					superseded = true
 					break
 				}
@@ -757,7 +797,10 @@ func (c *worktreeCutover) flatEnvironmentSupersedesSessionWorktree(
 		return false
 	}
 	env, ok := c.envs[envID]
-	return ok && env.taskID == ownerTaskID && env.repositoryID == wt.repositoryID && env.worktreeID != ""
+	if !ok || env.taskID != ownerTaskID || env.repositoryID != wt.repositoryID || env.worktreeID == "" {
+		return false
+	}
+	return c.targetsForTask(ownerTaskID).activeTargetForWorktree(env.worktreeID) != nil
 }
 
 // sessionOwnerTaskID returns the task that owns the environment a session

@@ -1,30 +1,20 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import {
-  IconChevronDown,
-  IconCircleCheck,
-  IconCircleDashed,
-  IconMessageQuestion,
-  IconProgressCheck,
-  IconShieldQuestion,
-} from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
-import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
-import {
-  InterruptedTaskIcon,
-  isTerminalInterruptedState,
-  shouldUseQuestionTaskIcon,
-  shouldUsePermissionTaskIcon,
-} from "@/lib/ui/state-icons";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import type {
+  ForegroundActivity,
+  TaskPriority,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { TaskRowMetadata } from "./task-row-plugin-slots";
-import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
@@ -35,7 +25,7 @@ import {
   type ResolvedTaskRowPresentation,
 } from "./task-row-presentation";
 import { TaskItemTrailing } from "./task-item-trailing";
-import { CompositorSpin } from "@kandev/ui/compositor-spin";
+import { TaskStateIcon } from "./task-state-icon";
 
 type DiffStats = {
   additions: number;
@@ -45,6 +35,7 @@ type DiffStats = {
 type TaskItemProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /**
@@ -68,6 +59,7 @@ type TaskItemProps = {
   diffStats?: DiffStats;
   comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
@@ -122,20 +114,6 @@ type TaskItemProps = {
   agentErrorMessage?: string | null;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
-
-// Delegates to the shared classifier in task-switcher so the sidebar bucket
-// and the per-task running spinner always agree. A task whose workflow state
-// is REVIEW or COMPLETED must not render as "running" when its session
-// transiently cycles through STARTING/RUNNING (e.g. during an agent auto-
-// resume after a backend restart).
-function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
-  return classifyTask(sessionState, state) === "in_progress";
-}
-
-function computeIsPreparing(state?: TaskState, sessionState?: TaskSessionState): boolean {
-  if (state === "SCHEDULING") return true;
-  return sessionState === "STARTING" && classifyTask(sessionState, state) !== "review";
-}
 
 function handleTaskItemKeyDown(
   e: React.KeyboardEvent<HTMLDivElement>,
@@ -192,176 +170,18 @@ function taskItemRowClick(
   return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
-function BackgroundWorkTaskIcon() {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-label={t("task:backgroundWorkIsRunning")}
-          tabIndex={0}
-          className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
-        >
-          <CompositorSpin
-            aria-hidden="true"
-            data-testid="task-state-background-running"
-            className="h-3.5 w-3.5 shrink-0 text-violet-500"
-          >
-            <IconCircleDashed className="size-full" />
-          </CompositorSpin>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function TaskRunningIcon({
-  phase,
-  className,
-}: {
-  phase: "running" | "preparing";
-  className: string;
-}) {
-  return (
-    <CompositorSpin
-      data-testid="task-state-running"
-      data-loading-phase={phase}
-      className={className}
-    >
-      <IconCircleDashed className="size-full" />
-    </CompositorSpin>
-  );
-}
-
-function TaskStateIcon({
-  sessionState,
-  state,
-  foregroundActivity,
-  isInProgress,
-  hasPendingClarification,
-  hasPendingPermission,
-  isOnLastWorkflowStep,
-  interrupted,
-}: {
-  sessionState?: TaskSessionState;
-  state?: TaskState;
-  foregroundActivity?: ForegroundActivity | null;
-  isInProgress: boolean;
-  hasPendingClarification?: boolean;
-  hasPendingPermission?: boolean;
-  isOnLastWorkflowStep?: boolean;
-  /** True when the task's session was mid-turn when the backend died. */
-  interrupted?: boolean;
-}) {
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
-    return (
-      <IconShieldQuestion
-        data-testid="task-state-pending-permission"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
-      />
-    );
-  }
-  if (hasPendingClarification) {
-    return (
-      <IconMessageQuestion
-        data-testid="task-state-waiting-for-input"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
-      />
-    );
-  }
-  if (foregroundActivity === "generating") {
-    return (
-      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
-    );
-  }
-  if (foregroundActivity === "background") {
-    return <BackgroundWorkTaskIcon />;
-  }
-  if (shouldUseQuestionTaskIcon(state)) {
-    return (
-      <IconMessageQuestion
-        data-testid="task-state-waiting-for-input"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
-      />
-    );
-  }
-  if (computeIsPreparing(state, sessionState)) {
-    return (
-      <TaskRunningIcon
-        phase="preparing"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40 [animation-duration:2s]"
-      />
-    );
-  }
-  // When the aggregate is unknown, a live turn safely falls back to the
-  // established generating spinner rather than a done affordance.
-  if (isInProgress) {
-    return (
-      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
-    );
-  }
-  // The task's session was mid-turn when the backend died (startup
-  // reconciliation marker). Show the red interruption icon instead of the
-  // idle/done affordances; every active/pending state above already won, and
-  // terminal states keep their own icons.
-  if (interrupted && !isTerminalInterruptedState(state, sessionState)) {
-    return <InterruptedTaskIcon className="mt-[1px] h-3.5 w-3.5 shrink-0" />;
-  }
-  if (classifyTask(sessionState, state) === "review") {
-    if (isOnLastWorkflowStep) {
-      return (
-        <IconCircleCheck
-          data-testid="task-state-workflow-complete"
-          className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
-        />
-      );
-    }
-    return (
-      <IconProgressCheck
-        data-testid="task-state-turn-finished"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
-      />
-    );
-  }
-  return (
-    <IconCircleDashed
-      data-testid="task-state-backlog"
-      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40"
-    />
-  );
-}
-
 function TaskItemTitle({ title }: { title: string }) {
   return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
-function TaskItemContent({
-  title,
-  autopilot,
-  taskId,
-  workflowStepId,
-  isRemoteExecutor,
-  remoteExecutorType,
-  remoteExecutorName,
-  primarySessionId,
-  isArchived,
-  isPinned,
-  repositoryPath,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  agentErrorMessage,
-  comparisonUnavailable,
-  resolvedTaskRow,
-  relativeTime,
-}: {
+type TaskItemContentProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   taskId?: string;
   workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   primarySessionId?: string | null;
@@ -376,7 +196,31 @@ function TaskItemContent({
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
-}) {
+};
+
+function TaskItemContent({
+  title,
+  autopilot,
+  priority,
+  taskId,
+  workflowStepId,
+  isRemoteExecutor,
+  remoteExecutorId,
+  remoteExecutorType,
+  remoteExecutorName,
+  primarySessionId,
+  isArchived,
+  isPinned,
+  repositoryPath,
+  prInfo,
+  queuedCount,
+  wipQueue,
+  issueInfo,
+  agentErrorMessage,
+  comparisonUnavailable,
+  resolvedTaskRow,
+  relativeTime,
+}: TaskItemContentProps) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -384,6 +228,7 @@ function TaskItemContent({
         <TaskItemTitle title={title} />
         <TaskItemLeadingBadges
           autopilot={autopilot}
+          priority={priority}
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
@@ -396,9 +241,10 @@ function TaskItemContent({
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
             sessionId={primarySessionId ?? null}
+            executorId={remoteExecutorId}
             executorType={remoteExecutorType}
             fallbackName={remoteExecutorName ?? remoteExecutorType}
-            iconClassName="h-3 w-3 text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           />
         )}
         {isArchived && (
@@ -473,6 +319,7 @@ function TaskItemActions({
 export const TaskItem = memo(function TaskItem({
   title,
   autopilot,
+  priority,
   state,
   sessionState,
   foregroundActivity,
@@ -485,6 +332,7 @@ export const TaskItem = memo(function TaskItem({
   archiveConfirmation,
   comparisonUnavailable,
   isRemoteExecutor,
+  remoteExecutorId,
   remoteExecutorType,
   remoteExecutorName,
   updatedAt,
@@ -546,18 +394,20 @@ export const TaskItem = memo(function TaskItem({
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
+        showBackgroundTooltip
       />
       <TaskItemContent
         title={title}
         autopilot={autopilot}
+        priority={priority}
         taskId={taskId}
         workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorId={remoteExecutorId}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}
         primarySessionId={primarySessionId}

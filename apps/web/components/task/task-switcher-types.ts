@@ -1,4 +1,9 @@
-import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPriority,
+  TaskSessionState,
+  TaskState,
+} from "@/lib/types/http";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
@@ -17,6 +22,7 @@ export type TaskSwitcherItem = {
   id: string;
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
@@ -35,6 +41,7 @@ export type TaskSwitcherItem = {
   diffStats?: { additions: number; deletions: number };
   comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;

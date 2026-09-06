@@ -139,6 +139,32 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 	})
 }
 
+func TestParseOpenCodeStderrLineWeeklyLimitResetInDays(t *testing.T) {
+	line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"`
+
+	diagnostic, ok := parseOpenCodeStderrLine(line)
+	if !ok {
+		t.Fatal("parseOpenCodeStderrLine() rejected a weekly usage-limit stream error")
+	}
+	wantOccurred := time.Date(2026, 9, 3, 7, 19, 45, 0, time.UTC)
+	wantReset := wantOccurred.Add(3 * 24 * time.Hour)
+	if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+		t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+	}
+
+	t.Run("mixed units", func(t *testing.T) {
+		line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days 4 hours 19 min."`
+		diagnostic, ok := parseOpenCodeStderrLine(line)
+		if !ok {
+			t.Fatal("parseOpenCodeStderrLine() rejected a mixed-unit weekly usage-limit stream error")
+		}
+		wantReset := wantOccurred.Add(3*24*time.Hour + 4*time.Hour + 19*time.Minute)
+		if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+			t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+		}
+	})
+}
+
 func TestParseOpenCodeStderrLineAcceptsForegroundStreamError(t *testing.T) {
 	line := `timestamp=2026-08-02T15:15:44.504Z level=ERROR run=a93db686 message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_03d1ac324ffeA2eAGeBfuq80dq small=false agent=build mode=primary error.error="AI_APICallError: 5-hour usage limit reached. Resets in 4hr 19min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"`
 

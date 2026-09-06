@@ -9,6 +9,9 @@ import type {
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
   AgentProfileRecentUseApiRecord,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowProfileSessionEndPolicy,
+  TaskPriority,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -41,6 +44,11 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import type {
+  KubernetesSession,
+  KubernetesTestRequest,
+  KubernetesTestResult,
+} from "../../lib/types/http-kubernetes";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
 
@@ -196,6 +204,8 @@ type CreateTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
+  priority?: TaskPriority;
 };
 
 export type TaskDependencyRef = {
@@ -265,6 +275,7 @@ function buildCreateTaskBody(
   if (options.start_when_unblocked !== undefined) {
     body.start_when_unblocked = options.start_when_unblocked;
   }
+  setIf(body, "priority", options.priority);
   return body;
 }
 
@@ -496,6 +507,8 @@ export class ApiClient {
       blocked_by?: string[];
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
+      /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
+      priority?: TaskPriority;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -521,6 +534,11 @@ export class ApiClient {
    *  desired object. */
   async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
+  }
+
+  /** Simulates a REST API caller (or another browser client) setting priority. */
+  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
@@ -627,6 +645,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -640,6 +659,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
@@ -786,6 +806,9 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
+      agent_profile_id?: string;
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -798,6 +821,13 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
+      ...(opts?.profile_session_start_policy
+        ? { profile_session_start_policy: opts.profile_session_start_policy }
+        : {}),
+      ...(opts?.profile_session_end_policy
+        ? { profile_session_end_policy: opts.profile_session_end_policy }
+        : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
@@ -1002,8 +1032,17 @@ export class ApiClient {
   async createExecutor(
     name: string,
     type: string,
+    config?: Record<string, string>,
   ): Promise<{ id: string; name: string; type: string }> {
-    return this.request("POST", "/api/v1/executors", { name, type });
+    return this.request("POST", "/api/v1/executors", { name, type, config });
+  }
+
+  async testKubernetesConnection(request: KubernetesTestRequest): Promise<KubernetesTestResult> {
+    return this.request("POST", "/api/v1/kubernetes/test", request);
+  }
+
+  async listKubernetesSessions(executorId: string): Promise<KubernetesSession[]> {
+    return this.request("GET", `/api/v1/kubernetes/executors/${executorId}/sessions`);
   }
 
   async updateWorkspace(
@@ -1173,7 +1212,12 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -1202,6 +1246,8 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -2216,6 +2262,7 @@ export class ApiClient {
       content: string;
       author_type: string;
       type?: string;
+      turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
     }>;
@@ -2271,7 +2318,10 @@ export class ApiClient {
       executor_id?: string;
       executor_profile_id?: string;
       state: string;
+      is_primary: boolean;
       started_at: string;
+      updated_at: string;
+      completed_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
       worktree_path?: string;
@@ -2301,6 +2351,23 @@ export class ApiClient {
   ): Promise<TaskDependencyProjection> {
     return this.request("POST", `/api/v1/tasks/${taskId}/dependencies`, {
       depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /** Replace the complete predecessor set, including an empty set. */
+  async replaceTaskDependencies(
+    taskId: string,
+    dependsOnTaskIds: string[],
+  ): Promise<TaskDependencyProjection> {
+    return this.request("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
+    });
+  }
+
+  /** Raw replacement helper for asserting structured validation failures. */
+  async rawReplaceTaskDependencies(taskId: string, dependsOnTaskIds: string[]): Promise<Response> {
+    return this.rawRequest("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
     });
   }
 
@@ -2349,6 +2416,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    priority?: TaskPriority;
     parent_id?: string;
     metadata?: Record<string, unknown> | null;
     repositories?: Array<{
@@ -2441,10 +2509,10 @@ export class ApiClient {
   async launchSession(
     payload: {
       task_id: string;
-      agent_profile_id: string;
+      agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
-      prompt: string;
+      prompt?: string;
       intent?: string;
       session_id?: string;
       workflow_step_id?: string;

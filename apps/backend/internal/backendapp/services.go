@@ -24,6 +24,7 @@ import (
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
+	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -34,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/mcp/canvasskill"
 	"github.com/kandev/kandev/internal/mentions"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -65,6 +67,11 @@ const (
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
+	if cfg.Features.Canvases {
+		if err := canvasskill.EnsureMaterialized(cfg.ResolvedHomeDir()); err != nil {
+			return nil, nil, fmt.Errorf("materialize canvas authoring skill: %w", err)
+		}
+	}
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
@@ -96,6 +103,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}))
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
+		dynamicruntime.WithCircuitLogger(log.Zap()),
 	)
 	if err := dynamicCircuits.Restore(context.Background()); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
@@ -158,6 +166,33 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		},
 	)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
+	// Workspace membership needs to resolve colleague names and reject
+	// disabled or unknown accounts before writing a row.
+	taskSvc.SetUserDirectory(newUserDirectoryAdapter(repos.UserAccounts))
+	// The default organization is named generically: an instance has no
+	// company name to borrow, and an operator renames it in one click.
+	const defaultOrgName = "Default organization"
+	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
+	if orgErr != nil {
+		return nil, nil, fmt.Errorf("initialize organizations: %w", orgErr)
+	}
+	// The tenancy migration runs once at boot: it creates the default
+	// organization and puts every pre-tenancy user and workspace into it.
+	if _, err := orgSvc.EnsureDefaultOrg(context.Background(), defaultOrgName); err != nil {
+		return nil, nil, fmt.Errorf("organization migration: %w", err)
+	}
+	// The unit tree is built after the tenancy migration, which is what stamps
+	// organization ids: placing a workspace before it knows its organization
+	// would put it under the wrong root.
+	unitSvc, unitErr := buildOrgUnitService(dbPool, repos.Task, repos.UserAccounts, log)
+	if unitErr != nil {
+		return nil, nil, fmt.Errorf("initialize organization units: %w", unitErr)
+	}
+	taskSvc.SetUnitPlacer(unitSvc)
+	taskSvc.SetUnitReach(unitSvc)
+	// Deleting an organization must take its unit tree with it.
+	orgSvc.SetUnitDeleter(unitSvc)
+
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
@@ -242,6 +277,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
+	canvasSvc, err := initCanvasService(cfg.Features.Canvases, dbPool, eventBus, pluginsSvc, taskSvc, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize canvas service: %w", err)
+	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
@@ -308,6 +347,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		DynamicProfileResolver:   dynamicResolver,
 		DynamicBindingResolver:   dynamicBindingResolver,
 		Task:                     taskSvc,
+		Org:                      orgSvc,
+		OrgUnits:                 unitSvc,
 		User:                     userSvc,
 		Editor:                   editorSvc,
 		Prompts:                  promptSvc,
@@ -324,6 +365,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		Canvas:                   canvasSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
@@ -344,6 +386,43 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	services.Mentions = mentionComponents
 	return services, agentSettingsController, nil
+}
+
+func initCanvasService(enabled bool, dbPool *db.Pool, eventBus bus.EventBus, pluginsSvc *plugins.Service, taskSvc *taskservice.Service, log *logger.Logger) (*canvasservice.Service, error) {
+	if !enabled || pluginsSvc == nil {
+		if enabled && pluginsSvc == nil {
+			return nil, errors.New("canvas: plugin service is required")
+		}
+		return nil, nil
+	}
+	if taskSvc == nil {
+		return nil, errors.New("canvas: task service is required")
+	}
+	canvasRepo, err := canvasservice.NewRepository(dbPool)
+	if err != nil {
+		return nil, fmt.Errorf("canvas repository: %w", err)
+	}
+	canvasSvc := canvasservice.NewService(canvasRepo, pluginsSvc.Instances())
+	canvasSvc.SetInstanceStateCleanup(func(ctx context.Context, instanceID string) error {
+		instanceState := pluginsSvc.InstanceState()
+		if instanceState == nil {
+			return nil
+		}
+		return instanceState.DeleteInstance(ctx, instanceID)
+	})
+	if err := canvasSvc.Reconcile(context.Background()); err != nil {
+		return nil, fmt.Errorf("reconcile canvas lifecycle: %w", err)
+	}
+	canvasSvc.SetEventPublisher(func(ctx context.Context, event canvasservice.LifecycleEvent) {
+		if eventBus == nil || event.Type == "" {
+			return
+		}
+		if err := eventBus.Publish(ctx, event.Type, bus.NewEvent(event.Type, "canvas", event)); err != nil {
+			log.Warn("failed to publish canvas lifecycle event", zap.String("event", event.Type), zap.Error(err))
+		}
+	})
+	taskSvc.SetCanvasCleanup(canvasSvc)
+	return canvasSvc, nil
 }
 
 func reserveBuiltinMentionIdentities(

@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -160,21 +161,6 @@ func TestDetachTaskPreservesDescendantsAndWorkspaceGroupMembership(t *testing.T)
 	}); err != nil {
 		t.Fatalf("CreateTask grandchild: %v", err)
 	}
-	now := time.Now().UTC()
-	if _, err := repo.DB().ExecContext(ctx, `
-		INSERT INTO task_workspace_groups
-			(id, workspace_id, owner_task_id, materialized_kind, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, "group-1", "workspace", "parent", "single_repo", now, now); err != nil {
-		t.Fatalf("insert workspace group: %v", err)
-	}
-	if _, err := repo.DB().ExecContext(ctx, `
-		INSERT INTO task_workspace_group_members (workspace_group_id, task_id, role, created_at)
-		VALUES (?, ?, ?, ?)
-	`, "group-1", "child", "member", now); err != nil {
-		t.Fatalf("insert workspace group member: %v", err)
-	}
-
 	if _, err := svc.DetachTask(ctx, "child"); err != nil {
 		t.Fatalf("DetachTask: %v", err)
 	}
@@ -195,6 +181,111 @@ func TestDetachTaskPreservesDescendantsAndWorkspaceGroupMembership(t *testing.T)
 	}
 	if releasedAt != nil {
 		t.Fatalf("workspace group membership released at %s", releasedAt)
+	}
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.1
+func TestDetachTaskTransfersSharedWorkspaceStewardship(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createDetachmentFixture(t, ctx, repo)
+	if _, err := repo.DB().ExecContext(ctx, `
+		UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?
+	`, "env-1", "group-1"); err != nil {
+		t.Fatalf("update workspace group environment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "parent", ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	if _, err := svc.DetachTask(ctx, "child"); err != nil {
+		t.Fatalf("DetachTask: %v", err)
+	}
+
+	var groupOwner, environmentOwner string
+	var groupGeneration, environmentGeneration int64
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT owner_task_id, ownership_generation FROM task_workspace_groups WHERE id = ?`, "group-1",
+	).Scan(&groupOwner, &groupGeneration); err != nil {
+		t.Fatalf("query workspace group owner: %v", err)
+	}
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`, "env-1",
+	).Scan(&environmentOwner, &environmentGeneration); err != nil {
+		t.Fatalf("query task environment owner: %v", err)
+	}
+	if groupOwner != "child" || environmentOwner != "child" {
+		t.Fatalf("owners after detach = group %q, environment %q; want child, child", groupOwner, environmentOwner)
+	}
+	var parentRole, childRole string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT role FROM task_workspace_group_members WHERE workspace_group_id = ? AND task_id = ?
+	`, "group-1", "parent").Scan(&parentRole); err != nil {
+		t.Fatalf("query parent membership role: %v", err)
+	}
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT role FROM task_workspace_group_members WHERE workspace_group_id = ? AND task_id = ?
+	`, "group-1", "child").Scan(&childRole); err != nil {
+		t.Fatalf("query child membership role: %v", err)
+	}
+	if parentRole != "member" || childRole != "owner" {
+		t.Fatalf("membership roles after detach = parent %q, child %q; want member, owner", parentRole, childRole)
+	}
+	if groupGeneration != 2 || environmentGeneration != 2 {
+		t.Fatalf("generations after detach = group %d, environment %d; want 2, 2", groupGeneration, environmentGeneration)
+	}
+
+	if _, err := svc.DetachTask(ctx, "child"); err != nil {
+		t.Fatalf("idempotent DetachTask: %v", err)
+	}
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT ownership_generation FROM task_workspace_groups WHERE id = ?`, "group-1",
+	).Scan(&groupGeneration); err != nil {
+		t.Fatalf("query workspace group generation after retry: %v", err)
+	}
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT ownership_generation FROM task_environments WHERE id = ?`, "env-1",
+	).Scan(&environmentGeneration); err != nil {
+		t.Fatalf("query task environment generation after retry: %v", err)
+	}
+	if groupGeneration != 2 || environmentGeneration != 2 {
+		t.Fatalf("generations after retry = group %d, environment %d; want 2, 2", groupGeneration, environmentGeneration)
+	}
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.2
+func TestDetachTaskRollsBackHierarchyWhenWorkspaceTransferFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createDetachmentFixture(t, ctx, repo)
+	if _, err := repo.DB().ExecContext(ctx, `
+		UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?
+	`, "missing-environment", "group-1"); err != nil {
+		t.Fatalf("update workspace group environment: %v", err)
+	}
+
+	if _, err := svc.DetachTask(ctx, "child"); err == nil {
+		t.Fatal("DetachTask succeeded with a missing canonical environment")
+	}
+	child, err := repo.GetTask(ctx, "child")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if child.ParentID != "parent" {
+		t.Fatalf("child parent after rollback = %q, want parent", child.ParentID)
+	}
+	var owner string
+	var generation int64
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT owner_task_id, ownership_generation FROM task_workspace_groups WHERE id = ?
+	`, "group-1").Scan(&owner, &generation); err != nil {
+		t.Fatalf("query workspace group after rollback: %v", err)
+	}
+	if owner != "parent" || generation != 1 {
+		t.Fatalf("workspace group after rollback = owner %q generation %d; want parent, 1", owner, generation)
 	}
 }
 
@@ -252,7 +343,7 @@ func TestDetachTaskPublishesOfficeTaskUpdated(t *testing.T) {
 	t.Fatal("office.task.updated event was not published")
 }
 
-func createDetachmentFixture(t *testing.T, ctx context.Context, repo taskEventTestRepository) {
+func createDetachmentFixture(t *testing.T, ctx context.Context, repo *sqliterepo.Repository) {
 	t.Helper()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -279,6 +370,25 @@ func createDetachmentFixture(t *testing.T, ctx context.Context, repo taskEventTe
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("CreateTask child: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO task_workspace_groups
+			(id, workspace_id, owner_task_id, materialized_kind, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "group-1", "workspace", "parent", "single_repo", now, now); err != nil {
+		t.Fatalf("insert workspace group: %v", err)
+	}
+	for _, member := range []struct {
+		taskID string
+		role   string
+	}{{"parent", "owner"}, {"child", "member"}} {
+		if _, err := repo.DB().ExecContext(ctx, `
+			INSERT INTO task_workspace_group_members (workspace_group_id, task_id, role, created_at)
+			VALUES (?, ?, ?, ?)
+		`, "group-1", member.taskID, member.role, now); err != nil {
+			t.Fatalf("insert workspace group member %s: %v", member.taskID, err)
+		}
 	}
 }
 

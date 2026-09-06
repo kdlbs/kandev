@@ -10,7 +10,10 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
+import {
+  EnsureSessionErrorBanner,
+  SessionRecoveryFeedback,
+} from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
@@ -34,6 +37,7 @@ import type {
   useMergedAgentState,
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -56,6 +60,7 @@ export type TaskPageInnerProps = {
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 };
 
 type RemoteExecutorStatus = {
@@ -142,9 +147,11 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
+    taskId: taskProps.taskId,
     workspaceId: taskProps.workspaceId,
     workflowId: taskProps.workflowId,
     sessionId: effectiveSessionId,
@@ -153,6 +160,7 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
+    taskCanvases: params.taskCanvases ?? [],
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
@@ -227,6 +235,7 @@ function useTaskPageDerivedProps({
   initialLayout,
   officeTaskHref,
   onTaskUnarchived,
+  taskCanvases,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
@@ -270,6 +279,7 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    taskCanvases,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };
@@ -330,6 +340,12 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 workspaceId={task?.workspace_id ?? null}
               />
             )}
+            <SessionRecoveryFeedback
+              error={props.resumption.error}
+              notice={props.resumption.notice}
+              onRetry={() => void props.resumption.resumeSession()}
+              workspaceId={task?.workspace_id ?? null}
+            />
             <TaskArchivedProvider value={archivedValue}>
               <TaskLaunchErrorProvider
                 value={{

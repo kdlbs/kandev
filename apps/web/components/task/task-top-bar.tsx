@@ -20,6 +20,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
+import { TaskAssigneeControl } from "@/components/task/task-assignee-control";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
@@ -411,6 +412,9 @@ function TopBarRight({
           </Button>
         </TopbarCluster>
       )}
+      <TopbarCluster label={t("task:assignedTo")} className="[&_button]:h-7 [&_button]:text-xs">
+        <TaskAssigneeControl taskId={taskId} workspaceId={workspaceId} isArchived={isArchived} />
+      </TopbarCluster>
       <AttentionStatusGroup
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -437,6 +441,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "remote_docker":
     case "sprites":
     case "ssh":
+    case "k8s":
       return true;
     default:
       return false;

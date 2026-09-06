@@ -19,6 +19,19 @@ const (
 	TaskDependencyFailed = "task.dependency_failed"
 )
 
+// Event types for plugin-backed canvas lifecycle changes. Payloads contain
+// only canvas identity, scope, status, and release metadata. They never carry
+// source files, application state, or runtime capabilities.
+const (
+	CanvasCreated                   = "canvas.created"
+	CanvasReleaseActivated          = "canvas.release.activated"
+	CanvasReleasePermissionRequired = "canvas.release.permission_required"
+	CanvasPromoted                  = "canvas.promoted"
+	CanvasArchived                  = "canvas.archived"
+	CanvasRestored                  = "canvas.restored"
+	CanvasRemoved                   = "canvas.removed"
+)
+
 // Event types for office task tree controls.
 const (
 	OfficeTaskTreeHoldCreated  = "task.tree_hold_created"
@@ -67,6 +80,10 @@ const (
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"
+	// SessionPendingActionChanged carries the compact, workspace-scoped
+	// pending-action projection for one session. It contains no transcript
+	// content and lets inactive session selectors stay current.
+	SessionPendingActionChanged = "session.pending_action_changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
@@ -178,6 +195,7 @@ const (
 const (
 	UserSettingsUpdated              = "user.settings.updated"
 	UserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	AuthSessionHostnameResolved      = "auth.session.hostname.resolved"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a

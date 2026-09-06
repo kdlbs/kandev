@@ -13,10 +13,12 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -87,15 +89,21 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir       string
-	store            store.Store
-	approvals        *approvalLedger
-	registry         *Registry
-	state            *state.Store
-	userState        *state.UserStore
-	userStateCleanup userStateCleanupStore
-	eventBus         bus.EventBus
-	log              *logger.Logger
+	pluginsDir        string
+	store             store.Store
+	approvals         *approvalLedger
+	registry          *Registry
+	state             *state.Store
+	userState         *state.UserStore
+	instances         *instances.Store
+	instanceState     *state.InstanceStore
+	webArtifacts      *webapp.ArtifactStore
+	webRuntime        *webapp.Runtime
+	eventHub          *webapp.EventHub
+	eventSubscription bus.Subscription
+	userStateCleanup  userStateCleanupStore
+	eventBus          bus.EventBus
+	log               *logger.Logger
 
 	deliverer                Deliverer
 	agentToolCatalogListener AgentToolCatalogListener
@@ -196,6 +204,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		lifecycleLocks:      newKeyedMutex(),
 		dispatchLocks:       newKeyedRWMutex(),
 		agentToolGeneration: uuid.NewString(),
+		eventHub:            webapp.NewEventHub(),
 	}
 }
 
@@ -384,6 +393,83 @@ func (s *Service) setUserStateCleanupStore(cleanup userStateCleanupStore) {
 // calling user (Approach D1, docs/decisions/2026-08-01-per-user-plugin-storage.md).
 func (s *Service) UserState() *state.UserStore {
 	return s.userState
+}
+
+// SetWebAppStorage wires the durable instance metadata and immutable static
+// artifact stores used by isolated web applications. Native plugin lifecycle
+// remains independent of these stores.
+func (s *Service) SetWebAppStorage(instanceStore *instances.Store, artifactStore *webapp.ArtifactStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instances = instanceStore
+	s.webArtifacts = artifactStore
+}
+
+// SetInstanceState wires revisioned state owned by isolated web-app
+// instances. It is separate from plugin_state, which belongs to a managed
+// plugin process and has no instance identity.
+func (s *Service) SetInstanceState(instanceState *state.InstanceStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instanceState = instanceState
+}
+
+func (s *Service) InstanceState() *state.InstanceStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceState
+}
+
+// Instances returns the scoped web-application instance store.
+func (s *Service) Instances() *instances.Store {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instances
+}
+
+// WebArtifacts returns immutable static web-application artifact storage.
+func (s *Service) WebArtifacts() *webapp.ArtifactStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webArtifacts
+}
+
+// SetWebRuntime attaches the capability-bound static web-app runtime. The
+// backend registers its route only when the canvas release gate is enabled.
+func (s *Service) SetWebRuntime(runtime *webapp.Runtime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webRuntime = runtime
+	if runtime != nil {
+		runtime.SetProtocolHandler(s.handleWebAppProtocol)
+	}
+}
+
+func (s *Service) WebRuntime() *webapp.Runtime {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webRuntime
+}
+
+// SetWebAppEventHub replaces the in-process public event transport. It is
+// primarily useful for deterministic tests; production creates the hub in
+// NewService and forwards the shared Kandev event bus into it.
+func (s *Service) SetWebAppEventHub(hub *webapp.EventHub) {
+	s.mu.Lock()
+	previous := s.eventHub
+	s.eventHub = hub
+	s.mu.Unlock()
+	if previous != nil && previous != hub {
+		previous.Close()
+	}
+}
+
+// WebAppEventHub returns the bounded SSE transport for capability-bound web
+// applications.
+func (s *Service) WebAppEventHub() *webapp.EventHub {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.eventHub
 }
 
 // SetSecrets wires the secret vault Provide was constructed with.

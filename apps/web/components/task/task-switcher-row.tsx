@@ -155,6 +155,7 @@ function TaskRowItem({
       }
       title={task.title}
       autopilot={task.autopilot}
+      priority={task.priority}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
@@ -164,6 +165,7 @@ function TaskRowItem({
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
+      remoteExecutorId={task.remoteExecutorId}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}

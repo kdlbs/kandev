@@ -129,6 +129,15 @@ describe("buildSidebarItem", () => {
     expect(item.isArchived).toBe(true);
   });
 
+  it("carries the primary executor identity for exact remote status", () => {
+    const item = buildSidebarItem(
+      task({ primaryExecutorId: "executor-1", primaryExecutorType: "k8s" }),
+      emptyContext(),
+    );
+
+    expect(item.remoteExecutorId).toBe("executor-1");
+  });
+
   it("carries the queued prompt count from the status summary", () => {
     const item = buildSidebarItem(
       task({ statusSummary: { revision: 4, updated_at: UPDATED_AT, queued_prompt_count: 3 } }),
@@ -156,6 +165,14 @@ describe("buildSidebarItem", () => {
 
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
+  });
+});
+
+describe("buildSidebarItem priority", () => {
+  it("carries task priority into the desktop sidebar row", () => {
+    const item = buildSidebarItem(task({ priority: "high" }), emptyContext());
+
+    expect(item.priority).toBe("high");
   });
 });
 

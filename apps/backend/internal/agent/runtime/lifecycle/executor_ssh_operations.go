@@ -648,17 +648,18 @@ func buildSSHCreateInstanceRequest(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:               req.McpServers,
-		McpMode:                  req.McpMode,
-		McpProviders:             req.McpProviders,
-		McpProfile:               req.McpProfile,
-		RequiresProcessKill:      requiresProcessKillFromReq(req),
-		StripEnv:                 stripEnvFromReq(req),
-		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:      req.RemoteContributions,
-		ContributionDestinations: req.ContributionDestinations,
-		ComparisonTargets:        req.ComparisonTargets,
-		Env:                      sshRemoteContributionEnv(req, agentctlBin),
+		McpServers:                 req.McpServers,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		StripEnv:                   stripEnvFromReq(req),
+		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		ComparisonTargets:          req.ComparisonTargets,
+		Env:                        sshRemoteContributionEnv(req, agentctlBin),
 	}
 }
 
@@ -797,6 +798,8 @@ const (
 	envKeyGitLabToken          = "GITLAB_TOKEN"
 	envKeyGitLabHost           = "GITLAB_HOST"
 	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
+	envKeyMCPTimeout           = "MCP_TIMEOUT"
+	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -810,6 +813,13 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGitLabToken,
 	envKeyGitLabHost,
 	envKeyKandevGitLabHost,
+}
+
+// sshRemoteAgentRuntimeEnvKeys are non-secret runtime controls that must reach
+// the remote agent process after profile and agent precedence has been resolved.
+var sshRemoteAgentRuntimeEnvKeys = []string{
+	envKeyMCPTimeout,
+	envKeyMCPToolTimeout,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -827,6 +837,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	}
 	env := make(map[string]string)
 	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
+	for _, key := range sshRemoteAgentRuntimeEnvKeys {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
@@ -904,13 +919,46 @@ fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
 }
 
-// isRemoteAgentctlAlive returns true when a kill -0 on the pid succeeds.
-func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+// probeRemoteAgentctlLiveness distinguishes a completed remote process probe
+// from an SSH failure that leaves the process state unknown.
+func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid int) (bool, error) {
 	if pid <= 0 {
-		return false
+		return false, nil
 	}
-	_, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
-	return err == nil
+	_, stderr, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		if remoteProcessProbeConfirmsAbsence(stderr) {
+			return false, nil
+		}
+		return false, remoteProcessProbeError(pid, err, stderr)
+	}
+	return false, err
+}
+
+func remoteProcessProbeConfirmsAbsence(stderr string) bool {
+	message := strings.ToLower(strings.TrimSpace(stderr))
+	return strings.Contains(message, "no such process") ||
+		strings.Contains(message, "no such pid") ||
+		strings.Contains(message, "esrch")
+}
+
+func remoteProcessProbeError(pid int, err error, stderr string) error {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return fmt.Errorf("remote kill -0 %d failed: %w", pid, err)
+	}
+	return fmt.Errorf("remote kill -0 %d failed: %w (stderr: %s)", pid, err, detail)
+}
+
+// isRemoteAgentctlAlive is the best-effort boolean form used by status and
+// startup polling, where either absence or an unavailable probe means down.
+func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+	alive, _ := probeRemoteAgentctlLiveness(ctx, client, pid)
+	return alive
 }
 
 // SSHPortForwarder fans out incoming local-port connections to a remote port

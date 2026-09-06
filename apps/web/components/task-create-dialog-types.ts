@@ -5,6 +5,7 @@ import type {
   RepositorySet,
   Executor,
   Task,
+  TaskPriority,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -14,6 +15,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -174,6 +176,10 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Create-mode source preset: start without a repository in a scratch workspace. */
+  noRepository?: boolean;
+  /** Create-mode launch hint; the dialog resolves a capable local profile by type. */
+  preferLocalExecutor?: boolean;
   /** Existing task repository rows, including immutable policy snapshots. */
   repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
@@ -222,6 +228,25 @@ export type StoreSelections = {
   effectiveWorkflowId?: string | null;
 };
 
+/**
+ * Agent-profile compatibility with the selected executor profile.
+ *   compatible:            no executor selected, nothing selected yet, or the
+ *                          selection passes the executor's credential check.
+ *   selected-incompatible: a compatible profile exists but the selected one
+ *                          fails the executor credential check (e.g. executor
+ *                          switched after the agent was chosen, or a workflow
+ *                          pins it).
+ *   selected-unavailable: a compatible profile exists, but the current
+ *                         selection is disabled or unavailable because dynamic
+ *                         routing is off.
+ *   none-compatible:       an executor is selected and no profile passes.
+ */
+export type AgentCompatState =
+  | "compatible"
+  | "selected-incompatible"
+  | "selected-unavailable"
+  | "none-compatible";
+
 export type DialogComputedValues = {
   isPassthroughProfile: boolean;
   effectiveWorkflowId: string | null;
@@ -244,8 +269,12 @@ export type DialogComputedValues = {
   effectiveAgentProfileId: string;
   /** Display name of the currently selected executor profile (null if none). */
   selectedExecutorProfileName: string | null;
-  /** True when an executor profile is selected and no agent profile is compatible with it. */
+  /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
+  /** Compatibility state of the effective agent profile with the selected executor profile. */
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile (null when none is selected or it is unknown). */
+  selectedAgentProfileName: string | null;
   /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
   compatibleAgentProfiles: AgentProfileOption[];
   /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
@@ -425,12 +454,18 @@ export type DialogFormState = {
   /** No-repo mode: when true the task is created with no repositories. */
   noRepository: boolean;
   setNoRepository: (v: boolean) => void;
+  /** Launch-only hint for choosing a capable direct local executor profile. */
+  preferLocalExecutor: boolean;
+  setPreferLocalExecutor: (v: boolean) => void;
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
   /** Create-mode opt-in. Autopilot is immutable after task creation. */
   autopilot: boolean;
   setAutopilot: (v: boolean) => void;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
+  setPriority: (v: TaskPriority) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -517,8 +552,12 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  /** Edit-mode dependency draft and persistence state. */
+  editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -559,10 +598,12 @@ export type DialogFormBodyProps = {
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
   isCreatingSession: boolean;
+  isCreatingTask?: boolean;
   workflows: WorkflowsState["items"];
   snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
   fs: DialogFormState;
+  editDependencies: TaskEditDialogDependenciesState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   onTaskNameChange: (v: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
@@ -613,7 +654,11 @@ export type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile, for the incompatible-agent note. */
+  selectedAgentProfileName: string | null;
+  /** Name of the effective workflow, for the workflow-locked incompatible note. */
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;

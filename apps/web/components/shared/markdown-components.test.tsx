@@ -47,10 +47,12 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import {
+  MarkdownFileLinkContext,
   MarkdownTaskContext,
   markdownComponents,
   normalizeMarkdown,
   remarkPlugins,
+  type MarkdownFileLinkContextValue,
 } from "./markdown-components";
 
 function renderMarkdown(source: string): string {
@@ -208,9 +210,11 @@ describe("markdownComponents", () => {
   it("does not open Windows drive-letter absolute file links", () => {
     render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
 
-    fireEvent.click(screen.getByRole("link", { name: "hosts" }));
+    const link = screen.getByRole("link", { name: "hosts" });
+    fireEvent.click(link);
 
     expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("does not treat bare domains as relative file links", () => {
@@ -222,6 +226,43 @@ describe("markdownComponents", () => {
 
     expect(openFile).not.toHaveBeenCalled();
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("markdownComponents registered source links", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("opens registered repository paths through the active task worktree", () => {
+    const fileLinkContext: MarkdownFileLinkContextValue = {
+      worktreePath: "/root/.kandev/tasks/example",
+      onOpenFile: openFile,
+      fileRootAliases: [
+        {
+          repositoryId: "repo-1",
+          sourceRoot: "/home/jcfs/kandev-plugins/project",
+          workspaceRelativeRoot: "kandev",
+        },
+      ],
+    };
+
+    render(
+      <MarkdownFileLinkContext.Provider value={fileLinkContext}>
+        <Markdown>{"[bundle](/home/jcfs/kandev-plugins/project/ui/bundle.js:61)"}</Markdown>
+      </MarkdownFileLinkContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "bundle" }));
+
+    expect(openFile).toHaveBeenCalledWith("kandev/ui/bundle.js");
+  });
+
+  it("keeps an unmatched host path inert", () => {
+    render(<Markdown>{"[secret](/home/other-project/secret.md)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "secret" });
+    expect(fireEvent.click(link)).toBe(false);
+    expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("aria-disabled")).toBe("true");
   });
 });
 

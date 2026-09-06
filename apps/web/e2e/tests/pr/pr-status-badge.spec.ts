@@ -709,18 +709,26 @@ test.describe("PR status badge", () => {
     await taskRow.hover();
     await expect(taskActions).toBeVisible();
     await expect(menuSlot).toHaveCSS("width", "24px");
-    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
-    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
-    await icon.hover();
+    // Escape leaves the icon focused and the controlled tooltip dismissed. Move
+    // focus through the row so the updated icon receives a real focus event.
+    // This avoids relying on a synthetic hover after the association rerender.
+    await taskRow.focus();
+    await testPage.keyboard.press("Tab");
+    await expect(icon).toBeFocused();
 
     const multiSummary = visibleTaskPRSummary(testPage);
-    await expect(multiSummary).toBeVisible();
+    // The second association updates the icon while the disclosure is closed.
+    // Wait for the keyboard-reopened tooltip before querying its refreshed rows.
+    await expect(multiSummary).toBeVisible({ timeout: 15_000 });
     const entries = multiSummary.getByTestId("pr-task-status-entry");
-    await expect(entries).toHaveCount(2);
+    await expect(entries).toHaveCount(2, { timeout: 15_000 });
     await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");
-    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967");
+    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967", {
+      timeout: 15_000,
+    });
     await expect(entries.nth(1).getByTestId("pr-task-status-title")).toHaveText(
       "Resolve the failing API checks",
+      { timeout: 15_000 },
     );
   });
 });

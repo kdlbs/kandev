@@ -322,7 +322,10 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	// A manual prepare call has no scheduler-owned Office run identity. Keep the
+	// participant slot empty so createStartSession uses the task assignee, while
+	// agentProfileID remains the concrete execution profile.
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, "", executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -345,6 +348,21 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		go func() {
 			bgCtx := context.Background()
 			launchProfileID := agentProfileID
+			// This workspace-only launch (StartAgent unset) never starts the
+			// agent, so it never reaches "active" itself — the eventual
+			// StartCreatedSession call does that. But if a route was claimed
+			// below and this launch then fails, nothing else will ever move
+			// it off "starting"; the deferred guard covers both failure
+			// points uniformly. It only fires while the route is still
+			// "starting" (see Engine.MarkActionRequired), so it is a no-op
+			// if a concurrent real launch already marked it active.
+			var claimedRouteGeneration int64
+			launchOwned := false
+			defer func() {
+				if claimedRouteGeneration > 0 && !launchOwned {
+					s.markDynamicRouteActionRequired(bgCtx, sessionID, claimedRouteGeneration, "prepared_session_launch_failed")
+				}
+			}()
 			if s.profileExecutionResolver != nil {
 				launchSession, loadErr := s.repo.GetTaskSession(bgCtx, sessionID)
 				if loadErr != nil {
@@ -364,6 +382,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				if resolved.ExecutionProfileID != "" {
 					launchProfileID = resolved.ExecutionProfileID
 					if routeClaimed {
+						claimedRouteGeneration = resolved.Generation
 						applyResolvedExecution(launchSession, resolved)
 						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
 							s.logger.Warn("failed to persist dynamic route for prepared session",
@@ -386,6 +405,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 					zap.Error(launchErr))
 				return
 			}
+			launchOwned = true
 			if prepExec != nil {
 				s.ensureSessionPRWatch(bgCtx, taskID, prepExec.SessionID, prepExec.WorktreeBranch)
 			}
@@ -425,6 +445,71 @@ func (s *Service) StartCreatedSession(
 	skipMessageRecord, planMode, autoStart bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, "", startCreatedSessionOptions{},
+	)
+}
+
+// StartCreatedSessionWithPromptContext starts a prepared session while
+// preserving the exact server-generated saved-prompt context prepared by the
+// message handler. Direct first turns need this narrow seam because the
+// session-start path canonicalizes the prompt again before dispatch.
+func (s *Service) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, startCreatedSessionOptions{},
+	)
+}
+
+// startCreatedSessionWithComposedPrompt launches a prepared session from an
+// auto-start path whose prompt was already composed and recorded by the
+// orchestrator. The ordinary public entry point intentionally applies the
+// workflow/config/plan transforms itself; reapplying them here would duplicate
+// wrappers and would also fall back to the task description for an empty,
+// already-prompted workflow step. Keep this seam private to the auto-start
+// admission path so user-initiated starts retain their existing contract.
+func (s *Service) startCreatedSessionWithComposedPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	retryPrompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, "", startCreatedSessionOptions{
+			skipTaskDescriptionFallback: true,
+			promptAlreadyComposed:       true,
+			retryPrompt:                 retryPrompt,
+		},
+	)
+}
+
+type startCreatedSessionOptions struct {
+	skipTaskDescriptionFallback bool
+	promptAlreadyComposed       bool
+	retryPrompt                 string
+}
+
+//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) startCreatedSession(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	options startCreatedSessionOptions,
 ) (*executor.TaskExecution, error) {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
@@ -543,7 +628,7 @@ func (s *Service) StartCreatedSession(
 	}
 
 	effectivePrompt := prompt
-	if effectivePrompt == "" {
+	if effectivePrompt == "" && !options.skipTaskDescriptionFallback {
 		effectivePrompt = task.Description
 	}
 
@@ -597,14 +682,26 @@ func (s *Service) StartCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
-	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-		planMode, task.IsEphemeral, session.IsPassthrough,
-	)
+	planModeActive := planMode
+	if !options.promptAlreadyComposed {
+		var generatedPromptReferenceContext string
+		effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContext(
+			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+			planMode, task.IsEphemeral, session.IsPassthrough, promptReferenceContext,
+		)
+		if generatedPromptReferenceContext != "" {
+			// The workflow helper preserves a direct message's acceptance-time
+			// context. Auto-started workflow prompts have no prior context, so their
+			// launch-time expansion becomes the trusted value here.
+			promptReferenceContext = generatedPromptReferenceContext
+		}
+	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	if configMode {
-		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+		if !options.promptAlreadyComposed {
+			effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+		}
 	}
 
 	// Wrap the first prompt with the Kandev MCP system block. See the
@@ -625,7 +722,11 @@ func (s *Service) StartCreatedSession(
 
 	// Cache the raw prompt so a transient-provider-error (529) retry can
 	// re-drive this first turn — initial launches bypass PromptTask.
-	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
+	retryPrompt := prompt
+	if options.promptAlreadyComposed {
+		retryPrompt = options.retryPrompt
+	}
+	s.rememberTurnPrompt(sessionID, retryPrompt, "", planMode, attachments)
 
 	mcpMode := ""
 	if isOfficeTask {
@@ -1051,7 +1152,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -1394,9 +1495,9 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 // propagateInheritedEnvironment is a no-op for tasks without a workspace policy.
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
-	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
-	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return "", false, err
 	}
@@ -1585,25 +1686,60 @@ func (s *Service) recordDynamicRouteResolutionFailure(
 }
 
 // createStartSession picks the right session-creation path for the task:
-// Office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
-// (so runs reuse one row across turns); kanban / quick-chat fall through to
-// the per-launch PrepareSession used since day one.
+// Office tasks use the per-(task, agent) EnsureSessionForAgent path (so runs
+// reuse one row across turns); kanban / quick-chat fall through to the
+// per-launch PrepareSession used since day one. An Office task can be created
+// before its runner seat is projected, so the run's captured identity or its
+// resolved execution profile supplies the owner until the seat is assigned.
+//
+// The session-owner identity passed to EnsureSessionForAgentWithCreation is,
+// by default, the task's runner seat (dbTask.AssigneeAgentProfileID) — even
+// for a reviewer/approver run whose agent differs from the runner, which
+// wrongly binds that run's session (and later its decisions) to the runner's
+// identity. When features.officeSessionIdentity is on, officeAgentProfileID
+// (the run's own agent, captured by the caller before step/routing overrides
+// mutate agentProfileID) is used instead so each participant agent gets its
+// own session per task.
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
-	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
-			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
-		)
-		if ensureErr != nil {
-			return "", false, ensureErr
-		}
-		return session.ID, created, nil
+	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
 	}
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
-	return sessionID, err == nil, err
+
+	sessionOwnerID := s.officeSessionOwnerID(dbTask, agentProfileID, officeAgentProfileID)
+	if sessionOwnerID == "" {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
+	}
+	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
+		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
+	)
+	if ensureErr != nil {
+		return "", false, ensureErr
+	}
+	return session.ID, created, nil
+}
+
+// officeSessionOwnerID selects the stable identity for an Office session. A
+// projected runner wins by default. When identity separation is enabled, a
+// scheduler-captured participant identity wins for assigned runs. Before a
+// runner seat is projected, the captured identity or execution profile keeps
+// the session on the Office path instead of creating a generic workspace row.
+func (s *Service) officeSessionOwnerID(task *models.Task, agentProfileID, officeAgentProfileID string) string {
+	if task.AssigneeAgentProfileID == "" {
+		if officeAgentProfileID != "" {
+			return officeAgentProfileID
+		}
+		return agentProfileID
+	}
+	if s.config.OfficeSessionIdentity && officeAgentProfileID != "" {
+		return officeAgentProfileID
+	}
+	return task.AssigneeAgentProfileID
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -1725,7 +1861,38 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool, string) {
+func (s *Service) applyWorkflowAndPlanMode(
+	ctx context.Context,
+	prompt string,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+	planMode bool,
+	isEphemeral bool,
+	isPassthrough bool,
+) (string, bool, string) {
+	return s.applyWorkflowAndPlanModeWithPromptContext(
+		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
+		isEphemeral, isPassthrough, "",
+	)
+}
+
+// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt while
+// preserving a direct message's acceptance-time saved-prompt expansion. A
+// direct message already has canonical reference content, so resolving it
+// again would make persistence and ACP dispatch depend on mutable prompt
+// records. Workflow-only prompts still use the normal expansion path.
+func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
+	ctx context.Context,
+	prompt string,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+	planMode bool,
+	isEphemeral bool,
+	isPassthrough bool,
+	trustedPromptContext string,
+) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
 
@@ -1739,9 +1906,15 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
-				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
-			)
+			if trustedPromptContext != "" {
+				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, trustedPromptContext,
+				)
+			} else {
+				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
+				)
+			}
 		}
 	}
 
@@ -1808,6 +1981,33 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 	return prompt
 }
 
+// buildWorkflowEntryPrompt applies the task-description fallback for one
+// workflow entry. Empty steps use the description only when this call
+// atomically claims the session's first prompt slot; non-empty step prompts
+// keep their existing placeholder and replacement semantics.
+func (s *Service) buildWorkflowEntryPrompt(
+	ctx context.Context,
+	taskDescription string,
+	step *wfmodels.WorkflowStep,
+	taskID, sessionID string,
+	isPassthrough bool,
+) (string, error) {
+	basePrompt := taskDescription
+	if step.Prompt == "" && strings.TrimSpace(taskDescription) != "" {
+		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID)
+		if err != nil {
+			return "", fmt.Errorf("failed to claim workflow prompt fallback: %w", err)
+		}
+		if !claimed {
+			basePrompt = ""
+		}
+	}
+	// A replacement session is intentionally a fresh prompt boundary. It has
+	// no prior claim, so the task description is eligible again after a reused
+	// session terminalizes during workflow entry.
+	return s.buildWorkflowPrompt(ctx, basePrompt, step, taskID, sessionID, isPassthrough), nil
+}
+
 // workflowInstructionsHeading/End are stable, agent-facing markers for the
 // optional workflow-level prompt block. Chat collapses everything between
 // them by default. Do not i18n (sent to the model, same as step prompt English).
@@ -1825,6 +2025,24 @@ func (s *Service) buildWorkflowPromptWithContext(
 	taskID string,
 	sessionID string,
 	isPassthrough bool,
+) (string, string) {
+	return s.buildWorkflowPromptWithTrustedContext(
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, "",
+	)
+}
+
+// buildWorkflowPromptWithTrustedContext composes a workflow prompt without
+// re-expanding an already canonical direct message. If the workflow step
+// replaces the base prompt, it restores the exact trusted block so the
+// accepted saved-prompt context remains available to the agent.
+func (s *Service) buildWorkflowPromptWithTrustedContext(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+	trustedPromptContext string,
 ) (string, string) {
 	_ = sessionID
 	var parts []string
@@ -1850,6 +2068,13 @@ func (s *Service) buildWorkflowPromptWithContext(
 	}
 
 	joined := strings.Join(parts, "\n\n")
+	if trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+		if !strings.Contains(joined, trustedBlock) {
+			joined += "\n\n" + trustedBlock
+		}
+		return joined, trustedPromptContext
+	}
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 }
 
@@ -1913,8 +2138,32 @@ func (s *Service) expandPromptReferencesWithContext(
 	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
 }
 
+// PrepareDirectPrompt applies the same backend-owned saved-prompt expansion
+// used by workflow prompts to a direct user message. Message handlers call it
+// before persistence so the stored content and the first dispatched prompt
+// share one canonical representation.
+func (s *Service) PrepareDirectPrompt(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+) (string, string) {
+	return s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
+}
+
 // ResumeTaskSession restarts a specific task session using its stored worktree.
 func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error) {
+	return s.ResumeTaskSessionWithOptions(ctx, taskID, sessionID, executor.ResumeOptions{})
+}
+
+// ResumeTaskSessionWithOptions restarts a task session with an explicit
+// recovery permission. The default ResumeTaskSession path remains unchanged.
+//
+//nolint:cyclop,gocognit,funlen // Resume coordinates state validation, launch recovery, and ready-state persistence.
+func (s *Service) ResumeTaskSessionWithOptions(
+	ctx context.Context,
+	taskID, sessionID string,
+	options executor.ResumeOptions,
+) (*executor.TaskExecution, error) {
 	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
@@ -1937,6 +2186,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
+	branchRecoveryBefore := s.captureBranchRecoveryBeforeResume(ctx, taskID, sessionID, options)
 
 	// Completed sessions cannot be restarted — they require a new session.
 	// Failed and cancelled sessions keep the resume token so the relaunched
@@ -1980,13 +2230,19 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
 	// Session resume can take time and shouldn't be tied to the WS request lifecycle.
 	resumeCtx := context.WithoutCancel(ctx)
-	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
+	persistBranchRecovery := func() {
+		if options.AllowBranchReplacement {
+			s.persistBranchRecoveryWarnings(resumeCtx, taskID, sessionID, branchRecoveryBefore)
+		}
+	}
+	execution, err := s.executor.ResumeSessionWithOptions(resumeCtx, session, true, options)
 	var readySession *models.TaskSession
 	if err != nil {
 		// If the execution is already running (duplicate resume request), return it as success.
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID)
+			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID, options)
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
+				persistBranchRecovery()
 				return nil, err
 			}
 		}
@@ -2001,6 +2257,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
 				return nil, executor.ErrTaskArchived
 			}
+			persistBranchRecovery()
 			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
 			// if the caller's ctx was already cancelled (e.g. WS client navigated
 			// away), the SessionStateFailed and TaskStateFailed updates would
@@ -2009,6 +2266,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			// ResumeSession launches the workspace directly rather than through
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
+			err = s.branchRecoveryError(resumeCtx, taskID, sessionID, err)
 			return nil, s.handleSessionLaunchFailure(
 				resumeCtx, taskID, sessionID, err, session,
 			)
@@ -2017,10 +2275,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if readySession == nil {
 		readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 		if err != nil {
+			persistBranchRecovery()
 			return nil, err
 		}
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	persistBranchRecovery()
 
 	// Backfill the initial user message when a prior failed launch never got
 	// to recordInitialMessage. Without this, the resume can succeed and the
@@ -2051,6 +2311,25 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	return execution, nil
 }
 
+func (s *Service) captureBranchRecoveryBeforeResume(
+	ctx context.Context,
+	taskID, sessionID string,
+	options executor.ResumeOptions,
+) *branchRecoverySnapshot {
+	if !options.AllowBranchReplacement {
+		return nil
+	}
+	snapshot, err := s.captureBranchRecoverySnapshot(ctx, taskID, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to capture branch recovery state before resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+	return snapshot
+}
+
 func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID string) (*models.TaskSession, error) {
 	return s.waitForSessionAndAgentReady(ctx, sessionID, "after resume")
 }
@@ -2059,6 +2338,7 @@ func (s *Service) recoverAlreadyRunningResume(
 	resumeCtx context.Context,
 	taskID string,
 	sessionID string,
+	options executor.ResumeOptions,
 ) (*executor.TaskExecution, *models.TaskSession, error) {
 	existing, ok := s.executor.GetExecutionBySession(sessionID)
 	if !ok || existing == nil {
@@ -2086,7 +2366,7 @@ func (s *Service) recoverAlreadyRunningResume(
 		return nil, nil, fmt.Errorf("task session does not belong to task")
 	}
 
-	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
+	execution, err := s.executor.ResumeSessionWithOptions(resumeCtx, session, true, options)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2177,7 +2457,12 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
-	effectivePrompt := s.buildWorkflowPrompt(ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough)
+	effectivePrompt, err := s.buildWorkflowEntryPrompt(
+		ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to build workflow prompt: %w", err)
+	}
 
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err
@@ -2187,8 +2472,20 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// step prompt. The helper reloads the session so a resume-created runtime
 	// state cannot be overwritten by the stale request snapshot.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
-
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+	// The plan/config transforms can make an otherwise empty workflow prompt
+	// actionable. Decide whether to dispatch only after applying those same
+	// transforms that PromptTask applies downstream.
+	session = s.latestSession(ctx, session)
+	promptForEmptinessCheck := s.effectivePromptForSession(sessionID, effectivePrompt, stepPlanMode, session)
+	if strings.TrimSpace(promptForEmptinessCheck) == "" {
+		s.logger.Info("workflow step has no prompt after entry fallback",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("workflow_step_id", workflowStepID))
+		return nil
+	}
+
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
@@ -2772,15 +3069,22 @@ func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string
 	}
 	resp.RemoteState = status.State
 	resp.RemoteName = status.RemoteName
-	if status.ErrorMessage != "" {
-		resp.RemoteStatusErr = status.ErrorMessage
-	}
+	resp.RemoteStatusErr = publicRemoteStatusError(status.ErrorMessage)
 	if status.CreatedAt != nil && !status.CreatedAt.IsZero() {
 		resp.RemoteCreatedAt = status.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	if !status.LastCheckedAt.IsZero() {
 		resp.RemoteCheckedAt = status.LastCheckedAt.UTC().Format(time.RFC3339)
 	}
+}
+
+const remoteStatusUnavailable = "remote executor status is unavailable"
+
+func publicRemoteStatusError(errorMessage string) string {
+	if errorMessage == "" {
+		return ""
+	}
+	return remoteStatusUnavailable
 }
 
 // populateWorktreeInfo copies worktree path and branch into the response if present.
@@ -3154,10 +3458,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
-	// Drop the in-memory git snapshot throttle entry — the session will
-	// never receive another git event, so its cache slot is dead weight.
-	if s.gitSnapshotCache != nil {
-		s.gitSnapshotCache.forget(sessionID)
+	// Drop the in-memory git snapshot throttle entries for an environment only
+	// after its session has been removed. The cache is environment-scoped, so a
+	// session ID cannot identify the entries and must not be used as the key.
+	if s.gitSnapshotCache != nil && session.TaskEnvironmentID != "" {
+		s.gitSnapshotCache.forget(session.TaskEnvironmentID)
 	}
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
@@ -3623,8 +3928,8 @@ func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string
 // captureGitStatusSnapshotWithRetry attempts a fresh capture with up to 3
 // retries at 1-second intervals if the first attempt returns stale 0/0 data
 // (caused by git lock contention between concurrent worktrees). Returns
-// immediately without retrying when no execution exists for the session
-// (returns nil,nil) or the agent genuinely has no file changes.
+// immediately without retrying when the environment or execution is missing,
+// or when the agent genuinely has no file changes.
 func (s *Service) captureGitStatusSnapshotWithRetry(ctx context.Context, sessionID string) {
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -3645,8 +3950,14 @@ func (s *Service) captureGitStatusSnapshotWithRetry(ctx context.Context, session
 // saveGitStatusSnapshot is the shared implementation for snapshot capture.
 // When fresh is true, it bypasses the workspace tracker's poll cache.
 // Returns (wrote, noExecution): wrote=true if a snapshot was persisted,
-// noExecution=true if the session has no active execution (nil status).
+// noExecution=true if the environment or active execution is unavailable.
 func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, fresh bool) (wrote, noExecution bool) {
+	taskEnvironmentID, ok := s.resolveGitSnapshotEnvironmentID(ctx, sessionID)
+	if !ok {
+		// A snapshot cannot be captured without an environment. Stop the
+		// retry loop because another attempt cannot resolve this identity.
+		return false, true
+	}
 	var status *client.GitStatusResult
 	var err error
 	if fresh {
@@ -3691,17 +4002,18 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
-		SessionID:    sessionID,
-		SnapshotType: models.SnapshotTypeStatusUpdate,
-		Branch:       status.Branch,
-		RemoteBranch: status.RemoteBranch,
-		HeadCommit:   status.HeadCommit,
-		BaseCommit:   status.BaseCommit,
-		Ahead:        status.Ahead,
-		Behind:       status.Behind,
-		Files:        status.Files,
-		TriggeredBy:  "agent_completed",
-		Metadata:     metadata,
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         sessionID,
+		SnapshotType:      models.SnapshotTypeStatusUpdate,
+		Branch:            status.Branch,
+		RemoteBranch:      status.RemoteBranch,
+		HeadCommit:        status.HeadCommit,
+		BaseCommit:        status.BaseCommit,
+		Ahead:             status.Ahead,
+		Behind:            status.Behind,
+		Files:             status.Files,
+		TriggeredBy:       gitSnapshotTriggeredByAgentCompleted,
+		Metadata:          metadata,
 	}); err != nil {
 		s.logger.Warn("failed to save git status snapshot",
 			zap.String("session_id", sessionID),
@@ -3709,17 +4021,8 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 		return false, false
 	}
 
-	// Remove stale live_monitor snapshots so the authoritative agent_completed
-	// snapshot is always returned by GetLatestGitSnapshot. Without this, a
-	// live_monitor poll that raced with agent completion could persist a
-	// snapshot with a later timestamp but stale data.
-	if err := s.repo.DeleteLiveMonitorSnapshots(ctx, sessionID); err != nil {
-		s.logger.Debug("failed to clean up live monitor snapshots",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
 	s.logger.Debug("saved git status snapshot",
+		zap.String("task_environment_id", taskEnvironmentID),
 		zap.String("session_id", sessionID),
 		zap.String("branch", status.Branch),
 		zap.Bool("fresh", fresh))
@@ -3729,6 +4032,10 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 // captureArchiveDiff fetches and saves the cumulative diff from baseCommit to the working tree
 // (including uncommitted/unstaged changes).
 func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit string) {
+	taskEnvironmentID, ok := s.resolveGitSnapshotEnvironmentID(ctx, sessionID)
+	if !ok {
+		return
+	}
 	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, baseCommit)
 	if err != nil {
 		s.logger.Warn("failed to capture cumulative diff for archive",
@@ -3741,11 +4048,12 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 	}
 
 	snapshot := &models.GitSnapshot{
-		SessionID:    sessionID,
-		SnapshotType: models.SnapshotTypeArchive,
-		HeadCommit:   diffResult.HeadCommit,
-		BaseCommit:   diffResult.BaseCommit,
-		Files:        diffResult.Files,
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         sessionID,
+		SnapshotType:      models.SnapshotTypeArchive,
+		HeadCommit:        diffResult.HeadCommit,
+		BaseCommit:        diffResult.BaseCommit,
+		Files:             diffResult.Files,
 	}
 	status, statusErr := s.agentManager.GetGitStatusFresh(ctx, sessionID)
 	if statusErr != nil {
@@ -3768,6 +4076,7 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 	}
 
 	s.logger.Debug("saved archive snapshot",
+		zap.String("task_environment_id", taskEnvironmentID),
 		zap.String("session_id", sessionID),
 		zap.String("head_commit", diffResult.HeadCommit),
 		zap.Int("total_commits", diffResult.TotalCommits))
@@ -6041,7 +6350,7 @@ type cancelAgentPreparation struct {
 }
 
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error) {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
 		return err
 	}
 	if s.repo == nil {

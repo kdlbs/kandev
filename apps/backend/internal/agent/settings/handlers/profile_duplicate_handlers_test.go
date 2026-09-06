@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -419,6 +420,27 @@ func (h *workspaceDuplicateHub) BroadcastToWorkspaceOrDrop(workspaceID string, m
 	h.workspaceMsgs[workspaceID] = append(h.workspaceMsgs[workspaceID], msg)
 }
 
+// syntheticSettingsIdentity is the single-user admin identity the auth
+// middleware installs when auth is disabled.
+func syntheticSettingsIdentity() authn.Identity {
+	return authn.Identity{UserID: "default", Role: authn.RoleAdmin, Synthetic: true}
+}
+
+// useSettingsIdentity puts an identity on every request. The agent and
+// agent-profile mutations are gated on org.config.manage, so a router built
+// without the production middleware chain has no identity at all and every
+// mutation answers 401 before reaching the handler under test.
+func useSettingsIdentity(router *gin.Engine, identity authn.Identity) {
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, identity)
+		c.Next()
+	})
+}
+
+func useSyntheticSettingsIdentity(router *gin.Engine) {
+	useSettingsIdentity(router, syntheticSettingsIdentity())
+}
+
 // newSettingsHarness wires the settings handlers to the given repo and hub and
 // returns the router plus the controller and agent registry, so a test can
 // register a deterministic agent implementation or attach a dependency checker.
@@ -426,6 +448,18 @@ func newSettingsHarness(
 	t *testing.T,
 	repo store.Repository,
 	hub Broadcaster,
+) (*gin.Engine, *controller.Controller, *registry.Registry) {
+	t.Helper()
+	return newSettingsHarnessAs(t, repo, hub, syntheticSettingsIdentity())
+}
+
+// newSettingsHarnessAs is newSettingsHarness with the caller's identity, for
+// tests that assert what a non-admin may and may not reach.
+func newSettingsHarnessAs(
+	t *testing.T,
+	repo store.Repository,
+	hub Broadcaster,
+	identity authn.Identity,
 ) (*gin.Engine, *controller.Controller, *registry.Registry) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -443,6 +477,7 @@ func newSettingsHarness(
 	}
 	ctrl := controller.NewController(repo, discoveryRegistry, reg, nil, log)
 	router := gin.New()
+	useSettingsIdentity(router, identity)
 	// Register through the production entry point so the install/update job
 	// stores are wired from the hub exactly as they are at startup — with a nil
 	// hub they stay unavailable, which is itself a behaviour under test.

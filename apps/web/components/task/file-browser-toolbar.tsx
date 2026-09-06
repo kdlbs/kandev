@@ -7,7 +7,10 @@ import {
   IconFolderOpen,
   IconCopy,
   IconCheck,
+  IconFilePlus,
+  IconFolderUp,
   IconPlus,
+  IconUpload,
   IconDots,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -59,6 +62,7 @@ type FileBrowserToolbarProps = {
   onStartSearch: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onUploadFiles?: (mode: "files" | "folder") => void;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
@@ -126,6 +130,71 @@ function useMobileDrawerFocusRestoration(triggerRef: RefObject<HTMLButtonElement
   return useCallback(() => {
     restoreAfterDrawerCloseRef.current = isMobile;
   }, [isMobile]);
+}
+
+function CreateMenu({
+  onStartCreate,
+  onUploadFiles,
+}: {
+  onStartCreate: () => void;
+  onUploadFiles?: (mode: "files" | "folder") => void;
+}) {
+  const { t } = useTranslation();
+
+  // Without an upload handler there is only one action, so keep the original
+  // one-click button rather than burying New File behind a menu.
+  if (!onUploadFiles) {
+    return (
+      <ToolbarButton
+        onClick={onStartCreate}
+        label={t("task:newFile")}
+        icon={<IconPlus className="h-3.5 w-3.5" />}
+      />
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("task:addToWorkspace")}
+              data-testid="files-create-menu"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:addToWorkspace")}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuItem
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          onSelect={onStartCreate}
+        >
+          <IconFilePlus className="h-3.5 w-3.5" />
+          {t("task:newFile")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          onSelect={() => onUploadFiles("files")}
+        >
+          <IconUpload className="h-3.5 w-3.5" />
+          {t("task:uploadFiles")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          onSelect={() => onUploadFiles("folder")}
+        >
+          <IconFolderUp className="h-3.5 w-3.5" />
+          {t("task:uploadFolder")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function WorkspaceActionsMenu({
@@ -225,6 +294,7 @@ export function FileBrowserToolbar({
   onStartSearch,
   onCollapseAll,
   showCreateButton,
+  onUploadFiles,
   onAddSources,
   addSourcesButtonRef,
   addSourcesDisabledReason,
@@ -258,11 +328,7 @@ export function FileBrowserToolbar({
       right={
         <>
           {showCreateButton && onStartCreate && (
-            <ToolbarButton
-              onClick={onStartCreate}
-              label={t("task:newFile")}
-              icon={<IconPlus className="h-3.5 w-3.5" />}
-            />
+            <CreateMenu onStartCreate={onStartCreate} onUploadFiles={onUploadFiles} />
           )}
           <WorkspaceActionsMenu
             onAddSources={onAddSources}

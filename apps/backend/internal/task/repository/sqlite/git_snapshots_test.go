@@ -12,15 +12,25 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// seedSessionForGit creates the task + session rows that the git snapshot and
-// commit tables reference via ON DELETE CASCADE foreign keys.
+// seedSessionForGit creates the task, environment, and session rows that the
+// git snapshot and commit tables reference.
 func seedSessionForGit(t *testing.T, repo *Repository, taskID, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
 		t.Fatalf("CreateTask(%s): %v", taskID, err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+	environmentID := "env-" + taskID
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment(%s): %v", environmentID, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+	}); err != nil {
 		t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
 	}
 }
@@ -81,6 +91,9 @@ func assertGitSnapshotEqual(t *testing.T, got, want *models.GitSnapshot) {
 	t.Helper()
 	if got.ID != want.ID {
 		t.Errorf("ID = %q, want %q", got.ID, want.ID)
+	}
+	if got.TaskEnvironmentID != want.TaskEnvironmentID {
+		t.Errorf("TaskEnvironmentID = %q, want %q", got.TaskEnvironmentID, want.TaskEnvironmentID)
 	}
 	if got.SessionID != want.SessionID {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, want.SessionID)
@@ -739,8 +752,12 @@ func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
 	}
 
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-cascade"); got != 0 {
-		t.Errorf("git snapshot rows after session delete = %d, want 0 (FK cascade)", got)
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE task_environment_id = ?`, "env-task-cascade"); got != 1 {
+		t.Errorf("git snapshot rows after session delete = %d, want 1 (environment ownership)", got)
+	}
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id IS NULL`); got != 1 {
+		t.Errorf("session provenance rows after session delete = %d, want 1", got)
 	}
 	if got := countRows(t, repo,
 		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`, "session-cascade"); got != 0 {

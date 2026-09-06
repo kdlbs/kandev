@@ -20,16 +20,18 @@ import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
 import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { cn } from "@/lib/utils";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
+  currentPage?: TaskListingPage;
   title: string;
   workspaceLabel: string;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
+  taskListingControls?: ReactNode;
 };
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
@@ -100,20 +102,23 @@ function MobileHeaderActionItems({
   handleOpenQuickChat,
   handleOpenQuickTerminal,
   toggleSearch,
+  taskListingControls,
 }: {
   workspaceId?: string;
   workspaceLabel: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   onSearchChange?: (query: string) => void;
   isSearchOpen: boolean;
   handleOpenQuickChat: () => void;
   handleOpenQuickTerminal: () => void;
   toggleSearch: () => void;
+  taskListingControls?: ReactNode;
 }) {
   const { t } = useTranslation();
 
   return (
     <>
+      {taskListingControls}
       <MainTopBarPluginActions
         workspaceId={workspaceId}
         workspaceLabel={workspaceLabel}
@@ -212,6 +217,7 @@ export function KanbanHeaderMobile({
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
+  taskListingControls,
 }: KanbanHeaderMobileProps) {
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -254,6 +260,7 @@ export function KanbanHeaderMobile({
             handleOpenQuickChat={handleOpenQuickChat}
             handleOpenQuickTerminal={handleOpenQuickTerminal}
             toggleSearch={toggleSearch}
+            taskListingControls={taskListingControls}
             setMenuOpen={setMenuOpen}
           />
         }

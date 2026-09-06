@@ -66,6 +66,8 @@ func (r *sqliteRepository) initSchema() error {
 		email TEXT NOT NULL,
 		display_name TEXT NOT NULL DEFAULT '',
 		role TEXT NOT NULL DEFAULT 'admin',
+		org_id TEXT NOT NULL DEFAULT '',
+		is_operator INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'active',
 		settings TEXT NOT NULL DEFAULT '{}',
 		settings_revision BIGINT NOT NULL DEFAULT 0,
@@ -101,6 +103,16 @@ func (r *sqliteRepository) runMigrations() {
 	m.Apply("users.role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
 	m.Apply("users.status", "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
 	m.Apply("users.settings_revision", "ALTER TABLE users ADD COLUMN settings_revision BIGINT NOT NULL DEFAULT 0")
+	// Organizations. Empty means "not yet assigned"; the tenancy migration
+	// puts every existing account into the default org on first boot with the
+	// feature on. Email stays unique instance-wide rather than per-org, so an
+	// address identifies one person and the login form needs no org picker.
+	m.Apply("users.org_id", "ALTER TABLE users ADD COLUMN org_id TEXT NOT NULL DEFAULT ''")
+	m.Apply("users.org_idx", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id)")
+	// The instance operator tier. Granted to the first admin by the tenancy
+	// migration so an upgraded instance is never left with nobody able to
+	// manage organizations.
+	m.Apply("users.is_operator", "ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0")
 	// Safe pre-auth: the table only ever held the single default-user row.
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 }
@@ -141,7 +153,7 @@ func (r *sqliteRepository) SetAgentProfileRecentUseLogger(log *commonlogger.Logg
 	r.recentUseLogger = log
 }
 
-const userColumns = "id, email, display_name, role, status, created_at, updated_at"
+const userColumns = "id, email, display_name, role, status, org_id, is_operator, created_at, updated_at"
 
 // GetUser returns the user row for the given id.
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
@@ -200,9 +212,10 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO users (id, email, display_name, role, status, settings, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
+		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, user.IsOperator,
+		user.CreatedAt, user.UpdatedAt)
 	return err
 }
 
@@ -575,6 +588,10 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if sidebarViews == nil {
 		sidebarViews = []models.SidebarView{}
 	}
+	threadViews := settings.ThreadViews
+	if threadViews == nil {
+		threadViews = []models.ThreadView{}
+	}
 	sidebarTaskPrefs := normalizeSidebarTaskPrefs(settings.SidebarTaskPrefs)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
@@ -617,6 +634,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"sidebar_views":                            sidebarViews,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             threadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       sidebarTaskPrefs,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
@@ -636,6 +656,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
@@ -676,7 +697,7 @@ func (r *sqliteRepository) scanConditionalSettingsUpdate(ctx context.Context, sc
 // scanUser scans a single user row into a models.User.
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
 	user := &models.User{}
-	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.OrgID, &user.IsOperator, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -715,8 +736,11 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
+		ThreadViews:                       DefaultThreadViews(),
+		ThreadActiveViewID:                DefaultThreadViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
+		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		QuickChatTabOrderByWorkspace:      map[string][]string{},
 		KanbanHiddenStepIDs:               map[string][]string{},
@@ -784,6 +808,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarViews                      json.RawMessage                     `json:"sidebar_views"`
 		SidebarActiveViewID               json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
+		ThreadViews                       json.RawMessage                     `json:"thread_views"`
+		ThreadActiveViewID                json.RawMessage                     `json:"thread_active_view_id"`
+		ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
@@ -803,6 +830,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
@@ -904,6 +932,33 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 	}
 	settings.SidebarDraft = payload.SidebarDraft
+	if len(payload.ThreadViews) > 0 {
+		var threadViews []models.ThreadView
+		if err := json.Unmarshal(payload.ThreadViews, &threadViews); err != nil {
+			return nil, err
+		}
+		if len(threadViews) > 0 {
+			settings.ThreadViews = threadViews
+		} else {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+	}
+	if len(payload.ThreadActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.ThreadActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID != nil {
+			settings.ThreadActiveViewID = *activeViewID
+		}
+	}
+	if !threadViewIDExists(settings.ThreadViews, settings.ThreadActiveViewID) {
+		if len(settings.ThreadViews) == 0 {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+		settings.ThreadActiveViewID = settings.ThreadViews[0].ID
+	}
+	settings.ThreadViewDraft = payload.ThreadViewDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
@@ -929,6 +984,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
+	}
+	if payload.ResolveSessionHostnames != nil {
+		settings.ResolveSessionHostnames = *payload.ResolveSessionHostnames
 	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
 	settings.QuickChatTabOrderByWorkspace = payload.QuickChatTabOrderByWorkspace

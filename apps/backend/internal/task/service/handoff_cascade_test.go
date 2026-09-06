@@ -22,17 +22,26 @@ func newCascadeRepo(base *fakeTaskRepo) *fakeCascadeRepo {
 	return &fakeCascadeRepo{phase4TaskRepo: &phase4TaskRepo{base: base}}
 }
 
-func (r *fakeCascadeRepo) ArchiveTaskIfActive(_ context.Context, id, cascadeID string) (bool, error) {
+func (r *fakeCascadeRepo) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+func (r *fakeCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	_ context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
 	t := r.base.tasks[id]
 	if t == nil || t.ArchivedAt != nil {
-		return false, nil
+		return "", false, nil
 	}
 	now := time.Now().UTC()
 	t.ArchivedAt = &now
 	t.ArchivedByCascadeID = cascadeID
-	return true, nil
+	return t.WorkflowStepID, true, nil
 }
 
 func (r *fakeCascadeRepo) UnarchiveTaskByCascade(_ context.Context, id, cascadeID string) (bool, error) {
@@ -160,6 +169,42 @@ func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
 	defer coordinator.mu.Unlock()
 	if len(coordinator.deleteEnvironmentRows) != 1 || !coordinator.deleteEnvironmentRows[0] {
 		t.Fatalf("deleteEnvironmentRows = %v, want [true]", coordinator.deleteEnvironmentRows)
+	}
+}
+
+func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.tasks["child"].Metadata = map[string]interface{}{
+		"workspace": map[string]interface{}{
+			"mode":     workspaceModeInheritParent,
+			"group_id": "group-1",
+		},
+		"keep": "this field",
+	}
+
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+
+	child, err := tasks.GetTask(context.Background(), "child")
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	if child == nil {
+		t.Fatal("no-cascade delete removed the child")
+	}
+	if child.ParentID != "" {
+		t.Fatalf("child parent_id = %q, want root", child.ParentID)
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if workspace["mode"] != workspaceModeSharedGroup {
+		t.Fatalf("child workspace mode = %#v, want %q", workspace["mode"], workspaceModeSharedGroup)
+	}
+	if workspace["group_id"] != "group-1" || child.Metadata["keep"] != "this field" {
+		t.Fatalf("child metadata was not preserved: %#v", child.Metadata)
 	}
 }
 
@@ -297,6 +342,42 @@ func TestArchiveTaskTree_StampsCascadeAcrossDescendants(t *testing.T) {
 		if got.ArchivedByCascadeID != out.CascadeID {
 			t.Errorf("%s cascade id = %q, want %q", id, got.ArchivedByCascadeID, out.CascadeID)
 		}
+	}
+}
+
+func TestArchiveTaskTree_TransfersSharedEnvironmentFromDepartingOwner(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.taskEnvironments = map[string]*models.TaskEnvironment{
+		"env-shared": {ID: "env-shared", TaskID: "root"},
+	}
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedEnvironmentID: "env-shared",
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root":  orchmodels.WorkspaceMemberRoleOwner,
+		"child": orchmodels.WorkspaceMemberRoleMember,
+	}
+	svc := newCascadeService(t, tasks, groups)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("ArchiveTaskTree: %v", err)
+	}
+	env, err := tasks.GetTaskEnvironment(context.Background(), "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.TaskID != "child" {
+		t.Fatalf("shared environment owner = %q, want surviving child", env.TaskID)
+	}
+	if status := groups.cleanupStatuses["g1"]; status != "" {
+		t.Fatalf("group cleanup status = %q, want unchanged while child remains active", status)
 	}
 }
 
@@ -508,6 +589,14 @@ func (r *archiveErrorCascadeRepo) ArchiveTaskIfActive(context.Context, string, s
 	return false, r.err
 }
 
+func (r *archiveErrorCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	context.Context,
+	string,
+	string,
+) (string, bool, error) {
+	return "", false, r.err
+}
+
 func TestArchiveTaskTree_DoesNotFinalizeSessionWhenArchiveFails(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
@@ -540,11 +629,20 @@ type fakeDeleteRepo struct {
 	*fakeCascadeRepo
 }
 
-func (r *fakeDeleteRepo) DeleteTask(_ context.Context, id string) error {
+func (r *fakeDeleteRepo) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
+	task := r.base.tasks[id]
+	if task == nil {
+		return "", errors.New("task not found")
+	}
 	delete(r.base.tasks, id)
-	return nil
+	return task.WorkflowStepID, nil
 }
 
 func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
@@ -558,6 +656,10 @@ type deleteErrorCascadeRepo struct {
 
 func (r *deleteErrorCascadeRepo) DeleteTask(context.Context, string) error {
 	return r.err
+}
+
+func (r *deleteErrorCascadeRepo) DeleteTaskWithVacatedStep(context.Context, string) (string, error) {
+	return "", r.err
 }
 
 func TestDeleteTaskTree_DoesNotFinalizeSessionWhenDeleteFails(t *testing.T) {

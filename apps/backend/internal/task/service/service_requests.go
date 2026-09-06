@@ -94,6 +94,9 @@ type CreateTaskRequest struct {
 	ParentID      string `json:"parent_id,omitempty"`
 	Autopilot     bool   `json:"autopilot,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+	// WorkspacePolicy carries the effective policy resolved by an API adapter.
+	// When omitted, CreateTask derives child defaults from the persisted parent.
+	WorkspacePolicy *WorkspacePolicy `json:"-"`
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
@@ -132,6 +135,10 @@ type UpdateTaskRequest struct {
 	// leaves the relationship untouched; a pointer to "" clears it (un-nests
 	// back to a root task); a non-empty value nests it under that parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. A nil pointer leaves it alone; a
+	// pointer to "" unassigns. It is independent of the agent assignee and
+	// never clears it.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow
@@ -173,6 +180,12 @@ type UpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	// Visibility is "private" or "org". Unknown values normalize to private:
+	// unrecognized input must never widen access.
+	Visibility *string `json:"visibility,omitempty"`
+	// UnitID moves the workspace to another organization unit, which is the
+	// only way to change who reaches it.
+	UnitID *string `json:"unit_id,omitempty"`
 }
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
@@ -318,6 +331,8 @@ type ListMessagesRequest struct {
 	Before        string
 	After         string
 	Sort          string
+	AuthorType    string
+	Around        string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

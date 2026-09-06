@@ -192,6 +192,10 @@ function pickDefaultExecutorId(
       ? executors.filter((e: Executor) => e.type !== "worktree")
       : executors;
   if (eligible.length === 0) return null;
+  if (preferLocalExecutor) {
+    const directLocal = eligible.find((e) => isDirectLocalExecutorType(e.type));
+    if (directLocal) return directLocal.id;
+  }
   const defId = workspaceDefaults?.default_executor_id ?? null;
   if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;
   if (noRepository || preferLocalExecutor) {
@@ -469,11 +473,14 @@ export function useDefaultSelectionsEffect(
     setExecutorId,
     setExecutorProfileId,
     noRepository,
+    preferLocalExecutor: presetPrefersLocalExecutor,
     useRemote,
     repositories,
   } = fs;
   const preferLocalExecutor =
-    !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
+    !useRemote &&
+    (presetPrefersLocalExecutor ||
+      (!noRepository && repositories.some((row) => Boolean(row.localPath))));
   const executorAutopickContext = useMemo(
     () => ({
       executors,

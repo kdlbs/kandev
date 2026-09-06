@@ -179,14 +179,16 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 	terminalID string,
 ) {
 	sessionID := execution.SessionID
-	if execution.GetAgentCtlClient() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		releaseClient()
 		c.JSON(http.StatusNotFound, gin.H{"error": "remote execution not available"})
 		return
 	}
-	client := execution.GetAgentCtlClient()
 
 	_, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
+		releaseClient()
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
@@ -200,6 +202,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 
 	// Create a per-terminal shell on agentctl (idempotent if already exists)
 	if err := client.StartShellTerminal(c.Request.Context(), terminalID, 80, 24); err != nil {
+		releaseClient()
 		h.logger.Error("failed to start remote terminal shell",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
@@ -210,6 +213,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 
 	// Open binary WS to the per-terminal shell on agentctl
 	agentctlConn, err := client.StreamShellTerminal(c.Request.Context(), terminalID)
+	releaseClient()
 	if err != nil {
 		h.logger.Error("failed to connect to remote terminal shell stream",
 			zap.String("session_id", sessionID),

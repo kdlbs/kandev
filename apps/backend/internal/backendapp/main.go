@@ -21,9 +21,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/org"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -85,6 +88,7 @@ import (
 	officeapprovals "github.com/kandev/kandev/internal/office/approvals"
 	officechannels "github.com/kandev/kandev/internal/office/channels"
 	officeconfig "github.com/kandev/kandev/internal/office/config"
+	officeconfigsync "github.com/kandev/kandev/internal/office/configsync"
 	officecosts "github.com/kandev/kandev/internal/office/costs"
 	officemodelsdev "github.com/kandev/kandev/internal/office/costs/modelsdev"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
@@ -321,6 +325,14 @@ func setBuildInfo(build BuildInfo) {
 
 // run initializes all services and runs the server. Returns false on fatal startup error.
 func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCleanups func()) bool {
+	// Organizations without authentication is the one configuration that
+	// cannot work: a tenant boundary needs identities to belong to it. Refuse
+	// at startup rather than booting an instance whose boundary is decorative.
+	if err := org.ValidateStartup(cfg.Features.MultiTenancy, cfg.Features.Auth); err != nil {
+		log.Error("Invalid feature configuration", zap.Error(err))
+		return false
+	}
+
 	addCleanup := func(fn func() error) { *cleanups = append(*cleanups, fn) }
 
 	// 3. Create context with cancellation
@@ -415,6 +427,61 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
+	taskservice.SetTenancyEnforced(cfg.Features.MultiTenancy)
+	if services.Org != nil && services.Org.Enabled() {
+		services.Auth.SetAdminCreatedHook(services.Org.ClaimSetupAdmin)
+		services.Org.SetFirstAdminCreator(services.Auth.CreateUserInOrg)
+		// Workspace fan-out needs to know which organization a user belongs
+		// to, so an org-visible workspace reaches its own org only.
+		services.Task.SetUserOrgResolver(func(ctx context.Context, userID string) (string, error) {
+			user, err := repos.UserAccounts.GetUser(ctx, userID)
+			if err != nil || user == nil {
+				return "", err
+			}
+			return user.OrgID, nil
+		})
+	}
+	if services.Org != nil && services.Org.Enabled() {
+		// A suspended organization fails every session and token closed, which
+		// is what makes suspension a real lever rather than a label. An
+		// unreadable status fails closed too: an org we cannot verify does not
+		// get to keep serving requests.
+		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
+			record, err := services.Org.Get(ctx, orgID)
+			return err == nil && record.Active()
+		})
+	}
+	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		log.Error("Failed to initialize session hostname cache", zap.Error(err))
+		return false
+	}
+	hostnameResolver := hostnames.NewResolver(
+		hostnameStore,
+		func(settingsCtx context.Context, userID string) (bool, error) {
+			settings, err := repos.User.GetUserSettings(settingsCtx, userID)
+			if err != nil {
+				return false, err
+			}
+			return settings.ResolveSessionHostnames, nil
+		},
+		services.Auth.SessionIPs,
+		eventBus,
+		log,
+	)
+	hostnameResolver.Start(ctx)
+	addCleanup(hostnameResolver.Close)
+	hostnameSettingsSubscription, err := eventBus.QueueSubscribe(
+		events.UserSettingsUpdated,
+		"session-hostname-resolver",
+		hostnameResolver.HandleUserSettingsUpdated,
+	)
+	if err != nil {
+		log.Error("Failed to subscribe session hostname resolver to user settings", zap.Error(err))
+		return false
+	}
+	addCleanup(hostnameSettingsSubscription.Unsubscribe)
+	services.SessionHostnameResolver = hostnameResolver
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every
@@ -514,7 +581,7 @@ func startAgentInfrastructure(
 		eventBus,
 		repos.AgentSettings,
 		agentRegistry,
-		userSecretStore,
+		repos.Secrets,
 		services.Task.TaskBaseBranches,
 		services.Task.TaskComparisonTargets,
 		services.ManagedRuntimeSelections,
@@ -673,6 +740,7 @@ func startAgentInfrastructure(
 		services.GitHub.SetTaskIssueStore(taskStoreAdapter)
 		services.GitHub.SetTaskRepositoryBaseBranchUpdater(taskStoreAdapter)
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
+		services.GitHub.SetWorkspaceGroupOwnerResolver(repos.Task)
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
 	}
@@ -752,6 +820,16 @@ func startAgentInfrastructure(
 		workflowSyncPoller.Start(ctx)
 		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
+	}
+
+	// Start Office config sync poller: periodically pulls agent/skill/
+	// project/routine definition files from each workspace's configured
+	// GitHub or GitLab repo and reconciles Office's tables with them.
+	if services.OfficeSvcs != nil && services.OfficeSvcs.ConfigSync != nil {
+		officeConfigSyncPoller := officeconfigsync.NewPoller(services.OfficeSvcs.ConfigSync, log)
+		officeConfigSyncPoller.Start(ctx)
+		addRuntimeCleanup(func() error { officeConfigSyncPoller.Stop(); return nil })
+		log.Info("Office config sync poller started")
 	}
 
 	// Start the plugin system's event delivery and health monitor
@@ -874,6 +952,9 @@ func startGatewayAndServe(
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
+	if cfg.Features.Canvases {
+		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
+	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
@@ -1276,6 +1357,7 @@ func initOfficeServices(
 		agentRegistry, log, services, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
+	services.OfficeSvcs.Dashboard.SetOfficeSessionIdentity(cfg.Features.OfficeSessionIdentity)
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
@@ -1373,6 +1455,11 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// Human assignee writes from the office PATCH surface go through the task
+	// service, which authorizes the caller and validates the assignee. That
+	// route carries no :wsId, so it is not covered by the office
+	// workspace-scope middleware and must not write the column directly.
+	services.OfficeSvcs.Dashboard.SetHumanAssigneeWriter(services.Task)
 	// Wire the reactivity pipeline so property mutations queue downstream runs.
 	services.OfficeSvcs.Dashboard.SetReactivityApplier(
 		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),
@@ -1387,6 +1474,9 @@ func wireOfficeSvcsDependencies(
 	officeSessionTerm := orchestratorSvc.OfficeSessionTerminator()
 	services.OfficeSvcs.Dashboard.SetSessionTerminator(officeSessionTerm)
 	services.OfficeSvcs.Agents.SetSessionTerminator(officeSessionTerm)
+	if services.OfficeSvcs.ConfigSync != nil {
+		services.OfficeSvcs.ConfigSync.SetSessionTerminator(officeSessionTerm)
+	}
 	// Wire the failure notifier so reassignments auto-dismiss the
 	// prior (task, agent) inbox entry.
 	services.OfficeSvcs.Dashboard.SetFailureNotifier(services.Office)
@@ -1621,6 +1711,10 @@ func wireWorkflowEngineForOffice(
 	// REQ-OFFICE-REVIEW-SEATS-004.3: drop a required seat whose agent profile
 	// was deleted after casting, rather than waiting forever on it.
 	orchestratorSvc.SetEngineAgentProfileResolver(officeengineadapters.NewAgentProfileResolverAdapter(repos.Office))
+	// REQ-OFFICE-STALL-VISIBILITY-002: the decision-waiting detector's
+	// false-positive guard. Without this the detector reports nothing rather
+	// than reporting tasks it cannot prove are idle.
+	orchestratorSvc.SetOfficeRunInFlightReader(repos.Office)
 	eng := orchestratorSvc.WorkflowEngine()
 	if eng == nil {
 		log.Warn("workflow engine not initialised; office engine dispatcher disabled")
@@ -2043,6 +2137,7 @@ func buildOfficeFeatureServices(
 	schedulerSvc := officescheduler.NewSchedulerService(repo, log, services.Office)
 	labelSvc := officelabels.NewLabelService(repo)
 	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
+	configSyncSvc := initOfficeConfigSyncService(repo, services.GitHub, services.GitLab, log)
 
 	return &office.Services{
 		Agents:       agentSvc,
@@ -2053,6 +2148,7 @@ func buildOfficeFeatureServices(
 		Approvals:    approvalSvc,
 		Channels:     channelSvc,
 		Config:       configSvc,
+		ConfigSync:   configSyncSvc,
 		Dashboard:    dashboardSvc,
 		Documents:    documentSvc,
 		Labels:       labelSvc,
@@ -2064,6 +2160,30 @@ func buildOfficeFeatureServices(
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,
 	}
+}
+
+// initOfficeConfigSyncService wires the Office config sync service. Either
+// integration may be nil; a workspace configured for the unavailable one
+// gets an actionable failure at sync time rather than the service failing to
+// boot (same non-fatal convention as initWorkflowSyncService). Returns nil
+// only if the store itself fails to initialize.
+func initOfficeConfigSyncService(
+	repo *officesqlite.Repository, githubSvc *githubpkg.Service, gitlabSvc *gitlabpkg.Service, log *logger.Logger,
+) *officeconfigsync.Service {
+	var githubClients officeconfigsync.GitHubClientProvider
+	if githubSvc != nil {
+		githubClients = githubSvc
+	}
+	var gitlabClients officeconfigsync.GitLabClientProvider
+	if gitlabSvc != nil {
+		gitlabClients = gitlabSvc
+	}
+	svc, _, err := officeconfigsync.Provide(repo.Writer(), repo.ReaderDB(), repo, githubClients, gitlabClients, log)
+	if err != nil {
+		log.Warn("office config sync service initialization failed (non-fatal)", zap.Error(err))
+		return nil
+	}
+	return svc
 }
 
 // buildOfficeDashboardService constructs the dashboard service and wires
@@ -2083,6 +2203,7 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)
 	dashboardSvc.SetRoutineLister(routineSvc)
@@ -2190,8 +2311,11 @@ func buildHTTPServer(
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
 	// unclassified (sanitized 500).
+	// Workspace secrets are a shared credential the workspace owner is
+	// accountable for, so they require secret.manage rather than mere reach:
+	// a collaborator contributes to the workspace, they do not hold its keys.
 	secretsSvc.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
-		err := services.Task.AuthorizeWorkspaceAccess(ctx, workspaceID)
+		err := services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSecretManage)
 		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 			return secrets.ErrWorkspaceAccessDenied
 		}

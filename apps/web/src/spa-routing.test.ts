@@ -71,6 +71,13 @@ describe("resolveSpaRoute", () => {
     });
   });
 
+  it("gives the Threads deck its own top-level route", () => {
+    expect(resolveSpaRoute("/threads", new URLSearchParams())).toEqual({ kind: "threads" });
+    expect(resolveSpaRoute("/threads/", new URLSearchParams("workspace=workspace-1"))).toEqual({
+      kind: "threads",
+    });
+  });
+
   it("keeps the flat cross-automation feed reachable as a view of the list", () => {
     expect(resolveSpaRoute("/automations", new URLSearchParams("view=feed"))).toEqual({
       kind: "runs",

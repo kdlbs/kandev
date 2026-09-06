@@ -194,6 +194,33 @@ func TestClassify_OpenCodeUsageLimitIsHighConfidenceQuota(t *testing.T) {
 	}
 }
 
+func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	for _, stderr := range []string{
+		"AI_APICallError: Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance",
+		"AI_APICallError: Daily usage limit reached. Resets in 4hr 19min.",
+		"AI_APICallError: monthly usage limit reached.",
+	} {
+		e := Classify(Input{
+			Phase:      PhaseStreaming,
+			ProviderID: "opencode-acp",
+			Stderr:     stderr,
+		})
+		if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+			t.Fatalf("classification of %q = %+v, want high-confidence quota_limited", stderr, e)
+		}
+	}
+}
+
+func TestHasProviderRules(t *testing.T) {
+	if !HasProviderRules("opencode-acp") {
+		t.Fatal("opencode-acp should have provider rules")
+	}
+	if HasProviderRules("opencode-go") {
+		t.Fatal("model-provider ID opencode-go must not resolve to provider rules")
+	}
+}
+
 func TestClassify_InjectionShortCircuit(t *testing.T) {
 	resetInjection()
 	t.Setenv("KANDEV_PROVIDER_FAILURES", "claude-acp:quota_limited,codex-acp:auth_required")

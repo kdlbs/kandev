@@ -16,8 +16,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -139,6 +141,8 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/upload", s.handleFileUpload)
+		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
@@ -148,6 +152,7 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST(agentctltypes.CanvasSourceTransferPath[len("/api/v1"):], s.handleCanvasSourceTransfer)
 		api.POST("/attachments/materialize", s.handleMaterializeAttachment)
 		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
@@ -328,8 +333,10 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
+	// ModeExternal stays rejected on purpose: it belongs to the backend's own
+	// MCP endpoint for external coding agents, and no launch path can emit it.
+	if !mcpmode.IsInstanceMode(req.Mode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

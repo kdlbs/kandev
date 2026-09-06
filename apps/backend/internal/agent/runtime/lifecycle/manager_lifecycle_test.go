@@ -239,7 +239,9 @@ type mockStopTracker struct {
 	name              executor.Name
 	stopCalled        bool
 	stoppedInstanceID string
+	stoppedSessionID  string
 	stopReason        string
+	stopForce         bool
 	stopErr           error
 }
 
@@ -253,7 +255,9 @@ func (m *mockStopTracker) CreateInstance(ctx context.Context, req *ExecutorCreat
 func (m *mockStopTracker) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	m.stopCalled = true
 	m.stoppedInstanceID = instance.InstanceID
+	m.stoppedSessionID = instance.SessionID
 	m.stopReason = instance.StopReason
+	m.stopForce = force
 	return m.stopErr
 }
 

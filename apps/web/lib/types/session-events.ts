@@ -99,6 +99,14 @@ export type TaskSessionCancellationChangedPayload = {
   cancellation_revision: number;
 };
 
+export type SessionPendingActionChangedPayload = {
+  workspace_id: string;
+  task_id: string;
+  session_id: string;
+  pending_action: TaskPendingAction | null;
+  pending_action_revision: TaskPendingActionRevision;
+};
+
 export type TaskSessionNotificationPayload = {
   task_id: string;
   session_id: string;
@@ -218,6 +226,10 @@ export type SessionBackendMessageMap = {
   "session.cancellation_changed": BackendMessage<
     "session.cancellation_changed",
     TaskSessionCancellationChangedPayload
+  >;
+  "session.pending_action_changed": BackendMessage<
+    "session.pending_action_changed",
+    SessionPendingActionChangedPayload
   >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",

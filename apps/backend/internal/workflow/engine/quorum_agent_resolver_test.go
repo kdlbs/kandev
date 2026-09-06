@@ -227,6 +227,63 @@ func TestComputeGuardOutcome_ResolverErrorSurfacesAsEvaluationError(t *testing.T
 // held one resolvable and one unresolved-agent seat still fires once the
 // resolvable seat approves, instead of waiting forever on a seat that can
 // never decide.
+// perIDErrResolver errors only for the agent profile ids listed in errFor,
+// resolving every other id as present.
+type perIDErrResolver struct {
+	errFor map[string]error
+}
+
+func (r *perIDErrResolver) AgentProfileExists(_ context.Context, agentProfileID string) (bool, error) {
+	if err, ok := r.errFor[agentProfileID]; ok {
+		return false, err
+	}
+	return true, nil
+}
+
+// TestResolveParticipantRole_ApproverAtStepSkipsReviewerResolverError is the
+// regression test for FINDING R1-A: when the caller's approver seat already
+// sits at stepID, that seat is both matches[0] and the step-preferred
+// answer, so the reviewer slate must never be built. A resolver error on the
+// reviewer seat's agent profile would otherwise fail the whole resolution.
+func TestResolveParticipantRole_ApproverAtStepSkipsReviewerResolverError(t *testing.T) {
+	boom := errors.New("boom")
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-approver", TaskID: "task-1", StepID: "review", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "other-step", Role: "reviewer", AgentProfileID: "agent-b", DecisionRequired: true},
+	}}
+	resolver := &perIDErrResolver{errFor: map[string]error{"agent-b": boom}}
+	eng := quorumEngineWithResolver(newFakeDecisionStore(), participants, resolver)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "approver" || participantID != "seat-approver" {
+		t.Errorf("role/participantID = %q/%q, want approver/seat-approver", role, participantID)
+	}
+}
+
+// TestResolveParticipantRole_ReviewerAtStepDefersApproverResolverError is the
+// inverse of the approver-at-step case: an unrelated approver resolver error
+// must not hide a valid reviewer seat at the step being evaluated.
+func TestResolveParticipantRole_ReviewerAtStepDefersApproverResolverError(t *testing.T) {
+	boom := errors.New("boom")
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-approver", TaskID: "task-1", StepID: "other-step", Role: "approver", AgentProfileID: "agent-b", DecisionRequired: true},
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	resolver := &perIDErrResolver{errFor: map[string]error{"agent-b": boom}}
+	eng := quorumEngineWithResolver(newFakeDecisionStore(), participants, resolver)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Errorf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+}
+
 func TestComputeGuardOutcome_ContinuesEvaluatingAfterDroppingUnresolvedSeat(t *testing.T) {
 	parts := scopedParticipants{template: []ParticipantInfo{
 		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},

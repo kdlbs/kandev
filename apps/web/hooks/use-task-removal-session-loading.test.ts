@@ -6,6 +6,7 @@ import type { TaskSession } from "@/lib/types/http";
 
 const listTaskSessionsMock = vi.fn();
 const TASK_ID = "task-cached";
+const CACHED_SESSION_ID = "cached-session";
 
 vi.mock("@/lib/api", () => ({
   fetchTask: vi.fn(),
@@ -25,8 +26,12 @@ function makeSession(id: string): TaskSession {
   } as TaskSession;
 }
 
-function makeStore(cachedSession: TaskSession): StoreApi<AppState> {
+function makeStore(cachedSession: TaskSession, activityEpoch = 0): StoreApi<AppState> {
   const state = {
+    taskSessions: {
+      items: { [cachedSession.id]: cachedSession },
+      activityEpochBySession: { [cachedSession.id]: activityEpoch },
+    },
     taskSessionsByTask: {
       itemsByTaskId: { [TASK_ID]: [cachedSession] },
       loadedByTaskId: { [TASK_ID]: true },
@@ -49,7 +54,7 @@ describe("useTaskRemoval session loading", () => {
     const freshSession = makeSession("fresh-session");
     listTaskSessionsMock.mockResolvedValue({ sessions: [freshSession] });
     const { result } = renderHook(() =>
-      useTaskRemoval({ store: makeStore(makeSession("cached-session")) }),
+      useTaskRemoval({ store: makeStore(makeSession(CACHED_SESSION_ID)) }),
     );
 
     const sessions = await result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
@@ -61,7 +66,7 @@ describe("useTaskRemoval session loading", () => {
   it("rejects a failed forced refresh instead of returning a stale owner", async () => {
     listTaskSessionsMock.mockRejectedValue(new Error("offline"));
     const { result } = renderHook(() =>
-      useTaskRemoval({ store: makeStore(makeSession("cached-session")) }),
+      useTaskRemoval({ store: makeStore(makeSession(CACHED_SESSION_ID)) }),
     );
 
     await expect(result.current.loadTaskSessionsForTask(TASK_ID, { force: true })).rejects.toThrow(
@@ -82,7 +87,7 @@ describe("useTaskRemoval session loading", () => {
       resolveNewer = resolve;
     });
     listTaskSessionsMock.mockReturnValueOnce(olderResponse).mockReturnValueOnce(newerResponse);
-    const store = makeStore(makeSession("cached-session"));
+    const store = makeStore(makeSession(CACHED_SESSION_ID));
     const { result } = renderHook(() => useTaskRemoval({ store }));
 
     const olderLoad = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
@@ -95,10 +100,35 @@ describe("useTaskRemoval session loading", () => {
     expect(consoleError).not.toHaveBeenCalled();
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
-    expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession]);
+    expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession], {
+      [CACHED_SESSION_ID]: 0,
+    });
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(1, TASK_ID, true);
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(2, TASK_ID, true);
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(3, TASK_ID, false);
     expect(store.getState().setTaskSessionsLoading).toHaveBeenCalledTimes(3);
+  });
+
+  it("captures activity epochs before a deferred forced refresh", async () => {
+    type SessionResponse = { sessions: TaskSession[] };
+    let resolveResponse: (response: SessionResponse) => void = () => {};
+    const response = new Promise<SessionResponse>((resolve) => {
+      resolveResponse = resolve;
+    });
+    listTaskSessionsMock.mockReturnValueOnce(response);
+    const cachedSession = makeSession(CACHED_SESSION_ID);
+    const store = makeStore(cachedSession, 4);
+    const { result } = renderHook(() => useTaskRemoval({ store }));
+
+    const load = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
+    await vi.waitFor(() => expect(listTaskSessionsMock).toHaveBeenCalledOnce());
+    store.getState().taskSessions.activityEpochBySession![cachedSession.id] = 5;
+    const freshSession = makeSession("fresh-session");
+    resolveResponse({ sessions: [freshSession] });
+
+    await expect(load).resolves.toEqual([freshSession]);
+    expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [freshSession], {
+      [cachedSession.id]: 4,
+    });
   });
 });

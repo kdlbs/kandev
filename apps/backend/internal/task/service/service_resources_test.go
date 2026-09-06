@@ -670,6 +670,9 @@ func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testin
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
 // ListWorkspaces. Used to exercise the DB-error path of GetOfficeWorkflowIDs.
 type errWorkspaceRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	// embed the real repo for all methods except ListWorkspaces.
 	WorkspaceRepositoryStub
 }
