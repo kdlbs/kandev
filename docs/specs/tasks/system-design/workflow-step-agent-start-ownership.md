@@ -175,6 +175,12 @@ attachment metadata, and dispatched even when its text is empty. A started
 passthrough session drains the queued handoff before returning from a suppressed
 empty-step decision.
 
+For a `CREATED` session, `autoStartStepPrompt` records the merged prompt before
+it calls `startCreatedSessionWithComposedPrompt`. The private launch path marks
+the prompt as composed. As a result, `startCreatedSession` does not apply the
+step prompt a second time. If a non-empty step prompt does not contain
+`{{task_prompt}}`, this rule preserves the textual handoff.
+
 The explicit workflow-step launch keeps its existing resume and session-setting
 behavior. It does not call `PromptTask` when the composed prompt is empty.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DragEndEvent,
   DragStartEvent,
@@ -50,6 +50,9 @@ import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
+const TASK_POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+const TASK_TOUCH_SENSOR_OPTIONS = { activationConstraint: { delay: 250, tolerance: 5 } };
+
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
   steps: WorkflowStep[];
@@ -81,12 +84,12 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 250, tolerance: 5 },
-    }),
+    useSensor(PointerSensor, TASK_POINTER_SENSOR_OPTIONS),
+    useSensor(TouchSensor, TASK_TOUCH_SENSOR_OPTIONS),
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -101,7 +104,7 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
 
       const taskId = active.id as string;
       const targetStepId = over.id as string;
-      const task = tasks.find((t) => t.id === taskId);
+      const task = tasksRef.current.find((candidate) => candidate.id === taskId);
       if (!task || task.workflowStepId === targetStepId || isOrphanMoveTarget(targetStepId)) return;
 
       const state = store.getState();
@@ -138,7 +141,7 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
       }
     },
-    [tasks, workflowId, store, moveTaskById, onMoveError],
+    [workflowId, store, moveTaskById, onMoveError],
   );
 
   const handleDragCancel = useCallback(() => {

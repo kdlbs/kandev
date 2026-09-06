@@ -31,6 +31,8 @@ export type MessagesState = {
 export type PromptsState = MessagesState & {
   /** Incremented when a session is removed to reject stale prompt requests. */
   generationBySession: Record<string, number>;
+  /** Incremented whenever an authoritative prompt refresh begins. */
+  refreshGenerationBySession: Record<string, number>;
 };
 
 export type TurnsState = {

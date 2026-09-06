@@ -115,6 +115,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_BACKEND_PID_FILE", Class: "internal wiring", Reason: "supervisor-owned process state"},
 	{EnvVar: "KANDEV_DESKTOP_HEALTH_TOKEN", Class: "generated", Reason: "per-launch health authentication token"},
 	{EnvVar: "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", Class: "internal wiring", Reason: "desktop shell capability handoff"},
+	{EnvVar: "KANDEV_DESKTOP_RUNTIME", Class: "internal wiring", Reason: "desktop shell launch-policy handoff"},
 	{EnvVar: "KANDEV_BUNDLE_DIR", Class: "packaging", Reason: "runtime bundle discovery"},
 	{EnvVar: "KANDEV_WEB_DIST_DIR", Class: "packaging", Reason: "embedded web asset override"},
 	{EnvVar: "KANDEV_TASK_ID", Class: "workspace injection", Reason: "task-owned child process context"},

@@ -115,6 +115,18 @@ repository resources, so that I can understand the consequence before acting.
   Enter default-action behavior, loading state, cascade selection, in-flight
   warning visibility, and single/bulk archive and delete callbacks shall remain
   unchanged.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.8:** When archive is initiated from a
+  phone Kanban card, the card shall use the contained full task-cleanup alert
+  dialog even when the task has no descendants. The dialog shall be centered
+  and inset, use the existing theme tokens, keep its content internally
+  scrollable, and expose stacked full-width actions at least 44 CSS px high;
+  no inline confirmation shall be inserted between cards or change the card's
+  height, board URL, or selected task. Fine-pointer desktop and compact-desktop
+  Kanban shall retain their anchored archive popover. Coarse-pointer tablet
+  Kanban shall retain its existing routing, including its current inline
+  zero-descendant surface. Task-switcher/task-row surfaces shall retain their
+  intentional row-owned coarse-pointer inline confirmation, and a disabled
+  archive-confirmation preference shall continue to bypass the surface.
 
 ## Out of scope
 

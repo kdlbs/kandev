@@ -536,7 +536,7 @@ func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 	switch req.Outcome {
 	case "failed":
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge provider unavailable")
-	case "pending":
+	case computedReviewStatePending:
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge request remained pending")
 	case "head_mismatch":
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge head mismatch")
@@ -548,7 +548,7 @@ func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 
 func validMockMergeOutcome(outcome string) bool {
 	switch outcome {
-	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", "pending", "head_mismatch":
+	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", computedReviewStatePending, "head_mismatch":
 		return true
 	default:
 		return false

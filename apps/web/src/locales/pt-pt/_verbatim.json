@@ -6,5 +6,7 @@
   "stats:summaryGit": "The only word is the tool name Git; the rest of the line is the interpolated value.",
   "system:diskTotal": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
   "system:featureToggleExperimental": "\"Experimental\" is spelled identically in Portuguese.",
-  "task:manual": "\"Manual\" is the ordinary Portuguese word for a non-automatic action."
+  "task:manual": "\"Manual\" is the ordinary Portuguese word for a non-automatic action.",
+  "task:promptHistoryPromptLabel": "Technical term kept in English across localized developer tooling.",
+  "task:promptHistoryPromptLabelGeneric": "Technical term kept in English across localized developer tooling."
 }
