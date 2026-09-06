@@ -48,6 +48,42 @@ func ExtractShellExecOutput(metadata map[string]any) (ShellExecOutputSnapshot, b
 	return shellOutputFromMetadata(metadata)
 }
 
+// RehydrateShellOutput restores a full shell command output snapshot into
+// metadata previously projected by ProjectMessageMetadata (or the equivalent
+// persist-time projection CreateMessage/UpdateMessage apply before storing
+// externalized large payloads). Read-time metadata is always the
+// map[string]any shape (it comes from json.Unmarshal), unlike
+// ProjectMessageMetadata's write path which must also accept the
+// *streams.NormalizedPayload shape emitted live by the agent adapter - so
+// only that shape needs handling here. Returns metadata unchanged (ok=false)
+// if it doesn't have the normalized shell shape ProjectMessageMetadata
+// produces, so a caller can distinguish "nothing to rehydrate" from success.
+func RehydrateShellOutput(metadata map[string]any, full ShellExecOutputSnapshot) (map[string]any, bool) {
+	normalized, ok := metadata["normalized"].(map[string]any)
+	if !ok {
+		return metadata, false
+	}
+	shell, ok := normalized["shell_exec"].(map[string]any)
+	if !ok {
+		return metadata, false
+	}
+	output := map[string]any{
+		"stdout":    full.Stdout,
+		"stderr":    full.Stderr,
+		"truncated": full.Truncated,
+	}
+	if full.ExitCode != nil {
+		output["exit_code"] = *full.ExitCode
+	}
+	rehydratedShell := copyMetadata(shell)
+	rehydratedShell["output"] = output
+	rehydratedNormalized := copyMetadata(normalized)
+	rehydratedNormalized["shell_exec"] = rehydratedShell
+	rehydrated := copyMetadata(metadata)
+	rehydrated["normalized"] = rehydratedNormalized
+	return rehydrated, true
+}
+
 func shellOutputFromMetadata(metadata map[string]any) (ShellExecOutputSnapshot, bool) {
 	if metadata == nil {
 		return ShellExecOutputSnapshot{}, false

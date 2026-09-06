@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
@@ -58,7 +59,31 @@ func (s *Store) initSchema() error {
 	if err := s.addPollEnabledColumn(); err != nil {
 		return err
 	}
-	return s.addProviderColumns()
+	if err := s.addProviderColumns(); err != nil {
+		return err
+	}
+	return s.addCircuitColumns()
+}
+
+// addCircuitColumns brings databases created before the auth/config
+// circuit-breaker (Task 04) up to the current schema. Idempotent and
+// race-safe, matching addPollEnabledColumn/addProviderColumns. A pre-existing
+// row's implicit state is "circuit closed, no known fingerprint" — exactly
+// the zero values these defaults produce, so no explicit backfill is needed.
+func (s *Store) addCircuitColumns() error {
+	statements := []string{
+		`ALTER TABLE workflow_sync_configs ADD COLUMN failure_class TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN next_retry_at DATETIME`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN config_fingerprint TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN credential_fingerprint TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range statements {
+		if _, err := s.db.Exec(schemaSQLForDriver(stmt, s.db.DriverName())); err != nil && !db.IsDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // addProviderColumns brings databases created before GitLab sync up to the
@@ -90,7 +115,8 @@ func (s *Store) addPollEnabledColumn() error {
 
 const configSelectColumns = `workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
 	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
-	created_at, updated_at`
+	created_at, updated_at, failure_class, consecutive_failures, next_retry_at,
+	config_fingerprint, credential_fingerprint`
 
 type configScanner interface {
 	Scan(dest ...interface{}) error
@@ -98,9 +124,9 @@ type configScanner interface {
 
 func scanConfig(row configScanner) (*Config, error) {
 	cfg := &Config{}
-	var lastOk, pollEnabled int
-	var lastSyncedAt sql.NullTime
-	var warningsJSON string
+	var lastOk, pollEnabled, consecutiveFailures int
+	var lastSyncedAt, nextRetryAt sql.NullTime
+	var warningsJSON, failureClass string
 	if err := row.Scan(
 		&cfg.WorkspaceID,
 		&cfg.Provider,
@@ -118,11 +144,22 @@ func scanConfig(row configScanner) (*Config, error) {
 		&cfg.LastHash,
 		&cfg.CreatedAt,
 		&cfg.UpdatedAt,
+		&failureClass,
+		&consecutiveFailures,
+		&nextRetryAt,
+		&cfg.ConfigFingerprint,
+		&cfg.CredentialFingerprint,
 	); err != nil {
 		return nil, err
 	}
 	cfg.LastOk = lastOk != 0
 	cfg.PollEnabled = pollEnabled != 0
+	cfg.FailureClass = authcircuit.FailureClass(failureClass)
+	cfg.ConsecutiveFailures = consecutiveFailures
+	if nextRetryAt.Valid {
+		t := nextRetryAt.Time
+		cfg.NextRetryAt = &t
+	}
 	// A row written before the provider column existed carries the implicit
 	// GitHub meaning. The migration default covers the normal path; this
 	// guards any row that still reads back empty.
@@ -176,15 +213,21 @@ func (s *Store) ListConfigs(ctx context.Context) ([]*Config, error) {
 }
 
 // UpsertConfigForWorkspace creates or replaces a workspace's config. The sync
-// status columns are reset so the next sync re-fetches and re-applies.
+// status and circuit-breaker columns are reset so the next sync re-fetches,
+// re-applies, and gets an immediate attempt regardless of any previously
+// open circuit — an explicit SetConfig call is exactly the kind of change
+// Author Decision #5 says must reset backoff. credential_fingerprint is
+// intentionally left untouched: it tracks the workspace's connection
+// identity, not this config, and is refreshed independently by the poller.
 func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*Config, error) {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO workflow_sync_configs (
 			workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
 			interval_seconds, poll_enabled,
-			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
+			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at,
+			failure_class, consecutive_failures, next_retry_at, config_fingerprint
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?, '', 0, NULL, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			provider = excluded.provider,
 			repo_owner = excluded.repo_owner,
@@ -199,17 +242,27 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			last_error = '',
 			last_warnings = '[]',
 			last_hash = '',
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			failure_class = '',
+			consecutive_failures = 0,
+			next_retry_at = NULL,
+			config_fingerprint = excluded.config_fingerprint
 	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
-		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
+		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now, req.fingerprint())
 	if err != nil {
 		return nil, err
 	}
 	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
 
-// RecordSyncStatus persists the outcome of a sync attempt.
-func (s *Store) RecordSyncStatus(ctx context.Context, workspaceID string, ok bool, errMsg string, warnings []string, hash string, at time.Time) error {
+// RecordSyncStatus persists the outcome of a sync attempt, along with the
+// resulting circuit-breaker state (failure class, consecutive-failure
+// count, and next-retry time), so a restart resumes backoff instead of
+// hammering a known-broken credential/config from a clean slate.
+func (s *Store) RecordSyncStatus(
+	ctx context.Context, workspaceID string, ok bool, errMsg string, warnings []string,
+	hash string, at time.Time, circuit authcircuit.State,
+) error {
 	warningsJSON, err := json.Marshal(warnings)
 	if err != nil {
 		warningsJSON = []byte("[]")
@@ -220,9 +273,25 @@ func (s *Store) RecordSyncStatus(ctx context.Context, workspaceID string, ok boo
 	}
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE workflow_sync_configs
-		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = ?, last_hash = ?, updated_at = ?
+		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = ?, last_hash = ?, updated_at = ?,
+			failure_class = ?, consecutive_failures = ?, next_retry_at = ?
 		WHERE workspace_id = ?
-	`), at, okInt, errMsg, string(warningsJSON), hash, at, workspaceID)
+	`), at, okInt, errMsg, string(warningsJSON), hash, at,
+		string(circuit.FailureClass), circuit.ConsecutiveFailures, circuit.NextRetryAt, workspaceID)
+	return err
+}
+
+// RecordCircuitState persists only the circuit-breaker fields, used when a
+// credential-fingerprint change resets an open circuit outside of a full
+// sync attempt (SyncDueConfigs may reset-and-skip in the same tick when the
+// reset alone does not yet prove the credential works).
+func (s *Store) RecordCircuitState(ctx context.Context, workspaceID string, circuit authcircuit.State) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE workflow_sync_configs
+		SET failure_class = ?, consecutive_failures = ?, next_retry_at = ?, credential_fingerprint = ?, updated_at = ?
+		WHERE workspace_id = ?
+	`), string(circuit.FailureClass), circuit.ConsecutiveFailures, circuit.NextRetryAt, circuit.Fingerprint,
+		time.Now().UTC(), workspaceID)
 	return err
 }
 

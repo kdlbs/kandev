@@ -1435,21 +1435,79 @@ func (s *Service) ListTasksNeedingPRWatch(ctx context.Context) ([]github.TaskBra
 	return s.buildTaskBranchList(ctx, store)
 }
 
-// ResolveBranchForSession returns the current branch for a task+session.
-// This is used by the poller to detect branch renames on existing PR watches.
-func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string {
-	return s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
+// ResolveBranchForRepository returns the current desired branch for a task's
+// repository, independent of which session (if any) created the watch.
+// Session identity does not participate in canonical PR-watch identity or
+// polling (task/repository/branch owns searching watches), so a still-
+// searching watch's branch must be re-derived from the task's own
+// configuration, not from whichever session happened to create it — a prior
+// per-session resolver ignored watch.RepositoryID entirely and always
+// resolved against the task's PRIMARY repository, corrupting secondary-repo
+// watches on multi-repo tasks. This satisfies the github.TaskBranchProvider
+// interface.
+func (s *Service) ResolveBranchForRepository(ctx context.Context, taskID, repositoryID string) string {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return ""
+	}
+	if branch := s.checkoutBranchForRepository(ctx, store, taskID, repositoryID); branch != "" {
+		return branch
+	}
+	// Fallback: any currently-active session's worktree branch for this
+	// specific repository. Session identity is a best-effort provenance
+	// candidate only here (checkout_branch is authoritative once set).
+	return s.activeWorktreeBranchForRepository(ctx, taskID, repositoryID)
+}
+
+// checkoutBranchForRepository returns the authoritative checkout_branch
+// configured for a specific task/repository pair, or "" if unset or missing.
+func (s *Service) checkoutBranchForRepository(ctx context.Context, store repoStore, taskID, repositoryID string) string {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return ""
+	}
+	for _, tr := range taskRepos {
+		if tr.RepositoryID == repositoryID {
+			return strings.TrimSpace(tr.CheckoutBranch)
+		}
+	}
+	return ""
+}
+
+// activeWorktreeBranchForRepository returns the worktree branch of any
+// currently-active session on the task whose worktree targets the given
+// repository. Best-effort fallback only.
+func (s *Service) activeWorktreeBranchForRepository(ctx context.Context, taskID, repositoryID string) string {
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return ""
+	}
+	for _, sess := range sessions {
+		for _, wt := range sess.Worktrees {
+			if wt.RepositoryID == repositoryID && strings.TrimSpace(wt.WorktreeBranch) != "" {
+				return strings.TrimSpace(wt.WorktreeBranch)
+			}
+		}
+	}
+	return ""
 }
 
 // buildTaskBranchList walks sessions × their repositories and emits one
-// TaskBranchInfo per (session, repository) that doesn't already have a PR
-// watch. Multi-repo: previously dedup was keyed by sessionID, which silently
-// dropped non-primary repos as soon as the primary one got a watch.
+// TaskBranchInfo per (task, repository, branch) that doesn't already have a
+// PR watch. Session identity does not own canonical PR-watch identity, so
+// multiple sessions resolving to the same (task, repository, branch) target
+// collapse to a single emission here — one lookup per canonical target per
+// cycle, regardless of how many sessions are active on it.
 //
-// TaskID is redirected via resolveEffectivePushTaskID before the caller
+// TaskID is redirected via resolveEffectivePushTaskID (to the workspace-group
+// owner task) before the dedup key is computed and before the caller
 // (poller.reconcileWatches) creates the watch, same as ensureSessionPRWatch:
 // this is the third and last producer that would otherwise write a
-// member-attributed watch for a shared-worktree subtask.
+// member-attributed watch for a shared-worktree subtask. Deduping on the
+// pre-redirect sess.TaskID would let a member and its owner both emit a
+// TaskBranchInfo for the same underlying repository/branch, so the redirect
+// must run first — canonical identity is (effective task, repository,
+// branch), never session or pre-redirect task.
 func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]github.TaskBranchInfo, error) {
 	sessions, err := store.ListSessionsWithBranches(ctx)
 	if err != nil {
@@ -1460,7 +1518,8 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 	}
 
 	// Batch fetch existing watches to avoid N+1 queries.
-	watchedKeys := s.buildWatchedSessionRepoSet(ctx)
+	watchedKeys := s.buildWatchedTaskRepoBranchSet(ctx)
+	emitted := make(map[string]bool)
 
 	var result []github.TaskBranchInfo
 	for _, sess := range sessions {
@@ -1469,10 +1528,12 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 		// come from session.Worktrees inside resolveSessionWatchTargets.
 		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, sess.Branch)
 		for _, t := range targets {
-			if watchedKeys[watchedSessionRepoKey(sess.SessionID, t.RepositoryID, t.Branch)] {
+			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
+			key := watchedTaskRepoBranchKey(effectiveTaskID, t.RepositoryID, t.Branch)
+			if watchedKeys[key] || emitted[key] {
 				continue
 			}
-			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
+			emitted[key] = true
 			result = append(result, github.TaskBranchInfo{
 				WorkspaceID:  sess.WorkspaceID,
 				TaskID:       effectiveTaskID,
@@ -1487,12 +1548,12 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 	return result, nil
 }
 
-// buildWatchedSessionRepoSet returns the set of (session_id, repository_id,
-// branch) triples that already have a PR watch row. Multi-branch tasks
-// hold one watch per (session, repo, branch); dedup keyed on
-// (session, repo) alone would silently drop secondary branches whenever
-// the primary already had a watch.
-func (s *Service) buildWatchedSessionRepoSet(ctx context.Context) map[string]bool {
+// buildWatchedTaskRepoBranchSet returns the set of (task_id, repository_id,
+// branch) triples that already have a PR watch row. Canonical searching
+// watches are owned by task/repository/branch, not session_id, so dedup here
+// must key on the same triple to avoid re-creating a watch that another
+// session already established for the same task/repo/branch.
+func (s *Service) buildWatchedTaskRepoBranchSet(ctx context.Context) map[string]bool {
 	watches, err := s.githubService.ListActivePRWatches(ctx)
 	if err != nil {
 		s.logger.Debug("failed to list PR watches for reconciliation", zap.Error(err))
@@ -1500,14 +1561,14 @@ func (s *Service) buildWatchedSessionRepoSet(ctx context.Context) map[string]boo
 	}
 	set := make(map[string]bool, len(watches))
 	for _, w := range watches {
-		set[watchedSessionRepoKey(w.SessionID, w.RepositoryID, w.Branch)] = true
+		set[watchedTaskRepoBranchKey(w.TaskID, w.RepositoryID, w.Branch)] = true
 	}
 	return set
 }
 
-// watchedSessionRepoKey builds the per-(session, repo, branch) dedup key.
-func watchedSessionRepoKey(sessionID, repositoryID, branch string) string {
-	return sessionID + "|" + repositoryID + "|" + branch
+// watchedTaskRepoBranchKey builds the per-(task, repo, branch) dedup key.
+func watchedTaskRepoBranchKey(taskID, repositoryID, branch string) string {
+	return taskID + "|" + repositoryID + "|" + branch
 }
 
 // subscribeGitHubEvents subscribes to GitHub-related events on the event bus.

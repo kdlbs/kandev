@@ -35,13 +35,17 @@ const (
 // exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
 // defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
-	Driver          string     `json:"driver"`
-	Path            string     `json:"path"`
-	BackupDirectory string     `json:"backup_directory"`
-	SizeBytes       int64      `json:"size_bytes"`
-	WALSizeBytes    int64      `json:"wal_size_bytes"`
-	SchemaVersion   string     `json:"schema_version"`
-	LastBackupAt    *time.Time `json:"last_backup_at"`
+	Driver               string     `json:"driver"`
+	Path                 string     `json:"path"`
+	BackupDirectory      string     `json:"backup_directory"`
+	SizeBytes            int64      `json:"size_bytes"`
+	WALSizeBytes         int64      `json:"wal_size_bytes"`
+	MessageContentBytes  int64      `json:"message_content_bytes"`
+	MessageMetadataBytes int64      `json:"message_metadata_bytes"`
+	MessagePayloadBytes  int64      `json:"message_payload_bytes"`
+	GitSnapshotBytes     int64      `json:"git_snapshot_bytes"`
+	SchemaVersion        string     `json:"schema_version"`
+	LastBackupAt         *time.Time `json:"last_backup_at"`
 }
 
 // ResetDirs lists the on-disk directories factory-reset wipes. The Service
@@ -132,6 +136,12 @@ func (s *Service) Stats() (Stats, error) {
 			return Stats{}, err
 		}
 		out.SchemaVersion = version
+
+		storage := readLogicalStorageStats(s.pool.Reader())
+		out.MessageContentBytes = storage.messageContent
+		out.MessageMetadataBytes = storage.messageMetadata
+		out.MessagePayloadBytes = storage.messagePayload
+		out.GitSnapshotBytes = storage.gitSnapshot
 	}
 
 	if driver == databaseDriverSQLite {
@@ -143,7 +153,36 @@ func (s *Service) Stats() (Stats, error) {
 			out.LastBackupAt = &last
 		}
 	}
+	recordStorageMetrics(out)
 	return out, nil
+}
+
+type logicalStorageStats struct {
+	messageContent  int64
+	messageMetadata int64
+	messagePayload  int64
+	gitSnapshot     int64
+}
+
+// readLogicalStorageStats uses portable LENGTH aggregates as a deterministic
+// fallback when SQLite dbstat or PostgreSQL relation-size extensions are not
+// available. A missing table during early boot or a partial test fixture is
+// reported as zero for that category; database/WAL sizes remain independent.
+func readLogicalStorageStats(db *sqlx.DB) logicalStorageStats {
+	var out logicalStorageStats
+	queries := []struct {
+		query string
+		dest  *int64
+	}{
+		{`SELECT COALESCE(SUM(LENGTH(content)), 0) FROM task_session_messages`, &out.messageContent},
+		{`SELECT COALESCE(SUM(LENGTH(metadata)), 0) FROM task_session_messages`, &out.messageMetadata},
+		{`SELECT COALESCE(SUM(LENGTH(compressed_content)), 0) FROM task_message_payloads`, &out.messagePayload},
+		{`SELECT COALESCE(SUM(LENGTH(files) + LENGTH(metadata)), 0) FROM task_session_git_snapshots`, &out.gitSnapshot},
+	}
+	for _, metric := range queries {
+		_ = db.QueryRow(metric.query).Scan(metric.dest)
+	}
+	return out
 }
 
 func (s *Service) databaseDriver() string {

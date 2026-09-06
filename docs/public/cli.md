@@ -218,6 +218,94 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 </details>
 
+## Database maintenance
+
+`kandev maintenance database` is an offline SQLite retention and compaction
+command for the same file the backend uses (`--home-dir`, `database.path`,
+`KANDEV_HOME_DIR`, and `KANDEV_DATABASE_PATH` resolve identically to the
+normal launcher):
+
+```text
+kandev maintenance database [--execute] [--compact]
+    [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
+```
+
+| Option | Meaning |
+|---|---|
+| `--execute` | Perform retention deletes. Without it, the command is a read-only dry run (the default). |
+| `--compact` | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
+| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`). |
+| `--candidate-limit <n>` | Cap how many rows are reported/deleted per retention category (default: unlimited). |
+| `--home-dir <path>` | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`). |
+| `--help`, `-h` | Print command help. |
+
+**Dry run (default).** Without `--execute`, the command never acquires a
+lock, takes a backup, or changes anything; it is always safe to run
+alongside a live `kandev` process. It reports a row count and estimated
+byte size for each retention category: duplicate git snapshots (content-
+identical repository-state polls for the same session), obsolete plan
+revisions (superseded, non-HEAD plan history beyond `--keep-plan-revisions`),
+and orphaned message payloads (externalized tool output no message still
+references). Normal conversation rows, the current plan HEAD, revert
+ancestry, and any protected snapshot are never candidates.
+
+**Execute.** `--execute` requires exclusive access to the database: it takes
+the same ownership lock a live backend takes at boot, so it refuses to run
+while `kandev` is already running against the same home/database. It always
+takes and verifies a fresh backup before deleting anything, written to
+`<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
+unverified backup aborts before any delete. Retention deletes run inside a
+single transaction, so partial deletion across categories cannot happen.
+
+**Compaction and rollback.** `--compact` (with `--execute`) stages a
+`VACUUM INTO` compacted copy after retention deletes commit, verifies it
+with an integrity check, requires enough free disk for the staged copy, and
+atomically replaces the live database file. The pre-compaction file is kept
+alongside the live database as
+`<database-path>.pre-compact-<timestamp>.bak` for manual rollback: stop
+`kandev` if it is running, then move that file back over the live database
+path. If compaction fails after retention deletes already committed, the
+command still reports the completed backup path and deleted-row counts; only
+the optional compaction step is aborted.
+
+### PR-watch and bounded-storage diagnostics
+
+Kandev publishes aggregate operational counters through Go's `/debug/vars`
+endpoint when diagnostics are enabled with `--debug`,
+`KANDEV_DEBUG_DEV_MODE=true`, or `KANDEV_DEBUG_PPROF_ENABLED=true`. Bind the
+backend to loopback while diagnostics are enabled and treat the complete
+response as sensitive process data. The counters below never use task,
+workspace, repository, branch, session, or execution identifiers as labels.
+
+| Metric | Meaning |
+|---|---|
+| `github_pr_watch_active` | Canonical watches eligible for polling in the latest poll census. |
+| `github_pr_watch_searching` | Eligible watches still searching by branch. |
+| `github_pr_watch_duplicates` | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`. |
+| `github_pr_watch_orphans` | Watches whose task or task/repository relationship is missing. Expected value: `0`. |
+| `github_pr_watch_canonical_poll_requests_total` | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request. |
+| `task_status_summary_cas_retries_total` | Projection compare-and-swap losses retried after reloading authoritative state. |
+| `task_status_summary_cas_exhaustions_total` | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase. |
+| `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error. |
+| `task_message_payload_hydrations_total` | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`. |
+| `task_message_payload_hydration_latency_ms` | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
+| `task_message_content_bytes` | Logical bytes in message content from the latest database-stat read. |
+| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest database-stat read. |
+| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest database-stat read. |
+| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest database-stat read. |
+| `database_size_bytes` / `database_wal_size_bytes` | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge. |
+| `message_queue_depth` | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed. |
+| `agent_active_runtimes` | Agent executions currently owned by the lifecycle runtime. |
+
+`GET /api/v1/system/database` refreshes the database and storage gauges and
+returns the same values as typed fields: `size_bytes`, `wal_size_bytes`,
+`message_content_bytes`, `message_metadata_bytes`, `message_payload_bytes`,
+and `git_snapshot_bytes`. Storage categories use portable logical byte
+aggregates, so they remain available when SQLite `dbstat` or PostgreSQL
+relation-size facilities are unavailable. Use them for trends and retention
+decisions; use filesystem or database-provider metrics for physical quota and
+capacity alerts.
+
 ## Ports and network exposure
 
 | Process | Preferred port | Automatic behavior |

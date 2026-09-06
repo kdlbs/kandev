@@ -61,7 +61,7 @@ func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 	// Reader DSN: read-only mode, FK enforcement, shared cache.
 	// journal_mode and synchronous are database-level (set by the writer).
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=ro&_busy_timeout=%d&_cache=shared",
+		"file:%s?_foreign_keys=on&mode=ro&_busy_timeout=%d&cache=shared",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
