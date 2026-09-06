@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -511,6 +512,13 @@ func (s *Server) requestFreshCIRunHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]any
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPRequestFreshCIRun, payload, &result); err != nil {
+			var backendErr *BackendError
+			if errors.As(err, &backendErr) && len(backendErr.Details) > 0 {
+				data, _ := json.MarshalIndent(backendErr.Details, "", "  ")
+				out := mcp.NewToolResultStructured(backendErr.Details, string(data))
+				out.IsError = true
+				return out, nil
+			}
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

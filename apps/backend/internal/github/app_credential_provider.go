@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // CachedInstallationCredentialProvider resolves short-lived installation
@@ -28,6 +29,12 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 	}
 	if p.tokens.registrationID != "" && connection.AppRegistrationID != p.tokens.registrationID {
 		return nil, ErrGitHubNotConfigured
+	}
+	scopedActions := req.Purpose == CredentialPurposeScopedActionsWrite ||
+		req.Purpose == CredentialPurposeScopedActionsRerun ||
+		req.Purpose == CredentialPurposeScopedActionsDispatch
+	if scopedActions && (strings.TrimSpace(req.RepoOwner) == "" || strings.TrimSpace(req.RepoName) == "") {
+		return nil, errors.New("scoped Actions credentials require repository owner and name")
 	}
 	var repositories []string
 	if req.RepoName != "" {

@@ -74,32 +74,32 @@ func (s *Service) executeCIRunDispatchFallback(
 		}
 		return s.failCIRunRequest(ctx, request, CIRunFailureHeadDrift)
 	}
-	return s.sendCIRunDispatch(ctx, client, latestBinding, latestPR, request, verified, inputs)
+	return s.sendCIRunDispatch(ctx, client, latestBinding, request, verified, inputs)
 }
 
 func (s *Service) sendCIRunDispatch(
 	ctx context.Context,
 	client ciRunActionsClient,
 	binding *ciRunBinding,
-	pr *PR,
 	request *CIRunRequest,
 	verified *verifiedCIRun,
 	inputs map[string]string,
 ) (*CIRunReceipt, error) {
 	dispatchStartedAt := s.ciRunClock()().UTC()
 	request.ProviderURL = ciRunDispatchProviderURL(binding.Owner, binding.Repo, verified.Workflow.ID)
-	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
-		return receiptFromCIRunRequest(request), err
-	}
-	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
+	if err := s.store.MarkCIRunProviderCallStartedWithAudit(ctx, request, dispatchStartedAt,
+		s.newCIRunAuditEvent(request, "provider_started", "")); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.handleCIRunProviderStartConflict(ctx, client, request)
 		}
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &dispatchStartedAt
+	// GitHub workflow dispatch accepts a branch or tag ref, not a commit SHA.
+	// Reconciliation rejects any resulting run that does not prove this request's
+	// validated head.
 	metadata, err := dispatchCIRunWorkflow(ctx, client, binding.Owner, binding.Repo,
-		verified.Workflow.ID, pr.HeadBranch, inputs)
+		verified.Workflow.ID, verified.PR.HeadBranch, inputs)
 	applyCIRunProviderMetadata(request, metadata, err)
 	if err != nil {
 		return s.handleCIRunMutationError(ctx, request, err)

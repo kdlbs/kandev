@@ -122,6 +122,28 @@ func TestCachedInstallationCredentialProviderRequiresInstallationID(t *testing.T
 	}
 }
 
+func TestCachedInstallationCredentialProviderRejectsUnscopedActionsRequests(t *testing.T) {
+	installationID := int64(42)
+	for _, purpose := range []CredentialPurpose{
+		CredentialPurposeScopedActionsWrite, CredentialPurposeScopedActionsRerun,
+		CredentialPurposeScopedActionsDispatch,
+	} {
+		for _, request := range []ResolveCredentialRequest{
+			{Purpose: purpose, RepoOwner: "", RepoName: "kandev"},
+			{Purpose: purpose, RepoOwner: "kdlbs", RepoName: ""},
+		} {
+			provider := NewCachedInstallationCredentialProvider(NewInstallationTokenCache(fixedInstallationMinter{}))
+			_, err := provider.ResolveInstallation(context.Background(), &WorkspaceConnection{
+				WorkspaceID: "workspace-1", InstallationID: &installationID,
+			}, ResolveCredentialRequest{WorkspaceID: "workspace-1", Purpose: request.Purpose,
+				RepoOwner: request.RepoOwner, RepoName: request.RepoName})
+			if err == nil {
+				t.Fatalf("purpose %s request %+v was accepted", purpose, request)
+			}
+		}
+	}
+}
+
 func TestCachedInstallationCredentialProviderRejectsDifferentRegistration(t *testing.T) {
 	installationID := int64(42)
 	cache := NewAppInstallationTokenCache("registration-a", 5, fixedInstallationMinter{})

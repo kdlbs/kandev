@@ -30,7 +30,7 @@ func evidenceVerdict(request *CIRunRequest) string {
 	if request.Status == CIRunRequestSucceeded {
 		return string(request.EvidenceKind)
 	}
-	if request.Status == CIRunRequestReconciling {
+	if request.Status == CIRunRequestPending || request.Status == CIRunRequestReconciling {
 		return ciRunEvidenceVerdictPending
 	}
 	return "denied"

@@ -4535,16 +4535,15 @@ func (s *Store) EnsureWorkspaceExecutorDefaults(ctx context.Context, workspaceID
 // DeleteWorkspaceSettings removes the non-secret GitHub settings owned by a
 // workspace after the task repository has deleted the workspace row.
 func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string) error {
-	defer func() {
-		_ = s.deleteCIRunWorkspaceData(ctx, strings.TrimSpace(workspaceID))
-	}()
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return fmt.Errorf("workspace_id is required")
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID)
-	return err
+	if _, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID); err != nil {
+		return err
+	}
+	return s.deleteCIRunWorkspaceData(ctx, workspaceID)
 }
 
 func (s *Store) deleteCIRunWorkspaceData(ctx context.Context, workspaceID string) error {

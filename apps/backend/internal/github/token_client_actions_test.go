@@ -174,6 +174,7 @@ func TestTokenClientActionsProviderFailureClassesAreRedacted(t *testing.T) {
 		{name: "rerun ineligible", status: 422, body: `{"message":"This workflow run cannot be rerun"}`, want: CIRunFailureRerunIneligible},
 		{name: "permission missing", status: 403, body: `{"message":"Must have admin rights to Repository token-secret"}`, want: CIRunFailureInstallationPermission},
 		{name: "rate limit", status: 429, body: `{"message":"rate limit exceeded"}`, want: CIRunFailureProviderRateLimited, wantRetry: true},
+		{name: "secondary limit", status: 403, body: `{"message":"abuse detection mechanism triggered"}`, want: CIRunFailureProviderRateLimited, wantRetry: true},
 		{name: "ambiguous mutation outage", status: 503, body: `private provider outage token-secret`, want: CIRunFailureProviderCallAmbiguous},
 	}
 	for _, tt := range tests {

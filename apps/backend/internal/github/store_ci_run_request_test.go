@@ -48,6 +48,17 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 	}
 }
 
+func TestSameCIRunSemanticIdentityIncludesWorkflowStep(t *testing.T) {
+	now := time.Now().UTC()
+	grant := testCIRunGrant(now)
+	left := testCIRunRequest(grant, now)
+	right := *left
+	right.WorkflowStepID = "different-step"
+	if sameCIRunSemanticIdentity(left, &right) {
+		t.Fatal("requests from different workflow steps were treated as semantically identical")
+	}
+}
+
 func TestStoreMigratesCIRunGrantGenerationAcrossRestart(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

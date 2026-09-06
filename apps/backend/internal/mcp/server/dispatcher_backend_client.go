@@ -27,6 +27,16 @@ type DispatcherBackendClient struct {
 	trustedExternalTransport bool
 }
 
+type BackendError struct {
+	Code    string
+	Message string
+	Details map[string]interface{}
+}
+
+func (e *BackendError) Error() string {
+	return fmt.Sprintf("backend error [%s]: %s", e.Code, e.Message)
+}
+
 // NewExternalDispatcherBackendClient creates the trusted bridge used only by
 // the authenticated external MCP endpoint.
 func NewExternalDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBackendClient {
@@ -66,12 +76,9 @@ func (c *DispatcherBackendClient) RequestPayload(ctx context.Context, action str
 		return fmt.Errorf("dispatcher returned nil response for %s", action)
 	}
 	if resp.Type == ws.MessageTypeError {
-		var ep struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		}
+		var ep ws.ErrorPayload
 		if json.Unmarshal(resp.Payload, &ep) == nil {
-			return fmt.Errorf("backend error [%s]: %s", ep.Code, ep.Message)
+			return &BackendError{Code: ep.Code, Message: ep.Message, Details: ep.Details}
 		}
 		return fmt.Errorf("backend error: %s", string(resp.Payload))
 	}

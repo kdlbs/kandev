@@ -21,6 +21,15 @@ func TestValidateFreshCIRunInputRejectsNonHexHeadSHA(t *testing.T) {
 	}
 }
 
+func TestCIRunEvidenceVerdictPendingForPendingRequests(t *testing.T) {
+	for _, status := range []CIRunRequestStatus{CIRunRequestPending, CIRunRequestReconciling} {
+		request := &CIRunRequest{Status: status, EvidenceKind: CIRunEvidencePRHead}
+		if got := evidenceVerdict(request); got != ciRunEvidenceVerdictPending {
+			t.Fatalf("status %s verdict = %q, want pending", status, got)
+		}
+	}
+}
+
 func TestRequestFreshCIRunClassifiesInitialPRRateLimitAsRetryable(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	reset := service.ciRunClock()().UTC().Add(10 * time.Minute)

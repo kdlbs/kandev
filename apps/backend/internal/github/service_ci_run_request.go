@@ -380,10 +380,8 @@ func (s *Service) executeCIRunRequest(
 	request.ObservedPRHeadSHA = verified.PR.HeadSHA
 	request.ProviderEvent = verified.Run.Event
 	request.ProviderURL = ciRunRerunProviderURL(latestBinding.Owner, latestBinding.Repo, request.SourceRunID)
-	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
-		return receiptFromCIRunRequest(request), err
-	}
-	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, now); err != nil {
+	if err := s.store.MarkCIRunProviderCallStartedWithAudit(ctx, request, now,
+		s.newCIRunAuditEvent(request, "provider_started", "")); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.handleCIRunProviderStartConflict(ctx, client, request)
 		}

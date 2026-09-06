@@ -256,8 +256,7 @@ func classifyNonNilCIRunProviderError(err error, mutation, rerun bool) error {
 	case rerun && apiErr.StatusCode == http.StatusUnprocessableEntity:
 		return &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: apiErr.StatusCode,
 			RequestID: apiErr.RequestID, URL: apiErr.URL}
-	case apiErr.StatusCode == http.StatusTooManyRequests ||
-		(apiErr.StatusCode == http.StatusForbidden && strings.Contains(body, "rate limit")):
+	case isCIRunRateLimitResponse(apiErr.StatusCode, body):
 		return &CIRunProviderError{Class: CIRunFailureProviderRateLimited, StatusCode: apiErr.StatusCode,
 			Retryable: true, RetryAfter: apiErr.RetryAfter, RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
@@ -273,4 +272,10 @@ func classifyNonNilCIRunProviderError(err error, mutation, rerun bool) error {
 		return &CIRunProviderError{Class: CIRunFailureProviderRejected, StatusCode: apiErr.StatusCode,
 			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	}
+}
+
+func isCIRunRateLimitResponse(statusCode int, body string) bool {
+	return statusCode == http.StatusTooManyRequests ||
+		(statusCode == http.StatusForbidden &&
+			(strings.Contains(body, "rate limit") || strings.Contains(body, "abuse detection")))
 }

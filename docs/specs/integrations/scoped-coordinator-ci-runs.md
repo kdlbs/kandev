@@ -1,6 +1,6 @@
 ---
 title: Scoped coordinator CI runs
-status: building
+status: active
 date: 2026-08-30
 ---
 

@@ -42,6 +42,8 @@ type fakeCIRunActionsClient struct {
 }
 
 func (f *fakeCIRunActionsClient) GetPR(context.Context, string, string, int) (*PR, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.prCalls++
 	if f.prCalls <= len(f.prErrSequence) && f.prErrSequence[f.prCalls-1] != nil {
 		return nil, f.prErrSequence[f.prCalls-1]
@@ -55,6 +57,8 @@ func (f *fakeCIRunActionsClient) GetPR(context.Context, string, string, int) (*P
 func (f *fakeCIRunActionsClient) GetRepoFileContent(
 	_ context.Context, _, _, _, ref string,
 ) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.workflowRefs = append(f.workflowRefs, ref)
 	if f.workflowHead != nil && ref == "feature/x" {
 		return f.workflowHead, nil
@@ -62,6 +66,8 @@ func (f *fakeCIRunActionsClient) GetRepoFileContent(
 	return f.workflowSource, nil
 }
 func (f *fakeCIRunActionsClient) GetActionsRun(context.Context, string, string, int64) (*GitHubActionsRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.runCalls++
 	if f.runHook != nil {
 		f.runHook(f.runCalls)

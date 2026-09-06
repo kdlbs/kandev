@@ -42,12 +42,6 @@ func githubAPIRetryAfter(resp *http.Response) *time.Time {
 	if resp == nil {
 		return nil
 	}
-	if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
-		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
-			reset := time.Unix(unix, 0).UTC()
-			return &reset
-		}
-	}
 	if raw := resp.Header.Get("Retry-After"); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
 			reset := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
@@ -55,6 +49,12 @@ func githubAPIRetryAfter(resp *http.Response) *time.Time {
 		}
 		if parsed, err := http.ParseTime(raw); err == nil {
 			reset := parsed.UTC()
+			return &reset
+		}
+	}
+	if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
+		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
+			reset := time.Unix(unix, 0).UTC()
 			return &reset
 		}
 	}

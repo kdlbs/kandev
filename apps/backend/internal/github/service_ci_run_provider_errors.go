@@ -67,10 +67,8 @@ func (s *Service) deferCIRunForRateLimit(
 ) (*CIRunReceipt, error) {
 	now := s.ciRunClock()().UTC()
 	retryAfter := ciRunRetryAfter(now, err)
-	if err := s.store.DeferCIRunForRateLimit(ctx, request, retryAfter, now); err != nil {
-		return nil, err
-	}
-	if err := s.auditCIRun(ctx, request, "provider_rate_limited", CIRunFailureProviderRateLimited); err != nil {
+	if err := s.store.DeferCIRunForRateLimitWithAudit(ctx, request, retryAfter, now,
+		s.newCIRunAuditEvent(request, "provider_rate_limited", CIRunFailureProviderRateLimited)); err != nil {
 		return nil, err
 	}
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderRateLimited}
