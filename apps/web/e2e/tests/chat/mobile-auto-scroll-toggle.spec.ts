@@ -24,7 +24,10 @@ async function switchMobileTask(testPage: Page, title: string): Promise<void> {
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });
-  await taskRow.tap();
+  // This test covers task-switch transcript continuity, not touch activation.
+  // Use a click so the row's long-press drag sensor cannot consume the gesture
+  // while the mobile drawer is under CI load.
+  await taskRow.click();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
 }
 

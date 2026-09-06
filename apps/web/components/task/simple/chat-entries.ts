@@ -2,6 +2,7 @@ import type { CommentTurnContext } from "./turn-context";
 import { groupSortKey, type SessionGroup } from "./session-groups";
 import { normalizeRemediationUrl } from "@/lib/remediation-url";
 import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
+import { isTypedTaskLaunchError } from "./components/task-launch-error-entry";
 import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import type {
   RunError,
@@ -10,6 +11,7 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 /**
  * Discriminated union of every row that can appear in the task chat
@@ -91,6 +93,20 @@ export function hasMatchingSessionLaunchError(
       { session_id: summarySessionId, stamp: summaryStamp ?? "" },
       { sessionId: error.sessionId, errorStamp: error.errorStamp },
     ),
+  );
+}
+
+export function filterVisibleRunErrors(
+  runErrors: RunError[],
+  activeError: TaskStatusSummary["active_error"],
+): RunError[] {
+  if (!isTypedTaskLaunchError(activeError)) return runErrors;
+  return runErrors.filter(
+    (error) =>
+      !isMatchingTaskLaunchError(activeError, {
+        sessionId: error.sessionId,
+        errorStamp: error.errorStamp,
+      }),
   );
 }
 

@@ -27,7 +27,6 @@ import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
 import { synchronizeInputValue } from "./synchronize-input-value";
 import type {
-  RunError,
   TaskComment,
   TaskDecision,
   TaskSession,
@@ -36,10 +35,10 @@ import type {
 import {
   buildLaterAgentReplyMap,
   buildRunErrorsFromSessions,
+  filterVisibleRunErrors,
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
-import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -68,20 +67,6 @@ type TaskChatProps = {
   statusSummary?: TaskStatusSummary | null;
   repositories?: TaskRepository[];
 };
-
-function filterVisibleRunErrors(
-  runErrors: RunError[],
-  activeError: TaskStatusSummary["active_error"],
-): RunError[] {
-  if (!activeError) return runErrors;
-  return runErrors.filter(
-    (error) =>
-      !isMatchingTaskLaunchError(activeError, {
-        sessionId: error.sessionId,
-        errorStamp: error.errorStamp,
-      }),
-  );
-}
 
 function partitionGroups(groups: SessionGroup[]): {
   visible: SessionGroup[];

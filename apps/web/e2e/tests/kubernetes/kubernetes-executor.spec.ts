@@ -52,9 +52,12 @@ async function assertUserVisibleFailure(page: Page, taskId: string, expected: Re
   await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
   await session.waitForLoad(30_000);
-  const banner = session.activeChat().getByTestId("failed-session-banner");
-  await expect(banner).toBeVisible({ timeout: 30_000 });
-  await expect(banner).toContainText(expected);
+  const launchError = session.activeChat().getByTestId("task-launch-error-entry");
+  await expect(launchError).toBeVisible({ timeout: 30_000 });
+  await launchError.getByRole("button", { name: "Show details" }).click();
+  const details = launchError.getByTestId("task-launch-error-details");
+  await expect(details).toBeVisible();
+  await expect(details).toContainText(expected);
 }
 
 async function createProfile(
