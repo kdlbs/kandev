@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type BrowserContext } from "@playwright/test";
 
 /**
- * Shared setup and API probes for the Data & storage member-gating specs
+ * Shared setup and API probes for the Data & Logs and Storage member-gating specs
  * (system-data-storage-member-gating.spec.ts desktop and its mobile-* twin).
  *
  * The backend mounts system backups and storage maintenance on two route
@@ -24,6 +24,7 @@ export const GATING_MEMBER = {
 };
 
 export const DATA_STORAGE_ROUTE = "/settings/system/data-storage";
+export const STORAGE_ROUTE = "/settings/system/storage";
 
 /** Creates the member account from an authenticated admin context. */
 export async function createMember(adminContext: BrowserContext, baseUrl: string): Promise<void> {

@@ -168,6 +168,14 @@ describe("buildSidebarItem", () => {
   });
 });
 
+describe("buildSidebarItem priority", () => {
+  it("carries task priority into the desktop sidebar row", () => {
+    const item = buildSidebarItem(task({ priority: "high" }), emptyContext());
+
+    expect(item.priority).toBe("high");
+  });
+});
+
 // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
 describe("buildSidebarItem automation indicators", () => {
   it("carries bounded automation indicators into the row PR info", () => {

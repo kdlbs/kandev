@@ -7,7 +7,7 @@ created: 2026-06-18
 owners:
   - tbd
 ---
-# Task PR Automation Controls System Design Part 1
+# Task PR automation (part 1)
 
 ## Purpose and boundaries
 
@@ -67,7 +67,11 @@ scoping; see that ADR's Consequences section).
   after changes.`, and the two terminal switches share an explanation that they
   wake the agent when review work ends while remaining independently
   configurable.
-- `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
+- `Auto-fix CI & address comments` causes Kandev to send or queue an agent
+  prompt for provider-owned actionable feedback. GitHub ordinary conflicts
+  follow the [integration contract](../../integrations/requirements/github-pr-auto-fix-conflicts.md),
+  and merge-queue removals follow the
+  [recovery contract](../../integrations/requirements/github-pr-merge-queue-recovery.md).
 - `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
 - `Your review is requested` follows the GitHub account connected to the task's
   workspace. It silently baselines that account's current request state, then
@@ -153,7 +157,10 @@ scoping; see that ADR's Consequences section).
 - The auto-fix prompt is customizable per task from the PR CI popover.
 - The per-task prompt editor is opened from an edit button in the automation section.
 - The per-task prompt editor links to Settings > Prompts so the user can edit the default `ci-auto-fix` prompt.
-- The per-task prompt editor explains that `{{pr.feedback}}` is the placeholder that inserts Kandev's PR feedback snapshot. The explanation lists the included data: PR identifier, new or changed failing checks with job links, and new or changed review comments with file, line, and body text.
+- The per-task prompt editor explains that `{{pr.feedback}}` inserts Kandev's
+  PR feedback snapshot. The explanation lists the PR identifier, changed
+  failing checks, review comments, ordinary conflicts, and actionable
+  merge-queue removal context.
 - Omitting `{{pr.feedback}}` from the prompt means Kandev still evaluates PR feedback for dedupe and trigger decisions, but it does not include the PR snapshot in the agent message. This supports prompts that tell the agent to pull/fetch the branch and inspect GitHub itself.
 - If a task has no custom auto-fix prompt, Kandev uses a built-in default prompt named `ci-auto-fix`.
 - The default `ci-auto-fix` prompt is editable from Settings > Prompts like other built-in prompts.
@@ -168,7 +175,14 @@ scoping; see that ADR's Consequences section).
   task-level — one prompt override and one resolved reviewer identity apply
   to every linked PR. Dedupe, last-attempt, review-request, and terminal
   state are tracked per linked PR, as before.
-- Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. Automation wakeups sync the latest lightweight PR state before evaluating gates. When auto-fix is enabled, Kandev fetches full PR feedback so failing checks, requested changes, unresolved threads, and human PR conversation comments can trigger deduped prompts even when the persisted lightweight row was stale. Auto-fix waits until all PR checks have finished before sending or queueing a prompt, so the agent receives the final check set and current comments in one pass. Bot-authored PR conversation comments without failed checks or unresolved review threads are treated as non-actionable status chatter and do not send an agent prompt.
+- Kandev checks watched PRs through the existing lightweight PR watch poller,
+  which runs once per minute. Automation wakeups sync the latest lightweight
+  PR state before evaluating gates. When auto-fix is enabled, Kandev fetches
+  full PR feedback. Failing checks, requested changes, unresolved threads,
+  human comments, and provider-owned conflict signals can trigger deduplicated
+  prompts. Auto-fix waits until all PR checks finish, so one prompt contains
+  the final actionable snapshot. Bot-authored status comments without another
+  actionable signal do not send an agent prompt.
 - Lightweight PR status sync counts unresolved review threads across every page
   returned by GitHub. A connection's `totalCount` indicates that more threads
   exist; it never classifies omitted threads as unresolved. The CI popover,
@@ -186,9 +200,13 @@ scoping; see that ADR's Consequences section).
 - Saving PR automation options while any option is enabled immediately
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.
-- Every auto-fix attempt records the latest actionable feedback snapshot it used. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR. If a previously recorded feedback snapshot becomes non-actionable after checks pass or review threads are cleared, Kandev can refresh the checkpoint without sending a prompt or counting another round.
+- Every auto-fix attempt records the latest actionable feedback snapshot.
+  Later rounds include only new or materially changed checks, comments, or
+  provider-owned conflict signals. When recorded feedback becomes
+  non-actionable, Kandev refreshes the checkpoint without a prompt or round.
 - The first auto-fix round targets the task's active primary session when one exists. Once a PR has an accepted auto-fix round, later auto-fix prompts for that task/repository/PR continue targeting the recorded `last_fix_session_id`. A newer active agent session for the same task must not steal auto-fix messages. Disabling and re-enabling auto-fix resets this binding with the rest of the per-PR auto-fix state.
-- Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
+- Automation must not repeatedly prompt for the same actionable snapshot or
+  repeatedly retry the same failed merge attempt on every poll.
 - When auto-fix is enabled and the task session is busy, Kandev keeps at most one pending CI auto-fix queue entry per task/repository/PR. Newer feedback replaces that pending entry instead of appending another queued `@ci-auto-fix` message.
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
 - The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; PRs paused by the backend after the cap is reached show `Auto-fix 10/10` with warning/paused styling.

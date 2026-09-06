@@ -40,7 +40,7 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
-import type { SystemMetricsSnapshot } from "./system";
+import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type {
   ExecutorPayload,
@@ -110,14 +110,19 @@ export type TaskEventPayload = {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
+  primary_executor_profile_id?: string | null;
   archived_at?: string | null;
   updated_at?: string;
+  created_at?: string;
+  labels?: string | string[] | null;
   is_ephemeral: boolean;
   /** Task origin (e.g. "manual", "automation_run"). */
   origin?: string;
@@ -213,6 +218,7 @@ export type WorkspacePayload = {
   name: string;
   description?: string;
   owner_id?: string;
+  unit_id?: string;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
@@ -365,6 +371,12 @@ export type UserSettingsUpdatedPayload = Omit<
   repository_ids: string[];
 };
 
+export type SessionHostnameResolvedPayload = {
+  ip: string;
+  hostname: string;
+  resolved_at: string | null;
+};
+
 // Session runtime payload types (extracted to reduce file size)
 export {
   type AuthMethodInfoPayload,
@@ -383,6 +395,18 @@ export type TaskStatusSummaryUpdatedPayload = {
   task_id: string;
   workspace_id: string;
   status_summary: TaskStatusSummary;
+};
+
+export type CanvasLifecyclePayload = {
+  type?: string;
+  canvas_id: string;
+  plugin_instance_id?: string;
+  workspace_id?: string;
+  task_id?: string;
+  scope_kind?: string;
+  status?: string;
+  active_release_id?: string;
+  active_release_status?: string;
 };
 
 export type BackendMessageMap = SessionBackendMessageMap &
@@ -422,6 +446,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
+    "system.storage.analysis.updated": BackendMessage<
+      "system.storage.analysis.updated",
+      StorageAnalysisUpdatedPayload
+    >;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
     [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: BackendMessage<
       typeof SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
@@ -457,6 +485,17 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
 
+    "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
+    "canvas.release.permission_required": BackendMessage<
+      "canvas.release.permission_required",
+      CanvasLifecyclePayload
+    >;
+    "canvas.promoted": BackendMessage<"canvas.promoted", CanvasLifecyclePayload>;
+    "canvas.archived": BackendMessage<"canvas.archived", CanvasLifecyclePayload>;
+    "canvas.restored": BackendMessage<"canvas.restored", CanvasLifecyclePayload>;
+    "canvas.removed": BackendMessage<"canvas.removed", CanvasLifecyclePayload>;
+
     "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 
     "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
@@ -483,6 +522,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "user.agent_profile_recent_use.updated": BackendMessage<
       "user.agent_profile_recent_use.updated",
       AgentProfileRecentUseApiRecord
+    >;
+    "auth.session.hostname.resolved": BackendMessage<
+      "auth.session.hostname.resolved",
+      SessionHostnameResolvedPayload
     >;
 
     "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
@@ -516,6 +559,7 @@ export type {
   TaskSessionStateChangedPayload,
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
+  SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
   TurnEventPayload,

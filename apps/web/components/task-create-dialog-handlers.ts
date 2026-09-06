@@ -188,7 +188,9 @@ export function queueTaskCreateLastUsedFromPayload(
 ) {
   if (!payload) return;
   const previousWorkflowIdsByWorkspace = lastQueuedLastUsed.workflowIdsByWorkspace;
-  lastQueuedLastUsed = {};
+  lastQueuedLastUsed = previousWorkflowIdsByWorkspace
+    ? { workflowIdsByWorkspace: previousWorkflowIdsByWorkspace }
+    : {};
   const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
   syncTaskCreateLastUsed({
     workspace_id: payload.workspace_id,
@@ -198,11 +200,6 @@ export function queueTaskCreateLastUsedFromPayload(
     agent_profile_id: payload.agent_profile_id,
     executor_profile_id: payload.executor_profile_id,
   });
-  if (previousWorkflowIdsByWorkspace) {
-    lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, {
-      workflowIdsByWorkspace: previousWorkflowIdsByWorkspace,
-    });
-  }
 }
 
 function mergeTaskCreateLastUsedState(
@@ -357,6 +354,7 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // useRemote when flipping the other way.
     if (next) {
       fs.setNoRepository(false);
+      fs.setPreferLocalExecutor(false);
       syncTaskCreateLastUsed({ repository_id: null, branch: null });
     }
     clearFreshBranch(fs);
@@ -385,6 +383,8 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // Repo mode will re-pick the workspace default or Worktree fallback.
     fs.setExecutorId("");
     fs.setExecutorProfileId("");
+    fs.setPreferLocalExecutor(false);
+    fs.setWorkspacePath("");
     if (next) {
       fs.setUseRemote(false);
       // None mode excludes Worktree, so its auto-fill effect picks a
@@ -394,8 +394,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
         branch: null,
         executor_profile_id: null,
       });
-    } else {
-      fs.setWorkspacePath("");
     }
   }, [fs]);
 

@@ -1568,6 +1568,32 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	return rows > 0, now, nil
 }
 
+// UpdateTaskSessionDynamicRouteIfCurrent changes only the route projection
+// while the session generation and projected route state still match the
+// caller's observation. It avoids writing a stale full session row after an
+// asynchronous launch or recovery callback.
+func (r *Repository) UpdateTaskSessionDynamicRouteIfCurrent(
+	ctx context.Context,
+	id string,
+	expectedGeneration int64,
+	expectedRouteState, routeState, routeReason string,
+) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET route_state = ?, route_reason = ?, updated_at = ?
+		WHERE id = ? AND route_generation = ? AND route_state = ?
+	`), routeState, routeReason, now, id, expectedGeneration, expectedRouteState)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
 // CancelActiveTaskSession atomically transitions one active session to
 // CANCELLED. A false result means the row exists in a non-active state or was
 // concurrently changed before this conditional write; callers re-read to
@@ -2842,6 +2868,16 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
+	// task_session_prompt_seq intentionally has no foreign key because it was
+	// added by a replay-safe migration. Remove its session-scoped admission
+	// state explicitly so a later session that reuses this ID starts fresh.
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the prompt-sequence schema. Production
+		// always has it; treat a missing table as already-cleaned.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge prompt history for session %s: %w", id, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
 		// Isolated unit tests may omit the messagequeue schema. Production
 		// always has queued_messages; treat a missing table as already-purged.
@@ -3148,7 +3184,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ts.id, ts.task_id, ts.review_status, ts.executor_id, ts.state,
+		SELECT ts.id, ts.task_id, ts.review_status, ts.executor_id, ts.executor_profile_id, ts.state,
 		       ts.agent_profile_snapshot, ts.repository_snapshot,
 		       e.type, e.name
 		FROM task_sessions ts
@@ -3168,12 +3204,13 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		var taskID string
 		var reviewStatus sql.NullString
 		var executorID sql.NullString
+		var executorProfileID sql.NullString
 		var sessionState sql.NullString
 		var agentProfileSnapshotJSON sql.NullString
 		var repositorySnapshotJSON sql.NullString
 		var executorType sql.NullString
 		var executorName sql.NullString
-		if err := rows.Scan(&sessionID, &taskID, &reviewStatus, &executorID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
+		if err := rows.Scan(&sessionID, &taskID, &reviewStatus, &executorID, &executorProfileID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
@@ -3188,6 +3225,9 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		}
 		if executorID.Valid {
 			session.ExecutorID = executorID.String
+		}
+		if executorProfileID.Valid {
+			session.ExecutorProfileID = executorProfileID.String
 		}
 		if executorType.Valid || executorName.Valid {
 			session.ExecutorSnapshot = make(map[string]interface{}, 2)

@@ -9,24 +9,20 @@ import {
   expectMemberApiGating,
   GATING_ADMIN,
   GATING_MEMBER,
+  STORAGE_ROUTE,
 } from "./data-storage-gating-helpers";
 
 /**
- * Mobile parity for the Data & storage member gate. The gating adds no new
- * composition: it removes controls from the backups table and disables the
- * storage actions inside surfaces that already have shipped phone layouts
- * (see tests/system/mobile-storage-maintenance.spec.ts). What is
- * viewport-specific is the consequence: dropping the backups Actions column
- * changes the table's column count, and a table is the surface most likely to
- * push a phone into horizontal scroll. This spec proves the member view is
- * complete, inert, and contained at Pixel 5 width.
+ * Mobile parity for the Data & Logs and Storage member gates. The split keeps
+ * backups on Data & Logs and disables storage actions on Storage. This spec
+ * proves both owning pages are complete, inert, and contained at Pixel 5 width.
  *
  * Runs in the `mobile-chrome` project (routed away from the desktop `auth`
  * project via its testIgnore) and restarts the worker backend with auth on
  * and its own database, mirroring system-data-storage-member-gating.spec.ts.
  * afterAll restarts to the fixture baseline.
  */
-test.describe.serial("Data & storage member gating (mobile)", () => {
+test.describe.serial("Data & Logs and Storage member gating (mobile)", () => {
   let snapshotName = "";
 
   test.beforeAll(async ({ backend, browser }) => {
@@ -75,6 +71,7 @@ test.describe.serial("Data & storage member gating (mobile)", () => {
     await expect(page.getByTestId("system-backups-restore")).toHaveCount(0);
     await expect(page.getByTestId("system-backups-delete")).toHaveCount(0);
 
+    await page.goto(STORAGE_ROUTE);
     const analyze = page.getByTestId("storage-analyze");
     await expect(analyze).toBeDisabled();
     await expect(page.getByTestId("storage-run-now")).toBeDisabled();
@@ -98,7 +95,10 @@ test.describe.serial("Data & storage member gating (mobile)", () => {
     await ctx.close();
   });
 
-  test("an admin still gets every control on a phone", async ({ browser, backend }) => {
+  test("an admin still gets every control across both pages on a phone", async ({
+    browser,
+    backend,
+  }) => {
     const ctx = await browser.newContext({
       ...devices["Pixel 5"],
       baseURL: backend.frontendUrl,
@@ -125,6 +125,7 @@ test.describe.serial("Data & storage member gating (mobile)", () => {
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
     await expect(page.getByTestId("system-backups-admin-only")).toHaveCount(0);
+    await page.goto(STORAGE_ROUTE);
     await expect(page.getByTestId("storage-analyze")).toBeEnabled();
 
     await expect

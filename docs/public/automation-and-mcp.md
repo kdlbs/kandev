@@ -29,6 +29,14 @@ Across Kandev's task, configuration, external, and Office MCP modes, each tool c
 - Use **external MCP** to expose Kandev tools to third-party clients.
 - Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
 
+![Automation flow from an external trigger to an AutomationRun, a task or continued session, and run history.](../screenshots/automation-and-mcp.svg)
+
+[Open full-size SVG diagram][automation-and-mcp-diagram]
+
+[automation-and-mcp-diagram]: ../../docs/screenshots/automation-and-mcp.svg
+
+Every firing gets a traceable run identity. The task destination and context setting determine whether Kandev creates a new thread or continues the previous session.
+
 ## Workflow events and human gates
 
 Regular workflow entry actions can enable plan mode, reset agent context, or auto-start an agent; auto-start can use the step prompt or a stored prompt override. Turn-start and turn-complete events can move the task, while turn-complete and step-exit actions can disable plan mode. There is no regular standalone **stop agent** or **send prompt** workflow action. Approval/review steps and steps without automatic start remain the supported human gates. Inspect events on both the source and destination step before enabling a move or automatic start; otherwise two steps can form a loop.

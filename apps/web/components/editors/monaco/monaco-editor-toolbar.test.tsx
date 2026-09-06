@@ -99,3 +99,52 @@ describe("MonacoEditorToolbar external file action", () => {
     expect(screen.queryByTestId("lsp-status")).toBeNull();
   });
 });
+
+describe("MonacoEditorToolbar download action", () => {
+  const baseProps = {
+    path: "assets/report.pdf",
+    isDirty: false,
+    isSaving: false,
+    diffStats: null,
+    wrapEnabled: false,
+    showDiffIndicators: false,
+    enableComments: false,
+    sessionId: "session-1",
+    commentCount: 0,
+    lspStatus: { state: "disabled" } as const,
+    lspProgress: {
+      initializingSince: null,
+      active: [],
+      completed: null,
+      hasReportedProgress: false,
+    },
+    lspLanguage: null,
+    onToggleLsp: vi.fn(),
+    onToggleWrap: vi.fn(),
+    onToggleDiffIndicators: vi.fn(),
+    onSave: vi.fn(),
+  };
+
+  it("invokes onDownload when the download control is activated", async () => {
+    const onDownload = vi.fn();
+    render(
+      <TooltipProvider>
+        <MonacoEditorToolbar {...baseProps} onDownload={onDownload} />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "Download file" });
+    button.click();
+    expect(onDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the download control when no handler is supplied", () => {
+    render(
+      <TooltipProvider>
+        <MonacoEditorToolbar {...baseProps} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Download file" })).toBeNull();
+  });
+});

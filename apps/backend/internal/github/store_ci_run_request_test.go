@@ -636,6 +636,9 @@ func TestDeleteWorkspaceSettingsRemovesCIRunAuthorityAndAudit(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	grant := testCIRunGrant(now)
+	if err := store.UpsertWorkspaceSettings(ctx, defaultWorkspaceSettings(grant.WorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
@@ -662,6 +665,14 @@ func TestDeleteWorkspaceSettingsRemovesCIRunAuthorityAndAudit(t *testing.T) {
 		if count != 0 {
 			t.Errorf("%s rows = %d, want 0", table, count)
 		}
+	}
+	var settingsCount int
+	if err := store.db.Get(&settingsCount,
+		`SELECT COUNT(*) FROM github_workspace_settings WHERE workspace_id = ?`, grant.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if settingsCount != 0 {
+		t.Fatalf("workspace settings rows = %d, want 0", settingsCount)
 	}
 }
 

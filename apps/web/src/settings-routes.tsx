@@ -35,18 +35,22 @@ import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { PluginShortcutsCard } from "@/components/settings/plugins/plugin-shortcuts-card";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { TerminalEditorsSettings } from "@/components/settings/terminal-editors-settings";
 import { AboutSettings } from "@/components/settings/system/about-settings";
 import { ApiTokens } from "@/components/settings/account/api-tokens";
 import { SecuritySettings } from "@/components/settings/account/security-settings";
 import { UsersTable } from "@/components/settings/system/users-table";
-import { DataStorageSettings } from "@/components/settings/system/data-storage-settings";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
+import { OrganizationsPage } from "@/components/settings/system/organizations/organizations-page";
+import { UnitsPage } from "@/components/settings/units/units-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -75,6 +79,7 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -200,11 +205,21 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       titleKey="system:navDataStorage"
       descriptionKey="system:dataStoragePageDescription"
     >
-      <DataStorageSettings />
+      <DataLogsSettings />
     </SystemRouteShell>
   ),
   "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
   "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/units": () => (
+    <SystemRouteShell titleKey="settings:unitsTitle" descriptionKey="settings:unitsDescription">
+      <UnitsPage />
+    </SystemRouteShell>
+  ),
+  "/settings/system/organizations": () => (
+    <SystemRouteShell titleKey="orgs:navOrganizations" descriptionKey="orgs:description">
+      <OrganizationsPage />
+    </SystemRouteShell>
+  ),
   "/settings/system/feature-toggles": () => (
     <SystemRouteShell
       titleKey="system:navFeatureToggles"
@@ -226,7 +241,11 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/storage": () => (
+    <SystemRouteShell titleKey="system:storageTitle" descriptionKey="system:storageDescription">
+      <StorageMaintenanceSettings />
+    </SystemRouteShell>
+  ),
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
@@ -301,10 +320,14 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
-    // A plugin-authored settings route registered at exactly this path
-    // (registry.registerSettingsRoute) wins over the first-party detail
-    // page, so a plugin can fully replace its own settings surface.
-    return renderPluginSettingsRoute(pathname) ?? <PluginDetailPage pluginId={pluginId} />;
+    const pluginRoute = renderPluginSettingsRoute(pathname);
+    // A plugin may replace its detail content, but host-owned personal
+    // shortcuts remain reachable beside that contribution.
+    return pluginRoute ? (
+      <PluginRootSettingsRoute pluginId={pluginId}>{pluginRoute}</PluginRootSettingsRoute>
+    ) : (
+      <PluginDetailPage pluginId={pluginId} />
+    );
   }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
@@ -323,6 +346,23 @@ function renderDynamicSettingsRoute(pathname: string) {
   if (executorRoute) return executorRoute;
 
   return null;
+}
+
+function PluginRootSettingsRoute({
+  pluginId,
+  children,
+}: {
+  pluginId: string;
+  children: ReactNode;
+}) {
+  const { items } = usePlugins();
+  const plugin = items.find((candidate) => candidate.id === pluginId);
+  return (
+    <div className="min-w-0 space-y-6">
+      {children}
+      {plugin && <PluginShortcutsCard plugin={plugin} plugins={items} />}
+    </div>
+  );
 }
 
 function renderExecutorSettingsRoute(pathname: string): ReactNode {

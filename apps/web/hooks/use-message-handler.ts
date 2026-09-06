@@ -19,6 +19,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
+  sanitizePromptReferenceSystemText,
 } from "@/lib/prompts/expand-prompt-references";
 import {
   deriveSessionInputMode,
@@ -26,7 +27,7 @@ import {
 } from "./domains/session/session-input-mode";
 import { t } from "@/lib/i18n";
 
-function buildDocumentContext(
+export function buildDocumentContext(
   activeDocument: ActiveDocument | null,
   planModeEnabled: boolean,
   planComments?: PlanComment[],
@@ -36,7 +37,7 @@ function buildDocumentContext(
   if (activeDocument.type === "plan") {
     if (!planModeEnabled) return "";
 
-    let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
+    let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the get_task_plan_kandev MCP tool to understand the context before responding.\nAny plan modifications should use the update_task_plan_kandev MCP tool.`;
 
     if (planComments && planComments.length > 0) {
       context += `\n\nUser comments on the plan:\n`;
@@ -131,7 +132,7 @@ export function buildContextFilesContext(
             promptExpansions.set(expansion.name, expansion.content);
           }
         }
-        return `### ${prompt.name}\n${prompt.content}`;
+        return `### ${sanitizePromptReferenceSystemText(prompt.name)}\n${sanitizePromptReferenceSystemText(prompt.content)}`;
       })
       .filter(Boolean);
 

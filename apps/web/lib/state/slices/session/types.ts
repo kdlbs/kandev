@@ -31,6 +31,8 @@ export type MessagesState = {
 export type PromptsState = MessagesState & {
   /** Incremented when a session is removed to reject stale prompt requests. */
   generationBySession: Record<string, number>;
+  /** Incremented whenever an authoritative prompt refresh begins. */
+  refreshGenerationBySession: Record<string, number>;
 };
 
 export type TurnsState = {
@@ -72,6 +74,16 @@ export type TaskSessionsByTaskState = {
   itemsByTaskId: Record<string, TaskSession[]>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
+  errorByTaskId?: Record<string, string | null>;
+};
+
+export type PendingActionProjection = Pick<
+  TaskSession,
+  "pending_action" | "pending_action_revision"
+>;
+
+export type PendingActionOrphanProjection = PendingActionProjection & {
+  task_id: string;
 };
 
 export type SessionAgentctlStatus = {
@@ -207,6 +219,7 @@ export type SessionSliceState = {
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
+  pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
@@ -326,6 +339,7 @@ export type SessionSliceActions = {
     sessionId: string,
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
+    taskId?: string,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (
@@ -335,6 +349,7 @@ export type SessionSliceActions = {
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setTaskSessionsError: (taskId: string, error: string | null) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;

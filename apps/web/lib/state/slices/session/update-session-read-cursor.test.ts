@@ -100,7 +100,7 @@ describe("updateSessionReadCursor", () => {
   });
 });
 
-describe("setTaskSessionPendingAction", () => {
+describe("setTaskSessionPendingAction — hydration", () => {
   it("updates the by-id and per-task projections without replacing session state", () => {
     const store = makeStore();
     const session = makeSession({
@@ -130,6 +130,76 @@ describe("setTaskSessionPendingAction", () => {
     store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
 
     expect(store.getState().taskSessions.items[SESSION_ID]).toBeUndefined();
+  });
+});
+
+describe("setTaskSessionPendingAction orphan projections", () => {
+  it("retains a newer event received before session-list hydration", () => {
+    const store = makeStore();
+    const newerRevision = pendingRevision(2);
+
+    store
+      .getState()
+      .setTaskSessionPendingAction(SESSION_ID, "clarification", newerRevision, TASK_ID);
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession({
+          pending_action: null,
+          pending_action_revision: pendingRevision(1),
+        }),
+      ],
+      {},
+    );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: "clarification",
+      pending_action_revision: newerRevision,
+    });
+  });
+
+  it("keeps the newest orphan projection when stale events and a stale list arrive", () => {
+    const store = makeStore();
+    const successorRevision = pendingRevision(3);
+
+    store
+      .getState()
+      .setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2), TASK_ID);
+    store.getState().setTaskSessionPendingAction(SESSION_ID, null, successorRevision, TASK_ID);
+    store
+      .getState()
+      .setTaskSessionPendingAction(SESSION_ID, "permission", pendingRevision(1), TASK_ID);
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession({
+          pending_action: "clarification",
+          pending_action_revision: pendingRevision(1),
+        }),
+      ],
+      {},
+    );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: null,
+      pending_action_revision: successorRevision,
+    });
+  });
+
+  it("records a recoverable list error without making an empty list authoritative", () => {
+    const store = makeStore();
+
+    store.getState().setTaskSessionsError(TASK_ID, "service unavailable");
+
+    expect(store.getState().taskSessionsByTask.errorByTaskId?.[TASK_ID]).toBe(
+      "service unavailable",
+    );
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBeUndefined();
+
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
+
+    expect(store.getState().taskSessionsByTask.errorByTaskId?.[TASK_ID]).toBeNull();
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
   });
 });
 

@@ -1,6 +1,7 @@
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskOrigin,
   TaskPriority,
   TaskState as TaskStatus,
 } from "@/lib/types/http";
@@ -72,6 +73,7 @@ export type KanbanState = {
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
+    origin?: TaskOrigin | string;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */
@@ -119,9 +121,15 @@ export type KanbanState = {
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
+    primaryExecutorProfileId?: string | null;
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
+    primaryAgentProfileId?: string | null;
+    primaryAgentName?: string | null;
+    labels?: string[];
     isRemoteExecutor?: boolean;
+    /** Human assignee (user id). Independent of any agent assignment. */
+    assigneeUserId?: string;
     parentTaskId?: string | null;
     workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;

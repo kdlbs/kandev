@@ -172,7 +172,12 @@ func newSubagentMigrationTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 // invalid JSON outright, which real corrupt rows predate.
 func dropMessageMetadataIndex(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+	for _, index := range []string{
+		"idx_messages_metadata_tool_call_id",
+		"idx_messages_metadata_pending_id",
+		"idx_messages_metadata_pending_id_lookup",
+		"idx_messages_metadata_pending_id_lookup_ordered",
+	} {
 		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)
 		}
@@ -398,8 +403,8 @@ func TestSubagentContextBackfillMalformedMetadataDoesNotAbort(t *testing.T) {
 	ts := time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
 
 	// A literal empty-string metadata row can only exist as historical
-	// corruption predating idx_messages_metadata_tool_call_id (the index
-	// itself rejects an empty-string insert via its json_extract expression).
+	// corruption predating the message metadata expression indexes (the indexes
+	// themselves reject an empty-string insert via their JSON expressions).
 	dropMessageMetadataIndex(t, db)
 	seedRawSubagentMessage(t, repo, "msg-blank", "session-malformed", "task-malformed", "turn-malformed", "", ts, ts)
 	seedRawSubagentMessage(t, repo, "msg-null", "session-malformed", "task-malformed", "turn-malformed", "null", ts, ts)

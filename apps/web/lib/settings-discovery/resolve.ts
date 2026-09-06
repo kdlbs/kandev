@@ -194,6 +194,7 @@ function dynamicDefinitions(context: SettingsDiscoveryContext): SettingsDiscover
 function isVisible(entry: SettingsDiscoveryDefinition, context: SettingsDiscoveryContext) {
   if (entry.requires === "account") return context.showAccount;
   if (entry.requires === "users") return context.showUsers;
+  if (entry.requires === "organizations") return context.showOrganizations;
   if (entry.requires === "workspace") return context.workspaces.length > 0;
   return true;
 }

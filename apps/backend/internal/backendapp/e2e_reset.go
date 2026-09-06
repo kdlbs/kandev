@@ -180,6 +180,21 @@ func handleE2EReset(
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
 			return
 		}
+		// Office config sync's poller reads office_config_sync_configs the
+		// same way the workflow-sync poller reads workflow_sync_configs
+		// above; office_config_sync_manifest has no FK/cascade onto it
+		// either, so both are deleted here before task/workspace deletion
+		// for the same reason.
+		for _, q := range []string{
+			`DELETE FROM office_config_sync_manifest WHERE workspace_id = ?`,
+			`DELETE FROM office_config_sync_configs WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				log.Error("e2e reset: office config sync cleanup failed", zap.String("sql", q), zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "office config sync cleanup failed"})
+				return
+			}
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test
@@ -274,7 +289,7 @@ func handleE2EReset(
 			deletedTaskIDSet[taskID] = struct{}{}
 		}
 		for _, t := range tasks {
-			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
+			if err := deleteTaskForE2EReset(ctx, taskSvc, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
@@ -317,6 +332,22 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+type e2eResetTaskDeleter interface {
+	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func deleteTaskForE2EReset(
+	ctx context.Context,
+	taskDeleter e2eResetTaskDeleter,
+	taskID string,
+) error {
+	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
+		// E2E reset is an explicit test cleanup boundary. It must remove
+		// disposable local changes left by the test that created the task.
+		DiscardWorktreeChanges: true,
+	})
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {

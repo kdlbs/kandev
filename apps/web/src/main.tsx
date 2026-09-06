@@ -2,6 +2,8 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
+import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
+import { setBackendReloadDiagnosticReporter } from "@/lib/platform/backend-reload-coordinator";
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { preloadLocale } from "@/lib/i18n";
@@ -20,6 +22,9 @@ import { applyTitlePrefix } from "@/lib/browser/document-title";
 installVitePreloadRecovery();
 installBfcacheRestoreReload();
 markRenderingEngine(document.documentElement);
+setBackendReloadDiagnosticReporter((source) => {
+  scheduleFrontendErrorReport({ source: "backend-reload", title: source });
+});
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
 

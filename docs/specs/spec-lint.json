@@ -6,7 +6,7 @@
     "product": 16384,
     "requirement": 20480,
     "system-design": 32768,
-    "system-index": 12288,
+    "system-index": 16384,
     "template": 8192
   }
 }

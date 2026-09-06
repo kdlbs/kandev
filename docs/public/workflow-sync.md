@@ -18,6 +18,14 @@ A workspace has at most one sync configuration, pointed at exactly one provider 
 3. Pick the provider, then fill in the repository (or project path), branch, and directory in **Workflows > Sync**.
 4. Run a sync and review created, updated, skipped, and removed definitions.
 
+![Workflow sync flow from repository files through fetch, per-file validation, safe reconciliation, and a result with counts and warnings.](../screenshots/workflow-sync.svg)
+
+[Open full-size SVG diagram][workflow-sync-diagram]
+
+[workflow-sync-diagram]: ../../docs/screenshots/workflow-sync.svg
+
+One invalid file freezes the workflows last synced from that file, while valid files continue through reconciliation. This protects existing definitions from a bad edit.
+
 ## Prerequisites and credentials
 
 You need a repository and a branch containing valid portable workflow files. The Kandev backend, not the browser and not a task executor, reads the repository. The repository must be inside the workspace's effective scope.
@@ -123,7 +131,7 @@ A valid fetch that returns no supported files is different: it is an empty desir
 
 Repository listing or file-download failures fail the run before apply. Per-workspace locking serializes sync, configuration changes, and removal, so two requests cannot interleave their changes.
 
-> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's stored credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+> **Network security:** With authentication disabled, the HTTP API is open and can read or change sync configuration with the backend's stored credentials. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing it.
 
 <details>
 <summary>HTTP API, reconciliation, and cleanup details</summary>

@@ -27,6 +27,8 @@ Long-running tasks can receive messages faster than their active session can dra
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.6:** An entry already reserved for durable lifecycle delivery is not visible and cannot be removed by these controls. Task archive/delete retains its separate privileged purge behavior.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.7:** **Settings > Task Behavior > Message Queue** exposes the maximum number of persisted messages allowed per session alongside independent manual and automatic merge switches.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.8:** The default is `10`. A positive integer sets a cap; `0` means unlimited.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9:** When a queued-message preview fits within its collapsed rendered height, evaluated at the row width available while the optional disclosure control is omitted, the row shall omit the expand/collapse control. The control itself shall not change that fit decision. When viewport width or zoom changes whether the preview overflows, the control shall appear or disappear without a reload.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10:** When a visible row offers removal, its expand/collapse control, when present, shall be immediately before the Remove control. Remove shall use the shared trash symbol and shall adopt the destructive color on hover while retaining its existing accessible name.
 
 ## Migrated source detail
 

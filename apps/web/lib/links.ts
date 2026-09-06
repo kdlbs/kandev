@@ -51,3 +51,17 @@ export function replaceTaskUrl(taskId: string): void {
 export function linkToTasks(workspaceId?: string): string {
   return workspaceId ? `/tasks?workspace=${workspaceId}` : "/tasks";
 }
+
+/**
+ * The Threads deck: every live agent conversation side by side. `taskId` asks
+ * the deck to scroll that task's column into view on arrival, which is how a
+ * task page hands a specific discussion back to the deck.
+ */
+export function linkToThreads(workspaceId?: string, taskId?: string, sessionId?: string): string {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace", workspaceId);
+  if (taskId) params.set("taskId", taskId);
+  if (taskId && sessionId) params.set("sessionId", sessionId);
+  const query = params.toString();
+  return query ? `/threads?${query}` : "/threads";
+}

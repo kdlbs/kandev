@@ -6,19 +6,19 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
  *
  * Deliberately *not* part of user settings: the menu belongs to the surface
  * you are looking at, not to the account. A phone reaching the same install
- * wants the flat list even when the desktop beside it wants the tree, and the
+ * can choose a different mode from the desktop beside it, and the
  * value has to be readable before the store hydrates (the sidebar paints the
  * menu on the first frame — a mode arriving one render later is a visible
  * flip). Both rule out `updateUserSettings`, which is async and account-wide.
  *
- * `flat` is the default and is exactly the two-level menu
- * (`settings-menu-sections.ts`) with no branches rendered at all.
+ * `accordion` is the default and follows the current route through the
+ * workspace, agent, and executor branches.
  */
 export const SETTINGS_MENU_MODES = ["flat", "accordion", "persistent"] as const;
 
 export type SettingsMenuMode = (typeof SETTINGS_MENU_MODES)[number];
 
-export const DEFAULT_SETTINGS_MENU_MODE: SettingsMenuMode = "flat";
+export const DEFAULT_SETTINGS_MENU_MODE: SettingsMenuMode = "accordion";
 
 /** True when `mode` renders branches at all — i.e. anything but `flat`. */
 export function isTreeSettingsMenuMode(mode: SettingsMenuMode): boolean {

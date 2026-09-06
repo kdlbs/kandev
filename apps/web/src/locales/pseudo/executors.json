@@ -175,6 +175,7 @@
   "portableConfigNotFoundHint": "Ţĥĩś ĩś àń ēďĩţĩńĝ ĥĩńţ. Ŷōũ ćàń śàvē ţĥē ƥŕōƒĩĺē àńď àďď ţĥē ƒĩĺē ĺàţēŕ.",
   "portableConfigTitle": "Àĝēńţ ćōńƒĩĝũŕàţĩōń",
   "provideSecret": "Ƥŕōvĩďē śēćŕēţ",
+  "provideSecretForEnvVar": "Ƥŕōvĩďē śēćŕēţ ƒōŕ {{envVar}}",
   "quickPresets": "Qũĩćķ ƥŕēśēţś",
   "refresh": "Ŕēƒŕēśĥ",
   "relatedDockerContainersRemoved_one": "{{count}} ŕēĺàţēď Ďōćķēŕ ćōńţàĩńēŕ ŵĩĺĺ àĺśō ƀē ŕēḿōvēď.",
@@ -393,5 +394,9 @@
   "usesTheLocalDockerDaemonOn": "Ũśēś ţĥē ĺōćàĺ Ďōćķēŕ ďàēḿōń ōń ţĥĩś ḿàćĥĩńē.",
   "value": "Vàĺũē",
   "verifyingConnection": "Vēŕĩƒŷĩńĝ ćōńńēćţĩōń...",
-  "profileNameExample": "Ƥŕōďũćţĩōń, Ďēvēĺōƥḿēńţ"
+  "profileNameExample": "Ƥŕōďũćţĩōń, Ďēvēĺōƥḿēńţ",
+  "allowUserNamespacesTitle": "Ũśēŕ ńàḿēśƥàćē śũƥƥōŕţ",
+  "allowUserNamespacesDescription": "Àĺĺōŵ ũńƥŕĩvĩĺēĝēď ũśēŕ ńàḿēśƥàćē ćŕēàţĩōń àńď ḿōũńţ ōƥēŕàţĩōńś ĩńśĩďē ćōńţàĩńēŕś. Ēńàƀĺēś śàńďƀōxĩńĝ ţōōĺś ĺĩķē ƀŵŕàƥ.",
+  "allowUserNamespacesNote": "Ţĥĩś śēţţĩńĝ ōńĺŷ àƒƒēćţś ńēŵĺŷ ćŕēàţēď ćōńţàĩńēŕś. Ēxĩśţĩńĝ ţàśķ ēńvĩŕōńḿēńţś ḿũśţ ƀē ŕēśēţ ƒōŕ ţĥē ćĥàńĝē ţō ţàķē ēƒƒēćţ.",
+  "allowUserNamespacesWarning": "⟦This disables Docker's default AppArmor restrictions for opted-in containers. Enable it only for trusted agent runtimes that need user-namespace sandboxing.⟧"
 }

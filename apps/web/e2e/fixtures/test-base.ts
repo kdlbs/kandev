@@ -166,6 +166,7 @@ export const test = backendFixture.extend<
   {
     testPage: Page;
     tabletTestPage: Page;
+    coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -417,6 +418,20 @@ export const test = backendFixture.extend<
     await context.close();
   },
 
+  coarseDesktopTestPage: async ({ browser, backend, testPage }, use) => {
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 1280, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
   // PR asset capture — gated behind CAPTURE_PR_ASSETS env var.
   // When enabled, provides screenshot/recording helpers for PR descriptions.
   // Destructure in tests that need it: { testPage, prCapture }
@@ -610,6 +625,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         agent_profile_id: seedData.agentProfileId,
         workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
       },
+      sidebar_task_color_automation: { enabled: false, rules: [] },
     });
   });
 });

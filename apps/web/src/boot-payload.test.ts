@@ -94,6 +94,39 @@ describe("readBootPayload", () => {
   });
 });
 
+describe("readBootPayload runtime metadata", () => {
+  it("reads the native folder picker capability from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: { nativeFolderPickerAvailable: true, desktopRuntime: true },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.nativeFolderPickerAvailable).toBe(true);
+    expect(readBootPayload(win).runtime?.desktopRuntime).toBe(true);
+  });
+
+  it("keeps the backend boot identity from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: "boot-123" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win)).toMatchObject({ runtime: { bootId: "boot-123" } });
+  });
+
+  it("ignores missing or malformed backend boot identities", () => {
+    const missing = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: {} },
+    } as unknown as Window;
+    const malformed = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: 123 } },
+    } as unknown as Window;
+
+    expect(readBootPayload(missing).runtime?.bootId).toBeUndefined();
+    expect(readBootPayload(malformed).runtime?.bootId).toBeUndefined();
+  });
+});
+
 describe("readBootPayload plugins", () => {
   it("parses active plugins from the boot payload", () => {
     const win = {

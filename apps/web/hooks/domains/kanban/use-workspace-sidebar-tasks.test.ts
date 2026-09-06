@@ -181,6 +181,67 @@ describe("useWorkspaceSidebarTasks", () => {
   });
 });
 
+describe("useWorkspaceSidebarTasks reference stability", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("preserves an unaffected task reference when a sibling task updates", () => {
+    const snapshot = makeSnapshot("wf-A", "Alpha", ["t-a1", "t-a2"]);
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: { snapshots: { "wf-A": snapshot }, isLoading: false },
+    });
+    const view = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    const unaffectedTask = view.result.current.allTasks[1];
+
+    setMockState({
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            ...snapshot,
+            tasks: [{ ...snapshot.tasks[0], title: "Updated" }, snapshot.tasks[1]],
+          },
+        },
+        isLoading: false,
+      },
+    });
+    view.rerender();
+
+    expect(view.result.current.allTasks[1]).toBe(unaffectedTask);
+  });
+
+  it("preserves workflow step references when only a task updates", () => {
+    const snapshot = makeSnapshot("wf-A", "Alpha", ["t-a1", "t-a2"]);
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: { snapshots: { "wf-A": snapshot }, isLoading: false },
+    });
+    const view = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    const previousSteps = view.result.current.stepsByWorkflowId;
+
+    setMockState({
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            ...snapshot,
+            tasks: [{ ...snapshot.tasks[0], title: "Updated" }, snapshot.tasks[1]],
+          },
+        },
+        isLoading: false,
+      },
+    });
+    view.rerender();
+
+    expect(view.result.current.stepsByWorkflowId).toBe(previousSteps);
+  });
+});
+
 describe("useWorkspaceSidebarTasks WIP queue", () => {
   beforeEach(() => {
     mockState = {

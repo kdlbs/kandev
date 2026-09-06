@@ -36,12 +36,10 @@ func staticResolver(argv []string) CommandResolver {
 // exits 0. Mirrors the minimum shape ACPProbe.hasInitializeResult
 // looks for: id + non-empty result + no error.
 const fakeBinaryOK = `#!/bin/sh
-# Drain stdin so the parent's Write does not block on a full pipe.
-cat >/dev/null &
-DRAIN=$!
+# Read the initialize request before replying. Keeping this in the
+# foreground ensures the process remains alive while the parent writes.
+cat >/dev/null
 echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
-# Keep stdin open briefly so the parent flushes the initialize frame.
-wait "$DRAIN" 2>/dev/null
 exit 0
 `
 

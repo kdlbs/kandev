@@ -905,10 +905,15 @@ type Task struct {
 	// this field are routed to SetTaskRunner / ClearTaskRunner inside
 	// the task repository.
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string `json:"origin,omitempty"`     // manual, agent_created, routine
-	ProjectID              string `json:"project_id,omitempty"` // FK to office project
-	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
-	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+	// AssigneeUserID is the HUMAN assignee, entirely independent of the agent
+	// assignee above: a task can carry both, and setting one never clears the
+	// other. It is advisory and gates nothing; taking a task over is a
+	// reassignment plus a prompt, not a lock.
+	AssigneeUserID string `json:"assignee_user_id,omitempty"`
+	Origin         string `json:"origin,omitempty"`     // manual, agent_created, routine
+	ProjectID      string `json:"project_id,omitempty"` // FK to office project
+	Labels         string `json:"labels,omitempty"`     // JSON array string, default "[]"
+	Identifier     string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
@@ -1125,10 +1130,17 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 string    `json:"description"`
-	OwnerID                     string    `json:"owner_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	OwnerID     string `json:"owner_id"`
+	// OrgID is the owning tenant. Empty means organizations are off or the
+	// tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// UnitID places the workspace in the organization unit tree. Reach is
+	// resolved from this placement, so a workspace without one is reachable by
+	// nobody.
+	UnitID                      string    `json:"unit_id,omitempty"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -1804,6 +1816,37 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// DesktopDiscoveryRootState describes whether an install-wide discovery root
+// can currently be read by the backend process.
+type DesktopDiscoveryRootState string
+
+const (
+	DesktopDiscoveryRootConnected         DesktopDiscoveryRootState = "connected"
+	DesktopDiscoveryRootReconnectRequired DesktopDiscoveryRootState = "reconnect_required"
+)
+
+// DesktopDiscoveryRoot is an install-wide root selected for automatic local
+// repository discovery. It is deliberately separate from a workspace-owned
+// repository grant.
+type DesktopDiscoveryRoot struct {
+	ID              string                    `json:"id"`
+	Path            string                    `json:"path"`
+	DisplayPath     string                    `json:"display_path"`
+	State           DesktopDiscoveryRootState `json:"state"`
+	LastScanAt      *time.Time                `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time                `json:"last_failure_at,omitempty"`
+	LastFailureCode string                    `json:"last_failure_code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// DesktopDiscoveryMigration records upgrade-only state without turning the
+// old implicit Home fallback into a new automatic scan.
+type DesktopDiscoveryMigration struct {
+	HomeConfirmationRequired bool      `json:"home_confirmation_required"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
 // RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
 // It is configuration, not task history: task repositories copy these fields
 // into their snapshot columns when a policy is selected.
@@ -2082,11 +2125,12 @@ const (
 // It owns the workspace (worktree/container/sandbox) and the agentctl control server.
 // Multiple sessions can share the same TaskEnvironment.
 type TaskEnvironment struct {
-	ID                string `json:"id"`
-	TaskID            string `json:"task_id"`
-	ExecutorType      string `json:"executor_type"`
-	ExecutorID        string `json:"executor_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	OwnershipGeneration int64  `json:"ownership_generation"`
+	ExecutorType        string `json:"executor_type"`
+	ExecutorID          string `json:"executor_id"`
+	ExecutorProfileID   string `json:"executor_profile_id"`
 	// AgentExecutionID was removed: executors_running owns the execution<->session
 	// mapping now. Read it via repo.GetExecutorRunningBySessionID(sessionID) when
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).

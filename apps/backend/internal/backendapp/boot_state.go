@@ -99,14 +99,14 @@ func bootInitialState(
 		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
-	// Home and unknown SPA routes both render the full app shell (nav,
+	// Home, Threads, and unknown SPA routes all render the full app shell (nav,
 	// workspace picker) without a route-specific data payload. Unknown
 	// covers plugin-owned routes (e.g. /github-plugin) registered at
 	// runtime, which the backend classifier can't enumerate — they still
 	// need the base workspace/workflow/kanban context so native plugin UI
 	// (like host.ui.TaskCreateDialog) has workspaces and workflows to work
 	// with, not an empty store.
-	if route.Route == webapp.RouteHome || route.Route == webapp.RouteUnknown {
+	if route.Route == webapp.RouteHome || route.Route == webapp.RouteThreads || route.Route == webapp.RouteUnknown {
 		builder.addHomeKanbanRouteState(ctx, req, state)
 	}
 	if route.Route == webapp.RouteTasks {
@@ -801,9 +801,11 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount,
 			info.reviewStatus,
 			info.executorID,
+			info.executorProfileID,
 			info.executorType,
 			info.executorName,
 			info.agentName,
+			info.agentProfileID,
 			info.workingDirectory,
 			info.sessionState,
 			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
@@ -857,14 +859,16 @@ func taskDTOs(tasks []*taskmodels.Task) []taskdto.TaskDTO {
 }
 
 type bootSessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     taskmodels.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      taskmodels.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
@@ -885,6 +889,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 		value := session.ExecutorID
 		info.executorID = &value
 	}
+	if session.ExecutorProfileID != "" {
+		value := session.ExecutorProfileID
+		info.executorProfileID = &value
+	}
 	if session.ExecutorSnapshot != nil {
 		if value, ok := session.ExecutorSnapshot["executor_type"].(string); ok && value != "" {
 			info.executorType = &value
@@ -897,6 +905,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 		if value, ok := session.AgentProfileSnapshot["name"].(string); ok && value != "" {
 			info.agentName = &value
 		}
+	}
+	if session.AgentProfileID != "" {
+		value := session.AgentProfileID
+		info.agentProfileID = &value
 	}
 	if session.RepositorySnapshot != nil {
 		if value, ok := session.RepositorySnapshot["path"].(string); ok && value != "" {

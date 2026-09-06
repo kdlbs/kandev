@@ -26,7 +26,9 @@ import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import { useDetachTask } from "@/hooks/use-detach-task";
+import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
   type ForegroundActivity,
   type Repository,
@@ -87,6 +89,8 @@ export interface Task {
   primaryExecutorType?: string | null;
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
+  /** Human assignee (user id); the card renders their name read-only. */
+  assigneeUserId?: string;
   parentTaskId?: string | null;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   updatedAt?: string;
@@ -133,8 +137,8 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: TaskActionOptions) => void;
+  onArchive?: (task: Task, opts?: TaskActionOptions) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
@@ -171,10 +175,7 @@ function useKanbanCardMoveMenuActions({
     });
   };
   const moveToStepFromDropdown = (stepId: string) => {
-    if (onMove) {
-      onMove(task, stepId);
-      return;
-    }
+    if (onMove) return onMove(task, stepId);
     if (moveTargets.currentWorkflowId) {
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
@@ -314,6 +315,7 @@ function useKanbanCardMenus({
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
   const dialogs = useKanbanCardDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
+  const updateTaskPriority = useUpdateTaskPriority();
   const detachAnchorRef = useRef<HTMLDivElement>(null);
   const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
@@ -351,6 +353,8 @@ function useKanbanCardMenus({
     isArchiving,
     isDetaching,
     parentTaskId: task.parentTaskId,
+    currentPriority: task.priority,
+    onSelectPriority: (priority: TaskPriority) => void updateTaskPriority(task.id, priority),
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? requestArchiveConfirmation : undefined,
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
@@ -410,7 +414,7 @@ function KanbanCardDialogs({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
+        onConfirm={(opts) => onDelete?.(task, opts)}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}
@@ -488,6 +492,7 @@ export function dispatchKanbanCardClick(
 
 function KanbanCardFrame({
   task,
+  presentation,
   repositoryChips,
   draggable,
   menu,
@@ -504,6 +509,7 @@ function KanbanCardFrame({
 }: Pick<
   KanbanCardProps,
   | "task"
+  | "presentation"
   | "repositoryChips"
   | "isSelected"
   | "isMultiSelectMode"
@@ -565,6 +571,7 @@ function KanbanCardFrame({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
+        forceDialog={presentation === "mobile"}
         onOpenChange={menu.setShowArchiveConfirm}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
@@ -628,6 +635,7 @@ export function KanbanCard({
     <>
       <KanbanCardFrame
         task={task}
+        presentation={presentation}
         repositoryChips={repositoryChips}
         draggable={draggable}
         menu={menu}
