@@ -5,6 +5,18 @@ package origin
 import "context"
 
 type externalTransportKey struct{}
+type internalCallKey struct{}
+
+// WithTrustedInternalCall marks a server-originated dispatch that is not
+// reachable from an MCP client payload.
+func WithTrustedInternalCall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, internalCallKey{}, true)
+}
+
+func IsTrustedInternalCall(ctx context.Context) bool {
+	trusted, _ := ctx.Value(internalCallKey{}).(bool)
+	return trusted
+}
 
 // WithTrustedExternalTransport marks a context after it enters through the
 // backend's external MCP transport boundary.
