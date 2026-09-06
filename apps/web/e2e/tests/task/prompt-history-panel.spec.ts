@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -12,6 +12,24 @@ const SENTINEL = "sentinel-jump-token-9f3a";
 // time between seeding and sending is uncontrolled, so only the shape is
 // asserted (exact-`0s` stays in fixed-time unit coverage).
 const DURATION_SHAPE = /^\d+s$|^\d+m \d+s$|^\d+h \d+m \d+s$/;
+
+async function revealPromptHistoryTarget(panel: Locator, targetRow: Locator) {
+  const scroller = panel.getByTestId("prompt-history-scroll");
+  await expect(scroller).toBeVisible();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if ((await targetRow.count()) > 0) return;
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await targetRow
+      .first()
+      .waitFor({ state: "attached", timeout: 5_000 })
+      .catch(() => undefined);
+  }
+  if ((await targetRow.count()) === 0) {
+    throw new Error("prompt history target did not load after 10 scroll attempts");
+  }
+}
 
 test.describe("Prompt history panel", () => {
   test("lists prompts newest-first with durations, caps expansion, and jumps to the transcript", async ({
@@ -157,7 +175,7 @@ test.describe("Prompt history panel", () => {
       el.scrollTop = el.scrollHeight;
     });
     await session.clickTab("Prompt history");
-    await sentinelRow.locator('[role="button"]').first().click();
+    await sentinelRow.locator("[data-message-id]").click();
 
     await expect(session.activeChat()).toBeVisible();
     const msg = chat.locator(`#msg-${sentinelMessageId}`);
@@ -222,7 +240,7 @@ test.describe("Prompt history panel", () => {
     const middleRow = panel.locator('[data-testid^="prompt-history-row-"]', {
       hasText: MIDDLE_PROMPT_MARKER,
     });
-    await expect(middleRow).toBeAttached({ timeout: 10_000 });
+    await revealPromptHistoryTarget(panel, middleRow);
     const messageId = await middleRow.locator("[data-message-id]").getAttribute("data-message-id");
     if (!messageId) throw new Error("Middle prompt row has no message id");
     await expect(testPage.locator(`#msg-${messageId}`)).toHaveCount(0);
@@ -233,7 +251,7 @@ test.describe("Prompt history panel", () => {
       if (url.searchParams.get("around") === messageId) aroundRequests += 1;
       await route.continue();
     });
-    await middleRow.locator('[role="button"]').first().click();
+    await middleRow.locator("[data-message-id]").click();
 
     await expect.poll(() => aroundRequests, { timeout: 10_000 }).toBe(1);
     const chat = session.activeChat();

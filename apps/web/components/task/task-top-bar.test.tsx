@@ -200,9 +200,9 @@ describe("TaskTopBar archived task controls", () => {
 
 function renderTopBar(ui: React.ReactNode) {
   return render(
-    <ToastProvider>
-      <StateProvider>{ui}</StateProvider>
-    </ToastProvider>,
+    <StateProvider>
+      <ToastProvider>{ui}</ToastProvider>
+    </StateProvider>,
   );
 }
 

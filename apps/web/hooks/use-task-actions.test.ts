@@ -11,6 +11,7 @@ const storeMock = { getState: getStateMock };
 const replaceTaskUrlMock = vi.fn();
 const setActiveSessionMock = vi.fn();
 const setActiveTaskMock = vi.fn();
+const toastMock = vi.fn();
 let storeState: {
   tasks: { activeTaskId: string | null; activeSessionId: string | null };
   setActiveSession: (...args: unknown[]) => void;
@@ -37,8 +38,15 @@ vi.mock("@/hooks/use-task-removal", () => ({
     removeTaskFromBoard: (...args: unknown[]) => removeTaskFromBoardMock(...args),
   }),
 }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: toastMock }),
+}));
 
-import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "./use-task-actions";
+import {
+  useArchiveAndSwitchTask,
+  useDeleteAndSwitchTask,
+  useTaskActions,
+} from "./use-task-actions";
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -189,5 +197,25 @@ describe("useDeleteAndSwitchTask", () => {
     expect(setActiveSessionMock).toHaveBeenCalledWith("task-A", "sess-A");
     expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-A");
     expect(deleteTaskMock).toHaveBeenCalledWith("task-A", undefined);
+  });
+});
+
+describe("useTaskActions", () => {
+  it("shows localized retry guidance for a dirty-worktree delete conflict", async () => {
+    const { ApiError } = await import("@/lib/api/client");
+    deleteTaskMock.mockRejectedValueOnce(
+      new ApiError("task worktree contains local changes", 409, {
+        error_code: "task_delete_dirty_worktree",
+      }),
+    );
+    const { result } = renderHook(() => useTaskActions());
+
+    await expect(result.current.deleteTaskById("task-1")).rejects.toMatchObject({ status: 409 });
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Task deletion needs your confirmation",
+      description:
+        "The task stays visible. Review the local changes, then select discard and try again.",
+      variant: "error",
+    });
   });
 });

@@ -28,6 +28,7 @@ vi.mock("@/lib/api/domains/team-access-api", () => ({
 }));
 
 import { updateTask } from "@/lib/api/domains/kanban-api";
+import { listDirectoryUsers, listWorkspaceMembers } from "@/lib/api/domains/team-access-api";
 
 afterEach(() => {
   cleanup();
@@ -76,6 +77,23 @@ function renderControl(assigneeUserId?: string, authenticated = true) {
   );
 }
 
+function renderControlWithDisabledSyntheticUser(assigneeUserId?: string) {
+  const state = stateWith(assigneeUserId);
+  state.auth.mode = "disabled";
+  state.auth.user = {
+    id: "default-user",
+    email: "",
+    display_name: "",
+    role: "admin",
+    status: "active",
+  };
+  return render(
+    <StateProvider initialState={state}>
+      <TaskAssigneeControl taskId="t-1" workspaceId="ws-1" />
+    </StateProvider>,
+  );
+}
+
 describe("TaskAssigneeControl", () => {
   it("shows the assignee's name from the store, not a raw user id", async () => {
     renderControl("user-1");
@@ -105,8 +123,10 @@ describe("TaskAssigneeControl", () => {
     await waitFor(() => expect(updateTask).toHaveBeenCalledWith("t-1", { assignee_user_id: "" }));
   });
 
-  it("renders nothing when authentication is disabled", () => {
-    renderControl(undefined, false);
+  it("renders nothing for the synthetic user when authentication is disabled", () => {
+    renderControlWithDisabledSyntheticUser("default-user");
     expect(screen.queryByTestId(CONTROL)).toBeNull();
+    expect(listDirectoryUsers).not.toHaveBeenCalled();
+    expect(listWorkspaceMembers).not.toHaveBeenCalled();
   });
 });

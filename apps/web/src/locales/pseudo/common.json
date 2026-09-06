@@ -166,6 +166,8 @@
   "failedToCreateFolder": "Ƒàĩĺēď ţō ćŕēàţē ƒōĺďēŕ",
   "failedToCreateRepository": "Ƒàĩĺēď ţō ćŕēàţē ŕēƥōśĩţōŕŷ",
   "failedToLoadDirectory": "Ƒàĩĺēď ţō ĺōàď ďĩŕēćţōŕŷ",
+  "nativeFolderPickerFailed": "Ţħē ńàţĩṽē ƒōĺďēŕ ƥĩćķēŕ ćōũĺď ńōţ ōƥēń.",
+  "nativeFolderPickerUnavailable": "Ţħē ńàţĩṽē ƒōĺďēŕ ƥĩćķēŕ ĩś ũńàṽàĩĺàƀĺē. Ŕēĺōàď Ķàńďēṽ àńď ţŕŷ àĝàĩń.",
   "failedToLoadRoutine": "Ƒàĩĺēď ţō ĺōàď ŕōũţĩńē",
   "failedToLoadSetup": "Ƒàĩĺēď ţō ĺōàď śēţũƥ",
   "failedToRenderDiagram": "Ƒàĩĺēď ţō ŕēńďēŕ ďĩàĝŕàḿ",

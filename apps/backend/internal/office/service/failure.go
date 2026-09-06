@@ -41,6 +41,13 @@ func (s *Service) HandleAgentFailure(
 	// has to be duplicated here — otherwise every agent-error terminal
 	// transition leaks the task checkout the same way FinishRun used to.
 	s.releaseTaskCheckoutForRun(ctx, run)
+	// Leave "working" before the auto-pause decision below, not after: the
+	// reset is a working → idle CAS, so running it first lets a subsequent
+	// auto-pause overwrite idle with paused, while running it last would
+	// find the agent already paused and silently do nothing. Ordering it
+	// here keeps the agent out of a stuck "working" even if the failure
+	// bookkeeping that follows errors out.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 
 	count, err := s.repo.IncrementAgentConsecutiveFailures(ctx, run.AgentProfileID)
 	if err != nil {

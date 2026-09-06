@@ -47,6 +47,9 @@ This design preserves the technical source detail for `REQ-UI-CI-PR-AUTOMATION-0
 - **GIVEN** a task with a custom auto-fix prompt, **WHEN** the user resets the prompt override, **THEN** the task uses the current default `ci-auto-fix` prompt.
 - **GIVEN** the default `ci-auto-fix` prompt is edited in Settings > Prompts, **WHEN** a task without an override later auto-fixes a PR, **THEN** the rendered prompt uses the edited default content.
 - **GIVEN** auto-fix is enabled and a watched PR transitions from passing to failing CI, **WHEN** the 1-minute PR watch poll observes the failure, **THEN** Kandev fetches full PR feedback and sends or queues one auto-fix prompt for that failure snapshot.
+- **GIVEN** auto-fix is enabled and checks are settled, **WHEN** a linked PR is
+  `dirty`, **THEN** Kandev sends or queues one conflict repair prompt under the
+  [GitHub integration contract](../../integrations/requirements/github-pr-auto-fix-conflicts.md).
 - **GIVEN** auto-fix is enabled and a PR still has queued, pending, or in-progress checks, **WHEN** automation evaluates the PR, **THEN** Kandev does not send or queue an `@ci-auto-fix` prompt and does not count a round, even if some checks have already failed or comments are present.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** the same failure is observed again on a later poll, **THEN** no duplicate prompt is sent.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** a new failed check or new unresolved review comment appears, **THEN** Kandev sends or queues a new prompt containing the new or materially changed feedback.

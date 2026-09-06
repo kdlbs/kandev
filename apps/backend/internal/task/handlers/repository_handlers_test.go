@@ -416,6 +416,59 @@ func TestHTTPListBranchesRejectsInvalidExplicitPath(t *testing.T) {
 	}
 }
 
+func TestHTTPDesktopDiscoveryRootLifecycle(t *testing.T) {
+	router, repo, _ := newDesktopRepositoryHTTPTestRouter(t)
+	rootPath := canonicalTempDir(t)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/repositories/discovery/roots",
+		strings.NewReader(`{"path":`+strconv.Quote(rootPath)+`}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("add status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), strconv.Quote(rootPath)) {
+		t.Fatalf("add response does not contain root path %q: %s", rootPath, response.Body.String())
+	}
+
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/api/v1/repositories/discovery/roots", nil))
+	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), strconv.Quote(rootPath)) {
+		t.Fatalf("list status/body = %d/%s", listResponse.Code, listResponse.Body.String())
+	}
+
+	snapshotResponse := httptest.NewRecorder()
+	router.ServeHTTP(snapshotResponse, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/ws-1/repositories/discovery",
+		nil,
+	))
+	if snapshotResponse.Code != http.StatusOK || !strings.Contains(snapshotResponse.Body.String(), `"desktop_runtime":true`) {
+		t.Fatalf("snapshot status/body = %d/%s", snapshotResponse.Code, snapshotResponse.Body.String())
+	}
+
+	removeResponse := httptest.NewRecorder()
+	router.ServeHTTP(removeResponse, httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/repositories/discovery/roots?path="+url.QueryEscape(rootPath),
+		nil,
+	))
+	if removeResponse.Code != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want %d; body = %s", removeResponse.Code, http.StatusNoContent, removeResponse.Body.String())
+	}
+	roots, err := repo.ListDesktopDiscoveryRoots(context.Background())
+	if err != nil {
+		t.Fatalf("list roots after remove: %v", err)
+	}
+	if len(roots) != 0 {
+		t.Fatalf("roots after remove = %+v, want none", roots)
+	}
+}
+
 func TestHTTPLocalRepositoryStatusRejectsInvalidExplicitPath(t *testing.T) {
 	router, _ := newRepositoryHTTPTestRouter(t)
 	request := httptest.NewRequest(
@@ -439,6 +492,14 @@ func newRepositoryHTTPTestRouter(t *testing.T) (*gin.Engine, *taskrepo.Repositor
 }
 
 func newRepositoryHTTPTestRouterWithService(t *testing.T) (*gin.Engine, *taskrepo.Repository, *service.Service) {
+	return newRepositoryHTTPTestRouterWithConfig(t, service.RepositoryDiscoveryConfig{})
+}
+
+func newDesktopRepositoryHTTPTestRouter(t *testing.T) (*gin.Engine, *taskrepo.Repository, *service.Service) {
+	return newRepositoryHTTPTestRouterWithConfig(t, service.RepositoryDiscoveryConfig{DesktopRuntime: true})
+}
+
+func newRepositoryHTTPTestRouterWithConfig(t *testing.T, discoveryConfig service.RepositoryDiscoveryConfig) (*gin.Engine, *taskrepo.Repository, *service.Service) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -466,9 +527,10 @@ func newRepositoryHTTPTestRouterWithService(t *testing.T) (*gin.Engine, *taskrep
 	}
 	eventBus := bus.NewMemoryEventBus(log)
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		RepoEntities: repo,
-	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+		Workspaces:     repo,
+		RepoEntities:   repo,
+		DiscoveryRoots: repo,
+	}, eventBus, log, discoveryConfig)
 	router := gin.New()
 	NewRepositoryHandlers(svc, log).registerHTTP(router)
 	return router, repo, svc

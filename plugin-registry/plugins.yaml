@@ -56,6 +56,9 @@ plugins:
   - id: kandev-plugin-youtrack
     repo: ahmedbally/kandev-plugin-youtrack
     categories: [integrations]
+  - id: kandev-plugin-deepseek-balance
+    repo: Fclem/kandev-plugin-deepseek-balance
+    categories: [analytics]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
