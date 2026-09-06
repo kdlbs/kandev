@@ -44,7 +44,7 @@ import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error"
 import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-import { isTaskLaunchErrorVisibleForSession } from "@/components/task/chat/types";
+import { isTaskLaunchErrorOwnedBySession } from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 
 /** Returns a `clarificationKey` that increments each time a pending
@@ -514,7 +514,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const activeLaunchError = launchStatusSummary?.active_error;
   const launchErrorOwned = Boolean(
     isTypedTaskLaunchError(activeLaunchError) &&
-    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId),
+    isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
   );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
@@ -684,6 +684,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             isVisible={transcriptIsVisible}
             launchErrorOwned={launchErrorOwned}
             launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
+            launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
             stickyPromptBar={
               showAnchoredBar && lastPromptMessage ? (
                 <AnchoredLastPromptBar

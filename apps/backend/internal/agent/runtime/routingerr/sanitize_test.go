@@ -81,6 +81,12 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustHave:    []string{"[path-redacted]"},
 		},
 		{
+			name:        "path redaction does not consume a following endpoint",
+			in:          "cannot read /workspace/.env while connecting to https://endpoint.example.test",
+			mustNotHave: []string{"/workspace/.env"},
+			mustHave:    []string{"https://endpoint.example.test"},
+		},
+		{
 			name:        "windows workspace path",
 			in:          `checkout failed in C:\Users\alice\workspace\repo\main.go`,
 			mustNotHave: []string{`C:\Users\alice\workspace\repo\main.go`},

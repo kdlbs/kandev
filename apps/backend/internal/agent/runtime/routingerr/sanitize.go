@@ -41,7 +41,7 @@ var redactions = []redaction{
 }
 
 var (
-	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n"']+`)
+	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n\s"'<>]+`)
 	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
 )
 

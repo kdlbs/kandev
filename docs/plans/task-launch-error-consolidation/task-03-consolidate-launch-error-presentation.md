@@ -25,10 +25,12 @@ Give desktop and phone users the same cause, details, and valid recovery.
 
 ## In scope
 
-- Derive one launch-error owner from session identity and error stamp.
+- Derive separate launch-card visibility and session-surface ownership from
+  session identity and error stamp.
 - Add clear category text, a no-change statement, and a details disclosure.
 - Suppress matching duplicate notices, rows, banners, empty-turn copy, and toasts.
-- Preserve unrelated historical and runtime errors.
+- Preserve unrelated historical and runtime errors, including stale
+  launch-only transcript rows.
 - Add all required locale values.
 - Add desktop and mobile Playwright coverage.
 

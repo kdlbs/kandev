@@ -47,6 +47,7 @@ const laterFailure = {
   },
 } satisfies Message;
 
+// eslint-disable-next-line max-lines-per-function -- footer ownership cases share one focused fixture.
 describe("MessageListFooter", () => {
   it("lets an actionable footer failure own the failure presentation", () => {
     render(
@@ -137,5 +138,40 @@ describe("MessageListFooter", () => {
 
     expect(screen.queryByTestId(AGENT_STATUS_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(ACTION_MESSAGE_TEST_ID)).toBeNull();
+  });
+
+  it("keeps stale launch failure footer history when the current card owns the error", () => {
+    const staleFailure = {
+      ...actionableFailure,
+      id: "failure-stale",
+      content: "Stale branch recovery",
+      metadata: {
+        ...actionableFailure.metadata,
+        launch_error_stamp: "old-stamp",
+      },
+    } satisfies Message;
+    const currentFailure = {
+      ...actionableFailure,
+      id: "failure-current",
+      content: "Current branch recovery",
+      metadata: {
+        ...actionableFailure.metadata,
+        launch_error_stamp: "current-stamp",
+      },
+    } satisfies Message;
+
+    render(
+      <MessageListFooter
+        sessionState={FAILED_SESSION_STATE}
+        sessionId={SESSION_ID}
+        messages={[]}
+        footerActionMessages={[staleFailure, currentFailure]}
+        launchErrorOwned
+        launchErrorStamp="current-stamp"
+      />,
+    );
+
+    expect(screen.getByText("Stale branch recovery")).toBeTruthy();
+    expect(screen.queryByText("Current branch recovery")).toBeNull();
   });
 });

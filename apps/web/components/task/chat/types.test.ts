@@ -3,6 +3,7 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 import {
   isLaunchErrorSurfaceMessage,
   isMatchingTaskLaunchError,
+  isTaskLaunchErrorOwnedBySession,
   isRichOutputMessage,
   kandevToolStemOf,
   type ToolCallMetadata,
@@ -106,6 +107,22 @@ describe("task launch error presentation predicates", () => {
         errorStamp: "stamp-1",
       }),
     ).toBe(false);
+  });
+
+  it("keeps a task-wide card visible without giving it ownership of a prior session", () => {
+    const activeError = { stamp: "stamp-1" };
+
+    expect(isTaskLaunchErrorOwnedBySession(activeError, null)).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, undefined)).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "prior-session")).toBe(false);
+  });
+
+  it("gives a session-owned error ownership only of its exact session", () => {
+    const activeError = { session_id: "session-1", stamp: "stamp-1" };
+
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "session-1")).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, null)).toBe(false);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "session-2")).toBe(false);
   });
 
   it.each([

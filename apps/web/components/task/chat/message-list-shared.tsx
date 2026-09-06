@@ -72,6 +72,8 @@ export type MessageListProps = {
   launchErrorOwned?: boolean;
   /** Stamp used to distinguish a matching last-agent-error notice. */
   launchErrorStamp?: string;
+  /** Timestamp used to identify unstamped synthetic rows from the active failure. */
+  launchErrorOccurredAt?: string;
 };
 
 /** Imperative handle exposed by `MessageList`, letting the chat panel scroll
@@ -96,14 +98,62 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
+const LAUNCH_ERROR_STAMP_KEYS = ["launch_error_stamp", "error_stamp"] as const;
+
+function launchErrorSurfaceStamp(message: Message): string | undefined {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of LAUNCH_ERROR_STAMP_KEYS) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function launchErrorSurfaceMessageIds(
+  messages: Message[],
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): Set<string> {
+  const launchMessages = messages.filter(isLaunchErrorSurfaceMessage);
+  if (launchMessages.length === 0) return new Set();
+
+  const unstampedMessages = launchMessages.filter(
+    (message) => launchErrorSurfaceStamp(message) === undefined,
+  );
+  const hiddenIds = new Set<string>();
+  if (launchErrorStamp) {
+    const stampedMatches = launchMessages.filter(
+      (message) => launchErrorSurfaceStamp(message) === launchErrorStamp,
+    );
+    stampedMatches.forEach((message) => hiddenIds.add(message.id));
+  }
+
+  const occurredAt = launchErrorOccurredAt ? Date.parse(launchErrorOccurredAt) : Number.NaN;
+  if (!Number.isNaN(occurredAt)) {
+    unstampedMessages.forEach((message) => {
+      const createdAt = Date.parse(message.created_at);
+      if (!Number.isNaN(createdAt) && createdAt >= occurredAt) hiddenIds.add(message.id);
+    });
+  }
+
+  if (hiddenIds.size > 0 || launchErrorStamp || launchErrorOccurredAt) return hiddenIds;
+
+  // Older synthetic rows do not carry the launch stamp. Keep historical rows
+  // intact and hide only the most recent row when no identity is available.
+  const fallbackMessage = launchMessages[launchMessages.length - 1];
+  return fallbackMessage ? new Set([fallbackMessage.id]) : new Set();
+}
+
 /** Remove the launch-only transcript decorations once the task card owns them. */
 export function filterLaunchErrorMessages(
   messages: Message[],
   launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
 ): Message[] {
-  return launchErrorOwned
-    ? messages.filter((message) => !isLaunchErrorSurfaceMessage(message))
-    : messages;
+  if (!launchErrorOwned) return messages;
+  const hiddenIds = launchErrorSurfaceMessageIds(messages, launchErrorStamp, launchErrorOccurredAt);
+  return messages.filter((message) => !hiddenIds.has(message.id));
 }
 
 /** Remove synthetic launch rows while preserving ordinary transcript activity. */
@@ -111,14 +161,20 @@ export function filterLaunchErrorItems(
   items: RenderItem[],
   launchErrorOwned: boolean,
   launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
 ): RenderItem[] {
   if (!launchErrorOwned) return items;
+  const hiddenMessageIds = launchErrorSurfaceMessageIds(
+    items.flatMap((item) => (item.type === "message" ? [item.message] : [])),
+    launchErrorStamp,
+    launchErrorOccurredAt,
+  );
   return items.filter((item) => {
     if (item.type === "prepare_progress") return false;
     if (item.type === "agent_error_notice") {
-      return lastAgentErrorStamp(item.error) !== launchErrorStamp;
+      return !launchErrorStamp || lastAgentErrorStamp(item.error) !== launchErrorStamp;
     }
-    return item.type !== "message" || !isLaunchErrorSurfaceMessage(item.message);
+    return item.type !== "message" || !hiddenMessageIds.has(item.message.id);
   });
 }
 

@@ -1160,7 +1160,7 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	// signal:killed). With this ordering the budget only counts actual
 	// git execution time.
 	if prNumber > 0 {
-		remoteRef := fmt.Sprintf("refs/remotes/origin/pr/%d", prNumber)
+		remoteRef := pullRequestSnapshotRef(prNumber)
 		refspec := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, remoteRef)
 		output, err, fetchCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", refspec)
 		if err != nil {
@@ -1177,14 +1177,14 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 				prNumber, reason, ErrWorkspaceCheckoutFailed, syncFailureCause(reason, err, fetchCtxErr),
 			)
 		}
-		exists, verifyErr := m.branchExists(ctx, repoPath, "origin/pr/"+fmt.Sprint(prNumber))
+		exists, verifyErr := m.branchExists(ctx, repoPath, remoteRef)
 		if verifyErr != nil {
 			return nil, fmt.Errorf("verify fetched pull request head %d: %w: %w", prNumber, ErrWorkspaceCheckoutFailed, verifyErr)
 		}
 		if !exists {
 			return nil, fmt.Errorf("verify fetched pull request head %d: %w", prNumber, ErrWorkspaceCheckoutFailed)
 		}
-		return &FetchBranchResult{StartPoint: "origin/pr/" + fmt.Sprint(prNumber)}, nil
+		return &FetchBranchResult{StartPoint: remoteRef}, nil
 	}
 
 	refspec := branch + ":" + branch

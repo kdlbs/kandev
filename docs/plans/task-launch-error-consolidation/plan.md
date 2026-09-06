@@ -55,11 +55,11 @@ status, and a stopped-session recovery banner from the same failed start.
 ### Pull-request ref isolation
 
 Update `apps/backend/internal/worktree/manager_lifecycle.go` to fetch a
-pull-request head into a PR-scoped internal ref. Verify that ref before worktree
-creation. If a same-named local branch has unrelated history, create a unique
-task branch from the verified ref using a task-owned suffix and bounded
-collision retries. Set a source-branch upstream only when its commit matches
-the verified PR start point.
+pull-request head into the Kandev-owned `refs/kandev/pull/<N>/head` ref. Verify
+that full ref before worktree creation. If a same-named local branch has
+unrelated history, create a unique task branch from the verified ref using a
+task-owned suffix and bounded collision retries. Set a source-branch upstream
+only when its commit matches the verified PR start point.
 
 Keep the named local branch unchanged. Continue to use the existing Git
 admission, timeout, and non-interactive environment.

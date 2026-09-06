@@ -15,6 +15,13 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
+// pullRequestSnapshotRef is internal state owned by Kandev. Keeping PR heads
+// outside refs/remotes/origin prevents ordinary remote pruning or a user branch
+// named pr/<N> from changing the commit selected for a task launch.
+func pullRequestSnapshotRef(prNumber int) string {
+	return fmt.Sprintf("refs/kandev/pull/%d/head", prNumber)
+}
+
 // isGitRepo checks if a path is a Git repository.
 func (m *Manager) isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
@@ -212,8 +219,8 @@ func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPa
 }
 
 // prepareBranchFromRefreshedOrigin selects a provider-refreshed source branch
-// without contacting origin. A PR number selects the dedicated origin/pr/<N>
-// ref, which is also how fork PR heads are kept available after the
+// without contacting origin. A PR number selects the dedicated Kandev-owned
+// snapshot ref, which is also how fork PR heads are kept available after the
 // authenticated refresh. PR preparation never creates or resets a local
 // branch with the PR's source name.
 func (m *Manager) prepareBranchFromRefreshedOrigin(
@@ -221,7 +228,7 @@ func (m *Manager) prepareBranchFromRefreshedOrigin(
 ) (string, error) {
 	remoteRef := "origin/" + sourceBranch
 	if prNumber > 0 {
-		remoteRef = fmt.Sprintf("origin/pr/%d", prNumber)
+		remoteRef = pullRequestSnapshotRef(prNumber)
 	}
 	localExists, err := m.branchExists(ctx, repoPath, localBranch)
 	if err != nil {

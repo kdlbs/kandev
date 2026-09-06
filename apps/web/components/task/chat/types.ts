@@ -230,6 +230,16 @@ export function isTaskLaunchErrorVisibleForSession(
   return activeError.session_id === sessionId;
 }
 
+/** Whether the active launch error owns the selected session's surfaces. */
+export function isTaskLaunchErrorOwnedBySession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (activeError.session_id == null) return sessionId == null;
+  return sessionId != null && activeError.session_id === sessionId;
+}
+
 /** Messages that are only useful while a launch failure has no typed owner. */
 export function isLaunchErrorSurfaceMessage(message: Message): boolean {
   const metadata = message.metadata as Record<string, unknown> | undefined;

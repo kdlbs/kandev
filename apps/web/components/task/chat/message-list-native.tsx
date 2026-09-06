@@ -274,6 +274,8 @@ type NativeMessageListBodyProps = {
   autoScrollEnabled: boolean;
   dividerBeforeItemKey?: string | null;
   launchErrorOwned: boolean;
+  launchErrorStamp?: string;
+  launchErrorOccurredAt?: string;
 };
 
 /**
@@ -478,6 +480,8 @@ function NativeMessageListBody({
   autoScrollEnabled,
   dividerBeforeItemKey,
   launchErrorOwned,
+  launchErrorStamp,
+  launchErrorOccurredAt,
 }: NativeMessageListBodyProps) {
   return (
     <div className="p-4">
@@ -520,6 +524,8 @@ function NativeMessageListBody({
         isWorking={isWorking}
         footerActionMessages={footerActionMessages}
         launchErrorOwned={launchErrorOwned}
+        launchErrorStamp={launchErrorStamp}
+        launchErrorOccurredAt={launchErrorOccurredAt}
       />
 
       {/* Bottom anchor keeps the view pinned while auto-scroll is enabled.
@@ -565,22 +571,36 @@ export const NativeMessageList = memo(
       isVisible = true,
       launchErrorOwned = false,
       launchErrorStamp,
+      launchErrorOccurredAt,
     }: MessageListProps,
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const visibleItems = useMemo(
-      () => filterLaunchErrorItems(items, launchErrorOwned, launchErrorStamp),
-      [items, launchErrorOwned, launchErrorStamp],
+      () =>
+        filterLaunchErrorItems(items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt),
+      [items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
     );
     const visibleMessages = useMemo(
-      () => filterLaunchErrorMessages(messages, launchErrorOwned),
-      [messages, launchErrorOwned],
+      () =>
+        filterLaunchErrorMessages(
+          messages,
+          launchErrorOwned,
+          launchErrorStamp,
+          launchErrorOccurredAt,
+        ),
+      [messages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
     );
     const visibleFooterActionMessages = useMemo(
-      () => filterLaunchErrorMessages(footerActionMessages ?? [], launchErrorOwned),
-      [footerActionMessages, launchErrorOwned],
+      () =>
+        filterLaunchErrorMessages(
+          footerActionMessages ?? [],
+          launchErrorOwned,
+          launchErrorStamp,
+          launchErrorOccurredAt,
+        ),
+      [footerActionMessages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
     );
 
     const { isInitialLoading, showLoadingState } = getConversationLoadingState({
@@ -663,6 +683,8 @@ export const NativeMessageList = memo(
           autoScrollEnabled={autoScrollEnabled}
           dividerBeforeItemKey={dividerBeforeItemKey}
           launchErrorOwned={launchErrorOwned}
+          launchErrorStamp={launchErrorStamp}
+          launchErrorOccurredAt={launchErrorOccurredAt}
         />
       </SessionPanelContent>
     );

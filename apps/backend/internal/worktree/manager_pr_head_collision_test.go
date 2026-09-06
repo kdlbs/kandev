@@ -12,8 +12,8 @@ func TestCreateWorktreePRHeadCollisionPreservesLocalBranch(t *testing.T) {
 	const branch = "feature/unit-7-reject-leg-wa-waj"
 
 	repoPath, firstPRHeadSHA := initGitRepoWithPullRef(t, 3294, branch)
-	runGit(t, repoPath, "fetch", "origin", pullHeadRef(3294)+":refs/remotes/origin/pr/3294")
-	runGit(t, repoPath, "branch", branch, "refs/remotes/origin/pr/3294")
+	runGit(t, repoPath, "fetch", "origin", pullHeadRef(3294)+":"+pullRequestSnapshotRef(3294))
+	runGit(t, repoPath, "branch", branch, pullRequestSnapshotRef(3294))
 
 	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
 	remoteClone := filepath.Join(t.TempDir(), "pr-3408-clone")
@@ -63,7 +63,7 @@ func TestCreateWorktreePRHeadCollisionPreservesLocalBranch(t *testing.T) {
 	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != secondPRHeadSHA {
 		t.Fatalf("worktree HEAD SHA = %q, want exact PR 3408 head %q", got, secondPRHeadSHA)
 	}
-	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/remotes/origin/pr/3408")); got != secondPRHeadSHA {
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", pullRequestSnapshotRef(3408))); got != secondPRHeadSHA {
 		t.Fatalf("stored PR ref SHA = %q, want %q", got, secondPRHeadSHA)
 	}
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{upstream}")
