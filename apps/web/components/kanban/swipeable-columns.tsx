@@ -110,7 +110,7 @@ export function SwipeableColumns({
     (stepId: string) => {
       return tasks
         .filter((task) => task.workflowStepId === stepId)
-        .map((task) => ({ ...task, position: task.position ?? 0 }))
+        .map((task) => (task.position == null ? { ...task, position: 0 } : task))
         .sort(comparator);
     },
     [tasks, comparator],

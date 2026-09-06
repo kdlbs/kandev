@@ -10,7 +10,7 @@ import {
   selectWorkflowSwimlanes,
 } from "@/lib/kanban/workflow-swimlanes";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
-import type { Repository } from "@/lib/types/http";
+import type { Repository, TaskPriority } from "@/lib/types/http";
 
 export const EMPTY_HIDDEN_STEP_IDS: string[] = [];
 
@@ -21,6 +21,7 @@ type TaskProjectionCacheEntry = {
   searchQuery: string;
   vcsSearchTextByTaskId: Record<string, string> | undefined;
   matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
+  priorityFilterTokens: TaskPriority[];
   visibleTasks: Task[];
 };
 
@@ -88,11 +89,12 @@ function useOrderedWorkflowLists(
 
 type TaskProjectionCacheOptions = {
   snapshots: Record<string, WorkflowSnapshotData>;
-  hiddenWorkflowStepIds: Record<string, string[]>;
+  hiddenWorkflowStepIds: Record<string, string[] | undefined>;
   repoFilter: Set<string>;
   searchQuery: string;
   vcsSearchTextByTaskId: Record<string, string> | undefined;
-  matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
+  matchesPluginTaskFilters?: (taskId: string) => boolean;
+  priorityFilterTokens: TaskPriority[];
 };
 
 function useTaskProjectionCache({
@@ -102,7 +104,8 @@ function useTaskProjectionCache({
   searchQuery,
   vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
-}: TaskProjectionCacheOptions) {
+  priorityFilterTokens,
+}: TaskProjectionCacheOptions): (workflowId: string) => Task[] {
   const projectionCacheRef = useRef(new Map<string, TaskProjectionCacheEntry>());
   useEffect(() => {
     for (const workflowId of projectionCacheRef.current.keys()) {
@@ -120,7 +123,8 @@ function useTaskProjectionCache({
         cached.repoFilter === repoFilter &&
         cached.searchQuery === searchQuery &&
         cached.vcsSearchTextByTaskId === vcsSearchTextByTaskId &&
-        cached.matchesPluginTaskFilters === matchesPluginTaskFilters
+        cached.matchesPluginTaskFilters === matchesPluginTaskFilters &&
+        cached.priorityFilterTokens === priorityFilterTokens
       ) {
         return cached.visibleTasks;
       }
@@ -129,6 +133,7 @@ function useTaskProjectionCache({
         vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenStepIds?.length ? new Set(hiddenStepIds) : undefined,
+        priorityFilterTokens,
       }).visibleTasks;
       projectionCacheRef.current.set(workflowId, {
         snapshot,
@@ -137,6 +142,7 @@ function useTaskProjectionCache({
         searchQuery,
         vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
+        priorityFilterTokens,
         visibleTasks,
       });
       return visibleTasks;
@@ -144,6 +150,7 @@ function useTaskProjectionCache({
     [
       hiddenWorkflowStepIds,
       matchesPluginTaskFilters,
+      priorityFilterTokens,
       repoFilter,
       searchQuery,
       vcsSearchTextByTaskId,
@@ -167,6 +174,9 @@ export function useSwimlaneRenderData(
   const workflowIdsWithAutoHideEmptySteps = useAppStore(
     (state) => state.userSettings.workflowIdsWithAutoHideEmptySteps,
   );
+  const priorityFilterTokens = useAppStore(
+    (state) => state.userSettings.kanbanPriorityFilterTokens,
+  );
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
@@ -189,6 +199,7 @@ export function useSwimlaneRenderData(
     searchQuery,
     vcsSearchTextByTaskId,
     matchesPluginTaskFilters,
+    priorityFilterTokens,
   });
 
   const hasLiveHiddenSteps = useCallback(
@@ -251,6 +262,9 @@ export function useWorkflowSwimlaneData(
   const autoHideEmpty = useAppStore((state) =>
     state.userSettings.workflowIdsWithAutoHideEmptySteps.includes(workflowId),
   );
+  const priorityFilterTokens = useAppStore(
+    (state) => state.userSettings.kanbanPriorityFilterTokens,
+  );
   const derivedHiddenSet = useMemo(() => {
     if (!snapshot || hiddenStepIds.length === 0) return new Set<string>();
     const liveStepIds = new Set(snapshot.steps.map((step) => step.id));
@@ -264,10 +278,12 @@ export function useWorkflowSwimlaneData(
       vcsSearchTextByTaskId,
       matchesPluginTaskFilters,
       hiddenStepIds: hiddenSet,
+      priorityFilterTokens,
     });
   }, [
     hiddenSet,
     matchesPluginTaskFilters,
+    priorityFilterTokens,
     repoFilter,
     searchQuery,
     vcsSearchTextByTaskId,
