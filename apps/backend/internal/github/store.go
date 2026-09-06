@@ -1646,28 +1646,38 @@ func (s *Store) addPRScopeMigrationColumn() error {
 	return nil
 }
 
-// tableColumns returns the set of column names declared on `table`. Cheap
-// SQLite PRAGMA lookup; used by addWatchSelfHealColumns to skip ALTERs on a
-// fresh install whose createTablesSQL already includes the columns. Mirrors
-// the helper in jira/store.go.
+// tableColumns returns the set of column names declared on `table`.
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	var rows *sqlx.Rows
+	var err error
+	postgres := dialect.IsPostgres(s.db.DriverName())
+	if postgres {
+		rows, err = s.db.Queryx(`
+			SELECT ordinal_position, column_name, data_type, column_default
+			FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = $1
+			ORDER BY ordinal_position`, table)
+	} else {
+		rows, err = s.db.Queryx(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	cols := make(map[string]struct{})
 	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return nil, err
+		var cid int
+		var name, ctype string
+		var dflt sql.NullString
+		if postgres {
+			if err := rows.Scan(&cid, &name, &ctype, &dflt); err != nil {
+				return nil, err
+			}
+		} else {
+			var notnull, pk int
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				return nil, err
+			}
 		}
 		cols[name] = struct{}{}
 	}
