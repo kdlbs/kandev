@@ -367,6 +367,9 @@ jobs:
     needs: pr-walkthrough-publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: pr-description-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
@@ -392,47 +395,113 @@ jobs:
           test -f scripts/pr-walkthrough-pr-body
           test -n "$PUBLIC_URL"
 
-          pr_response_ok=false
           for attempt in 1 2 3; do
-            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json &&
-              python3 -c 'import json; json.load(open("pr-response.json", encoding="utf-8"))'; then
-              pr_response_ok=true
-              break
-            fi
-            if [ "$attempt" -lt 3 ]; then
+            rm -f \
+              pr-response.json \
+              pr-latest-response.json \
+              pr-verified-response.json \
+              pr-update.json \
+              pr-verify-update.json \
+              pr-body-before \
+              pr-body-latest \
+              pr-body-expected \
+              pr-body-verified
+
+            if ! gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json ||
+              ! python3 -c 'import json; json.load(open("pr-response.json", encoding="utf-8"))'; then
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to fetch the pull request description." >&2
+                exit 1
+              fi
               sleep 2
+              continue
             fi
-          done
-          test "$pr_response_ok" = true
 
-          set +e
-          python3 scripts/pr-walkthrough-pr-body \
-            --github-response pr-response.json \
-            --output pr-update.json \
-            --url "$PUBLIC_URL" \
-            --pr-number "$PR_NUMBER" \
-            --head-sha "$HEAD_SHA"
-          update_status=$?
-          set -e
+            set +e
+            python3 scripts/pr-walkthrough-pr-body \
+              --github-response pr-response.json \
+              --output pr-update.json \
+              --url "$PUBLIC_URL" \
+              --pr-number "$PR_NUMBER" \
+              --head-sha "$HEAD_SHA"
+            update_status=$?
+            set -e
 
-          if [ "$update_status" -eq 3 ]; then
-            echo "PR description already links the published walkthrough." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          test "$update_status" -eq 0
+            if [ "$update_status" -eq 3 ]; then
+              echo "PR description already links the published walkthrough." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            test "$update_status" -eq 0
+            jq -j '.body // ""' pr-update.json > pr-body-expected
 
-          patch_ok=false
-          for attempt in 1 2 3; do
-            if gh api --method PATCH \
+            jq -j '.body // ""' pr-response.json > pr-body-before
+            if ! gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-latest-response.json ||
+              ! python3 -c 'import json; json.load(open("pr-latest-response.json", encoding="utf-8"))'; then
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to refresh the pull request description." >&2
+                exit 1
+              fi
+              sleep 2
+              continue
+            fi
+            jq -j '.body // ""' pr-latest-response.json > pr-body-latest
+            if ! cmp -- pr-body-before pr-body-latest; then
+              echo "Pull request description changed before PATCH; retrying." >&2
+              sleep 2
+              continue
+            fi
+
+            if ! gh api --method PATCH \
               "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
               --input pr-update.json \
               --silent; then
-              patch_ok=true
-              break
-            fi
-            if [ "$attempt" -lt 3 ]; then
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to update the pull request description." >&2
+                exit 1
+              fi
               sleep 2
+              continue
             fi
+
+            if ! gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-verified-response.json ||
+              ! python3 -c 'import json; json.load(open("pr-verified-response.json", encoding="utf-8"))'; then
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to verify the pull request description." >&2
+                exit 1
+              fi
+              sleep 2
+              continue
+            fi
+            jq -j '.body // ""' pr-verified-response.json > pr-body-verified
+            if ! cmp -- pr-body-expected pr-body-verified; then
+              if [ "$attempt" -eq 3 ]; then
+                echo "Pull request description changed before readback verification." >&2
+                exit 1
+              fi
+              echo "Pull request description changed after PATCH; retrying." >&2
+              sleep 2
+              continue
+            fi
+
+            set +e
+            python3 scripts/pr-walkthrough-pr-body \
+              --github-response pr-verified-response.json \
+              --output pr-verify-update.json \
+              --url "$PUBLIC_URL" \
+              --pr-number "$PR_NUMBER" \
+              --head-sha "$HEAD_SHA"
+            verify_status=$?
+            set -e
+            if [ "$verify_status" -eq 3 ]; then
+              echo "Added the walkthrough link to the top of the PR description." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Pull request description readback did not contain the published walkthrough." >&2
+              exit 1
+            fi
+            echo "Pull request description readback changed; retrying." >&2
+            sleep 2
           done
-          test "$patch_ok" = true
-          echo "Added the walkthrough link to the top of the PR description." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pull request description update did not converge." >&2
+          exit 1

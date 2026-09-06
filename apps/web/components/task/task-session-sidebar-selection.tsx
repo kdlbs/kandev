@@ -11,6 +11,7 @@ import {
 } from "@/lib/sidebar/apply-view";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 
 type BulkConfirmState = { ids: string[]; executorTypes: Array<string | null | undefined> };
 
@@ -22,7 +23,7 @@ type BulkConfirmState = { ids: string[]; executorTypes: Array<string | null | un
  */
 export function useBulkConfirmDialog(
   displayTasks: Array<{ id: string; remoteExecutorType?: string | null }>,
-  run: (ids: string[], opts?: { cascade?: boolean }) => Promise<void>,
+  run: (ids: string[], opts?: TaskActionOptions) => Promise<void>,
 ) {
   const [state, setState] = useState<BulkConfirmState | null>(null);
 
@@ -35,10 +36,10 @@ export function useBulkConfirmDialog(
   );
 
   const confirm = useCallback(
-    async ({ cascade }: { cascade: boolean }) => {
+    async ({ cascade, discardWorktreeChanges }: TaskActionOptions & { cascade: boolean }) => {
       if (!state) return;
       try {
-        await run(state.ids, { cascade });
+        await run(state.ids, { cascade, discardWorktreeChanges });
       } catch (error) {
         console.error("Bulk action failed:", error);
       } finally {

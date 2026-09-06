@@ -20,6 +20,7 @@ export function useWorkspaceRepositoryOptions(workspaceId: string | null, open: 
     repositories,
     discoveredRepositories: discovery.repositories,
     repositoriesRefreshing: repositoriesLoading || discovery.isLoading || discovery.isRefreshing,
+    error: discovery.error,
     refreshRepositoryOptions,
   };
 }
