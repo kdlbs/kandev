@@ -299,6 +299,43 @@ func TestApprovalRevokeRetryRejectsChangedAuditPayload(t *testing.T) {
 	}
 }
 
+func TestApprovalRevokeRetryReplaysExactPayloadAfterRevisionAdvances(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "grant-1", at); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	first, err := ledger.revokeIfRevision("inst-1", "ws-1", 1, "human", "revoke", "revoke-1", at.Add(time.Second), false)
+	if err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load after revoke: %v", err)
+	}
+	current := file.Approvals[approvalKey("inst-1", "ws-1")]
+	if current.Revision != first.Revision {
+		t.Fatalf("loaded approval revision = %d, want %d", current.Revision, first.Revision)
+	}
+
+	replayed, err := ledger.revokeIfRevision("inst-1", "ws-1", 1, "human", "revoke", "revoke-1", at.Add(2*time.Second), false)
+	if err != nil {
+		t.Fatalf("exact replay revoke: %v", err)
+	}
+	if replayed.Revision != first.Revision || replayed.State != first.State || !replayed.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatalf("retry did not replay original revoke: first=%#v replayed=%#v", first, replayed)
+	}
+
+	file, err = ledger.load()
+	if err != nil {
+		t.Fatalf("reload after replay: %v", err)
+	}
+	if len(file.Events) != 2 {
+		t.Fatalf("event count = %d, want grant and first revoke only", len(file.Events))
+	}
+}
+
 func TestApprovalGrantRetryReplaysAfterLaterRevision(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)

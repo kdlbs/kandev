@@ -273,7 +273,7 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 		idempotencyKey := approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)
 		if replayed, ok := file.Idempotency[idempotencyKey]; ok {
 			input, inputOK := file.IdempotencyInputs[idempotencyKey]
-			if inputOK && input.Revision == effectiveExpectedRevision && input.Actor == actor && input.Reason == reason {
+			if inputOK && input.Revision == expectedRevision && input.Actor == actor && input.Reason == reason {
 				return replayed, nil
 			}
 			return CapabilityApproval{}, ErrApprovalIdempotencyConflict
