@@ -88,6 +88,31 @@ func queuedMoveExitPending(task *models.Task) bool {
 	return !completed
 }
 
+// operationLedger is the in-memory idempotency ledger every OperationID-keyed
+// workflow trigger dedups against. Its zero value is usable: no constructor,
+// no initialization statement, safe for concurrent use without external
+// locking. A Service holds exactly one, as a direct field whose lifetime
+// outlives any single workflowStore built from it (see
+// docs/specs/workflow-engine-operation-ledger-lifetime/spec.md).
+type operationLedger struct {
+	applied sync.Map
+}
+
+func (l *operationLedger) isApplied(operationID string) bool {
+	if operationID == "" {
+		return false
+	}
+	_, ok := l.applied.Load(operationID)
+	return ok
+}
+
+func (l *operationLedger) markApplied(operationID string) {
+	if operationID == "" {
+		return
+	}
+	l.applied.Store(operationID, true)
+}
+
 // workflowStore implements engine.TransitionStore by delegating to the
 // orchestrator's existing repositories and services.
 type workflowStore struct {
@@ -101,7 +126,7 @@ type workflowStore struct {
 	logger              *logger.Logger
 	stepHistoryRecorder StepHistoryRecorder
 	guardedLifecycle    guardedTransitionLifecycle
-	appliedOps          sync.Map
+	ledger              *operationLedger
 	stepCache           *stepSpecCache
 }
 
@@ -111,6 +136,7 @@ func newWorkflowStore(
 	agentMgr executor.AgentManagerClient,
 	publishTaskUpdated taskUpdatedPublisher,
 	log *logger.Logger,
+	ledger *operationLedger,
 	publishers ...interface{},
 ) *workflowStore {
 	var moved taskMovedPublisher
@@ -147,6 +173,7 @@ func newWorkflowStore(
 		publishStateChanged: stateChanged,
 		logger:              log,
 		stepHistoryRecorder: history,
+		ledger:              ledger,
 		stepCache:           newStepSpecCache(),
 	}
 }
@@ -884,18 +911,11 @@ func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data 
 }
 
 func (s *workflowStore) IsOperationApplied(_ context.Context, operationID string) (bool, error) {
-	if operationID == "" {
-		return false, nil
-	}
-	_, ok := s.appliedOps.Load(operationID)
-	return ok, nil
+	return s.ledger.isApplied(operationID), nil
 }
 
 func (s *workflowStore) MarkOperationApplied(_ context.Context, operationID string) error {
-	if operationID == "" {
-		return nil
-	}
-	s.appliedOps.Store(operationID, true)
+	s.ledger.markApplied(operationID)
 	return nil
 }
 

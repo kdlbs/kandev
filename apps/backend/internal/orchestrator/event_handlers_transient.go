@@ -35,6 +35,7 @@ const (
 	metaKeySessionID      = "session_id"
 	metaKeyTaskID         = "task_id"
 	metaKeyNewState       = "new_state"
+	metaKeyAgentID        = "agent_id"
 	metaKeyAgentProfileID = "agent_profile_id"
 	metaKeyUpdatedAt      = "updated_at"
 )

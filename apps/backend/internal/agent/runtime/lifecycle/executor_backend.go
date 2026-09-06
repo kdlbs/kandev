@@ -255,7 +255,8 @@ const (
 	MetadataKeyModelOverride = "model_override"
 
 	// Office metadata keys
-	MetadataKeySkillManifestJSON = "skill_manifest_json"
+	MetadataKeySkillManifestJSON    = "skill_manifest_json"
+	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
 	MetadataKeySSHHostAlias          = "ssh_host_alias"
@@ -376,6 +377,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyWorktreeBranch:           true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
+	MetadataKeyOfficeAgentProfileID:     true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -392,6 +394,10 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	// Office identity belongs to the session that produced the runtime row and
+	// must not be inherited by a sibling session sharing the environment.
+	MetadataKeyOfficeAgentProfileID: true,
+
 	MetadataKeySSHRemoteSessionDir:             true,
 	MetadataKeySSHRemoteAgentctlPort:           true,
 	MetadataKeySSHRemoteAgentctlPID:            true,

@@ -825,6 +825,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		}
 	}
 
+	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -833,7 +834,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskEnvironmentID:              info.TaskEnvironmentID,
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
-			OfficeAgentProfileID:           info.AgentProfileID,
+			OfficeAgentProfileID:           officeAgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
 			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
@@ -881,11 +882,12 @@ func (m *Manager) prepareExecutionEnvironment(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) (*executionEnvironmentPreparation, error) {
+	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	managedReq := &LaunchRequest{
 		TaskID:             taskID,
 		WorkspaceID:        info.WorkspaceID,
 		SessionID:          info.SessionID,
-		AgentProfileID:     info.AgentProfileID,
+		AgentProfileID:     officeAgentProfileID,
 		ExecutionProfileID: executionProfileID,
 		ExecutorType:       info.ExecutorType,
 		Env:                make(map[string]string),
@@ -1013,6 +1015,18 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 	}
 	if info.ExecutionProfileID != "" {
 		return info.ExecutionProfileID
+	}
+	return info.AgentProfileID
+}
+
+func workspaceOfficeAgentProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	if value, ok := info.Metadata[MetadataKeyOfficeAgentProfileID].(string); ok {
+		if profileID := strings.TrimSpace(value); profileID != "" {
+			return profileID
+		}
 	}
 	return info.AgentProfileID
 }

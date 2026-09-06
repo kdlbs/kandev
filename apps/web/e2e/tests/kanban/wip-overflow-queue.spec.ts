@@ -43,7 +43,8 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceY = sourceBox!.y + sourceBox!.height / 2;
   await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
-  await testPage.mouse.move(sourceX + 20, sourceY);
+  await testPage.mouse.move(sourceX + 20, sourceY, { steps: 4 });
+  await expect(sourceCard).toHaveClass(/opacity-50/, { timeout: 5_000 });
   await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
   await testPage.evaluate(
     () =>
