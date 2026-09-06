@@ -248,8 +248,9 @@ that exists, which is the question it was actually asking.
 A third case reaches the same cross-step scan without either seat sitting at
 the current step at all: both `AddTaskReviewer`/`AddTaskApprover` seats are
 cast while the task sits on an earlier step (e.g. Backlog), so by the time
-the task reaches Review neither seat's `StepID` matches `review`. Here
-`ResolveParticipantRole` reads the role named by Review's own
+the task reaches Review neither seat's `StepID` matches `review`. The seats
+can share that earlier step or come from two different earlier steps. Here
+`ResolveParticipantRole` reads the role named by Review's own eligible
 `wait_for_quorum` guard and prefers the matching seat — `reviewer`, in the
 thin-workspace Review case — over the fixed approver-first order. This
 guard-role tiebreak only applies when the current step names exactly one

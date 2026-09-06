@@ -959,8 +959,8 @@ func (e *Engine) ResolveParticipantRole(
 }
 
 // guardRolesAtStep returns the set of roles named by wait_for_quorum guards
-// on stepID's on_turn_complete actions, used to break a cross-step role
-// resolution tie in favor of the role the step is actually waiting on.
+// on stepID's eligible on_turn_complete transitions, used to break a
+// cross-step role resolution tie in favor of the role the step is waiting on.
 // Returns an empty set when the step names no such guard or cannot be
 // loaded, so callers fall back to approver-wins rather than treating a load
 // failure as a role match.
@@ -974,6 +974,9 @@ func (e *Engine) guardRolesAtStep(ctx context.Context, workflowID, stepID string
 	}
 	roles := make(map[string]bool)
 	for _, action := range step.Events[TriggerOnTurnComplete] {
+		if !isTransitionAction(action.Kind) || action.RequiresApproval {
+			continue
+		}
 		if action.Guard == nil || action.Guard.WaitForQuorum == nil || action.Guard.WaitForQuorum.Role == "" {
 			continue
 		}

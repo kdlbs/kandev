@@ -200,9 +200,9 @@ func TestResolveParticipantRole_StepPreferredTransitionFires(t *testing.T) {
 // no-guard-at-step fallback: a caller holding both seats, with neither
 // seat's StepID matching the step being queried and that step naming no
 // wait_for_quorum guard (quorumEngine's step has a nil Guard), still
-// resolves under approver-wins — the step-preference early return only
-// kicks in when neither seat sits at the queried step, and the guard-role
-// tiebreak only kicks in when the queried step names exactly one guard role.
+// resolves under approver-wins — the step-preference early return applies
+// when either seat sits at the queried step, and the guard-role tiebreak only
+// kicks in when the queried step names exactly one guard role.
 func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
 	participants := scopedParticipants{perTask: []ParticipantInfo{
 		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review-1", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
@@ -257,6 +257,65 @@ func TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_GuardRoleWins(t *t
 	}
 	if result.FromStepID != "review" || result.ToStepID != "approval" {
 		t.Fatalf("unexpected transition endpoints: %#v", result)
+	}
+}
+
+// TestResolveParticipantRole_IgnoresApprovalRequiredGuard keeps role
+// resolution aligned with automatic transition evaluation: an approval-only
+// action is not a guard that the current step can satisfy automatically.
+func TestResolveParticipantRole_IgnoresApprovalRequiredGuard(t *testing.T) {
+	store := &stepStoreForQuorum{
+		state: MachineState{TaskID: "task-1", SessionID: "sess-1", WorkflowID: "wf", CurrentStepID: "review"},
+		step: StepSpec{
+			ID: "review", WorkflowID: "wf", Position: 1,
+			Events: map[Trigger][]Action{
+				TriggerOnTurnComplete: {
+					{Kind: ActionMoveToNext, RequiresApproval: true, Guard: &TransitionGuard{
+						WaitForQuorum: &WaitForQuorumGuard{Role: "approver", Threshold: QuorumAllApprove},
+					}},
+					{Kind: ActionMoveToNext, Guard: &TransitionGuard{
+						WaitForQuorum: &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove},
+					}},
+				},
+			},
+		},
+		next:    StepSpec{ID: "approval", Position: 2},
+		applied: map[string]bool{},
+	}
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "backlog", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "backlog", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := New(store, MapRegistry{}, WithParticipantStore(participants))
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Errorf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+}
+
+// TestResolveParticipantRole_BothSeatsAtDifferentNonCurrentSteps_GuardRoleWins
+// documents the AC-4 behavior for seats attached to two different earlier
+// steps. The implementation already applies the guard-role tie-break here.
+func TestResolveParticipantRole_BothSeatsAtDifferentNonCurrentSteps_GuardRoleWins(t *testing.T) {
+	store := quorumStore(&TransitionGuard{
+		WaitForQuorum: &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove},
+	})
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "backlog", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "approval", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := New(store, MapRegistry{}, WithParticipantStore(participants))
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Errorf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
 	}
 }
 
