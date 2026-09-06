@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -50,6 +50,10 @@ type TaskDeleteConfirmDialogProps = {
   requireDiscardConsent?: boolean;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
+  /** Element to return keyboard focus to on close, confirmed or cancelled
+   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
+   * default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type DiscardWorktreeChangesOptionProps = {
@@ -254,6 +258,7 @@ export function TaskDeleteConfirmDialog({
   requireDiscardConsent = false,
   onConfirm,
   confirmTestId,
+  focusReturnRef,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
   const safeCount = count ?? 0;
@@ -284,7 +289,17 @@ export function TaskDeleteConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={(event) => {
+          const target = focusReturnRef?.current;
+          if (!target || !document.contains(target)) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>

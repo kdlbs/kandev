@@ -98,7 +98,15 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
 function useEscapeKey(isOpen: boolean, close: () => void, isDisclosureOpen: () => boolean) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen && !isDisclosureOpen()) {
+      // `e.defaultPrevented` is the authoritative signal that an open actions
+      // menu already consumed this exact keypress (its `onEscapeKeyDown`
+      // calls `preventDefault()` during document-capture, which always runs
+      // before this window-bubble listener sees the same event). Do not gate
+      // on menu-open state read at listener-fire time instead: Radix's
+      // Escape handling can synchronously re-render and re-attach this very
+      // listener mid-dispatch, so that state can already read "closed" for
+      // the SAME keypress that closed it (AC-TASKS-TASK-ACTIONS-MENU-001.11).
+      if (e.key === "Escape" && isOpen && !isDisclosureOpen() && !e.defaultPrevented) {
         close();
       }
     };
@@ -106,6 +114,21 @@ function useEscapeKey(isOpen: boolean, close: () => void, isDisclosureOpen: () =
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, close, isDisclosureOpen]);
+}
+
+/** Mirrors the previewed task id into the store so kanban cards can highlight
+ * the currently-previewed card without prop-drilling through swimlanes. */
+function useMirrorPreviewedTaskId(
+  isOpen: boolean,
+  selectedTaskId: string | null | undefined,
+  setKanbanPreviewedTaskId: (taskId: string | null) => void,
+) {
+  useEffect(() => {
+    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
+  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
+  useEffect(() => {
+    return () => setKanbanPreviewedTaskId(null);
+  }, [setKanbanPreviewedTaskId]);
 }
 
 function useResizeHandler(
@@ -202,24 +225,13 @@ function useSelectedTask(
       description: task.description,
       position: task.position,
       repositoryId: task.repositoryId,
+      repositories: task.repositories,
       primarySessionId: task.primarySessionId,
+      parentTaskId: task.parentTaskId,
+      primaryExecutorType: task.primaryExecutorType,
+      workspaceMode: task.workspaceMode,
     };
   }, [selectedTaskId, kanbanTasks, snapshots]);
-}
-
-// Mirror the previewed task id into the store so kanban cards can highlight
-// the currently-previewed card without prop-drilling through swimlanes.
-function useMirrorPreviewedTaskId(
-  isOpen: boolean,
-  selectedTaskId: string | null | undefined,
-  setKanbanPreviewedTaskId: (taskId: string | null) => void,
-) {
-  useEffect(() => {
-    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
-  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
-  useEffect(() => {
-    return () => setKanbanPreviewedTaskId(null);
-  }, [setKanbanPreviewedTaskId]);
 }
 
 function useCloseMissingSelectedTask(params: {
@@ -325,6 +337,13 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // Track resize state
   const isResizingRef = useRef(false);
 
+  // Gates the preview's own Escape-to-close so a first Escape only closes an
+  // open actions menu (AC-TASKS-TASK-ACTIONS-MENU-001.11): this reads the
+  // pre-keypress state, since the window `keydown` listener below runs after
+  // Radix's own Escape handling has requested the menu close for this same
+  // keypress but before that state update has re-rendered.
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+
   const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
   const previewStepMove = usePreviewWorkflowStepMove(selectedTaskId, selectedTask);
 
@@ -379,7 +398,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [isOpen, selectedTaskId, open, close],
   );
 
-  useEscapeKey(isOpen, close, previewStepMove.isDisclosureOpen);
+  useEscapeKey(isOpen && !actionsMenuOpen, close, previewStepMove.isDisclosureOpen);
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
@@ -408,6 +427,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       onClose={close}
       onSessionChange={setUserSelectedSessionId}
       onResizeMouseDown={handleResizeMouseDown}
+      onActionsMenuOpenChange={setActionsMenuOpen}
     />
   );
 }
@@ -452,6 +472,7 @@ type PreviewLayoutProps = {
   onClose: () => void;
   onSessionChange: (sessionId: string | null) => void;
   onResizeMouseDown: (e: React.MouseEvent) => void;
+  onActionsMenuOpenChange: (open: boolean) => void;
 };
 
 function previewPanelStepProps(stepMove: PreviewStepMove) {
@@ -479,6 +500,7 @@ function FloatingPreviewLayout({
   onClose,
   onSessionChange,
   onResizeMouseDown,
+  onActionsMenuOpenChange,
 }: PreviewLayoutProps) {
   const { t } = useTranslation();
   return (
@@ -512,6 +534,7 @@ function FloatingPreviewLayout({
             onMaximize={(task) => onNavigateToTask(task)}
             onSessionChange={onSessionChange}
             {...previewPanelStepProps(stepMove)}
+            onActionsMenuOpenChange={onActionsMenuOpenChange}
           />
         </div>
       </div>
@@ -532,6 +555,7 @@ function InlinePreviewLayout({
   onClose,
   onSessionChange,
   onResizeMouseDown,
+  onActionsMenuOpenChange,
 }: PreviewLayoutProps & { isOpen: boolean }) {
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -557,6 +581,7 @@ function InlinePreviewLayout({
               onMaximize={(task) => onNavigateToTask(task)}
               onSessionChange={onSessionChange}
               {...previewPanelStepProps(stepMove)}
+              onActionsMenuOpenChange={onActionsMenuOpenChange}
             />
           </div>
         </div>

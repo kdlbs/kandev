@@ -27,6 +27,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -104,6 +105,7 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -134,6 +136,13 @@ function buildTaskTopBarProps(params: {
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 
@@ -241,6 +250,7 @@ function useTaskPageDerivedProps({
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -259,6 +269,7 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,

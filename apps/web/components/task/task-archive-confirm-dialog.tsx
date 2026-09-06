@@ -32,6 +32,9 @@ import { useTranslation } from "react-i18next";
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Element to return keyboard focus to on close, confirmed or cancelled
+   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
+   * default restore-to-previously-focused-element behavior. */
   focusReturnRef?: RefObject<HTMLElement | null>;
   taskTitle?: string;
   isBulkOperation?: boolean;

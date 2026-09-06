@@ -1,4 +1,11 @@
-import { createRef, type ReactNode, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  createRef,
+  type ComponentProps,
+  type ReactNode,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,20 +23,26 @@ const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
 
 type EscapeEvent = { preventDefault: () => void };
 
+type CloseAutoFocusEvent = { preventDefault: () => void };
+
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
 let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
+let dialogCloseAutoFocusHandler: ((event: CloseAutoFocusEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogContent: ({
     children,
     onEscapeKeyDown,
+    onCloseAutoFocus,
   }: {
     children: ReactNode;
     onEscapeKeyDown?: (event: EscapeEvent) => void;
+    onCloseAutoFocus?: (event: CloseAutoFocusEvent) => void;
   }) => {
     dialogEscapeHandler = onEscapeKeyDown;
+    dialogCloseAutoFocusHandler = onCloseAutoFocus;
     return <div>{children}</div>;
   },
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -351,7 +364,10 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   };
 }
 
-function renderDialog(mode: "create" | "edit" | "session" = "create") {
+function renderDialog(
+  mode: "create" | "edit" | "session" = "create",
+  extraProps: Partial<ComponentProps<typeof TaskCreateDialog>> = {},
+) {
   return render(
     <TaskCreateDialog
       open
@@ -361,6 +377,7 @@ function renderDialog(mode: "create" | "edit" | "session" = "create") {
       workflowId={null}
       defaultStepId={null}
       steps={[]}
+      {...extraProps}
     />,
   );
 }
@@ -375,7 +392,49 @@ beforeEach(() => {
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
   dialogEscapeHandler = undefined;
+  dialogCloseAutoFocusHandler = undefined;
   mockFs = buildMockFs();
+});
+
+describe("TaskCreateDialog focus return (AC-TASKS-TASK-ACTIONS-MENU-001.12)", () => {
+  it("returns focus to the given focusReturnRef target on close, overriding Radix's default", () => {
+    const target = document.createElement("button");
+    document.body.appendChild(target);
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(target.focus).toHaveBeenCalled();
+
+    document.body.removeChild(target);
+  });
+
+  it("leaves Radix's default close-focus behavior alone when the target has left the document", () => {
+    const target = document.createElement("button");
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(target.focus).not.toHaveBeenCalled();
+  });
+
+  it("leaves Radix's default close-focus behavior alone when no focusReturnRef is given", () => {
+    renderDialog("edit");
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCreateDialog Escape dismissal", () => {

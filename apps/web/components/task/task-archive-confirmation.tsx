@@ -213,6 +213,7 @@ type ArchiveDialogProps = Pick<
   | "executorTypes"
   | "onConfirm"
   | "confirmTestId"
+  | "focusReturnRef"
 > & {
   subtaskClassification: SubtaskCountResult;
 };
