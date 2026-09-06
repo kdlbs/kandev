@@ -1,22 +1,24 @@
 ---
 created: 2026-09-05
-status: done
+status: complete
 requirements:
   - REQ-UI-NATIVE-HTML-PREVIEW-001
 system_design:
   - ../../specs/ui/system-design/native-html-preview.md
 legacy_specs: []
 ---
+
 # Implementation Plan: Trusted Browser HTML File Preview
 
 ## Overview
 
 Replace the QuickJS and virtual-DOM implementation with a one-click static
 preview server in agentctl. Publish the current editor buffer as an in-memory
-entry document. Serve relative workspace assets from disk. Desktop uses the
-existing Browser panel. Mobile uses the focused file viewer.
+entry document. Serve relative workspace assets from disk. Desktop and mobile
+replace the active file editor body with the focused iframe. The Browser panel
+remains an explicit secondary desktop action.
 
-The product owner selected the trusted Browser-panel model. Implementation and
+The product owner selected the trusted native-browser model. Implementation and
 documentation must state that previewing executes trusted workspace code and
 must not claim hostile-content isolation.
 
@@ -30,8 +32,9 @@ must not claim hostile-content isolation.
   protection.
 - A session-authorized backend publish endpoint and agentctl client contract.
 - Existing session port-proxy routing for every supported executor.
-- Desktop Browser-panel open, focus, reuse, and refresh behavior.
-- A full-height mobile iframe with `Show code` and preserved editor state.
+- Desktop in-editor iframe, `Show code`, refresh, and optional Browser-panel
+  behavior.
+- A full-height mobile iframe with the same recovery and preserved editor state.
 - Localized trusted-code, progress, error, and retry copy in all locales.
 - Removal of the preview-specific QuickJS and direct parse5 dependencies, the
   virtual DOM, worker code, and obsolete tests.
@@ -67,10 +70,11 @@ session port-proxy URL and appends the version as a cache buster.
 
 ### Responsive UI
 
-Desktop keeps the source editor open and calls the existing Browser-panel action
-with the preview URL. Repeated activation republishes and reuses the panel.
-Mobile publishes through the same API but renders the URL in its focused viewer,
-with Kandev-owned `Show code` and error controls outside the iframe.
+Desktop and mobile keep the file tab identity and replace the source body with
+`HtmlPreviewContent` after publication. Kandev-owned chrome provides `Show
+code`, refresh, errors, retry, and an optional desktop Browser-panel action.
+Preview state is scoped to the active session and file identity and is not
+restored across reloads.
 
 Before execution, user-facing copy identifies the action as trusted workspace
 code. The iframe uses the existing Browser-panel sandbox policy. The feature
@@ -86,11 +90,11 @@ development servers and to state the trust consequence.
 
 ## Acceptance evidence
 
-| Acceptance criteria | Evidence |
-| --- | --- |
-| `.1`, `.2`, `.3`, `.7`, `.8`, `.9`, `.10` | Frontend API/component tests plus desktop and mobile E2E for current buffers, panel reuse, trust copy, source preservation, and recovery |
-| `.4`, `.5`, `.11` | Agentctl server tests and browser E2E for native scripts, browser APIs, relative assets, bounds, path containment, eviction, and shutdown |
-| `.6` | Backend handler/client tests plus existing session port-proxy regression coverage |
+| Acceptance criteria                       | Evidence                                                                                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.1`, `.2`, `.3`, `.7`, `.8`, `.9`, `.10` | Frontend API/component tests plus desktop and mobile E2E for current buffers, in-editor toggling, explicit Browser-panel opening, trust copy, source preservation, and recovery |
+| `.4`, `.5`, `.11`                         | Agentctl server tests and browser E2E for native scripts, browser APIs, relative assets, bounds, path containment, eviction, and shutdown                                       |
+| `.6`                                      | Backend handler/client tests plus existing session port-proxy regression coverage                                                                                               |
 
 ## Work orders
 
@@ -100,6 +104,11 @@ development servers and to state the trust consequence.
 - [done] [Task 11: Add the session publish contract](task-11-session-preview-publish-contract.md)
 - [done] [Task 12: Replace the virtual runtime with Browser-panel UI](task-12-browser-panel-preview-ui.md)
 - [done] [Task 13: Document and prove browser-fidelity preview](task-13-browser-fidelity-docs-and-e2e.md)
+
+### In-editor preview revision
+
+- [done] [Task 14: Move desktop HTML preview into the file editor](task-14-in-editor-html-preview.md)
+- [done] [Task 15: Revise preview guidance and browser E2E](task-15-in-editor-preview-docs-e2e.md)
 
 ### Superseded implementation work
 
@@ -131,12 +140,19 @@ Task 12 responsive UI and runtime removal
         |
         v
 Task 13 docs, E2E, and final verification
+        |
+        v
+Task 14 in-editor desktop preview
+        |
+        v
+Task 15 revised docs and E2E
 ```
 
 Tasks 10 and 11 establish the serving and authorization boundary before any UI
 depends on it. Task 12 removes the old runtime only after the end-to-end URL can
-be produced. Task 13 verifies the shipped flow and updates guidance after its
-behavior is stable.
+be produced. Task 13 verified the first shipped flow. Tasks 14 and 15 revise the
+desktop presentation without changing the serving boundary, then update its
+documentation and browser evidence.
 
 ## Risks
 
@@ -148,7 +164,8 @@ behavior is stable.
   redirect, module, and fetch requests.
 - Multi-repository roots and symlinks can accidentally widen filesystem access
   unless existing canonical path helpers are used consistently.
-- Reusing a Browser panel must not replace unrelated manually opened content.
+- In-editor preview state must not outlive its session or file identity, and
+  stale publish completions must not replace another file's source body.
 - Removing runtime packages changes the shared lockfile and generated license
   catalog. The Markdown renderer still owns transitive parse5 licenses, so the
   verification must distinguish those from the removed preview dependency.
@@ -187,3 +204,12 @@ licenses, and PR CI. Every review thread must have a disposition before merge.
 - Re-ran desktop and mobile native preview E2E locally: 2 tests passed in each
   project. Web lint, direct web typecheck, i18n checks, and formatting checks
   also passed.
+- Revised the desktop presentation so `Preview HTML` replaces the active editor
+  body instead of automatically opening a Browser panel. Focused frontend
+  coverage passed 6 files and 22 tests, including source recovery, latest-buffer
+  refresh, explicit Browser-panel opening, and file/session identity resets.
+- Revised desktop and mobile preview E2E passed 2 tests in each project on the
+  first attempt. Specification validation passed all 30 tests, public-doc
+  validation passed 61 tests across 46 pages, and desktop shell E2E passed.
+- The final full frontend suite passed 1,870 test files and 15,881 tests, with
+  four intentional skips and no failures.

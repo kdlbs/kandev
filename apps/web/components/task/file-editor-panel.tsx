@@ -111,7 +111,7 @@ function useLoadedFileDownloadForBuffer(
 
 type FileEditorPanelActions = Pick<
   ReturnType<typeof useFileEditors>,
-  "handleFileChange" | "saveFile" | "deleteFile" | "applyRemoteUpdate" | "openFileInHtmlPreview"
+  "handleFileChange" | "saveFile" | "deleteFile" | "applyRemoteUpdate"
 >;
 
 function useFileEditorPanelActions({
@@ -129,8 +129,7 @@ function useFileEditorPanelActions({
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   actions: FileEditorPanelActions;
 }) {
-  const { handleFileChange, saveFile, deleteFile, applyRemoteUpdate, openFileInHtmlPreview } =
-    actions;
+  const { handleFileChange, saveFile, deleteFile, applyRemoteUpdate } = actions;
   const onChange = useCallback(
     (newContent: string) => handleFileChange(path, newContent, repo),
     [handleFileChange, path, repo],
@@ -145,11 +144,7 @@ function useFileEditorPanelActions({
     () => updateFileState(fileKey, { renderedPreview: !renderedPreview }),
     [updateFileState, fileKey, renderedPreview],
   );
-  const onPreviewHtml = useCallback(
-    () => void openFileInHtmlPreview(path, repo),
-    [openFileInHtmlPreview, path, repo],
-  );
-  return { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview, onPreviewHtml };
+  return { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview };
 }
 
 function StaticFilePanel({
@@ -473,8 +468,6 @@ type LoadedFileEditorPanelProps = {
     | "previewKind"
     | "renderedPreview"
     | "onTogglePreview"
-    | "onPreviewHtml"
-    | "isPublishingHtmlPreview"
   >;
   actions: Pick<
     FileEditorContentProps,
@@ -520,15 +513,8 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   );
   const gitStatus = useSessionGitStatus(activeSessionId);
   const vcsDiff = gitStatus?.files?.[path]?.diff;
-  const {
-    savingFiles,
-    handleFileChange,
-    saveFile,
-    deleteFile,
-    applyRemoteUpdate,
-    openFileInHtmlPreview,
-    isPublishingHtmlPreview,
-  } = useFileEditors();
+  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
+    useFileEditors();
   useFileLoader({ hasFile: file.hasFile, activeSessionId, fileKey, path, setFileState, repo });
   useResyncOnTabActivate({
     panelId,
@@ -540,7 +526,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     updateFileState,
   });
 
-  const { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview, onPreviewHtml } =
+  const { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview } =
     useFileEditorPanelActions({
       path,
       repo,
@@ -552,7 +538,6 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         saveFile,
         deleteFile,
         applyRemoteUpdate,
-        openFileInHtmlPreview,
       },
     });
   const onDownload = useLoadedFileDownloadForBuffer(file, path);
@@ -594,8 +579,6 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         previewKind,
         renderedPreview: previewKind !== "none" && file.renderedPreview,
         onTogglePreview: previewKind === "markdown" ? onTogglePreview : undefined,
-        onPreviewHtml: previewKind === "html" ? onPreviewHtml : undefined,
-        isPublishingHtmlPreview,
       }}
       actions={{
         onChange,

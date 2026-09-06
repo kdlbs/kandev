@@ -543,6 +543,7 @@
   "htmlPreviewTooLarge": "Este buffer HTML é demasiado grande para pré-visualizar. Mostre o código e tente novamente com um ficheiro mais pequeno.",
   "htmlPreviewTrustedCode": "A pré-visualização executa código da área de trabalho com as capacidades do painel do navegador. Pré-visualize apenas ficheiros em que confia.",
   "htmlPreviewUnavailable": "A sessão de pré-visualização HTML não está disponível. Verifique a sessão da tarefa e tente novamente.",
+  "refreshHtmlPreview": "Atualizar pré-visualização HTML",
   "failedToLoadRevision": "Não foi possível carregar a revisão",
   "failedToLoadRevisionContent": "Não foi possível carregar o conteúdo da revisão",
   "failedToOpenFile": "Não foi possível abrir o ficheiro",

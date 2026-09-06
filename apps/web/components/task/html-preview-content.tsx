@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { IconCode } from "@tabler/icons-react";
+import { IconBrowser, IconCode, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
@@ -29,6 +29,8 @@ type HtmlPreviewContentProps = {
   repositoryName?: string;
   showExternalVcsLink?: boolean;
   onDownload?: () => void;
+  onRefresh?: () => void;
+  onOpenInBrowser?: () => void;
   onRetry?: () => void;
   onTogglePreview: () => void;
 };
@@ -41,9 +43,12 @@ function HtmlPreviewContentToolbar({
   repositoryId,
   repositoryName,
   showExternalVcsLink,
+  isLoading,
   onDownload,
+  onRefresh,
+  onOpenInBrowser,
   onTogglePreview,
-}: Omit<HtmlPreviewContentProps, "previewUrl" | "isLoading" | "error" | "onRetry">) {
+}: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry">) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   const trustWarning = t("task:htmlPreviewTrustedCode");
@@ -71,6 +76,29 @@ function HtmlPreviewContentToolbar({
             />
           )}
           <FileViewerDownloadButton onDownload={onDownload} />
+          {onRefresh && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRefresh}
+              disabled={isLoading}
+              aria-label={t("task:refreshHtmlPreview")}
+              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+            >
+              <IconRefresh className="h-4 w-4" />
+            </Button>
+          )}
+          {onOpenInBrowser && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onOpenInBrowser}
+              aria-label={t("task:openInBrowserPanel")}
+              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+            >
+              <IconBrowser className="h-4 w-4" />
+            </Button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -108,6 +136,8 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   repositoryName,
   showExternalVcsLink = true,
   onDownload,
+  onRefresh,
+  onOpenInBrowser,
   onRetry,
   onTogglePreview,
 }: HtmlPreviewContentProps) {
@@ -124,7 +154,10 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         repositoryId={repositoryId}
         repositoryName={repositoryName}
         showExternalVcsLink={showExternalVcsLink}
+        isLoading={isLoading}
         onDownload={onDownload}
+        onRefresh={onRefresh}
+        onOpenInBrowser={onOpenInBrowser}
         onTogglePreview={onTogglePreview}
       />
       <p

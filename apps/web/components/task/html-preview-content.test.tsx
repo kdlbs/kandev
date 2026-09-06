@@ -68,4 +68,16 @@ describe("HtmlPreviewContent", () => {
     screen.getByRole("button", { name: "Show code" }).click();
     expect(onTogglePreview).toHaveBeenCalledOnce();
   });
+
+  it("offers refresh and an explicit Browser-panel action", () => {
+    const onRefresh = vi.fn();
+    const onOpenInBrowser = vi.fn();
+    renderPreview(vi.fn(), { onRefresh, onOpenInBrowser });
+
+    screen.getByRole("button", { name: "Refresh HTML preview" }).click();
+    expect(onRefresh).toHaveBeenCalledOnce();
+
+    screen.getByRole("button", { name: /Open in browser panel/i }).click();
+    expect(onOpenInBrowser).toHaveBeenCalledOnce();
+  });
 });

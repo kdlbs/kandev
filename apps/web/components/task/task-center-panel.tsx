@@ -18,7 +18,6 @@ import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { executeApprove } from "@/lib/services/session-approve";
 import {
@@ -36,7 +35,6 @@ import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
-import { useTaskCenterHtmlPreview } from "@/hooks/use-task-center-html-preview";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
 
@@ -143,12 +141,6 @@ function useFileTabOperations({
   leftTab,
 }: FileTabOperationsOptions) {
   const { toast } = useToast();
-  const openBrowserPanel = useDockviewStore((state) => state.openBrowserPanel);
-  const { handlePreviewHtml, isPublishingHtmlPreview } = useTaskCenterHtmlPreview({
-    activeSessionId,
-    openBrowserPanel,
-    toast,
-  });
 
   const addFileTab = useCallback(
     (fileTab: OpenFileTab) => {
@@ -210,8 +202,6 @@ function useFileTabOperations({
     handleCloseFileTab,
     handleFileChange,
     handleRenderedPreviewToggle,
-    handlePreviewHtml,
-    isPublishingHtmlPreview,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -420,8 +410,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     handleOpenFileFromChat,
     handleFileChange,
     handleRenderedPreviewToggle,
-    handlePreviewHtml,
-    isPublishingHtmlPreview,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -475,8 +463,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
             onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
-            onPreviewHtml={() => handlePreviewHtml(tab.path, tab.repo, tab.content)}
-            isPublishingHtmlPreview={isPublishingHtmlPreview}
           />
         ))}
       </SessionTabs>

@@ -113,14 +113,10 @@ async function setupDesktopHtmlPreviewTest({
   return { session, fileName, assetDirectory };
 }
 
-function browserFrame(session: SessionPage) {
-  return session.browserPanel.frameLocator("iframe");
-}
-
 test.describe("HTML preview", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("runs the current buffer in the native Browser panel with relative assets", async ({
+  test("replaces the editor with a native iframe and resolves relative assets", async ({
     testPage,
     apiClient,
     seedData,
@@ -147,11 +143,12 @@ test.describe("HTML preview", () => {
 
     await testPage.getByTestId("html-preview-toggle").first().click();
 
-    const browser = session.browserPanel;
-    await expect(browser).toBeVisible({ timeout: 10_000 });
-    const browserIframe = browser.locator("iframe");
-    await expect(browserIframe).toHaveAttribute("src", /\/port-proxy\/.*\/\d+\//);
-    const frame = browserFrame(session);
+    const preview = testPage.getByTestId("html-preview").first();
+    await expect(preview).toBeVisible({ timeout: 10_000 });
+    await expect(session.browserPanel).toHaveCount(0);
+    const previewIframe = preview.locator("iframe");
+    await expect(previewIframe).toHaveAttribute("src", /\/port-proxy\/.*\/\d+\//);
+    const frame = preview.frameLocator("iframe");
     await expect(frame.locator("h1")).toHaveText("Unsaved native preview", { timeout: 15_000 });
     await expect(frame.locator("#native-status")).toHaveText(
       "api:available | image:loaded | path:entry",
@@ -172,14 +169,18 @@ test.describe("HTML preview", () => {
     await frame.locator("#increment").click();
     await expect(frame.locator("#value")).toHaveText("1");
 
-    await browser.getByTitle("Refresh").click();
+    const firstSrc = await previewIframe.getAttribute("src");
+    await preview.getByRole("button", { name: "Refresh HTML preview" }).click();
     await expect(frame.locator("#native-status")).toHaveText(
       "api:available | image:loaded | path:entry",
       { timeout: 15_000 },
     );
+    const refreshedSrc = await previewIframe.getAttribute("src");
+    expect(refreshedSrc).not.toBe(firstSrc);
+    expect(refreshedSrc).toContain("v=2");
 
     const secondHtml = nativePreviewHtml(assetDirectory, fileName, "Republished native preview");
-    await sourceTab.click();
+    await preview.getByRole("button", { name: "Show code" }).click();
     const editor = testPage.locator(".monaco-editor:visible").first();
     await expect(editor).toBeVisible();
     await editor.locator(".view-lines").click();
@@ -187,16 +188,18 @@ test.describe("HTML preview", () => {
     await testPage.keyboard.insertText(secondHtml);
     await testPage.getByTestId("html-preview-toggle").first().click();
 
-    await expect(browser).toHaveCount(1);
+    await expect(session.browserPanel).toHaveCount(0);
     await expect(frame.locator("h1")).toHaveText("Republished native preview", { timeout: 15_000 });
-    const refreshedSrc = await browserIframe.getAttribute("src");
-    expect(refreshedSrc).toContain("v=2");
+    await expect(previewIframe).toHaveAttribute("src", /[?&]v=3(?:&|$)/);
 
     await prCapture.screenshot("html-preview-desktop", {
-      caption: "Unsaved HTML rendered by the native Browser panel",
+      caption: "Unsaved HTML rendered in place of the desktop editor",
     });
 
+    await preview.getByRole("button", { name: /Open in browser panel/i }).click();
+    await expect(session.browserPanel).toBeVisible({ timeout: 10_000 });
     await sourceTab.click();
+    await preview.getByRole("button", { name: "Show code" }).click();
     await expect(
       testPage.locator(".monaco-editor:visible").first().locator(".view-lines"),
     ).toContainText("Republished native preview");
@@ -224,10 +227,19 @@ test.describe("HTML preview", () => {
       });
     });
     await testPage.getByTestId("html-preview-toggle").first().click();
-    await expect(testPage.getByTestId("toast-message")).toContainText(
+    const preview = testPage.getByTestId("html-preview").first();
+    await expect(preview.getByTestId("html-preview-error")).toContainText(
       "HTML preview session is not available",
     );
     await expect(session.browserPanel).toHaveCount(0);
     await testPage.unroute("**/api/v1/task-sessions/*/html-previews");
+
+    await preview.getByRole("button", { name: "Retry HTML preview" }).click();
+    await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
+      "Unsaved native preview",
+      { timeout: 15_000 },
+    );
+    await preview.getByRole("button", { name: "Show code" }).click();
+    await expect(testPage.locator(".monaco-editor:visible").first()).toBeVisible();
   });
 });

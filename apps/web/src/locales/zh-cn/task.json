@@ -543,6 +543,7 @@
   "htmlPreviewTooLarge": "此 HTML 缓冲区太大，无法预览。请显示代码并使用较小的文件重试。",
   "htmlPreviewTrustedCode": "预览会使用浏览器面板的功能执行工作区代码。请只预览你信任的文件。",
   "htmlPreviewUnavailable": "HTML 预览会话不可用。请检查任务会话并重试。",
+  "refreshHtmlPreview": "刷新 HTML 预览",
   "failedToLoadRevision": "加载修订失败",
   "failedToLoadRevisionContent": "加载修订内容失败",
   "failedToOpenFile": "打开文件失败",

@@ -4,16 +4,17 @@ system: ui
 requirements:
   - REQ-UI-NATIVE-HTML-PREVIEW-001
 ---
+
 # Native HTML File Preview System Design
 
 ## Purpose and boundaries
 
 Native HTML preview is a one-click static-server workflow built on Kandev's
-existing Browser panel and session port proxy. It favors browser fidelity over
-hostile-content isolation. Agentctl serves the current editor buffer as an
-in-memory entry document and serves relative assets from the selected task
-workspace. The browser then renders that page with its normal HTML, CSS, and
-JavaScript implementation.
+existing browser iframe policy and session port proxy. It favors browser
+fidelity over hostile-content isolation. Agentctl serves the current editor
+buffer as an in-memory entry document and serves relative assets from the
+selected task workspace. The active file viewer replaces its source body with
+an iframe that renders the page with normal HTML, CSS, and JavaScript behavior.
 
 The feature does not create a virtual browser, transform user scripts, or
 introduce a second executor-routing protocol. It also does not make a security
@@ -22,8 +23,8 @@ in [ADR-2026-09-05-trusted-browser-html-preview](../../../decisions/2026-09-05-t
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                      | Design sections                                                                                                                                                                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-NATIVE-HTML-PREVIEW-001` | [Architecture](#architecture), [Contracts](#contracts), [Control flow](#control-flow), [Trust and security](#trust-and-security), [Responsive contract](#responsive-contract), [Failure and recovery](#failure-and-recovery), [Verification strategy](#verification-strategy) |
 
 ## Architecture
@@ -44,7 +45,7 @@ Agentctl workspace preview manager
                      |
                      | existing session port proxy
                      v
-          Browser panel / mobile iframe
+          Desktop or mobile file-preview iframe
 ```
 
 The existing gateway port proxy remains responsible for session authorization,
@@ -90,10 +91,12 @@ listener and no direct browser-to-agentctl connection.
   paths after binary-file classification.
 - The frontend API publishes the current editor buffer and converts the result
   into the same port-proxy URL form used by development servers.
-- Desktop calls the existing `openBrowserPanel(url)` action. That action focuses
-  or creates the Browser panel according to existing Dockview behavior.
-- Mobile renders the same URL in the focused file viewer because Dockview is not
-  part of the phone composition.
+- Desktop renders the URL through `HtmlPreviewContent` in place of the active
+  source editor. `Show code` restores the source body, refresh republishes the
+  latest buffer, and an explicit secondary action can call
+  `openBrowserPanel(url)` without making that panel the primary outcome.
+- Mobile renders the same URL in the focused file viewer and uses the same
+  source-recovery, refresh, trust, loading, and error semantics.
 - Markdown keeps its sanitized in-place renderer and existing preview state.
 
 ## Contracts
@@ -164,15 +167,16 @@ sandbox and do not constrain resources consumed by browser scripts.
    agentctl.
 5. Agentctl starts or reuses its workspace preview server and returns its port,
    path, and new version.
-6. The frontend constructs the existing session port-proxy URL and calls
-   `openBrowserPanel(url)`.
-7. The Browser panel loads the page. Relative subresources traverse the same
-   proxy and are read from the workspace by agentctl.
-8. Repeating the action republishes the buffer and navigates the existing panel
-   to the new versioned URL.
+6. The frontend constructs the existing session port-proxy URL and replaces the
+   source editor body with `HtmlPreviewContent` at that URL.
+7. The iframe loads the page. Relative subresources traverse the same proxy and
+   are read from the workspace by agentctl.
+8. `Refresh` republishes the latest unsaved buffer and loads the new versioned
+   URL. `Show code` restores source, while `Open in Browser panel` explicitly
+   opens the same URL as a secondary workflow.
 
-The source editor remains open and dirty throughout. HTML preview is a companion
-browser surface on desktop, not a source-editor replacement.
+The file tab, current buffer, and dirty state remain owned by the source editor
+flow while the iframe is visible.
 
 ### Mobile
 
@@ -180,8 +184,8 @@ browser surface on desktop, not a source-editor replacement.
 2. Publishing follows the desktop flow.
 3. The focused viewer replaces its code body with a full-height iframe at the
    returned proxy URL and keeps a `Show code` action outside the iframe.
-4. `Show code`, file identity change, or preview failure restores source without
-   changing its buffer.
+4. `Show code` or file identity change restores source without changing its
+   buffer. A preview failure keeps source recovery and retry actions available.
 
 ## Relative assets and browser fidelity
 
@@ -224,29 +228,32 @@ must not enable or use this action until a dedicated-origin mode exists.
 - A root's preview server starts on first publish and is reused for the
   agentctl instance lifetime.
 - Entry overlays are in-memory only and do not save or modify workspace files.
-- Closing a Browser panel does not stop the shared server. Agentctl teardown
-  stops the server.
-- A restored desktop Browser panel can contain a stale port-proxy URL after an
-  executor restart. Activating `Preview HTML` publishes the current buffer to
-  the replacement instance and opens a valid URL.
-- Mobile preview state is scoped to the focused repository-plus-path identity
-  and resets when that identity changes.
+- Leaving preview or closing the file tab unmounts the iframe but does not stop
+  the shared server. Agentctl teardown stops the server.
+- In-editor preview state and URLs are not persisted. Activating `Preview HTML`
+  after reload or executor restart publishes the current buffer to the live
+  instance and obtains a valid URL.
+- Preview state is scoped to the active session plus repository-and-path
+  identity and resets when that identity changes.
 
 ## Responsive contract
 
 - **Desktop entry and outcome:** The existing file toolbar exposes `Preview
-  HTML`. The action opens or focuses the existing Browser panel beside the file
-  editor. It does not introduce another preview panel type.
+HTML`. The action replaces the source body inside the same file tab with an
+  iframe and keeps `Show code`, refresh, and optional Browser-panel actions in
+  Kandev-owned chrome.
 - **Phone entry and outcome:** `MobileFileViewerPanel` exposes a minimum
   44-pixel action target. It shows a focused full-height iframe and puts `Show
-  code` in Kandev-owned chrome.
-- **Nearest shipped exemplars:** The development-server preview button supplies
-  Browser-panel creation and URL behavior. Markdown preview supplies mobile
-  toolbar placement, source recovery, and file-identity reset behavior.
+code` in Kandev-owned chrome.
+- **Nearest shipped exemplars:** Markdown preview supplies the in-place source
+  toggle and file identity behavior. The mobile HTML focused viewer supplies
+  the iframe toolbar, source recovery, and full-height composition. The
+  development-server preview keeps ownership of automatic Browser-panel use.
 - **Scroll ownership:** Browser content owns iframe scrolling. Kandev's focused
   viewer owns its header and must not add page-level horizontal overflow.
 - **Shared behavior:** Eligibility, publication, errors, trust copy, proxy URL,
-  and retry semantics are shared. Only the viewport composition differs.
+  refresh, source recovery, and retry semantics are shared. Only toolbar
+  density and viewport composition differ.
 
 ## Failure and recovery
 
@@ -254,12 +261,13 @@ must not enable or use this action until a dedicated-origin mode exists.
   escapes return validation errors and do not start or update a preview.
 - A missing or stopped task session returns the existing session-unavailable
   response. The UI preserves source and shows localized retry guidance.
-- An agentctl start or publish failure leaves the current Browser panel
-  unchanged. Repeating `Preview HTML` retries the whole publish flow.
+- An agentctl start or publish failure keeps the in-editor preview surface open
+  with localized retry and `Show code` actions. Retry republishes the latest
+  buffer.
 - A missing relative asset receives a normal HTTP 404 inside the preview so the
   browser's native diagnostics remain meaningful.
-- A stale URL after agentctl restart can fail in the Browser panel. Republishing
-  obtains the current ephemeral port and version.
+- A stale URL after agentctl restart is not restored as active preview state.
+  Republishing obtains the current ephemeral port and version.
 - The UI never falls back to `srcDoc`, QuickJS, a virtual DOM, or direct file
   URLs when the server path fails.
 
@@ -267,8 +275,8 @@ must not enable or use this action until a dedicated-origin mode exists.
 
 Remove the QuickJS worker, virtual-DOM renderer, source-navigation normalizer,
 and their dependencies. Existing persisted `markdownPreview` compatibility only
-applies to Markdown. The system ignores persisted HTML in-place preview state.
-The user invokes the Browser-panel action after an upgrade.
+applies to Markdown. HTML in-place preview starts from source after reload and
+publishes only after the user activates it.
 
 The explicit development-server action remains unchanged. Native HTML preview
 is the zero-configuration static case, while the development-server path
@@ -291,9 +299,10 @@ continue to cover browser routing.
   readiness, payload bounds, forwarding, typed 400/413/503 propagation,
   malformed requests, unavailable sessions, malformed responses, and response
   validation.
-- Frontend API and component tests cover unsaved-buffer publication, Browser
-  panel reuse, versioned URLs, trusted-code copy, errors, retry, source-state
-  preservation, mobile identity reset, and stale publish completion guards.
+- Frontend API and component tests cover unsaved-buffer publication, in-editor
+  source/preview toggling, explicit Browser-panel opening, versioned URLs,
+  trusted-code copy, errors, retry, refresh, source-state preservation, identity
+  reset, and stale publish completion guards.
 - Desktop Chromium E2E proves that an unsaved document runs native JavaScript
   and loads relative CSS, JavaScript, and images. It also proves use of a native
   browser API and refresh after a second publish.
@@ -310,9 +319,8 @@ continue to cover browser routing.
   capability cookie through redirects and rewritten URLs.
 - Multi-repository tasks must use the same repository identity and path helper
   as existing workspace-file APIs.
-- Browser-panel URL reuse must not unexpectedly replace an unrelated manual
-  Browser panel. The implementation must follow the current
-  development-server focus/reuse policy and test that behavior.
+- Preview publication completion must remain scoped to the file and session
+  that initiated it so a stale response cannot replace another editor's body.
 
 ## Related decisions
 

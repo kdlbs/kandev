@@ -27,7 +27,6 @@ import {
   type FileEditorRequestToken,
 } from "./file-editor-state";
 import { scrollEditorIfMounted, setPendingCursorPosition } from "./file-editor-cursor";
-import { useFileHtmlPreview } from "./use-file-html-preview";
 export {
   consumePendingCursorPosition,
   scrollEditorIfMounted,
@@ -316,7 +315,6 @@ function useFileEditorEffects({
 }
 
 type FileEditorActionsParams = {
-  activeSessionId: string | null;
   activeSessionIdRef: React.MutableRefObject<string | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
@@ -328,8 +326,6 @@ type FileEditorActionsParams = {
   ) => void;
   promotePreviewToPinned: (type: "file-editor") => void;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setPublishingHtmlPreview: React.Dispatch<React.SetStateAction<boolean>>;
-  openBrowserPanel: (url: string) => void;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
@@ -510,7 +506,6 @@ function useMarkdownPreviewAction({
 }
 
 function useFileEditorActions({
-  activeSessionId,
   activeSessionIdRef,
   setFileState,
   updateFileState,
@@ -518,8 +513,6 @@ function useFileEditorActions({
   addFileEditorPanel,
   promotePreviewToPinned,
   setSavingFiles,
-  setPublishingHtmlPreview,
-  openBrowserPanel,
   toast,
 }: FileEditorActionsParams) {
   const activeFileRequestRef = useRef<FileEditorRequestToken | null>(null);
@@ -541,14 +534,6 @@ function useFileEditorActions({
     toast,
   });
 
-  const openFileInHtmlPreview = useFileHtmlPreview({
-    activeSessionId,
-    activeSessionIdRef,
-    setPublishingHtmlPreview,
-    openBrowserPanel,
-    toast,
-  });
-
   const handleFileChange = useCallback(
     (path: string, newContent: string, repo?: string) =>
       applyFileChange(path, repo, newContent, updateFileState, promotePreviewToPinned),
@@ -565,7 +550,6 @@ function useFileEditorActions({
   return {
     openFile,
     openFileInMarkdownPreview,
-    openFileInHtmlPreview,
     handleFileChange,
     saveFile,
     deleteFileAction,
@@ -578,7 +562,6 @@ export function useFileEditors() {
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { toast } = useToast();
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
-  const [isPublishingHtmlPreview, setIsPublishingHtmlPreview] = useState(false);
 
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
@@ -586,7 +569,6 @@ export function useFileEditors() {
   const clearFileStates = useDockviewStore((s) => s.clearFileStates);
   const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
   const promotePreviewToPinned = useDockviewStore((s) => s.promotePreviewToPinned);
-  const openBrowserPanel = useDockviewStore((s) => s.openBrowserPanel);
   const openFiles = useDockviewStore((s) => s.openFiles);
   const api = useDockviewStore((s) => s.api);
   const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
@@ -615,13 +597,11 @@ export function useFileEditors() {
   const {
     openFile,
     openFileInMarkdownPreview,
-    openFileInHtmlPreview,
     handleFileChange,
     saveFile,
     deleteFileAction,
     applyRemoteUpdate,
   } = useFileEditorActions({
-    activeSessionId,
     activeSessionIdRef,
     setFileState,
     updateFileState,
@@ -629,8 +609,6 @@ export function useFileEditors() {
     addFileEditorPanel,
     promotePreviewToPinned,
     setSavingFiles,
-    setPublishingHtmlPreview: setIsPublishingHtmlPreview,
-    openBrowserPanel,
     toast,
   });
 
@@ -638,8 +616,6 @@ export function useFileEditors() {
     savingFiles,
     openFile,
     openFileInMarkdownPreview,
-    openFileInHtmlPreview,
-    isPublishingHtmlPreview,
     saveFile,
     deleteFile: deleteFileAction,
     handleFileChange,

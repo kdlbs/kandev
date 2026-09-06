@@ -25,8 +25,6 @@ export function FileTabContent({
   onFileSave,
   onFileDelete,
   onTogglePreview,
-  onPreviewHtml,
-  isPublishingHtmlPreview,
 }: {
   tab: OpenFileTab;
   activeSession: {
@@ -41,8 +39,6 @@ export function FileTabContent({
   onFileSave: (path: string, repo?: string) => void;
   onFileDelete: (path: string, repo?: string) => void;
   onTogglePreview?: () => void;
-  onPreviewHtml?: () => void;
-  isPublishingHtmlPreview?: boolean;
 }) {
   const category = resolveTabCategory(tab);
   const previewKind = getFilePreviewKind(tab.path, !!tab.isBinary);
@@ -90,8 +86,6 @@ export function FileTabContent({
           previewKind={previewKind}
           renderedPreview={previewKind === "markdown" && !!tab.renderedPreview}
           onTogglePreview={previewKind === "markdown" ? onTogglePreview : undefined}
-          onPreviewHtml={previewKind === "html" ? onPreviewHtml : undefined}
-          isPublishingHtmlPreview={isPublishingHtmlPreview}
           onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
           onSave={() => onFileSave(tab.path, tab.repo)}
           onDelete={() => onFileDelete(tab.path, tab.repo)}

@@ -7,10 +7,8 @@ const mocks = vi.hoisted(() => {
   const fakeClient = {};
   const toast = vi.fn();
   const requestFileContent = vi.fn();
-  const publishHtmlPreviewUrl = vi.fn();
   const addFileEditorPanel = vi.fn();
   const promotePreviewToPinned = vi.fn();
-  const openBrowserPanel = vi.fn();
 
   type MockFileState = {
     path: string;
@@ -34,7 +32,6 @@ const mocks = vi.hoisted(() => {
     clearFileStates: () => void;
     addFileEditorPanel: ReturnType<typeof vi.fn>;
     promotePreviewToPinned: ReturnType<typeof vi.fn>;
-    openBrowserPanel: ReturnType<typeof vi.fn>;
   };
 
   let dockState: DockState;
@@ -59,7 +56,6 @@ const mocks = vi.hoisted(() => {
       }),
       addFileEditorPanel,
       promotePreviewToPinned,
-      openBrowserPanel,
     };
   };
 
@@ -69,10 +65,8 @@ const mocks = vi.hoisted(() => {
     fakeClient,
     toast,
     requestFileContent,
-    publishHtmlPreviewUrl,
     addFileEditorPanel,
     promotePreviewToPinned,
-    openBrowserPanel,
     getDockState: () => dockState,
     resetDockState,
   };
@@ -129,11 +123,6 @@ vi.mock("@/lib/ws/workspace-files", () => ({
   deleteFile: vi.fn(),
 }));
 
-vi.mock("@/hooks/use-html-preview-publisher", () => ({
-  publishHtmlPreviewUrl: (...args: unknown[]) => mocks.publishHtmlPreviewUrl(...args),
-  getHtmlPreviewPublishErrorKey: () => "task:htmlPreviewPublishFailed",
-}));
-
 vi.mock("./file-editors-sync", () => ({
   useOpenFileWorkspaceSync: vi.fn(),
 }));
@@ -174,7 +163,6 @@ describe("useFileEditors open actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resetDockState();
-    mocks.publishHtmlPreviewUrl.mockResolvedValue("http://api.test/preview?v=1");
   });
 
   it("keeps a pending file open request alive when focusing an already-open file", async () => {
@@ -220,22 +208,5 @@ describe("useFileEditors open actions", () => {
     expect(mocks.addFileEditorPanel).toHaveBeenCalledWith(FIRST_PATH, "first.ts", {
       repo: undefined,
     });
-  });
-
-  it("publishes the current open HTML buffer and opens the shared Browser panel", async () => {
-    const path = "reports/index.html";
-    const content = "<button>unsaved</button>";
-    mocks.getDockState().openFiles.set(path, fileState(path, content));
-    const { result } = renderHook(() => useFileEditors());
-
-    await result.current.openFileInHtmlPreview(path);
-
-    expect(mocks.publishHtmlPreviewUrl).toHaveBeenCalledWith("sess-1", {
-      path,
-      repo: undefined,
-      content,
-    });
-    expect(mocks.openBrowserPanel).toHaveBeenCalledWith("http://api.test/preview?v=1");
-    expect(mocks.getDockState().openFiles.get(path)?.content).toBe(content);
   });
 });

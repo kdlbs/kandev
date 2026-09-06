@@ -562,6 +562,7 @@
   "htmlPreviewTooLarge": "This HTML buffer is too large to preview. Show code and try again with a smaller file.",
   "htmlPreviewTrustedCode": "Previewing runs workspace code with Browser-panel capabilities. Only preview files you trust.",
   "htmlPreviewUnavailable": "The HTML preview session is not available. Check the task session and try again.",
+  "refreshHtmlPreview": "Refresh HTML preview",
   "failedToLoadRevision": "Failed to load revision",
   "failedToLoadRevisionContent": "Failed to load revision content",
   "failedToOpenFile": "Failed to open file",

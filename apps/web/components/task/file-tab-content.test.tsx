@@ -4,19 +4,19 @@ import type { ReactNode } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { FileTabContent } from "./file-tab-content";
 
+const FILE_EDITOR_CONTENT_TEST_ID = "file-editor-content";
+
 vi.mock("./file-editor-content", () => ({
   FileEditorContent: ({
     previewKind,
     renderedPreview,
     worktreePath,
     onTogglePreview,
-    onPreviewHtml,
   }: {
     previewKind?: string;
     renderedPreview?: boolean;
     worktreePath?: string;
     onTogglePreview?: () => void;
-    onPreviewHtml?: () => void;
   }) => (
     <div
       data-testid="file-editor-content"
@@ -27,11 +27,6 @@ vi.mock("./file-editor-content", () => ({
       <button type="button" onClick={onTogglePreview}>
         Toggle preview
       </button>
-      {onPreviewHtml && (
-        <button type="button" onClick={onPreviewHtml}>
-          Preview HTML
-        </button>
-      )}
     </div>
   ),
 }));
@@ -77,12 +72,12 @@ describe("FileTabContent Markdown preview", () => {
       />,
     );
 
-    expect(screen.getByTestId("file-editor-content").getAttribute("data-preview-kind")).toBe(
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-preview-kind")).toBe(
       "markdown",
     );
-    expect(screen.getByTestId("file-editor-content").getAttribute("data-rendered-preview")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-rendered-preview"),
+    ).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Toggle preview" }));
     expect(onTogglePreview).toHaveBeenCalledOnce();
   });
@@ -104,16 +99,14 @@ describe("FileTabContent Markdown preview", () => {
       />,
     );
 
-    expect(screen.getByTestId("file-editor-content").getAttribute("data-worktree-path")).toBe(
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-worktree-path")).toBe(
       "/tmp/task-root",
     );
   });
 });
 
 describe("FileTabContent HTML preview", () => {
-  it("keeps the source tab and forwards the HTML preview action", () => {
-    const onPreviewHtml = vi.fn();
-
+  it("delegates HTML preview ownership to the file editor content", () => {
     render(
       <FileTabContent
         tab={{
@@ -130,11 +123,11 @@ describe("FileTabContent HTML preview", () => {
         onFileChange={vi.fn()}
         onFileSave={vi.fn()}
         onFileDelete={vi.fn()}
-        onPreviewHtml={onPreviewHtml}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
-    expect(onPreviewHtml).toHaveBeenCalledOnce();
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-preview-kind")).toBe(
+      "html",
+    );
   });
 });

@@ -5,15 +5,16 @@ created: 2026-09-04
 owners:
   - kandev
 ---
+
 # Native HTML File Preview Requirements
 
 ## Overview
 
 Kandev shall open an `.html` or `.htm` file in a real browser runtime. The user
-does not need to start a development server. The preview shall use
-the current editor buffer as its entry document and shall resolve relative
-assets from the task workspace. Desktop uses the existing Browser panel. Phone
-surfaces use the same proxied page in the focused file viewer.
+does not need to start a development server. The preview shall use the current
+editor buffer as its entry document and shall resolve relative assets from the
+task workspace. Desktop and phone surfaces replace the active file editor body
+with the same proxied page while preserving a direct return to source.
 
 HTML preview is a trusted-workspace-code feature. Previewed scripts have native
 browser behavior and the authority already granted to Browser-panel content.
@@ -31,8 +32,8 @@ session authorization across local and remote executors.
   preview.
 - **Workspace preview server:** A loopback HTTP server inside agentctl that
   serves the entry document from memory and relative assets from the workspace.
-- **Preview URL:** The session-scoped port-proxy URL used by the Browser panel
-  or focused mobile viewer.
+- **Preview URL:** The session-scoped port-proxy URL used by the in-editor
+  preview iframe or an explicitly opened Browser panel.
 - **Trusted workspace code:** Content the user permits to run with the existing
   Browser-panel sandbox and origin policy. It is not isolated as hostile code.
 
@@ -53,10 +54,11 @@ development-server command is not necessary.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.2:** Activating `Preview HTML` shall publish
   the current editor buffer without saving it. The source file shall remain
   open and retain its content and dirty state.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.3:** On desktop, activation shall open or
-  focus a Browser panel at the preview URL. Repeated activation for the same
-  file shall update the in-memory entry document and refresh or reuse the
-  existing Browser panel instead of creating duplicate panels.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.3:** On desktop, activation shall replace the
+  active file editor body with an iframe at the preview URL without opening a
+  Browser panel. The preview shall provide `Show code`, refresh the current
+  unsaved buffer on request, and offer an explicit secondary action to open the
+  same URL in a Browser panel.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.4:** The preview shall use the native browser
   engine for markup, CSS, JavaScript, DOM events, and relative workspace assets.
   Existing Browser-panel iframe, browser, and deployment policies shall control
@@ -70,8 +72,8 @@ development-server command is not necessary.
   SSH, and Kubernetes task sessions without a second public routing mechanism.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.7:** Before activation, the UI shall make the
   trusted-code consequence clear. Preview source shall execute only in the
-  Browser-panel or mobile preview iframe and shall never be inserted directly
-  into the Kandev parent document.
+  Kandev-owned preview iframe or an explicitly opened Browser panel and shall
+  never be inserted directly into the Kandev parent document.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.8:** On phone and coarse-pointer surfaces, the
   focused file viewer shall expose the preview action. The active touch
   dimension shall be at least 44 pixels. Preview shall occupy the full-height

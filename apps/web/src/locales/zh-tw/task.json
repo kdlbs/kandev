@@ -543,6 +543,7 @@
   "htmlPreviewTooLarge": "此 HTML 緩衝區太大，無法預覽。請顯示程式碼，並使用較小的檔案重試。",
   "htmlPreviewTrustedCode": "預覽會使用瀏覽器面板的功能執行工作區程式碼。請只預覽你信任的檔案。",
   "htmlPreviewUnavailable": "HTML 預覽工作階段無法使用。請檢查工作項工作階段並重試。",
+  "refreshHtmlPreview": "重新整理 HTML 預覽",
   "failedToLoadRevision": "載入修訂失敗",
   "failedToLoadRevisionContent": "載入修訂內容失敗",
   "failedToOpenFile": "開啟檔案失敗",
