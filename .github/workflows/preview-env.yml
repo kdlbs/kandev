@@ -116,10 +116,19 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      # The fork supplies the product being built, but deploy control-plane
+      # behavior must remain compatible with the trusted workflow contract.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .preview-cli
+          persist-credentials: false
+
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          go-version-file: .preview-cli/apps/backend/go.mod
+          cache-dependency-path: .preview-cli/apps/backend/go.sum
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -132,12 +141,16 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm -C apps install --frozen-lockfile
 
+      - name: Build trusted preview command
+        working-directory: .preview-cli/apps/backend
+        run: go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview
+
       - name: Deploy preview environment
         id: deploy
         working-directory: apps/backend
         run: |
           set -euo pipefail
-          deploy_output="$(go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-web-install --skip-description)"
+          deploy_output="$("$RUNNER_TEMP/kandev-preview-deploy" deploy --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-web-install --skip-description)"
           printf '%s\n' "$deploy_output"
           preview_url="$(printf '%s\n' "$deploy_output" | sed -n 's/^preview URL: //p' | tail -n 1)"
           test -n "$preview_url"

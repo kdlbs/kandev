@@ -40,7 +40,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
             deploy_job,
         )
-        self.assertEqual(workflow.count("persist-credentials: false"), 6)
+        self.assertEqual(workflow.count("persist-credentials: false"), 7)
 
     def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -80,6 +80,19 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             self.assertIn("--skip-description", job)
             self.assertIn("preview_url=", job)
         self.assertIn("--skip-description", workflow_job(workflow, "cleanup-preview"))
+
+    def test_fork_deploy_uses_the_trusted_preview_command(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        deploy_job = workflow_job(workflow, "deploy-fork")
+
+        self.assertIn("path: .preview-cli", deploy_job)
+        self.assertIn("ref: ${{ github.workflow_sha }}", deploy_job)
+        self.assertIn("go build -o \"$RUNNER_TEMP/kandev-preview-deploy\" ./cmd/preview", deploy_job)
+        self.assertIn(
+            'deploy_output="$(\"$RUNNER_TEMP/kandev-preview-deploy\" deploy',
+            deploy_job,
+        )
+        self.assertNotIn("go run ./cmd/preview deploy", deploy_job)
 
 
 if __name__ == "__main__":
