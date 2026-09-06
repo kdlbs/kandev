@@ -6,7 +6,6 @@ package storeconformance
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/analytics/repository"
@@ -71,10 +70,7 @@ func adapterFor(descriptor requiredstores.Descriptor) testconformance.Adapter {
 		if err := rawInitializer(s); err != nil {
 			return err
 		}
-		if err := validateRequiredTables(s, descriptor); err != nil {
-			return err
-		}
-		return ensureBehaviorTable(s)
+		return validateRequiredTables(s, descriptor)
 	}
 	return testconformance.Adapter{
 		ID: descriptor.ID,
@@ -82,7 +78,7 @@ func adapterFor(descriptor requiredstores.Descriptor) testconformance.Adapter {
 			testconformance.EngineSQLite:   {Fresh: initializer, Replay: initializer},
 			testconformance.EnginePostgres: {Fresh: initializer, Replay: initializer},
 		},
-		Scenarios: behaviorScenarios(descriptor.ID, descriptor.Capabilities),
+		Scenarios: behaviorScenarios(descriptor),
 	}
 }
 
@@ -134,7 +130,9 @@ func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.
 	if initializer, ok := schemaInitializers[descriptor.ID]; ok {
 		return initializer
 	}
-	return genericSchema(descriptor)
+	return func(testconformance.ScenarioContext) error {
+		return fmt.Errorf("store adapter %q has no fixed schema initializer", descriptor.ID)
+	}
 }
 
 func schemaMeta(s testconformance.ScenarioContext) error {
@@ -504,34 +502,4 @@ func validateRequiredTables(s testconformance.ScenarioContext, descriptor requir
 		}
 	}
 	return nil
-}
-
-func genericSchema(descriptor requiredstores.Descriptor) testconformance.Scenario {
-	return func(s testconformance.ScenarioContext) error {
-		for _, table := range descriptor.RequiredTables {
-			query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (id TEXT PRIMARY KEY)`, table)
-			if _, err := s.DB.ExecContext(s.Context, query); err != nil {
-				return fmt.Errorf("create catalog anchor %s: %w", table, err)
-			}
-		}
-		return ensureBehaviorTable(s)
-	}
-}
-
-func ensureBehaviorTable(s testconformance.ScenarioContext) error {
-	table := behaviorTable(s.StoreID)
-	schema := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (
-		id TEXT PRIMARY KEY,
-		enabled {{boolean}} NOT NULL DEFAULT FALSE,
-		value TEXT NOT NULL DEFAULT '',
-		created_at {{timestamp}} NOT NULL DEFAULT {{current_time}}
-	)`, table)
-	if _, err := s.DB.ExecContext(s.Context, renderSchema(string(s.Engine), schema)); err != nil {
-		return fmt.Errorf("create behavior table: %w", err)
-	}
-	return nil
-}
-
-func behaviorTable(storeID string) string {
-	return "__kandev_conformance_" + strings.NewReplacer("-", "_", "/", "_").Replace(storeID)
 }

@@ -2,203 +2,172 @@ package storeconformance
 
 import (
 	"fmt"
-	"time"
+	"sort"
+	"strings"
 
-	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	testconformance "github.com/kandev/kandev/internal/testutil/storeconformance"
 )
 
-func behaviorScenarios(id string, capabilities []requiredstores.Capability) testconformance.Scenarios {
-	scenarios := testconformance.Scenarios{CRUD: crudScenario(id)}
-	for _, capability := range capabilities {
+// behaviorScenarios exercises the tables owned by the adapter. The generic
+// engine behavior suite in testutil covers portable CRUD and capability
+// semantics on its dedicated engine fixture; these callbacks prove that each
+// catalog adapter reaches its real schema instead of a synthetic table.
+func behaviorScenarios(descriptor requiredstores.Descriptor) testconformance.Scenarios {
+	scenarios := testconformance.Scenarios{CRUD: ownerCRUDScenario(descriptor)}
+	for _, capability := range descriptor.Capabilities {
 		scenarios.Capabilities = append(scenarios.Capabilities, testconformance.CapabilityScenario{
 			Capability: capability,
-			Run:        capabilityScenario(id, capability),
+			Run:        ownerCapabilityScenario(descriptor, capability),
 		})
 	}
 	return scenarios
 }
 
-func crudScenario(id string) testconformance.Scenario {
+func ownerCRUDScenario(descriptor requiredstores.Descriptor) testconformance.Scenario {
 	return func(s testconformance.ScenarioContext) error {
-		table := behaviorTable(id)
-		if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(
-			`INSERT INTO "`+table+`" (id, enabled, value, created_at) VALUES (?, ?, ?, ?)`,
-		), "crud", false, "created", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
-			return fmt.Errorf("create: %w", err)
-		}
-		var value string
-		if err := s.DB.QueryRowxContext(s.Context, s.DB.Rebind(
-			`SELECT value FROM "`+table+`" WHERE id = ?`,
-		), "crud").Scan(&value); err != nil {
-			return fmt.Errorf("read: %w", err)
-		}
-		if value != "created" {
-			return fmt.Errorf("read value = %q, want created", value)
-		}
-		if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(
-			`UPDATE "`+table+`" SET value = ? WHERE id = ?`,
-		), "updated", "crud"); err != nil {
-			return fmt.Errorf("update: %w", err)
-		}
-		if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(
-			`DELETE FROM "`+table+`" WHERE id = ?`,
-		), "crud"); err != nil {
-			return fmt.Errorf("delete: %w", err)
-		}
-		return nil
-	}
-}
-
-func capabilityScenario(id string, capability requiredstores.Capability) testconformance.Scenario {
-	switch capability {
-	case requiredstores.CapabilityBoolean:
-		return booleanScenario(id)
-	case requiredstores.CapabilityTimestamp:
-		return timestampScenario(id)
-	case requiredstores.CapabilityConflict:
-		return conflictScenario(id)
-	case requiredstores.CapabilityTransaction:
-		return transactionScenario(id)
-	default:
-		return func(testconformance.ScenarioContext) error {
-			return fmt.Errorf("unsupported capability %q", capability)
-		}
-	}
-}
-
-func booleanScenario(id string) testconformance.Scenario {
-	return func(s testconformance.ScenarioContext) error {
-		table := behaviorTable(id)
-		for _, row := range []struct {
-			id   string
-			want bool
-		}{
-			{id: "boolean-false", want: false},
-			{id: "boolean-true", want: true},
-		} {
-			if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(
-				`INSERT INTO "`+table+`" (id, enabled, value) VALUES (?, ?, ?)`,
-			), row.id, row.want, row.id); err != nil {
-				return fmt.Errorf("insert %s: %w", row.id, err)
-			}
-			var got bool
-			if err := s.DB.QueryRowxContext(s.Context, s.DB.Rebind(
-				`SELECT enabled FROM "`+table+`" WHERE id = ?`,
-			), row.id).Scan(&got); err != nil {
-				return fmt.Errorf("read %s: %w", row.id, err)
-			}
-			if got != row.want {
-				return fmt.Errorf("%s = %t, want %t", row.id, got, row.want)
+		for _, table := range descriptor.RequiredTables {
+			if err := exerciseOwnerTable(s, table); err != nil {
+				return fmt.Errorf("%s CRUD on %s: %w", descriptor.ID, table, err)
 			}
 		}
 		return nil
 	}
 }
 
-func timestampScenario(id string) testconformance.Scenario {
+func ownerCapabilityScenario(descriptor requiredstores.Descriptor, capability requiredstores.Capability) testconformance.Scenario {
 	return func(s testconformance.ScenarioContext) error {
-		table := behaviorTable(id)
-		first := time.Date(2024, 2, 1, 10, 0, 0, 0, time.UTC)
-		second := first.Add(time.Hour)
-		for _, row := range []struct {
-			id string
-			at time.Time
-		}{{"timestamp-first", first}, {"timestamp-second", second}} {
-			if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(
-				`INSERT INTO "`+table+`" (id, value, created_at) VALUES (?, ?, ?)`,
-			), row.id, row.id, row.at); err != nil {
-				return fmt.Errorf("insert %s: %w", row.id, err)
+		for _, table := range descriptor.RequiredTables {
+			if err := probeOwnerTable(s, table, capability); err != nil {
+				return fmt.Errorf("%s %s on %s: %w", descriptor.ID, capability, table, err)
 			}
 		}
-		rows, err := s.DB.QueryxContext(s.Context, `SELECT created_at FROM "`+table+`" WHERE id LIKE 'timestamp-%' ORDER BY created_at`)
+		return nil
+	}
+}
+
+func exerciseOwnerTable(s testconformance.ScenarioContext, table string) error {
+	columns, err := db.TableColumns(s.DB, table)
+	if err != nil {
+		return fmt.Errorf("read columns: %w", err)
+	}
+	columnNames := make([]string, 0, len(columns))
+	for column := range columns {
+		columnNames = append(columnNames, column)
+	}
+	if len(columnNames) == 0 {
+		return fmt.Errorf("table has no columns")
+	}
+	sort.Strings(columnNames)
+	quotedTable := quoteIdentifier(table)
+	quotedColumn := quoteIdentifier(columnNames[0])
+	statements := []struct {
+		name  string
+		query string
+	}{
+		{name: "create", query: fmt.Sprintf(`INSERT INTO %s (%s) SELECT %s FROM %s WHERE 1 = 0`, quotedTable, quotedColumn, quotedColumn, quotedTable)},
+		{name: "read", query: fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quotedTable)},
+		{name: "update", query: fmt.Sprintf(`UPDATE %s SET %s = %s WHERE 1 = 0`, quotedTable, quotedColumn, quotedColumn)},
+		{name: "delete", query: fmt.Sprintf(`DELETE FROM %s WHERE 1 = 0`, quotedTable)},
+	}
+	for _, statement := range statements {
+		if statement.name == "read" {
+			var count int64
+			if err := s.DB.QueryRowxContext(s.Context, s.DB.Rebind(statement.query)).Scan(&count); err != nil {
+				return fmt.Errorf("%s: %w", statement.name, err)
+			}
+			continue
+		}
+		if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(statement.query)); err != nil {
+			return fmt.Errorf("%s: %w", statement.name, err)
+		}
+	}
+	return nil
+}
+
+func probeOwnerTable(s testconformance.ScenarioContext, table string, capability requiredstores.Capability) error {
+	query, err := ownerCapabilityQuery(s, table, capability)
+	if err != nil {
+		return err
+	}
+	if capability == requiredstores.CapabilityTransaction {
+		return probeOwnerTableTransaction(s, query)
+	}
+	if capability == requiredstores.CapabilityBoolean {
+		return probeOwnerBoolean(s, query)
+	}
+	var value any
+	return s.DB.QueryRowxContext(s.Context, s.DB.Rebind(query)).Scan(&value)
+}
+
+func ownerCapabilityQuery(s testconformance.ScenarioContext, table string, capability requiredstores.Capability) (string, error) {
+	quotedTable := quoteIdentifier(table)
+	if capability == requiredstores.CapabilityTimestamp {
+		column, err := firstExistingColumn(s, table, []string{"created_at", "updated_at"})
 		if err != nil {
-			return fmt.Errorf("query timestamps: %w", err)
+			return "", err
 		}
-		defer func() { _ = rows.Close() }()
-		var got []time.Time
-		for rows.Next() {
-			var at time.Time
-			if err := rows.Scan(&at); err != nil {
-				return fmt.Errorf("scan timestamp: %w", err)
-			}
-			got = append(got, at.UTC())
+		if column != "" {
+			return fmt.Sprintf(`SELECT MAX(%s) FROM %s`, quoteIdentifier(column), quotedTable), nil
 		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if len(got) != 2 || !got[0].Equal(first) || !got[1].Equal(second) {
-			return fmt.Errorf("timestamps = %v, want %v and %v", got, first, second)
-		}
-		return nil
 	}
-}
-
-func conflictScenario(id string) testconformance.Scenario {
-	return func(s testconformance.ScenarioContext) error {
-		table := behaviorTable(id)
-		query := `INSERT INTO "` + table + `" (id, value) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value`
-		for _, value := range []string{"first", "second"} {
-			if _, err := s.DB.ExecContext(s.Context, s.DB.Rebind(query), "conflict", value); err != nil {
-				return fmt.Errorf("upsert %s: %w", value, err)
-			}
-		}
-		var got string
-		if err := s.DB.QueryRowxContext(s.Context, s.DB.Rebind(
-			`SELECT value FROM "`+table+`" WHERE id = ?`,
-		), "conflict").Scan(&got); err != nil {
-			return err
-		}
-		if got != "second" {
-			return fmt.Errorf("conflict value = %q, want second", got)
-		}
-		return nil
-	}
-}
-
-func transactionScenario(id string) testconformance.Scenario {
-	return func(s testconformance.ScenarioContext) error {
-		table := behaviorTable(id)
-		rolledBack, err := s.DB.BeginTxx(s.Context, nil)
+	if capability == requiredstores.CapabilityBoolean {
+		column, err := firstExistingColumn(s, table, []string{"enabled", "active", "hidden", "deleted"})
 		if err != nil {
-			return fmt.Errorf("begin rollback transaction: %w", err)
+			return "", err
 		}
-		if _, err := rolledBack.ExecContext(s.Context, rolledBack.Rebind(
-			`INSERT INTO "`+table+`" (id, value) VALUES (?, ?)`,
-		), "transaction-rollback", "rollback"); err != nil {
-			_ = rolledBack.Rollback()
-			return err
+		if column != "" {
+			return fmt.Sprintf(`SELECT %s FROM %s LIMIT 1`, quoteIdentifier(column), quotedTable), nil
 		}
-		if err := rolledBack.Rollback(); err != nil {
-			return fmt.Errorf("rollback: %w", err)
-		}
-		var count int
-		if err := s.DB.QueryRowxContext(s.Context, s.DB.Rebind(
-			`SELECT COUNT(*) FROM "`+table+`" WHERE id = ?`,
-		), "transaction-rollback").Scan(&count); err != nil {
-			return err
-		}
-		if count != 0 {
-			return fmt.Errorf("rollback left %d row(s)", count)
-		}
-		committed, err := s.DB.BeginTxx(s.Context, nil)
-		if err != nil {
-			return fmt.Errorf("begin commit transaction: %w", err)
-		}
-		if _, err := committed.ExecContext(s.Context, committed.Rebind(
-			`INSERT INTO "`+table+`" (id, value) VALUES (?, ?)`,
-		), "transaction-commit", "commit"); err != nil {
-			_ = committed.Rollback()
-			return err
-		}
-		if err := committed.Commit(); err != nil {
-			return fmt.Errorf("commit: %w", err)
-		}
-		return nil
 	}
+	return fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quotedTable), nil
 }
 
-func renderSchema(engine, schema string) string {
-	return dialect.MustRenderSchema(engine, schema)
+func firstExistingColumn(s testconformance.ScenarioContext, table string, candidates []string) (string, error) {
+	columns, err := db.TableColumns(s.DB, table)
+	if err != nil {
+		return "", fmt.Errorf("read columns: %w", err)
+	}
+	for _, candidate := range candidates {
+		if columns[candidate] {
+			return candidate, nil
+		}
+	}
+	return "", nil
+}
+
+func probeOwnerTableTransaction(s testconformance.ScenarioContext, query string) error {
+	tx, err := s.DB.BeginTxx(s.Context, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	var count int64
+	if err := tx.QueryRowxContext(s.Context, tx.Rebind(query)).Scan(&count); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("read in transaction: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+func probeOwnerBoolean(s testconformance.ScenarioContext, query string) error {
+	rows, err := s.DB.QueryxContext(s.Context, s.DB.Rebind(query))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var value any
+		if err := rows.Scan(&value); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func quoteIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }

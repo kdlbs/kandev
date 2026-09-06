@@ -2,6 +2,7 @@ package dialect
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -13,6 +14,8 @@ const (
 	schemaTokenCurrentTime = "{{current_time}}"
 	schemaTokenNow         = "{{now}}"
 )
+
+var schemaTimestampTypePattern = regexp.MustCompile(`(?i)\b(?:TIMESTAMPTZ|TIMESTAMP|DATETIME)\b`)
 
 // SchemaTokenTimestamp is the portable timestamp type token for schema text.
 const SchemaTokenTimestamp = schemaTokenTimestamp
@@ -41,25 +44,25 @@ func RenderSchema(driver, schema string) (string, error) {
 		boolean = "BOOLEAN"
 		identity = "BIGSERIAL"
 	}
-	// Existing stores used these two generic type spellings before the token
-	// contract was introduced. Keep their rendering centralized while those
-	// schema constants migrate to explicit tokens.
-	rendered := strings.ReplaceAll(schema, "TIMESTAMP", timestamp)
-	rendered = strings.ReplaceAll(rendered, "DATETIME", timestamp)
-	if IsPostgres(driver) {
-		rendered = strings.ReplaceAll(rendered, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-		rendered = strings.ReplaceAll(rendered, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
-		rendered = strings.ReplaceAll(rendered, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
-		rendered = strings.ReplaceAll(rendered, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-	}
-	rendered = strings.NewReplacer(
+	rendered := strings.NewReplacer(
 		schemaTokenTimestamp, timestamp,
 		schemaTokenBool, boolean,
 		schemaTokenBoolean, boolean,
 		schemaTokenIdentity, identity,
 		schemaTokenCurrentTime, "CURRENT_TIMESTAMP",
 		schemaTokenNow, "CURRENT_TIMESTAMP",
-	).Replace(rendered)
+	).Replace(schema)
+	// Existing stores used these generic type spellings before the token
+	// contract was introduced. Keep their rendering centralized while those
+	// schema constants migrate to explicit tokens. Word boundaries are
+	// important here: CURRENT_TIMESTAMP is an expression, not a type.
+	rendered = schemaTimestampTypePattern.ReplaceAllString(rendered, timestamp)
+	if IsPostgres(driver) {
+		rendered = strings.ReplaceAll(rendered, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		rendered = strings.ReplaceAll(rendered, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		rendered = strings.ReplaceAll(rendered, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		rendered = strings.ReplaceAll(rendered, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
 	if IsPostgres(driver) {
 		// Apply the boolean default normalization after token expansion too.
 		// A tokenized BOOLEAN column cannot be normalized by the legacy pass

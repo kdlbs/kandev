@@ -61,6 +61,7 @@ var (
 	booleanIntegerPattern = regexp.MustCompile(`(?is)\bBOOLEAN\b.{0,100}?\bDEFAULT\s+[01]\b`)
 	sqliteDatePattern     = regexp.MustCompile(`(?i)\b(?:date|datetime|strftime|julianday)\s*\(`)
 	datetimeTypePattern   = regexp.MustCompile(`(?i)(?:^|[\s(,])DATETIME(?:\s|[,);]|$)`)
+	pragmaPattern         = regexp.MustCompile(`(?i)\bpragma(?:_[a-z0-9_]+)?\b`)
 	sqlPattern            = regexp.MustCompile(`(?i)\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|WITH)\b`)
 )
 
@@ -127,8 +128,12 @@ func analyzeSQLLiteral(
 	exemptions []Exemption,
 	seen map[string]struct{},
 	result *analysisResult,
+	forceSQL ...bool,
 ) {
 	sqlText := sqlPattern.MatchString(value)
+	if len(forceSQL) > 0 && forceSQL[0] {
+		sqlText = true
+	}
 	checks := []struct {
 		rule    Rule
 		match   bool
@@ -176,7 +181,15 @@ func analyzeExecutorCalls(
 			return true
 		}
 		query, value, ok := queryArgument(call, values)
-		if !ok || !rawPlaceholder(value) || isBoundQuery(query) {
+		if !ok || isBoundQuery(query) {
+			return true
+		}
+		if pragmaPattern.MatchString(value) {
+			position := fileSet.Position(query.Pos())
+			symbol := sourceSymbol(query, parents)
+			analyzeSQLLiteral(filename, value, symbol, position, exemptions, seen, result, true)
+		}
+		if !rawPlaceholder(value) {
 			return true
 		}
 		analyzeRawPlaceholder(filename, query, fileSet, parents, exemptions, seen, result)
@@ -374,7 +387,7 @@ func isExecutorCall(call *ast.CallExpr) bool {
 func queryArgument(call *ast.CallExpr, values map[string]string) (ast.Expr, string, bool) {
 	for _, argument := range call.Args {
 		value, ok := literalValue(argument, values)
-		if ok && sqlPattern.MatchString(value) {
+		if ok && (sqlPattern.MatchString(value) || pragmaPattern.MatchString(value)) {
 			return argument, value, true
 		}
 	}

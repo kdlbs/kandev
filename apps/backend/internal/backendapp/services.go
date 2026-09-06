@@ -291,8 +291,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
-	pluginsSvc, _, pluginsErr := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordPluginStores(storeTracker, pluginsErr); recordErr != nil {
+	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
 	if pluginsSvc != nil {
@@ -1354,9 +1354,9 @@ func initPluginsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *plugins.Service {
-	svc, _, err := initPluginsServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
-	if err != nil {
-		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
+	svc, _, storeErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
+	if err := storeErrors.CombinedError(); err != nil && log != nil {
+		log.Warn("Plugin SQL store initialization failed", zap.Error(err))
 		return nil
 	}
 	return svc
@@ -1368,15 +1368,12 @@ func initPluginsServiceRequired(
 	eventBus bus.EventBus,
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
-) (*plugins.Service, func() error, error) {
-	svc, cleanup, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
-	if err != nil {
-		return nil, nil, fmt.Errorf("plugin persistence: %w", err)
-	}
-	return svc, cleanup, nil
+) (*plugins.Service, func() error, plugins.StoreInitErrors) {
+	return plugins.ProvideWithStoreErrors(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
 }
 
-func recordPluginStores(tracker *requiredstores.Tracker, initErr error) error {
+func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {
+	var failures []error
 	for _, id := range []string{
 		"plugin-instances",
 		"plugin-marketplace",
@@ -1385,11 +1382,11 @@ func recordPluginStores(tracker *requiredstores.Tracker, initErr error) error {
 		"plugin-instance-state",
 		"plugin-user-state",
 	} {
-		if err := recordRequiredStore(tracker, id, initErr); err != nil {
-			return err
+		if err := recordRequiredStore(tracker, id, initErrors[id]); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	return initErr
+	return errors.Join(failures...)
 }
 
 type pluginsHostUtilityAdapter struct {

@@ -62,7 +62,7 @@ func (h *Health) Check(ctx context.Context) error {
 	for index, descriptor := range h.tracker.catalog {
 		results[index] = probeErr
 		if probeErr == nil {
-			results[index] = h.probeTables(descriptor)
+			results[index] = h.probeTables(ctx, descriptor)
 		}
 	}
 	var failures []error
@@ -93,9 +93,9 @@ func (h *Health) ping(ctx context.Context) error {
 	return nil
 }
 
-func (h *Health) probeTables(descriptor Descriptor) error {
+func (h *Health) probeTables(ctx context.Context, descriptor Descriptor) error {
 	for _, table := range descriptor.RequiredTables {
-		exists, err := db.TableExists(h.pool.Writer(), table)
+		exists, err := db.TableExistsContext(ctx, h.pool.Writer(), table)
 		if err != nil {
 			return fmt.Errorf("table probe failed: %w", err)
 		}

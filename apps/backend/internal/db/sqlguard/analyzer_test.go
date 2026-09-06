@@ -118,3 +118,14 @@ func TestAnalyzeSourceReportsUsefulLocations(t *testing.T) {
 		t.Fatalf("finding = %#v, want line and placeholder message", findings)
 	}
 }
+
+func TestAnalyzeSourceFindsStandalonePragma(t *testing.T) {
+	source := "package p\nfunc unsafe(db interface{ Exec(string, ...any) }) { db.Exec(\"PRAGMA table_info(items)\") }\n"
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	if !hasRule(findings, RuleSQLiteCatalog) {
+		t.Fatalf("AnalyzeSource() findings = %#v, want sqlite-catalog finding", findings)
+	}
+}

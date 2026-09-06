@@ -35,5 +35,5 @@ func persistencePathExcluded(path string) bool {
 	if path == "/health" || path == "/ready" || path == persistenceDiagnosticsPath {
 		return true
 	}
-	return !strings.HasPrefix(path, "/api/") && path != "/ws"
+	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/mcp") && path != "/ws"
 }

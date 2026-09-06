@@ -64,3 +64,19 @@ func TestRenderSchemaSupportsBooleanAndCurrentTimeAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSchemaPreservesCurrentTimestampExpression(t *testing.T) {
+	schema := "CREATE TABLE example (created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+	for _, driver := range []string{SQLite3, PGX} {
+		rendered, err := RenderSchema(driver, schema)
+		if err != nil {
+			t.Fatalf("RenderSchema(%q) error = %v", driver, err)
+		}
+		if strings.Contains(rendered, "CURRENT_TIMESTAMPTZ") || strings.Contains(rendered, "CURRENT_DATETIME") {
+			t.Fatalf("RenderSchema(%q) rewrote current-time expression: %q", driver, rendered)
+		}
+		if !strings.Contains(rendered, "DEFAULT CURRENT_TIMESTAMP") {
+			t.Fatalf("RenderSchema(%q) dropped current-time expression: %q", driver, rendered)
+		}
+	}
+}

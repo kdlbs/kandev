@@ -31,6 +31,8 @@ func TestRequiredPersistenceMiddlewareBlocksStatefulTrafficButAllowsDiagnostics(
 	router.GET("/api/v1/system/diagnostics/persistence", func(c *gin.Context) { c.Status(http.StatusOK) })
 	router.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
 	router.GET("/ready", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/ws", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/mcp", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	blocked := httptest.NewRecorder()
 	router.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/api/v1/tasks", nil))
@@ -39,6 +41,14 @@ func TestRequiredPersistenceMiddlewareBlocksStatefulTrafficButAllowsDiagnostics(
 	}
 	if blocked.Header().Get("Content-Type") == "" {
 		t.Fatal("blocked response has no content type")
+	}
+
+	for _, path := range []string{"/ws", "/mcp"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s status = %d, want %d", path, rec.Code, http.StatusServiceUnavailable)
+		}
 	}
 
 	for _, path := range []string{

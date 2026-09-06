@@ -179,6 +179,7 @@ func Run(t testingT, catalog []requiredstores.Descriptor, adapters []Adapter, op
 				callbacks := adapter.Engines[engineName]
 				runScenario(t, "fresh", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, callbacks.Fresh)
 				runScenario(t, "replay", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, callbacks.Replay)
+				runScenario(t, "engine-behavior", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, engineBehaviorScenario)
 				runScenario(t, "crud", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, adapter.Scenarios.CRUD)
 				for _, capability := range adapter.Scenarios.Capabilities {
 					capabilityName := capabilityName(capability.Capability)

@@ -4,24 +4,46 @@ import "testing"
 
 func TestCatalog(t *testing.T) {
 	catalog := Catalog()
-	if len(catalog) < 30 {
-		t.Fatalf("catalog has %d entries, want at least 30", len(catalog))
-	}
 	if err := ValidateCatalog(catalog); err != nil {
 		t.Fatalf("ValidateCatalog() error = %v", err)
 	}
 
-	seen := make(map[string]bool, len(catalog))
+	wantIDs := map[string]struct{}{
+		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
+		"azure-devops": {}, "canvas": {}, "delivery": {}, "editor": {},
+		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
+		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
+		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
+		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
+		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
+		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
+		"task": {}, "task-share": {}, "telemetry-contract": {}, "terminal": {},
+		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {},
+	}
+	seen := make(map[string]struct{}, len(catalog))
 	for _, descriptor := range catalog {
-		if seen[descriptor.ID] {
+		if _, exists := seen[descriptor.ID]; exists {
 			t.Fatalf("catalog contains duplicate ID %q", descriptor.ID)
 		}
-		seen[descriptor.ID] = true
+		seen[descriptor.ID] = struct{}{}
 		if descriptor.OwnerPackage == "" {
 			t.Errorf("catalog entry %q has no owner package", descriptor.ID)
 		}
 		if len(descriptor.RequiredTables) == 0 {
 			t.Errorf("catalog entry %q has no required tables", descriptor.ID)
+		}
+	}
+	if len(seen) != len(wantIDs) {
+		t.Fatalf("catalog has %d IDs, want exact set of %d", len(seen), len(wantIDs))
+	}
+	for id := range wantIDs {
+		if _, exists := seen[id]; !exists {
+			t.Errorf("catalog is missing expected ID %q", id)
+		}
+	}
+	for id := range seen {
+		if _, expected := wantIDs[id]; !expected {
+			t.Errorf("catalog contains unexpected ID %q", id)
 		}
 	}
 
