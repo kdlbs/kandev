@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -31,7 +32,16 @@ import (
 
 // defaultPriority is the default value for the task priority column.
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
-const defaultPriority = "medium"
+const defaultPriority = models.TaskPriorityMedium
+
+// ValidateTaskPriority checks the canonical priority enum. Creation callers
+// may omit priority and receive the default; updates must always name a value.
+// It delegates to models.ValidateTaskPriority so internal/plugins (which
+// cannot import internal/task/service without an import cycle, per ADR 0043)
+// can validate against the same enum via the lower-level models package.
+func ValidateTaskPriority(priority string) error {
+	return models.ValidateTaskPriority(priority)
+}
 
 const (
 	providerAzureDevOps = "azure_devops"
@@ -208,7 +218,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // call returns, so settlement is their responsibility (see the spec's
 // "Settlement call site" section).
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		return CreateTaskResult{}, err
 	}
 
@@ -750,6 +760,11 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
+	}
+	if req.Priority != "" {
+		if err := ValidateTaskPriority(req.Priority); err != nil {
+			return err
+		}
 	}
 	isOffice := isOfficeRequest(req)
 	// Automation runs never land on a board, so they need no workflow — the
@@ -1899,11 +1914,16 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	if req.Title != nil {
 		if err := validateTaskTitle(*req.Title); err != nil {
+			return nil, err
+		}
+	}
+	if req.Priority != nil {
+		if err := ValidateTaskPriority(*req.Priority); err != nil {
 			return nil, err
 		}
 	}
@@ -1944,6 +1964,13 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	if req.Position != nil {
 		task.Position = *req.Position
+	}
+	if req.AssigneeUserID != nil {
+		assignee, err := s.resolveTaskAssignee(ctx, task, *req.AssigneeUserID)
+		if err != nil {
+			return nil, err
+		}
+		task.AssigneeUserID = assignee
 	}
 	if req.Metadata != nil {
 		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
@@ -2279,7 +2306,7 @@ func (s *Service) RestoreTaskMessageRollback(
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
 	// 1. Get task and verify it exists
@@ -2594,7 +2621,7 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
 	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, func(ctx context.Context, id string) (bool, error) {
@@ -2656,6 +2683,15 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 			zap.String("task_id", id),
 			zap.String("env_id", taskEnvironmentID(taskEnv)),
 			zap.String("new_owner_task_id", taskEnv.TaskID))
+	}
+	// Remove task-scoped canvas authority while the task identity still exists.
+	// Promoted canvases have no task_id and are therefore preserved by the
+	// canvas service. A failure aborts the task mutation so the active release
+	// cannot be orphaned by a successful task delete.
+	if s.canvasCleanup != nil {
+		if err := s.canvasCleanup.CleanupTaskCanvases(ctx, id); err != nil {
+			return false, fmt.Errorf("cleanup task canvases for delete: %w", err)
+		}
 	}
 
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}

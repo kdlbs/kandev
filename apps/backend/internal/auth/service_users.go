@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,9 +22,7 @@ func (s *Service) AdminCreateUser(ctx context.Context, email, password, displayN
 	if err := validateEmailPassword(email, password); err != nil {
 		return nil, err
 	}
-	if role != usermodels.RoleAdmin {
-		role = usermodels.RoleMember
-	}
+	role = usermodels.NormalizeRole(role)
 	if _, err := s.users.GetUserByEmail(ctx, email); err == nil {
 		return nil, ErrEmailTaken
 	}
@@ -33,21 +32,13 @@ func (s *Service) AdminCreateUser(ctx context.Context, email, password, displayN
 		DisplayName: displayName,
 		Role:        role,
 		Status:      usermodels.StatusActive,
+		// A new account joins the creating admin's organization. There is no
+		// org parameter on this path on purpose: an admin can only ever create
+		// users in their own tenant, so the org comes from the caller's
+		// identity rather than from the request.
+		OrgID: callerOrgID(ctx),
 	}
-	if err := s.users.CreateUser(ctx, user); err != nil {
-		return nil, ErrEmailTaken
-	}
-	hash, err := HashPassword(password)
-	if err != nil {
-		return nil, err
-	}
-	identity := &store.LoginIdentity{
-		UserID:       user.ID,
-		Provider:     store.ProviderLocal,
-		Subject:      email,
-		PasswordHash: hash,
-	}
-	if err := s.store.CreateIdentity(ctx, identity); err != nil {
+	if err := s.createLocalUser(ctx, user, password); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -66,9 +57,7 @@ func (s *Service) AdminSetRoleStatus(ctx context.Context, targetID, role, status
 	if status == "" {
 		status = target.Status
 	}
-	if role != usermodels.RoleAdmin {
-		role = usermodels.RoleMember
-	}
+	role = usermodels.NormalizeRole(role)
 	if status != usermodels.StatusDisabled {
 		status = usermodels.StatusActive
 	}
@@ -143,4 +132,50 @@ func (s *Service) ensureAnotherAdmin(ctx context.Context, excludingID string) er
 		}
 	}
 	return ErrLastAdmin
+}
+
+// CreateUserInOrg provisions an account in a named organization.
+//
+// It exists for exactly one caller: the operator creating an organization's
+// first administrator. Every other creation path takes the org from the
+// requesting admin's identity, because an admin may only ever create accounts
+// in their own tenant.
+func (s *Service) CreateUserInOrg(
+	ctx context.Context, orgID, email, password, displayName string,
+) error {
+	email = normalizeEmail(email)
+	if err := validateEmailPassword(email, password); err != nil {
+		return err
+	}
+	if _, err := s.users.GetUserByEmail(ctx, email); err == nil {
+		return ErrEmailTaken
+	}
+	user := &usermodels.User{
+		ID:          uuid.New().String(),
+		Email:       email,
+		DisplayName: displayName,
+		Role:        usermodels.RoleAdmin,
+		Status:      usermodels.StatusActive,
+		OrgID:       orgID,
+	}
+	return s.createLocalUser(ctx, user, password)
+}
+
+func (s *Service) createLocalUser(ctx context.Context, user *usermodels.User, password string) error {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return err
+	}
+	if err := s.users.CreateUser(ctx, user); err != nil {
+		return ErrEmailTaken
+	}
+	if err := s.store.CreateIdentity(ctx, &store.LoginIdentity{
+		UserID:       user.ID,
+		Provider:     store.ProviderLocal,
+		Subject:      user.Email,
+		PasswordHash: hash,
+	}); err != nil {
+		return errors.Join(err, s.users.DeleteUser(ctx, user.ID))
+	}
+	return nil
 }

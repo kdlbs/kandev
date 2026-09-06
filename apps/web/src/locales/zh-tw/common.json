@@ -166,6 +166,8 @@
   "failedToCreateFolder": "建立資料夾失敗",
   "failedToCreateRepository": "建立儲存庫失敗",
   "failedToLoadDirectory": "載入目錄失敗",
+  "nativeFolderPickerFailed": "無法開啟原生資料夾選擇器。",
+  "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
   "failedToLoadRoutine": "載入例程失敗",
   "failedToLoadSetup": "載入設定失敗",
   "failedToRenderDiagram": "圖表渲染失敗",

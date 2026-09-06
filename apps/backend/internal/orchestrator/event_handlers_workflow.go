@@ -2652,7 +2652,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 		// resolveDynamicLaunchExecution above may have claimed newSession's
 		// route generation as "starting"; nothing else transitions it if this
 		// workspace-only attach then fails. Safe to call unconditionally: it
-		// only fires while that generation is still "starting".
+		// only fires while that generation is still "starting" or "retrying".
 		s.markDynamicRouteActionRequired(ctx, sessionID, newSession.RouteGeneration, "workflow_replacement_launch_failed")
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
 	}

@@ -294,6 +294,8 @@ type wsUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -343,14 +345,15 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     req.Priority,
-		State:        req.State,
-		Repositories: convertUpdateRepositories(req.Repositories != nil, repos),
-		Position:     req.Position,
-		Metadata:     req.Metadata,
-		ParentID:     req.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       req.Priority,
+		State:          req.State,
+		Repositories:   convertUpdateRepositories(req.Repositories != nil, repos),
+		Position:       req.Position,
+		Metadata:       req.Metadata,
+		ParentID:       req.ParentID,
+		AssigneeUserID: req.AssigneeUserID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))

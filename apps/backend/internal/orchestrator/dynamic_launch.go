@@ -209,11 +209,12 @@ func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, 
 // durable action_required and mirrors the status onto the task-session
 // projection. It is the catch-all recovery marker every declined or failed
 // dynamic launch path falls back to, so a claimed route is never left
-// silently stuck at "starting" with no recovery affordance. The underlying
-// engine call only transitions a route that is still "starting" (see
-// Engine.MarkActionRequired), so calling this on a route a launch already
-// carried to "active" is a safe no-op: neither store is touched, and an
-// unrelated later failure cannot overwrite a healthy route's reason.
+// silently stuck at "starting" or "retrying" with no recovery affordance.
+// The underlying engine call only transitions a route that is still
+// "starting" or "retrying" (see Engine.MarkActionRequired), so calling this
+// on a route a launch already carried to "active" is a safe no-op: neither
+// store is touched, and an unrelated later failure cannot overwrite a
+// healthy route's reason.
 func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID string, generation int64, reason string) {
 	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
 		return
@@ -663,9 +664,10 @@ func (s *Service) routeDynamicAgentFailure(
 	// failed attempt, not the one this call started from. The guard is safe
 	// to arm this early even for a failure the classifier forbids fallback
 	// for: markDynamicRouteActionRequired only transitions a route that is
-	// still "starting", so it is a no-op once this generation's launch has
-	// already reached "active" (an ordinary runtime failure on a healthy
-	// session), and only fires for a route genuinely stranded mid-launch.
+	// still "starting" or "retrying", so it is a no-op once this generation's
+	// launch has already reached "active" (an ordinary runtime failure on a
+	// healthy session), and only fires for a route genuinely stranded
+	// mid-launch.
 	generation := session.RouteGeneration
 	handled := false
 	defer func() {

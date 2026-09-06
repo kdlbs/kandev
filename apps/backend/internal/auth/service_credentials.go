@@ -37,6 +37,13 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 		return nil, "", ErrInvalidCredentials
 	}
 	s.limiter.Reset(limiterKey)
+	// A suspended organization refuses login outright rather than handing out
+	// a session that fails on the very next request. The message is distinct
+	// from ErrInvalidCredentials on purpose: the credentials were correct, and
+	// telling the user their password is wrong would send them to reset it.
+	if !s.orgUsable(ctx, user.OrgID) {
+		return nil, "", ErrOrgUnavailable
+	}
 	token, err := s.createSession(ctx, user.ID, userAgent, ip)
 	if err != nil {
 		return nil, "", err
@@ -101,7 +108,10 @@ func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (au
 		}
 		_ = s.store.TouchSession(ctx, sess.ID, now, now.Add(s.SessionTTL()), refreshIP)
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user), SessionID: sess.ID}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, sess.ID, ""), true
 }
 
 // ResolveBearer authenticates an Authorization bearer credential when it is a
@@ -126,7 +136,10 @@ func (s *Service) ResolveBearer(ctx context.Context, token string) (authn.Identi
 	if record.LastUsedAt == nil || now.Sub(*record.LastUsedAt) > sessionTouchInterval {
 		_ = s.store.TouchAPIToken(ctx, record.ID, now)
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user), TokenID: record.ID}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, "", record.ID), true
 }
 
 // IdentityForUser resolves a stored user ID to the identity that user carries
@@ -148,7 +161,10 @@ func (s *Service) IdentityForUser(ctx context.Context, userID string) (authn.Ide
 	if err != nil {
 		return authn.Identity{}, false
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user)}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, "", ""), true
 }
 
 // ListSessions returns the user's sessions for the account page.

@@ -274,6 +274,14 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  /** "private" (owner + explicit members) or "org" (every non-guest user). */
+  /** The organization unit this workspace sits in; reach follows the tree. */
+  unit_id?: string;
+  /** The requesting user's role here; drives owner-only controls. */
+  viewer_role?: string;
+  /** Scopes the requesting user holds here. The server is authoritative. */
+  scopes?: string[];
+  member_count?: number;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
@@ -435,6 +443,11 @@ export type Task = ActiveSubagentCountFields & {
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  /**
+   * The human assignee's user id, independent of the agent assignee. Advisory:
+   * it records who owns the task and gates nothing.
+   */
+  assignee_user_id?: string;
   parent_id?: TaskId;
   archived_at?: string | null;
   created_at: string;
@@ -708,10 +721,27 @@ export type LocalRepository = {
   default_branch?: string;
 };
 
+export type DesktopDiscoveryRoot = {
+  id: string;
+  path: string;
+  display_path: string;
+  state: "connected" | "reconnect_required" | string;
+  last_scan_at?: string;
+  last_failure_at?: string;
+  last_failure_code?: string;
+};
+
 export type RepositoryDiscoveryResponse = {
   roots: string[];
   repositories: LocalRepository[];
   total: number;
+  desktop_runtime?: boolean;
+  root_states?: DesktopDiscoveryRoot[];
+  scan_time?: string;
+  refreshing?: boolean;
+  cached?: boolean;
+  home_confirmation_required?: boolean;
+  failed_roots?: string[];
 };
 
 export type RepositoryPathValidationResponse = {

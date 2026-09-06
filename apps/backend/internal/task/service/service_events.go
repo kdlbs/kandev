@@ -405,6 +405,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// omitted key here would make clearTaskAutoStartFailedMarker's publish
 		// as invisible as the set it is meant to undo.
 		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		// The human assignee, always sent, never omitted when empty, for the
+		// same reason as auto_start_failed above: the frontend pins the
+		// previous value when the key is absent, so omitting it would make
+		// unassigning invisible to every open client, and a takeover would
+		// leave the previous owner's name on their screens.
+		"assignee_user_id": task.AssigneeUserID,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
@@ -786,6 +792,7 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"assignee_user_id":          task.AssigneeUserID,
 		"wip_admitted":              task.WIPAdmitted,
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
@@ -827,11 +834,24 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
-		"created_at":                      workspace.CreatedAt.Format(time.RFC3339),
-		"updated_at":                      workspace.UpdatedAt.Format(time.RFC3339),
+		// Placement is reach: moving a workspace between units is what grants
+		// and withdraws access now, so an access-changed event that omitted it
+		// would tell clients something changed without telling them what.
+		"unit_id":    workspace.UnitID,
+		"created_at": workspace.CreatedAt.Format(time.RFC3339),
+		"updated_at": workspace.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "workspace", workspace.ID, data)
+}
+
+// publishWorkspaceAccessChanged tells open clients that who-can-reach-this
+// changed (unit placement, membership, ownership) so they re-evaluate access
+// without a reload. It rides the existing workspace-updated event: the payload
+// carries owner and unit_id, and a client that lost access is dropped from the
+// workspace's subscriber set on the next broadcast.
+func (s *Service) publishWorkspaceAccessChanged(ctx context.Context, workspace *models.Workspace) {
+	s.publishWorkspaceEvent(ctx, events.WorkspaceUpdated, workspace)
 }
 
 func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {

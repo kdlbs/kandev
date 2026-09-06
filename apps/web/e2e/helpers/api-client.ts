@@ -13,7 +13,7 @@ import type {
   WorkflowProfileSessionEndPolicy,
   TaskPriority,
 } from "../../lib/types/http";
-import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
   PRCommitDetail,
@@ -560,6 +560,10 @@ export class ApiClient {
       ...response,
       agents,
     };
+  }
+
+  async listAvailableAgents(): Promise<{ agents: AvailableAgent[]; total: number }> {
+    return this.request("GET", "/api/v1/agents/available");
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {

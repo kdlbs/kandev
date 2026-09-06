@@ -200,13 +200,14 @@ jobs:
 
             let currentPullRequest;
             try {
+              // AutoMergeRequest has no node ID; use the pull request ID for its mutation.
               const state = await github.graphql(
                 `
                   query($owner: String!, $repo: String!, $number: Int!) {
                     repository(owner: $owner, name: $repo) {
                       pullRequest(number: $number) {
                         id
-                        autoMergeRequest { id }
+                        autoMergeRequest { enabledAt }
                         mergeQueueEntry { id }
                       }
                     }
@@ -229,7 +230,7 @@ jobs:
             if (currentPullRequest) {
               await attemptCleanup(
                 'auto-merge',
-                currentPullRequest.autoMergeRequest?.id,
+                currentPullRequest.autoMergeRequest ? currentPullRequest.id : null,
                 id =>
                   github.graphql(
                     `
@@ -255,7 +256,7 @@ jobs:
                         }
                       }
                     `,
-                    { id: currentPullRequest.id },
+                    { id },
                   ),
               );
             }

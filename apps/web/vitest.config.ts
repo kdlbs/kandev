@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
+import { resolveMaxWorkers } from "./scripts/vitest-worker-budget";
 
 if (process.env.DEBUG === "1") process.env.DEBUG = "";
 
@@ -9,7 +10,12 @@ if (process.env.DEBUG === "1") process.env.DEBUG = "";
 process.env.NODE_ENV = "test";
 
 const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
-const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, Boolean(process.env.CI));
+const isCI = Boolean(process.env.CI);
+const allowUnsafeParallelism = process.env.KANDEV_ALLOW_UNSAFE_TEST_PARALLELISM === "1";
+const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, isCI, allowUnsafeParallelism);
+if (configuredMaxWorkers && !isCI && !allowUnsafeParallelism) {
+  delete process.env.VITEST_MAX_WORKERS;
+}
 
 export default mergeConfig(
   viteConfig,
@@ -46,12 +52,3 @@ export default mergeConfig(
     },
   }),
 );
-
-function resolveMaxWorkers(value: string | undefined, isCI: boolean) {
-  if (/^[1-9]\d*%$/.test(value ?? "")) return value;
-
-  const workers = Number(value);
-  if (Number.isInteger(workers) && workers > 0) return workers;
-
-  return isCI ? undefined : "20%";
-}

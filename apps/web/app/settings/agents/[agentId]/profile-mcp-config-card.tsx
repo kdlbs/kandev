@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { SettingsCard } from "@/components/settings/settings-card";
 // `validateDraftServers` runs outside React (from an onChange handler and from
 // the parent's draft state), so it uses the module-level `t`, which resolves at
@@ -412,6 +413,7 @@ export function ProfileMcpConfigCard({
     mcpBaselineServers,
     mcpError,
   });
+  const canManage = useIsAdmin();
   useSettingsSaveContributor({
     id: `agent-profile-mcp:${profileId}`,
     revision: JSON.stringify({
@@ -419,8 +421,9 @@ export function ProfileMcpConfigCard({
       servers: state.currentServers,
     }),
     isDirty: supportsMcp && state.isEditableProfile && state.currentDirty,
-    canSave: !state.currentError,
-    invalidReason: state.currentError ?? undefined,
+    // Same org.config.manage gate as the agent form this card saves beside.
+    canSave: canManage && !state.currentError,
+    invalidReason: canManage ? (state.currentError ?? undefined) : t("agents:adminOnly"),
     save: handleSaveMcp,
     discard: resetMcpDraft,
   });
