@@ -44,6 +44,11 @@ const createTablesSQL = `
 		last_error TEXT NOT NULL DEFAULT '',
 		last_warnings TEXT NOT NULL DEFAULT '[]',
 		last_hash TEXT NOT NULL DEFAULT '',
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at DATETIME,
+		last_error_class TEXT NOT NULL DEFAULT '',
+		poll_suspended INTEGER NOT NULL DEFAULT 0,
+		poll_suspension_reason TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		provider TEXT NOT NULL DEFAULT 'github',
@@ -58,7 +63,26 @@ func (s *Store) initSchema() error {
 	if err := s.addPollEnabledColumn(); err != nil {
 		return err
 	}
-	return s.addProviderColumns()
+	if err := s.addProviderColumns(); err != nil {
+		return err
+	}
+	return s.addRecoveryColumns()
+}
+
+func (s *Store) addRecoveryColumns() error {
+	statements := []string{
+		`ALTER TABLE workflow_sync_configs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN next_attempt_at DATETIME`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN last_error_class TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspended INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspension_reason TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range statements {
+		if _, err := s.db.Exec(stmt); err != nil && !db.IsDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // addProviderColumns brings databases created before GitLab sync up to the
@@ -90,6 +114,7 @@ func (s *Store) addPollEnabledColumn() error {
 
 const configSelectColumns = `workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
 	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
+	consecutive_failures, next_attempt_at, last_error_class, poll_suspended, poll_suspension_reason,
 	created_at, updated_at`
 
 type configScanner interface {
@@ -98,8 +123,8 @@ type configScanner interface {
 
 func scanConfig(row configScanner) (*Config, error) {
 	cfg := &Config{}
-	var lastOk, pollEnabled int
-	var lastSyncedAt sql.NullTime
+	var lastOk, pollEnabled, pollSuspended int
+	var lastSyncedAt, nextAttemptAt sql.NullTime
 	var warningsJSON string
 	if err := row.Scan(
 		&cfg.WorkspaceID,
@@ -116,6 +141,11 @@ func scanConfig(row configScanner) (*Config, error) {
 		&cfg.LastError,
 		&warningsJSON,
 		&cfg.LastHash,
+		&cfg.ConsecutiveFailures,
+		&nextAttemptAt,
+		&cfg.LastErrorClass,
+		&pollSuspended,
+		&cfg.PollSuspensionReason,
 		&cfg.CreatedAt,
 		&cfg.UpdatedAt,
 	); err != nil {
@@ -123,6 +153,7 @@ func scanConfig(row configScanner) (*Config, error) {
 	}
 	cfg.LastOk = lastOk != 0
 	cfg.PollEnabled = pollEnabled != 0
+	cfg.PollSuspended = pollSuspended != 0
 	// A row written before the provider column existed carries the implicit
 	// GitHub meaning. The migration default covers the normal path; this
 	// guards any row that still reads back empty.
@@ -132,6 +163,10 @@ func scanConfig(row configScanner) (*Config, error) {
 	if lastSyncedAt.Valid {
 		t := lastSyncedAt.Time
 		cfg.LastSyncedAt = &t
+	}
+	if nextAttemptAt.Valid {
+		t := nextAttemptAt.Time
+		cfg.NextAttemptAt = &t
 	}
 	if warningsJSON != "" {
 		// Corrupt JSON degrades to no warnings rather than failing the read.
@@ -183,8 +218,10 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 		INSERT INTO workflow_sync_configs (
 			workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
 			interval_seconds, poll_enabled,
-			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
+			last_synced_at, last_ok, last_error, last_warnings, last_hash,
+			consecutive_failures, next_attempt_at, last_error_class, poll_suspended,
+			poll_suspension_reason, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', 0, NULL, '', 0, '', ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			provider = excluded.provider,
 			repo_owner = excluded.repo_owner,
@@ -199,6 +236,11 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			last_error = '',
 			last_warnings = '[]',
 			last_hash = '',
+			consecutive_failures = 0,
+			next_attempt_at = NULL,
+			last_error_class = '',
+			poll_suspended = 0,
+			poll_suspension_reason = '',
 			updated_at = excluded.updated_at
 	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
 		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
@@ -220,9 +262,44 @@ func (s *Store) RecordSyncStatus(ctx context.Context, workspaceID string, ok boo
 	}
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE workflow_sync_configs
-		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = ?, last_hash = ?, updated_at = ?
+		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = ?, last_hash = ?,
+			consecutive_failures = CASE WHEN ? = 1 THEN 0 ELSE consecutive_failures END,
+			next_attempt_at = CASE WHEN ? = 1 THEN NULL ELSE next_attempt_at END,
+			last_error_class = CASE WHEN ? = 1 THEN '' ELSE last_error_class END,
+			poll_suspended = CASE WHEN ? = 1 THEN 0 ELSE poll_suspended END,
+			poll_suspension_reason = CASE WHEN ? = 1 THEN '' ELSE poll_suspension_reason END,
+			updated_at = ?
 		WHERE workspace_id = ?
-	`), at, okInt, errMsg, string(warningsJSON), hash, at, workspaceID)
+	`), at, okInt, errMsg, string(warningsJSON), hash,
+		okInt, okInt, okInt, okInt, okInt, at, workspaceID)
+	return err
+}
+
+func (s *Store) RecordSyncFailure(
+	ctx context.Context,
+	workspaceID string,
+	errMsg string,
+	directive failureDirective,
+	at time.Time,
+) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE workflow_sync_configs
+		SET last_synced_at = ?, last_ok = 0, last_error = ?, last_warnings = '[]', last_hash = '',
+			consecutive_failures = ?, next_attempt_at = ?, last_error_class = ?, poll_suspended = ?,
+			poll_suspension_reason = ?, updated_at = ?
+		WHERE workspace_id = ?
+	`), at, errMsg, directive.consecutive, directive.nextAttemptAt, directive.class,
+		boolToInt(directive.suspended), directive.suspensionReason, at, workspaceID)
+	return err
+}
+
+func (s *Store) ResetRecoveryState(ctx context.Context, workspaceID string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE workflow_sync_configs
+		SET consecutive_failures = 0, next_attempt_at = NULL, last_error_class = '',
+			poll_suspended = 0, poll_suspension_reason = '', updated_at = ?
+		WHERE workspace_id = ?
+	`), at, workspaceID)
 	return err
 }
 

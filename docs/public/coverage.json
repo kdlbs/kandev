@@ -408,7 +408,8 @@
       "stability": "stable",
       "docs": [
         "integrations",
-        "configuration"
+        "configuration",
+        "workflow-sync"
       ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",

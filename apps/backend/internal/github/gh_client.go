@@ -35,6 +35,7 @@ const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_pag
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
 	rateTracker   *RateTracker
+	rateAdmission *RateAdmission
 	mergePollWait func(context.Context, time.Duration) error
 }
 
@@ -48,6 +49,11 @@ func NewGHClient() *GHClient {
 // chaining; safe to call before any commands run.
 func (c *GHClient) WithRateTracker(t *RateTracker) *GHClient {
 	c.rateTracker = t
+	return c
+}
+
+func (c *GHClient) withRateAdmission(admission *RateAdmission) *GHClient {
+	c.rateAdmission = admission
 	return c
 }
 
@@ -70,18 +76,61 @@ func ghStderrIndicatesRateLimit(stderr string) bool {
 }
 
 // inspectRateStderr inspects the stderr from a failed `gh` invocation and
-// flags the appropriate resource bucket as exhausted. `gh api <path>` is REST
+// records a secondary throttle unless a real primary snapshot already reports
+// zero remaining. `gh api <path>` is REST
 // (Core) by default, with `api graphql` and `api search/*` as the documented
 // exceptions; non-`api` subcommands like `pr`, `issue`, and `repo` are
 // implemented against GraphQL by gh itself, so they map to the GraphQL bucket.
-func (c *GHClient) inspectRateStderr(args []string, stderr string) {
-	if c.rateTracker == nil {
-		return
-	}
+func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIError {
 	if !ghStderrIndicatesRateLimit(stderr) {
-		return
+		return nil
 	}
-	c.rateTracker.markRateExhausted(resourceForGHArgs(args), time.Time{})
+	resource := resourceForGHArgs(args)
+	if c.rateTracker != nil {
+		if snap, ok := c.rateTracker.Snapshot(resource); ok && snap.Exhausted() {
+			incGitHubResponseClassification(FailurePrimaryRateLimit, resource, RetrySourcePrimaryReset)
+			return &GitHubAPIError{
+				StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
+				FailureKind: FailurePrimaryRateLimit, Resource: resource,
+				RetryAt: snap.ResetAt, RetrySource: RetrySourcePrimaryReset, Rate: &snap,
+			}
+		}
+	}
+	retryAt := time.Now().Add(secondaryFallbackDelay).UTC()
+	if c.rateTracker != nil {
+		c.rateTracker.ObserveSecondary(
+			resource,
+			retryAt,
+			RetrySourceConservativeFallback,
+			stderr,
+		)
+	}
+	incGitHubResponseClassification(
+		FailureSecondaryRateLimit, resource, RetrySourceConservativeFallback,
+	)
+	return &GitHubAPIError{
+		StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
+		FailureKind: FailureSecondaryRateLimit, Resource: resource,
+		RetryAt: retryAt, RetrySource: RetrySourceConservativeFallback,
+	}
+}
+
+func inspectAuthStderr(args []string, stderr string) *GitHubAPIError {
+	lower := strings.ToLower(stderr)
+	status := 0
+	switch {
+	case strings.Contains(lower, "http 401"), strings.Contains(lower, "401 unauthorized"), strings.Contains(lower, "status: 401"):
+		status = http.StatusUnauthorized
+	case strings.Contains(lower, "http 403"), strings.Contains(lower, "403 forbidden"), strings.Contains(lower, "status: 403"):
+		status = http.StatusForbidden
+	}
+	if status == 0 || ghStderrIndicatesRateLimit(stderr) {
+		return nil
+	}
+	return &GitHubAPIError{
+		StatusCode: status, Endpoint: firstArg(args), Body: stderr,
+		FailureKind: FailureInvalidCredentials, Resource: resourceForGHArgs(args),
+	}
 }
 
 // resourceForGHArgs maps a `gh` argv to the rate-limit bucket the call hits.
@@ -105,6 +154,10 @@ func resourceForGHArgs(args []string) Resource {
 	default:
 		return ResourceCore
 	}
+}
+
+func isGitHubRateLimitProbe(args []string) bool {
+	return len(args) >= 2 && args[0] == "api" && args[1] == "rate_limit"
 }
 
 // GHAvailable checks if the gh CLI is installed and accessible.
@@ -1315,6 +1368,13 @@ func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...strin
 // inspection, and the same error wrap. The only delta is whether stdin
 // is wired (`stdin != nil`).
 func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (string, error) {
+	if c.rateAdmission != nil {
+		release, err := c.rateAdmission.acquire(ctx, resourceForGHArgs(args))
+		if err != nil {
+			return "", fmt.Errorf("gh %s admission: %w", firstArg(args), err)
+		}
+		defer release()
+	}
 	var stdout, stderr bytes.Buffer
 	execTimeout := resolveGHExecTimeout(ctx)
 	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {
@@ -1335,10 +1395,23 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
-		c.inspectRateStderr(args, stderr.String())
+		if apiErr := inspectAuthStderr(args, stderr.String()); apiErr != nil {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)
+		}
+		if apiErr := c.inspectRateStderr(args, stderr.String()); apiErr != nil {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)
+		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
+	if c.rateTracker != nil && !isGitHubRateLimitProbe(args) &&
+		(!isGraphQLGHArgs(args) || !graphQLPayloadRateLimited(stdout.Bytes())) {
+		c.rateTracker.ObserveSuccess(resourceForGHArgs(args))
+	}
 	return stdout.String(), nil
+}
+
+func isGraphQLGHArgs(args []string) bool {
+	return len(args) >= 2 && args[0] == "api" && args[1] == "graphql"
 }
 
 // firstArg returns args[0] when present, else "<no-args>". Used for error

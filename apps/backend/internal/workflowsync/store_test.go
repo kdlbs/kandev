@@ -10,6 +10,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/github"
 )
 
 func setupTestStore(t *testing.T) *Store {
@@ -136,4 +138,54 @@ func TestStore_PollEnabledRoundtrip(t *testing.T) {
 	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", req)
 	require.NoError(t, err)
 	assert.False(t, cfg.PollEnabled)
+}
+
+func TestStore_WorkflowSyncRecoveryColumnsExist(t *testing.T) {
+	store := setupTestStore(t)
+	rows, err := store.db.Query(`PRAGMA table_info(workflow_sync_configs)`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey))
+		columns[name] = true
+	}
+	require.NoError(t, rows.Err())
+	for _, name := range []string{
+		"consecutive_failures", "next_attempt_at", "last_error_class",
+		"poll_suspended", "poll_suspension_reason",
+	} {
+		assert.True(t, columns[name], "missing workflow-sync recovery column %s", name)
+	}
+}
+
+func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	_, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	nextAttempt := now.Add(5 * time.Minute)
+	require.NoError(t, store.RecordSyncFailure(ctx, "ws-1", "rate limited", failureDirective{
+		class: string(github.FailureSecondaryRateLimit), consecutive: 3,
+		nextAttemptAt: &nextAttempt,
+	}, now))
+
+	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Equal(t, 3, cfg.ConsecutiveFailures)
+	require.NotNil(t, cfg.NextAttemptAt)
+	assert.Equal(t, nextAttempt, *cfg.NextAttemptAt)
+	assert.Equal(t, string(github.FailureSecondaryRateLimit), cfg.LastErrorClass)
+
+	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextAttemptAt)
+	assert.Empty(t, cfg.LastErrorClass)
+	assert.False(t, cfg.PollSuspended)
+	assert.Empty(t, cfg.PollSuspensionReason)
 }

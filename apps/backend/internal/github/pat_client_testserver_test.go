@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestTokenClientFetchRateLimitSeedsAllBuckets(t *testing.T) {
@@ -41,6 +43,47 @@ func TestTokenClientFetchRateLimitSeedsAllBuckets(t *testing.T) {
 		if snapshot.Remaining != wantRemaining {
 			t.Errorf("%s remaining = %d, want %d", resource, snapshot.Remaining, wantRemaining)
 		}
+	}
+}
+
+func TestTokenClientFetchRateLimitPreservesSecondaryThrottle(t *testing.T) {
+	client, _ := newRecordingPATServer(t, map[string]string{
+		"/rate_limit": `{"resources":{"core":{"limit":5000,"remaining":5000,"reset":2000000000}}}`,
+	})
+	tracker := NewRateTracker(nil, nil)
+	client.WithRateTracker(tracker)
+	retryAt := time.Now().Add(time.Hour)
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceConservativeFallback, "secondary")
+
+	if err := client.FetchRateLimit(context.Background()); err != nil {
+		t.Fatalf("FetchRateLimit: %v", err)
+	}
+	if got := tracker.Secondary(ResourceCore); !got.Active {
+		t.Fatalf("rate-limit probe success cleared active secondary throttle: %+v", got)
+	}
+}
+
+func TestPATClientExecuteGraphQLClassifiesRateLimitedPayload(t *testing.T) {
+	client, _ := newRecordingPATServer(t, map[string]string{
+		"/graphql": `{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit already exceeded for user ID 79718216"}]}`,
+	})
+	tracker := NewRateTracker(nil, nil)
+	client.WithRateTracker(tracker)
+
+	var out map[string]any
+	err := client.ExecuteGraphQL(context.Background(), "query { viewer { login } }", nil, &out)
+	if err == nil {
+		t.Fatal("ExecuteGraphQL returned nil for a rate-limited GraphQL payload")
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("ExecuteGraphQL error = %T %v, want *GitHubAPIError", err, err)
+	}
+	if apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("failure kind = %q, want %q", apiErr.FailureKind, FailureSecondaryRateLimit)
+	}
+	if !tracker.Secondary(ResourceGraphQL).Active {
+		t.Fatal("GraphQL rate-limited payload did not activate the secondary throttle")
 	}
 }
 

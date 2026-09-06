@@ -3,11 +3,34 @@ package github
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+type blockingPrincipalRoundTripper struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (t *blockingPrincipalRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	close(t.started)
+	select {
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	case <-t.release:
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"login":"test-user"}`)),
+			Header:     make(http.Header),
+		}, nil
+	}
+}
 
 // mockSecretManager implements SecretManager for testing.
 type mockSecretManager struct {
@@ -274,11 +297,87 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 		rateTracker: NewRateTracker(nil, nil),
 	}
 
-	c := svc.newPATClient("ghp_x")
+	c := svc.newPATClient(context.Background(), "ghp_x")
 	if c == nil {
 		t.Fatalf("newPATClient returned nil")
 	}
 	if c.rateTracker != svc.rateTracker {
 		t.Fatalf("expected rate tracker to be wired onto the new PAT client")
+	}
+	if c.rateAdmission == nil {
+		t.Fatal("expected principal admission to be wired onto the new PAT client")
+	}
+}
+
+func TestNewService_DoesNotProbeLegacyIdentity(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &countingPrincipalRoundTripper{}
+	client := NewTokenClient("ghp_test", TokenPrincipal{Kind: TokenCredentialPAT})
+	client.httpClient.Transport = transport
+
+	_ = NewService(client, AuthMethodPAT, nil, nil, nil, log)
+
+	if got := transport.requests; got != 0 {
+		t.Fatalf("service construction made %d identity requests, want 0", got)
+	}
+}
+
+type countingPrincipalRoundTripper struct {
+	requests int
+}
+
+func (t *countingPrincipalRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"login":"octocat"}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func TestCoordinateLegacyClientHonorsCancellationDuringPrincipalResolution(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &blockingPrincipalRoundTripper{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client := NewTokenClient("ghp_test", TokenPrincipal{Kind: TokenCredentialPAT})
+	client.httpClient.Transport = transport
+	svc := &Service{
+		logger:      log,
+		rateTracker: NewRateTracker(nil, nil),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		svc.coordinateLegacyClient(ctx, client, "")
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("coordinateLegacyClient goroutine did not terminate during cleanup")
+		}
+	})
+
+	select {
+	case <-transport.started:
+	case <-time.After(time.Second):
+		t.Fatal("principal resolution did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("coordinateLegacyClient ignored cancellation during principal resolution")
 	}
 }
