@@ -276,11 +276,12 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 
 // AgentTurnMessageData is the payload of an agent.turn.message_saved event.
 type AgentTurnMessageData struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	TurnID    string `json:"turn_id"`
-	AgentText string `json:"agent_text"`
-	AgentID   string `json:"agent_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	TurnID         string `json:"turn_id"`
+	AgentText      string `json:"agent_text"`
+	AgentID        string `json:"agent_id"`
+	AgentProfileID string `json:"agent_profile_id"`
 }
 
 // handleAgentTurnMessageSaved auto-bridges an agent session response to a
@@ -332,13 +333,20 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
-	// Attribute to the agent that actually ran the session, not the
-	// task's assignee — the two diverge for a reviewer/approver turn
-	// under officeSessionIdentity. Fall back to the assignee when the
-	// session can't be resolved, mirroring handlePromptUsage's
-	// log-and-continue fallback below.
+	// Attribute to the agent that actually ran the turn, not the task's
+	// assignee — the two diverge for a reviewer/approver turn. The event
+	// carries the acting agent's own office identity directly
+	// (execution.officeProfileID(), captured at launch before step/routing
+	// overrides mutate the profile). The session-row lookup only reflects
+	// the acting agent when features.officeSessionIdentity is on — off by
+	// default in every shipped profile, it stores the assignee for every
+	// participant's session — so it is kept only as a fallback for events
+	// published before this field existed. Final fallback is the assignee,
+	// mirroring handlePromptUsage's log-and-continue fallback below.
 	authorID := fields.AssigneeAgentProfileID
-	if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
+	if data.AgentProfileID != "" {
+		authorID = data.AgentProfileID
+	} else if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
 		s.logger.Warn("session agent profile lookup failed",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
