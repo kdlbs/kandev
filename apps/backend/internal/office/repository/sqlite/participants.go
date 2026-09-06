@@ -255,9 +255,9 @@ func (r *Repository) insertManualParticipant(ctx context.Context, tx *sqlx.Tx, s
 	id := uuid.New().String()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_step_participants
-			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
-		VALUES (?, ?, ?, ?, ?, 1, 0, ?)
-	`), id, stepID, taskID, role, agentID, string(models.ParticipantProvenanceManual)); err != nil {
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)
+	`), id, stepID, taskID, role, agentID, time.Now().UTC(), string(models.ParticipantProvenanceManual)); err != nil {
 		if workflowrepo.IsParticipantsNaturalKeyViolation(err) {
 			return false, nil
 		}

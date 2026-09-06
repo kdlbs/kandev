@@ -240,7 +240,8 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)`)
 }
 
