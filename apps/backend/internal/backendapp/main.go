@@ -1769,7 +1769,7 @@ type engineStepEntryDispatcherAdapter struct {
 // ActionRunCodeReview once SetReviewRunner has been called. This mirrors
 // switchWorkflowDispatcher's existing lazy read of svc.workflowEngine
 // (workflow_callbacks.go).
-func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
+func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
 	eng := a.engineProvider.WorkflowEngine()
 	if eng == nil {
 		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
@@ -1779,7 +1779,7 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 			zap.String("entry_id", entryID))
 		return
 	}
-	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID, markerEntryID)
 	for _, result := range results {
 		fields := []zap.Field{
 			zap.String("task_id", taskID),

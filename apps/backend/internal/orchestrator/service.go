@@ -1890,7 +1890,17 @@ func (s *Service) initWorkflowEngine() {
 	// s.engineOptions via a Set* method) because s.logger is a stable
 	// constructor-time field already in scope, unlike the optional
 	// dependencies those methods wire in after Service creation.
-	options := append([]engine.Option{engine.WithLogger(s.logger)}, s.engineOptions...)
+	//
+	// WithMarkerBearingStepEntryExecutor(s) is wired unconditionally for the
+	// same reason: *Service satisfies the interface directly
+	// (ExecuteMarkerBearingStepEntryAction in event_handlers_workflow.go),
+	// so there is no separate adapter or Set* call whose absence would need
+	// guarding — a kanban-only deployment simply never dispatches a
+	// marker-bearing kind, so the hook never fires.
+	options := append(
+		[]engine.Option{engine.WithLogger(s.logger), engine.WithMarkerBearingStepEntryExecutor(s)},
+		s.engineOptions...,
+	)
 	s.workflowEngine = engine.New(store, callbacks, options...)
 	s.agentErrorDeps.Store(&agentErrorDispatchDeps{
 		engine:   s.workflowEngine,

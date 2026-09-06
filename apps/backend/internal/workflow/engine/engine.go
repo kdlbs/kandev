@@ -181,6 +181,14 @@ func WithAgentProfileResolver(resolver AgentProfileResolver) Option {
 	return func(e *Engine) { e.agentProfiles = resolver }
 }
 
+// WithMarkerBearingStepEntryExecutor wires DispatchStepEntry's marker-bearing
+// action hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3). Without it, a
+// marker-bearing on_enter action executes directly and unprotected — the
+// pre-convergence behaviour, safe only for deployments that never wire it.
+func WithMarkerBearingStepEntryExecutor(executor MarkerBearingStepEntryExecutor) Option {
+	return func(e *Engine) { e.markerExecutor = executor }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
@@ -199,6 +207,10 @@ type Engine struct {
 	// logger is nil-safe (AC-24): *logger.Logger methods are not nil-safe
 	// themselves, so every use is guarded by an explicit nil check.
 	logger *logger.Logger
+	// markerExecutor is DispatchStepEntry's optional marker-bearing action
+	// hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3) — nil-safe like every other
+	// Phase 2/8 dependency.
+	markerExecutor MarkerBearingStepEntryExecutor
 }
 
 // TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
