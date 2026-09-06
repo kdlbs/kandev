@@ -15,6 +15,7 @@ import (
 // added without growing the function's cyclomatic complexity.
 func (r *Repository) initSchema() error {
 	steps := []func() error{
+		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,

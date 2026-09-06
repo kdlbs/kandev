@@ -1816,6 +1816,37 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// DesktopDiscoveryRootState describes whether an install-wide discovery root
+// can currently be read by the backend process.
+type DesktopDiscoveryRootState string
+
+const (
+	DesktopDiscoveryRootConnected         DesktopDiscoveryRootState = "connected"
+	DesktopDiscoveryRootReconnectRequired DesktopDiscoveryRootState = "reconnect_required"
+)
+
+// DesktopDiscoveryRoot is an install-wide root selected for automatic local
+// repository discovery. It is deliberately separate from a workspace-owned
+// repository grant.
+type DesktopDiscoveryRoot struct {
+	ID              string                    `json:"id"`
+	Path            string                    `json:"path"`
+	DisplayPath     string                    `json:"display_path"`
+	State           DesktopDiscoveryRootState `json:"state"`
+	LastScanAt      *time.Time                `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time                `json:"last_failure_at,omitempty"`
+	LastFailureCode string                    `json:"last_failure_code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// DesktopDiscoveryMigration records upgrade-only state without turning the
+// old implicit Home fallback into a new automatic scan.
+type DesktopDiscoveryMigration struct {
+	HomeConfirmationRequired bool      `json:"home_confirmation_required"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
 // RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
 // It is configuration, not task history: task repositories copy these fields
 // into their snapshot columns when a policy is selected.

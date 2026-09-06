@@ -215,6 +215,7 @@ export function RepoChipRepositoryPill({
   onCreateRepository,
   onRefreshRepositories,
   repositoriesRefreshing,
+  popoverHeader,
 }: {
   repoLabel: string;
   repoTooltip: string;
@@ -224,6 +225,7 @@ export function RepoChipRepositoryPill({
   onCreateRepository?: () => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
+  popoverHeader?: React.ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -242,6 +244,7 @@ export function RepoChipRepositoryPill({
       onRefresh={onRefreshRepositories}
       refreshing={repositoriesRefreshing}
       refreshLabel="repositories"
+      popoverHeader={popoverHeader}
       flat
     />
   );
