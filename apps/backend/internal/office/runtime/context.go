@@ -18,8 +18,23 @@ type Capabilities struct {
 	CanSpawnAgentRun    bool     `json:"spawn_agent_run"`
 	CanModifyAgents     bool     `json:"modify_agents"`
 	CanDeleteSkills     bool     `json:"delete_skills"`
+	CanListTasks        bool     `json:"list_tasks"`
 	AllowedTaskIDs      []string `json:"allowed_task_ids"`
+	// TaskScopeSource marks which source produced AllowedTaskIDs — "payload"
+	// or "runner_set" (both final), or "unavailable" (provisional). Empty for
+	// a snapshot persisted before this marker existed. See
+	// docs/specs/office/system-design/taskless-coordinator-authority-01.md#snapshot-semantics.
+	TaskScopeSource string `json:"task_scope_source,omitempty"`
 }
+
+// Task scope source markers. "payload" and "runner_set" are final: a build
+// reads a final marker back verbatim rather than re-deriving the scope.
+// "unavailable" is provisional and is retried on the next build.
+const (
+	TaskScopeSourcePayload     = "payload"
+	TaskScopeSourceRunnerSet   = "runner_set"
+	TaskScopeSourceUnavailable = "unavailable"
+)
 
 // RunContext is the identity, runtime-permission, and advertised-action
 // envelope for one agent execution. AvailableActions only describes tools the

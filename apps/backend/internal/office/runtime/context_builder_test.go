@@ -74,7 +74,12 @@ func (r *recordingAgentReader) ListAgentInstancesByIDs(
 }
 
 type recordingRunSnapshotStore struct {
-	calls []snapshotCall
+	calls    []snapshotCall
+	casCalls []snapshotCall
+	runs     map[string]*models.Run
+	casWins  bool
+	casErr   error
+	getErr   error
 }
 
 type snapshotCall struct {
@@ -244,4 +249,38 @@ func TestContextBuilderPersistsSeatActionAsAdvisoryMetadata(t *testing.T) {
 	if _, ok := capabilities["record_step_decision"]; ok {
 		t.Fatalf("record_step_decision must not be serialized as a runtime capability: %s", store.calls[0].Capabilities)
 	}
+}
+
+func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshotCAS(
+	_ context.Context,
+	id string,
+	_ string,
+	capabilities string,
+	inputSnapshot string,
+	sessionID string,
+) (bool, error) {
+	s.casCalls = append(s.casCalls, snapshotCall{
+		RunID:         id,
+		Capabilities:  capabilities,
+		InputSnapshot: inputSnapshot,
+		SessionID:     sessionID,
+	})
+	if s.casErr != nil {
+		return false, s.casErr
+	}
+	win := s.casWins
+	if win {
+		s.calls = append(s.calls, s.casCalls[len(s.casCalls)-1])
+	}
+	return win, nil
+}
+
+func (s *recordingRunSnapshotStore) GetRunByID(_ context.Context, id string) (*models.Run, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if run, ok := s.runs[id]; ok {
+		return run, nil
+	}
+	return &models.Run{ID: id}, nil
 }

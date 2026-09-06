@@ -135,6 +135,38 @@ func (r *Repository) SetRunSessionID(
 	return n > 0, nil
 }
 
+// UpdateRunRuntimeSnapshotCAS is UpdateRunRuntimeSnapshot's compare-and-swap
+// sibling: the write only takes effect while the run's current
+// capabilities still equal prevCapabilities. Used to decide first-write-
+// wins when two processors build runtime context for the same run
+// concurrently (docs/specs/office/system-design/
+// taskless-coordinator-authority-01.md#first-write-wins-and-how). The
+// comparison is a value compare rather than a SQL JSON extraction so it
+// stays dialect-neutral across SQLite and Postgres. The bool reports
+// whether this call's write took effect.
+func (r *Repository) UpdateRunRuntimeSnapshotCAS(
+	ctx context.Context,
+	id string,
+	prevCapabilities string,
+	capabilities string,
+	inputSnapshot string,
+	sessionID string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET capabilities = ?, input_snapshot = ?, session_id = ?
+		WHERE id = ? AND COALESCE(capabilities, '') = ?
+	`), capabilities, inputSnapshot, sessionID, id, prevCapabilities)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // UpdateRunPromptArtifacts persists the assembled prompt the agent
 // received and the continuation-summary content prepended at dispatch.
 // Called from the scheduler-integration after BuildAgentPrompt completes
