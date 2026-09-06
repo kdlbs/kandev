@@ -781,6 +781,12 @@ const legacyScopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_i
 const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
 
 func (s *Store) migrateCIRunSemanticConstraint() error {
+	// The constraint-rebuild migration is SQLite-specific. PostgreSQL applies
+	// the current constraint through CREATE TABLE and does not expose
+	// sqlite_master, so there is nothing to rebuild on that driver.
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	var existingSQL string
 	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master
 		WHERE type = 'table' AND name = 'github_ci_run_requests'`).Scan(&existingSQL); err != nil {
@@ -1115,6 +1121,9 @@ func (s *Store) resetUnpublishedGitHubAuthSchema() error {
 }
 
 func (s *Store) unpublishedGitHubAuthSchemaNeedsReset() (bool, error) {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return false, nil
+	}
 	for _, singleton := range []string{"github_app_registration", "github_app_registration_flow_head"} {
 		if s.tableExists(singleton) {
 			return true, nil
@@ -1685,6 +1694,9 @@ func (s *Store) tableExists(name string) bool {
 // single-repo shape, once for the interim multi-repo shape — so DBs caught
 // in either state upgrade cleanly to the multi-branch shape.
 func (s *Store) migratePRTablesForMultiRepo() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	for _, trigger := range []string{
 		"session_id TEXT NOT NULL UNIQUE",
 		"UNIQUE(session_id, repository_id)\n",
