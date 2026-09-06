@@ -785,11 +785,12 @@ func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messag
 	}
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
+	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
 	meta := NewUserMessageMeta().
 		WithPlanMode(queuedMsg.PlanMode).
 		WithAttachments(attachments).
 		WithEntityReferences(references)
-	metaMap := mergeMetadata(meta.ToMap(), metadataWithoutEntityReferences(queuedMsg.Metadata))
+	metaMap := mergeMetadata(meta.ToMap(), metadataWithoutQueueOnlyKeys(queuedMsg.Metadata))
 	if err := s.messageCreator.CreateUserMessage(ctx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap); err != nil {
 		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
 		return err
@@ -860,6 +861,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
+	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
 
 	// Create user messages for ordinary queue entries now. Lifecycle entries
 	// persist their visible message only after the final active-task claim.
@@ -1137,13 +1139,19 @@ func markQueuedUserMessageRecorded(queuedMsg *messagequeue.QueuedMessage) {
 	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
 }
 
-func metadataWithoutEntityReferences(metadata map[string]interface{}) map[string]interface{} {
+// metadataWithoutQueueOnlyKeys strips queue-transport-only keys before a
+// queued message's metadata is persisted onto a chat message row:
+// entity references are re-added via WithEntityReferences, and a carried
+// completion handoff (messagequeue.MetadataStepHandoff) is already folded
+// into the recorded content by the caller, so neither belongs in the row's
+// own stored metadata.
+func metadataWithoutQueueOnlyKeys(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
 		return nil
 	}
 	copy := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
-		if key != messagequeue.MetadataEntityReferences {
+		if key != messagequeue.MetadataEntityReferences && key != messagequeue.MetadataStepHandoff {
 			copy[key] = value
 		}
 	}

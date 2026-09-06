@@ -983,6 +983,70 @@ func (r *Repository) RemoveTaskMetadataKeyIfStamp(
 	return rows > 0, err
 }
 
+// TakeTaskMetadataKeyIfDestinationStep removes one metadata object only when
+// its nested step_id and stamp both equal the caller's expectations, and
+// returns the object's raw JSON on a successful claim. The advisory read
+// happens before the conditional removal; since stamp is a fresh unique value
+// minted on every write (never content-derived), a removal that matches both
+// step_id and stamp can only have removed the exact object just read.
+func (r *Repository) TakeTaskMetadataKeyIfDestinationStep(
+	ctx context.Context,
+	taskID, key, expectedStepID, expectedStamp string,
+) (json.RawMessage, bool, error) {
+	if strings.TrimSpace(expectedStepID) == "" || strings.TrimSpace(expectedStamp) == "" {
+		return nil, false, nil
+	}
+	task, err := r.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	value, present := task.Metadata[key]
+	if !present {
+		return nil, false, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'step_id') = ?
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'stamp') = ?
+		`
+		args = []interface{}{key, time.Now().UTC(), taskID, key, expectedStepID, key, expectedStamp}
+	} else {
+		path := jsonPath(key)
+		stepIDPath := path + ".step_id"
+		stampPath := path + ".stamp"
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, time.Now().UTC(), taskID, stepIDPath, expectedStepID, stampPath, expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if rows == 0 {
+		return nil, false, nil
+	}
+	return raw, true, nil
+}
+
 func (r *Repository) removeTaskMetadataKeyWithExecutor(
 	ctx context.Context,
 	exec taskSessionExecutor,

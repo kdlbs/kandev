@@ -301,6 +301,23 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
+	// The on_turn_complete transition consumes the source session's signal.
+	// Put its carry token on this task snapshot before admission so a queued
+	// destination cannot be promoted between the transition commit and a later
+	// metadata write.
+	if trigger == engine.TriggerOnTurnComplete {
+		var consumedSignal *models.PendingStepCompletionSignal
+		session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
+		if sessionErr != nil {
+			s.logger.Debug("failed to load session for step handoff carry",
+				zap.String("session_id", sessionID), zap.Error(sessionErr))
+		} else if session != nil {
+			if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
+				consumedSignal = &signal
+			}
+			setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+		}
+	}
 	task.UpdatedAt = time.Now().UTC()
 	// engine_transition applies only when no outer caller already declared a
 	// trigger — applyPendingMove sets mcp_deferred_move before reaching this

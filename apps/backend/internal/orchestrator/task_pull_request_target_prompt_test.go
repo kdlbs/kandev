@@ -105,7 +105,7 @@ func TestAutoStartStepPrompt_ResetContextReinjectsSnapshottedPullRequestTarget(t
 	svc.messageCreator = messages
 
 	require.NoError(t, svc.autoStartStepPrompt(
-		ctx, "task1", session, step, "Review the release", false, false,
+		ctx, "task1", session, step, "Review the release", false, false, nil,
 	))
 	require.Len(t, messages.userMessages, 1)
 	require.Contains(t, messages.userMessages[0].content, `gh pr create --base "main"`)

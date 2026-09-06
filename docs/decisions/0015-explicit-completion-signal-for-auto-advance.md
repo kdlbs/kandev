@@ -1,6 +1,6 @@
 # 0015: Explicit completion signal for auto-advance
 
-**Status:** proposed (amended 2026-08-14)
+**Status:** proposed (amended 2026-08-14, 2026-09-05)
 **Date:** 2026-06-04
 **Area:** backend, frontend
 
@@ -8,6 +8,15 @@
 > [ADR-2026-08-14-current-turn-clarification-ownership](2026-08-14-current-turn-clarification-ownership.md):
 > a detached clarification remains a hard-pause barrier only while its turn remains current.
 > That ownership rule stands independently of this proposal's future status.
+>
+> Amended 2026-09-05: `handoff` now carries one hop beyond the bag into the next step's
+> dispatched prompt, and `blockers` (with `handoff`) now rides the existing step-transition
+> audit metadata alongside `signal_source`/`signal_summary`, retrievable through
+> `GET /sessions/:id/workflow/history`. The "persisted in the bag only, not on the wire" claim
+> below (Mechanism, step 1) describes the signal-publish event only and no longer describes the
+> full lifecycle of either field. See
+> `docs/specs/tasks/requirements/workflow-completion-signal-payload-delivery.md` and its
+> system design for the carry/claim mechanism and the audit-metadata addition.
 
 ## Context
 
@@ -61,7 +70,7 @@ Today, a workflow step's `on_turn_complete` actions (most commonly `move_to_next
    - **Idempotent.** Repeated calls within the same step are no-ops: if `existing != nil && existing.StepID == currentStepID`, the MCP tool returns `{accepted: false, reason: "already_signaled"}` without overwriting.
    - **Audit (implemented for the trigger-enum call sites).** Consumed-signal context is persisted on the transition row (`SessionStepHistory.Metadata["signal_source"]` ∈ {`"agent"`, `"manual_fallback"`} plus `Metadata["signal_summary"]`), written by `orchestrator.Service.recordAutoStepTransition` immediately before the bag is cleared, for both the workflow-engine (`applyEngineTransition`) and legacy (`executeStepTransition`) transition paths. The three `StepTransitionTrigger` funnels are wired: manual moves (`StepTransitionTriggerManual`, from `task/service.MoveTaskWithOptions`, including the deferred `move_task_kandev` path via `orchestrator.applyPendingMove`), approval-gated moves (`StepTransitionTriggerApproval`, from `applyApprovalStepTransition`), and orchestrator-driven moves (`StepTransitionTriggerAutoComplete`, covering on_turn_complete, on_turn_start, and on_children_completed via `applyEngineTransition`/`executeStepTransition`) — but only an on_turn_complete transition that actually consumed a matching pending signal carries the metadata above; other automated transitions record with no metadata. Cancelled signals (overwritten by user reply) are still not retained — the bag is cleared, not archived.
 
-     Transition ownership is now explicit at the mutation boundaries. Generic `task/service.UpdateTask` changes use `task_update`; queue-promotion paths use `queue_promotion`; engine and legacy orchestrator paths preserve their event trigger; and human or agent move paths carry explicit actor provenance. The workflow service owns the history writer. Runtime callers enqueue rows on its bounded worker, which drains during service shutdown. This is best-effort telemetry: a full queue or database failure is logged and does not roll back an already-committed task mutation. A durable audit ledger would require an outbox transaction in a future change.
+     Transition ownership is now explicit at the mutation boundaries. Generic `task/service.UpdateTask` changes use `task_update`; queue-promotion paths use `queue_promotion`; engine and legacy orchestrator paths preserve their event trigger; and human or agent move paths carry explicit actor provenance. The workflow service owns the history writer. Runtime callers enqueue rows on its bounded worker, which drains during service shutdown; a full or closed worker falls back to a bounded synchronous write. Database failure or a shutdown deadline remains best-effort telemetry and does not roll back an already-committed task mutation. A durable audit ledger would require an outbox transaction in a future change.
    - **Chat visibility (deferred).** Surfacing a `step_complete_signaled` system message in the existing message stream is planned but not yet emitted. Today the only user-visible cue is the next-step transition itself; the bag remains the only truth source.
 
 3. **System-prompt injection.** When `auto_advance_requires_signal` is true on the current workflow step, `internal/sysprompt/` prepends a short instruction block to the agent's system prompt at launch / resume time, in the same path that already injects MCP tool descriptions. The text is fixed, terse, and points at the tool by name:

@@ -77,6 +77,15 @@ type taskMetadataKeySetterIfNoActiveSession interface {
 	SetTaskMetadataKeyIfNoActiveSession(context.Context, string, string, interface{}) (bool, error)
 }
 
+// taskMetadataCarryTaker is the compare-and-swap claim behind the
+// completion-handoff carry token. A repository that lacks it degrades to
+// today's behavior (no handoff delivered) rather than erroring.
+type taskMetadataCarryTaker interface {
+	TakeTaskMetadataKeyIfDestinationStep(
+		ctx context.Context, taskID, key, expectedStepID, expectedStamp string,
+	) (json.RawMessage, bool, error)
+}
+
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
 }
@@ -398,6 +407,21 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// transition.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
+	// Capture the completion signal before admission and carry its handoff on
+	// the same task snapshot. A queued destination can be promoted immediately
+	// after this write, so a post-commit metadata write would leave a race where
+	// the first prompt starts without its handoff.
+	var consumedSignal *models.PendingStepCompletionSignal
+	signalSession, signalErr := s.repo.GetTaskSession(ctx, sessionID)
+	if signalErr != nil {
+		s.logger.Warn("failed to load session for step handoff carry",
+			zap.String("session_id", sessionID), zap.Error(signalErr))
+	} else if triggerOnEnter && signalSession != nil {
+		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID {
+			consumedSignal = &signal
+		}
+		setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+	}
 	// executeStepTransition's two callers are always a genuine session turn:
 	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
 	legacyTrigger := engine.TriggerOnTurnStart
@@ -416,13 +440,14 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 	queued := task.QueuedForStepID != ""
 
-	// Process on_exit only after the transition is durably admitted. Freshly
-	// load the session since the caller may not have it (legacy path).
+	// Process on_exit only after the transition is durably admitted. Reload the
+	// session so side effects use the same fresh snapshot as the old path; the
+	// earlier signal snapshot was needed only to make carry part of admission.
 	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
 	if exitErr != nil {
 		s.logger.Warn("failed to load session for on_exit",
 			zap.String("session_id", sessionID), zap.Error(exitErr))
-	} else {
+	} else if exitSession != nil {
 		s.processOnExit(ctx, taskID, exitSession, fromStep)
 	}
 
@@ -443,26 +468,28 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if s.workflowStore != nil {
 		s.workflowStore.pullNextTaskOnVacate(ctx, fromStep.ID, taskID)
 	}
-	if queued {
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
-	}
 
-	// ADR 0015 — record the audit row before the pending signal (if any)
-	// is cleared below. Only the triggerOnEnter=true (legacy
-	// on_turn_complete) branch could have consumed a signal; the
-	// on_turn_start branch records with no signal metadata.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if triggerOnEnter && exitSession != nil {
-		if signal, has := models.LoadPendingStepSignal(exitSession.Metadata); has && signal.StepID == fromStep.ID {
-			consumedSignal = &signal
-		}
-	}
+	// A queued transition still commits: the task's step already changed
+	// above, only entry into it is deferred until a queue promotion admits
+	// the task. So the audit row and any handoff carry token are captured
+	// here, before the queued check below returns — a later promotion
+	// dispatches through StartSessionForWorkflowStep, which claims the token
+	// itself and has no other way to learn one was ever written. Only the
+	// triggerOnEnter=true (legacy on_turn_complete) branch could have
+	// consumed a signal; the on_turn_start branch records with no signal
+	// metadata and never touches the token.
 	trigger := wfmodels.StepTransitionTriggerTurnStart
 	if triggerOnEnter {
 		trigger = wfmodels.StepTransitionTriggerAutoComplete
 	}
 	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
+	if queued {
+		if triggerOnEnter {
+			s.clearPendingStepSignalByID(ctx, sessionID)
+		}
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
 
 	if triggerOnEnter {
 		// ADR 0015 — clear any pending completion-signal bag for the
@@ -2848,7 +2875,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+		// This step entry never reaches buildWorkflowEntryPrompt or
+		// launchAfterOnEnterDispatch (no on_enter actions, no profile switch),
+		// so a single-use claim helper covers it.
+		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, newStepHandoffOnce())
 		return
 	}
 
@@ -2889,6 +2919,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 ) {
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
+	// One claim for this whole step entry: every branch and replacement
+	// launch below shares it, so a successful claim's text is reused rather
+	// than silently lost to a second, always-empty DB attempt.
+	handoffOnce := newStepHandoffOnce()
 	var effectivePrompt string
 	if hasAutoStart || (sessionSwitched && step.Prompt != "") {
 		var err error
@@ -2910,10 +2944,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// The empty workflow prompt is suppressed for an already-prompted
 			// session, but a queued handoff may still be the next user input.
 			// Drain it through the normal executor path so passthrough attachments
-			// are materialized and the handoff is not stranded in the queue.
-			s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+			// are materialized and the handoff is not stranded in the queue. This
+			// branch still DISPATCHES, so it carries the completion handoff too.
+			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
 			return
 		}
+		// Claimed after the actionability decision above (effectivePrompt was
+		// non-blank), over content that excludes the handoff text.
+		effectivePrompt = appendStepHandoffToPrompt(
+			effectivePrompt, s.resolveStepHandoffText(ctx, handoffOnce, taskID, step.ID, true),
+		)
 		if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, effectivePrompt); err != nil {
 			s.logger.Error("failed to auto-start passthrough agent for step",
 				zap.String("task_id", taskID),
@@ -2929,38 +2969,11 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// When called from applyEngineTransition (on_turn_complete), processOnEnter
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
-		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, handoffOnce); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-				if workflowAutoStartWasCancelled(err) {
-					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID))
-					return
-				}
-				s.logger.Info("creating fresh workflow session after reused session terminalized",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID))
-				replacement, replacementErr := s.createNewSessionForStep(
-					ctx, taskID, session, session.AgentProfileID,
+				s.replaceTerminalizedAutoStartSession(
+					ctx, taskID, taskDescription, session, step, isPassthrough, hasPlanMode, handoffOnce, err,
 				)
-				if replacementErr != nil {
-					s.logger.Error("failed to create replacement after reused session terminalized",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
-					return
-				}
-				replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-					ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
-				)
-				if promptErr != nil {
-					s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
-					return
-				}
-				if replacementErr = s.autoStartStepPrompt(
-					ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true,
-				); replacementErr != nil {
-					s.logger.Error("failed to auto-start replacement after reused session terminalized",
-						zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
-					s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
-					s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
-				}
 				return
 			}
 			s.logger.Error("failed to auto-start agent for step",
@@ -3027,7 +3040,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 						return
 					}
 					if replacementErr = s.autoStartStepPrompt(
-						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
+						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 					); replacementErr != nil {
 						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -3039,7 +3052,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 				lock.Unlock()
 				release()
 
-				err := s.autoStartStepPrompt(asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true)
+				err := s.autoStartStepPrompt(asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true, handoffOnce)
 				if err != nil {
 					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 						if workflowAutoStartWasCancelled(err) {
@@ -3065,7 +3078,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 							return
 						}
 						if replacementErr = s.autoStartStepPrompt(
-							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
+							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 						); replacementErr != nil {
 							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -3080,7 +3093,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 						zap.Error(err))
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
-					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
+					s.drainQueuedMessageForPromptableSessionWithHandoff(asyncCtx, taskID, sessionID, stepID, handoffOnce)
 				}
 			}()
 			return
@@ -3094,10 +3107,53 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// so user-queued messages would otherwise stick forever on transitions to
 		// steps without auto_start_agent (e.g. Review). Drain here to match the
 		// pre-#677 behavior where handleAgentReady always drained after returning
-		// from inline processOnEnter.
-		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+		// from inline processOnEnter. This is the ordinary no-on_enter-actions
+		// step shape, so it carries the completion handoff too.
+		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
 	}
 
+}
+
+// replaceTerminalizedAutoStartSession handles the ACP auto-start path's
+// errWorkflowAutoStartSessionTerminalized outcome: an explicit cancellation
+// stays terminal, otherwise a fresh replacement session is created and
+// launched with the same shared handoffOnce so the completion handoff (if any
+// was already claimed) is not silently dropped.
+func (s *Service) replaceTerminalizedAutoStartSession(
+	ctx context.Context, taskID, taskDescription string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	isPassthrough, hasPlanMode bool, handoffOnce *stepHandoffOnce, err error,
+) {
+	sessionID := session.ID
+	if workflowAutoStartWasCancelled(err) {
+		s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return
+	}
+	s.logger.Info("creating fresh workflow session after reused session terminalized",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID))
+	replacement, replacementErr := s.createNewSessionForStep(
+		ctx, taskID, session, session.AgentProfileID,
+	)
+	if replacementErr != nil {
+		s.logger.Error("failed to create replacement after reused session terminalized",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+		return
+	}
+	replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
+		ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+	)
+	if promptErr != nil {
+		s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
+		return
+	}
+	if replacementErr = s.autoStartStepPrompt(
+		ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
+	); replacementErr != nil {
+		s.logger.Error("failed to auto-start replacement after reused session terminalized",
+			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+		s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+		s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+	}
 }
 
 func (s *Service) handleWorkflowEntryPromptError(
@@ -3834,13 +3890,14 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	origin workflowMessageOrigin,
 	references []v1.EntityReference,
 	takenMsg *messagequeue.QueuedMessage,
+	handoffText string,
 ) {
 	promptQueued := false
 	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
 		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
 		if queueErr := s.queueAutoStartPrompt(
 			ctx, taskID, sessionID, prompt, planMode,
-			attachments, origin, userMessageRecorded, references,
+			attachments, origin, userMessageRecorded, references, handoffText,
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
 				zap.String("task_id", taskID),
@@ -3856,11 +3913,18 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	}
 }
 
+// handoffOnce claims the completion-handoff carry token addressed to step,
+// through the caller's shared per-step-entry stepHandoffOnce, so a
+// replacement launch after this attempt reuses the same handoff text. Pass
+// nil when the caller is not part of a step-entry dispatch (e.g. tests
+// exercising this function directly) — resolveStepHandoffText treats a nil
+// once as "never claim".
 func (s *Service) autoStartStepPrompt(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
 	planMode bool,
 	shouldQueueIfBusy bool,
+	handoffOnce *stepHandoffOnce,
 ) error {
 	sessionID := session.ID
 	origin := workflowOriginFromStep(step)
@@ -3871,16 +3935,29 @@ func (s *Service) autoStartStepPrompt(
 	// content first, hand-off after — and forward attachments verbatim.
 	// Track the original message so terminal failure paths can restore it
 	// instead of dropping the user's prompt or attachments on the floor.
-	takenMsg, mergedPrompt, attachments, references := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
+	takenMsg, mergedPrompt, attachments, references, queuedHandoff := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
 	prompt = mergedPrompt
 	agentPrompt := AppendEntityReferenceContext(prompt, references)
 	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
-	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 {
+	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" {
 		// The session is already running after ensureSessionRunning; no prompt
 		// means we leave it waiting for the first user message rather than
 		// auto-starting. Attachment-only handoffs are admitted below.
 		return nil
 	}
+
+	// The completion-handoff carry token is claimed only after the
+	// actionability decision above, and over content that excludes the
+	// handoff text, then appended last, after the queued hand-off already
+	// merged into agentPrompt/effectiveAgentPrompt above.
+	handoffText := s.resolveStepHandoffText(ctx, handoffOnce, taskID, step.ID, true)
+	if queuedHandoff != "" {
+		agentPrompt = appendStepHandoffToPrompt(agentPrompt, queuedHandoff)
+		effectiveAgentPrompt = appendStepHandoffToPrompt(effectiveAgentPrompt, queuedHandoff)
+	}
+	agentPrompt = appendStepHandoffToPrompt(agentPrompt, handoffText)
+	effectiveAgentPrompt = appendStepHandoffToPrompt(effectiveAgentPrompt, handoffText)
+	handoffForQueue := joinStepHandoffText(queuedHandoff, handoffText)
 
 	// requeueTaken puts the original queued message back so a manual retry can
 	// pick it up. Skip when shouldQueueIfBusy successfully re-queued the
@@ -3896,7 +3973,7 @@ func (s *Service) autoStartStepPrompt(
 		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
 		// the drain side (executeQueuedMessage) is responsible for inserting
 		// the chat-history row.
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references)
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -4029,7 +4106,7 @@ func (s *Service) autoStartStepPrompt(
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
-				attachments, origin, references, takenMsg,
+				attachments, origin, references, takenMsg, handoffForQueue,
 			)
 		}
 		return err
@@ -4039,6 +4116,15 @@ func (s *Service) autoStartStepPrompt(
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, promptTaskOptions{
 			requireNonterminalSession: true,
+			// dispatchPrompt is already fully composed for this step entry
+			// (handoff included, see the ErrExecutionNotFound branch below):
+			// if promptTask's own internal ErrExecutionNotFound recovery fires
+			// first (ordinary lazy-resume race), it must use the same
+			// composed-prompt seam rather than recomposing from the
+			// destination step's own template and discarding the handoff.
+			promptAlreadyComposed: true,
+			fallbackLaunchPrompt:  recordedPrompt,
+			fallbackRetryPrompt:   dispatchPrompt,
 		})
 		if err == nil {
 			return nil
@@ -4052,15 +4138,17 @@ func (s *Service) autoStartStepPrompt(
 		// the lifecycle manager no longer has (e.g. the post-resume agent
 		// process failed to start and runAgentProcessAsync removed it). The
 		// session's stored AgentExecutionID is now stale. Recover by clearing
-		// it and routing through StartCreatedSession for a fresh launch — the
-		// prompt is baked into LaunchPreparedSession so we don't lose it.
+		// it and relaunching fresh through the composed-prompt seam — recordedPrompt
+		// and dispatchPrompt are already fully composed for this step entry
+		// (handoff included), so the fallback must not let StartCreatedSession
+		// recompose them from the destination step's own template.
 		if errors.Is(err, executor.ErrExecutionNotFound) {
 			s.logger.Warn("auto-start: PromptTask hit missing execution; falling back to fresh launch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode, takenMsg, attachments, references,
 			)
 		}
 
@@ -4071,7 +4159,7 @@ func (s *Service) autoStartStepPrompt(
 		// chat row was successfully inserted above; a failed write passes false,
 		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -4086,7 +4174,7 @@ func (s *Service) autoStartStepPrompt(
 		if shouldQueueIfBusy {
 			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
 			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -4113,12 +4201,21 @@ func (s *Service) autoStartStepPrompt(
 // fallbackFreshLaunchOnMissingExecution recovers from a PromptTask that returned
 // ErrExecutionNotFound — the session's stored AgentExecutionID points at an
 // execution the lifecycle manager doesn't have, so the resume path is dead.
-// Clear the stale ID, flip state to CREATED, and route through StartCreatedSession
-// (which uses LaunchPreparedSession with the prompt baked in — bypassing resume).
-// On further failure, the queued message is restored so a manual retry recovers it.
+// Clear the stale ID, flip state to CREATED, and relaunch with prompt.
+// promptAlreadyComposed routes the relaunch through the composed-prompt seam
+// (startCreatedSessionWithComposedPrompt, with retryPrompt as its raw dispatch
+// value) instead of the public StartCreatedSession, so a caller that already
+// composed prompt itself (e.g. appending a claimed step handoff) is not
+// recomposed from the destination step's own template — which discards
+// everything it was passed when that template lacks {{task_prompt}}. Callers
+// that have not composed the prompt pass promptAlreadyComposed=false and an
+// empty retryPrompt. On further failure, the queued message is restored so a
+// manual retry recovers it.
 func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
+	promptAlreadyComposed bool,
+	retryPrompt string,
 	planMode bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
@@ -4150,14 +4247,23 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(
-		ctx, taskID, sessionID, fresh.AgentProfileID,
-		prompt, true, planMode, true, attachments, references,
-	); err != nil {
+	var launchErr error
+	if promptAlreadyComposed {
+		_, launchErr = s.startCreatedSessionWithComposedPrompt(
+			ctx, taskID, sessionID, fresh.AgentProfileID,
+			prompt, retryPrompt, true, planMode, true, attachments, references,
+		)
+	} else {
+		_, launchErr = s.StartCreatedSession(
+			ctx, taskID, sessionID, fresh.AgentProfileID,
+			prompt, true, planMode, true, attachments, references,
+		)
+	}
+	if launchErr != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
-			zap.String("session_id", sessionID), zap.Error(err))
+			zap.String("session_id", sessionID), zap.Error(launchErr))
 		requeue()
-		return err
+		return launchErr
 	}
 	return nil
 }
@@ -4212,13 +4318,17 @@ func (s *Service) resetSessionForFreshFallback(
 // the original queued message (so terminal failure paths can re-queue it via
 // requeueMessage), merged prompt, converted attachments, and structurally
 // normalized references.
-func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment, []v1.EntityReference) {
+func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment, []v1.EntityReference, string) {
 	if s.messageQueue == nil {
-		return nil, basePrompt, nil, nil
+		return nil, basePrompt, nil, nil, ""
 	}
 	msg, ok := s.messageQueue.TakeQueuedIfAutoRun(ctx, sessionID)
-	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0) {
-		return nil, basePrompt, nil, nil
+	queuedHandoff := ""
+	if msg != nil {
+		queuedHandoff = stepHandoffFromQueuedMetadata(msg.Metadata)
+	}
+	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0 && queuedHandoff == "") {
+		return nil, basePrompt, nil, nil, ""
 	}
 	prompt := basePrompt
 	if msg.Content != "" {
@@ -4241,7 +4351,7 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	references := entityrefs.NormalizePersisted(msg.Metadata[messagequeue.MetadataEntityReferences])
-	return msg, prompt, attachments, references
+	return msg, prompt, attachments, references, queuedHandoff
 }
 
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
@@ -4303,11 +4413,12 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	origin workflowMessageOrigin,
 	userMessageRecorded bool,
 	references []v1.EntityReference,
+	handoffText string,
 ) (bool, error) {
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded, references); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded, references, handoffText); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -4342,7 +4453,10 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 // Callers that queue BEFORE recordAutoStartMessage runs (e.g.
 // queueAutoStartPromptIfRunning's early-busy path) must pass false. Prompt
 // content stays raw here; references remain metadata until drain-time context
-// is built, preventing duplicate system blocks across retries.
+// is built, preventing duplicate system blocks across retries. handoffText, if
+// non-empty, is a completion handoff already claimed for this step entry; it
+// rides the same way, so a dispatch deferred through this queue still appends
+// it last, after entity-reference expansion, at actual dispatch time.
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
@@ -4351,6 +4465,7 @@ func (s *Service) queueAutoStartPrompt(
 	origin workflowMessageOrigin,
 	userMessageRecorded bool,
 	references []v1.EntityReference,
+	handoffText string,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
@@ -4358,6 +4473,9 @@ func (s *Service) queueAutoStartPrompt(
 	meta := workflowMessageMetadata(planMode, origin, references)
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
+	}
+	if handoffText != "" {
+		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
 	_, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,

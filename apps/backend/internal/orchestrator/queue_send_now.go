@@ -459,6 +459,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	}
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
+	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(claim.Dispatch.Metadata))
 	if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
 		s.logger.Warn("failed to record send-now user message before prompt",
 			zap.String("session_id", sessionID), zap.Error(err))
