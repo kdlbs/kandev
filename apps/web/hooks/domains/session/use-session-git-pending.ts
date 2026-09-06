@@ -16,7 +16,7 @@ export type PendingFileOperationOwner = {
   requestId: number;
   scopeIdentity: string;
   responseSucceeded: boolean;
-  targetStateObserved: boolean;
+  targetStateObservedKeys: Set<string>;
 };
 
 export function pendingKey(repo: string | undefined, path: string): string {
@@ -73,7 +73,8 @@ export function markPendingFileOperationsSucceeded(
   }
   clearPendingFileOperations(
     keys.filter(
-      (key) => pendingFileOperations.current.get(key) === owner && owner.targetStateObserved,
+      (key) =>
+        pendingFileOperations.current.get(key) === owner && owner.targetStateObservedKeys.has(key),
     ),
     owner,
     pendingFileOperations,
@@ -212,7 +213,7 @@ export function usePerRepoPendingClear(
           out.add(key);
           continue;
         }
-        owner.targetStateObserved = true;
+        owner.targetStateObservedKeys.add(key);
         if (owner.responseSucceeded) {
           pendingFileOperations.current.delete(key);
           continue;

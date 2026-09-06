@@ -236,6 +236,71 @@ describe("useSessionGit partial repository failures", () => {
   );
 });
 
+describe("useSessionGit bulk response ownership", () => {
+  it.each([
+    { operation: "stage" as const, initialStaged: false, completedStaged: true },
+    { operation: "unstage" as const, initialStaged: true, completedStaged: false },
+  ])(
+    "does not clear a sibling $operation key when one repository reaches target state before the aggregate response",
+    async ({ operation, initialStaged, completedStaged }) => {
+      const firstPath = `first-${operation}.txt`;
+      const secondPath = `second-${operation}.txt`;
+      const first = deferredResult();
+      const second = deferredResult();
+      mocks.statuses = [
+        { repository_name: "repo-a", status: status(firstPath, initialStaged) },
+        { repository_name: "repo-b", status: status(secondPath, initialStaged) },
+      ];
+      mocks.gitOps[operation].mockImplementation((_paths, repositoryName) =>
+        repositoryName === "repo-a" ? first.promise : second.promise,
+      );
+
+      const hook = renderHook(() => useSessionGit("session-1"));
+
+      let aggregate!: Promise<OperationResult>;
+      act(() => {
+        aggregate = hook.result.current[`${operation}File`]([firstPath, secondPath]);
+      });
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toEqual(
+          new Set([pendingKey("repo-a", firstPath), pendingKey("repo-b", secondPath)]),
+        );
+      });
+
+      mocks.statuses = [
+        { repository_name: "repo-a", status: status(firstPath, completedStaged) },
+        { repository_name: "repo-b", status: status(secondPath, initialStaged) },
+      ];
+      hook.rerender();
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toContain(pendingKey("repo-a", firstPath));
+      });
+
+      first.resolve({ success: true, operation, output: "" });
+      await waitFor(() => expect(mocks.gitOps[operation]).toHaveBeenCalledTimes(2));
+      second.resolve({ success: true, operation, output: "" });
+      await aggregate;
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toEqual(
+          new Set([pendingKey("repo-b", secondPath)]),
+        );
+      });
+
+      mocks.statuses = [
+        { repository_name: "repo-a", status: status(firstPath, completedStaged) },
+        { repository_name: "repo-b", status: status(secondPath, completedStaged) },
+      ];
+      hook.rerender();
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toEqual(new Set());
+      });
+    },
+  );
+});
+
 describe("useSessionGit overlapping request ownership", () => {
   it.each([
     { operation: "stage" as const, initialStaged: false, completedStaged: true },

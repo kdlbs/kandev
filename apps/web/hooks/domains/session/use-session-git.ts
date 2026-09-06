@@ -458,7 +458,7 @@ function useStageDispatch({
         requestId: ++nextPendingRequestId.current,
         scopeIdentity: pendingScopeIdentity,
         responseSucceeded: false,
-        targetStateObserved: false,
+        targetStateObservedKeys: new Set(),
       };
       for (const key of keys) pendingFileOperations.current.set(key, owner);
       setPendingStageFiles((prev) => {
