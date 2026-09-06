@@ -332,6 +332,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			SessionID:        sessionID,
 			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
+			AgentProfileID:   payload.AgentProfileID,
 			PromptGeneration: payload.Data.PromptGeneration,
 			ErrorMessage:     payload.Data.Error,
 			ProviderError:    payload.Data.ProviderError,
@@ -608,11 +609,12 @@ func (s *Service) publishAgentTurnCompleteForTurn(ctx context.Context, payload *
 	// For streaming agents this will be empty — the subscriber falls back to
 	// querying the last session message from the DB.
 	data := map[string]string{
-		"task_id":    payload.TaskID,
-		"session_id": payload.SessionID,
-		"agent_text": payload.Data.Text,
-		"agent_id":   payload.AgentID,
-		"turn_id":    turnID,
+		metaKeyTaskID:         payload.TaskID,
+		metaKeySessionID:      payload.SessionID,
+		"agent_text":          payload.Data.Text,
+		metaKeyAgentID:        payload.AgentID,
+		metaKeyAgentProfileID: payload.AgentProfileID,
+		"turn_id":             turnID,
 	}
 	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", data)
 	if err := s.eventBus.Publish(ctx, events.AgentTurnMessageSaved, event); err != nil {

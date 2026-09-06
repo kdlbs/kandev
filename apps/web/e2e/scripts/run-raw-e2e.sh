@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Run Playwright directly, while keeping the deprecated project alias usable.
+# Run Playwright through the workspace package, while keeping the deprecated
+# project alias usable and enforcing the local resource budget.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/resource-guard.sh"
 
 PW_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -28,4 +32,5 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-exec playwright test --config e2e/playwright.config.ts "${PW_ARGS[@]}"
+e2e_validate_playwright_args "${PW_ARGS[@]}" || exit 2
+exec pnpm exec playwright test --config e2e/playwright.config.ts --workers=1 "${PW_ARGS[@]}"

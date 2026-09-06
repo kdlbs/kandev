@@ -460,7 +460,9 @@ function TaskSwitcherDialogs({
         taskId={actions.deletingTask?.id}
         executorType={actions.deletingTask?.executorType}
         isDeleting={actions.isDeleting}
-        onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          actions.handleDeleteConfirm({ cascade, discardWorktreeChanges })
+        }
       />
       <TaskDetachTargetConfirmDialog
         target={actions.detachingTask}

@@ -81,6 +81,9 @@ COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
 
 # Store Playwright browsers in a shared location accessible by all users
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# Let the guarded raw runner resolve the workspace-local Playwright binary when
+# this image is invoked directly by make test-e2e-ci.
+ENV PATH=/app/apps/web/node_modules/.bin:$PATH
 
 # Install Playwright chromium with all system dependencies
 RUN cd /app/apps/web && npx playwright install --with-deps chromium
@@ -102,7 +105,7 @@ ENV CI=true
 
 WORKDIR /app/apps/web
 
-# --reporter=list overrides blob reporter for real-time terminal output.
-# Extra args (shard, test file, --grep) can be appended via CMD.
-ENTRYPOINT ["npx", "playwright", "test", "--config", "e2e/playwright.config.ts", "--reporter=list"]
+# The guarded raw runner keeps each invocation at one Playwright worker.
+# Extra args (reporter, shard, test file, --grep) can be appended via CMD.
+ENTRYPOINT ["bash", "e2e/scripts/run-raw-e2e.sh"]
 CMD []

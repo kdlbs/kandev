@@ -14,18 +14,6 @@
       "target_removal_date": "2027-02-01"
     },
     {
-      "id": "agent-model-fetcher-shim",
-      "locator": {
-        "path": "apps/backend/internal/agent/settings/modelfetcher/cache.go",
-        "marker": "// shim for legacy callers until they migrate."
-      },
-      "reason": "Legacy callers still require the old typed cache while model discovery moves to the host utility capability cache.",
-      "owner": "backend agent-settings maintainers",
-      "introduced_on": "2026-04-15",
-      "removal_condition": "No production package imports internal/agent/settings/modelfetcher and the shim package can be deleted.",
-      "target_removal_date": "2027-02-01"
-    },
-    {
       "id": "passthrough-stdin-writes-legacy-view",
       "locator": {
         "path": "apps/backend/internal/agent/agents/passthrough_payload.go",

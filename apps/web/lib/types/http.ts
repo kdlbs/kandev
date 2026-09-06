@@ -29,6 +29,15 @@ export type {
   SidebarViewApi,
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
+  SidebarTaskColorAutomation,
+  SidebarTaskColorAutomationApi,
+  SidebarTaskColor,
+  SidebarTaskColorsApi,
+  SidebarTaskColorPatchApi,
+  SidebarTaskColorDimension,
+  SidebarTaskColorRepositoryTarget,
+  SidebarTaskColorRule,
+  FixedAutomaticTaskColor,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   ThreadTaskScopeApi,
@@ -436,6 +445,7 @@ export type Task = ActiveSubagentCountFields & {
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
+  primary_executor_profile_id?: string | null;
   primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
@@ -715,10 +725,27 @@ export type LocalRepository = {
   default_branch?: string;
 };
 
+export type DesktopDiscoveryRoot = {
+  id: string;
+  path: string;
+  display_path: string;
+  state: "connected" | "reconnect_required" | string;
+  last_scan_at?: string;
+  last_failure_at?: string;
+  last_failure_code?: string;
+};
+
 export type RepositoryDiscoveryResponse = {
   roots: string[];
   repositories: LocalRepository[];
   total: number;
+  desktop_runtime?: boolean;
+  root_states?: DesktopDiscoveryRoot[];
+  scan_time?: string;
+  refreshing?: boolean;
+  cached?: boolean;
+  home_confirmation_required?: boolean;
+  failed_roots?: string[];
 };
 
 export type RepositoryPathValidationResponse = {

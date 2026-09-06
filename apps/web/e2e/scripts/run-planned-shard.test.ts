@@ -99,6 +99,7 @@ describe("planned shard runner", () => {
         "test",
         "--config",
         "e2e/playwright.config.ts",
+        "--workers=1",
         "--project=chromium",
         "--project=mobile-chrome",
         "tests/example.spec.ts",
@@ -127,6 +128,7 @@ describe("planned shard runner", () => {
       "test",
       "--config",
       "e2e/playwright.config.ts",
+      "--workers=1",
       "--project=containers",
       "tests/docker/example.spec.ts",
     ]);

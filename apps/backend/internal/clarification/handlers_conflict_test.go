@@ -1,13 +1,48 @@
 package clarification
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestWriteResolutionResultPreClaimTimeoutReturnsRetryable503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handlers{}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	h.writeResolutionResult(c, "p1", nil, false, ErrPreClaimTimeout)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if got := body["code"]; got != "temporarily_unavailable" {
+		t.Fatalf("code = %v, want temporarily_unavailable", got)
+	}
+}
+
+func TestWriteResolutionResultCallerCancellationRemainsInternalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handlers{logger: logger.Default()}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	h.writeResolutionResult(c, "p1", nil, false, context.Canceled)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
 
 // TestWriteResolutionResultNotActiveConflictIncludesMachineReadableCode covers
 // Defect 2: the frontend used to map every 409 from /respond to a silent

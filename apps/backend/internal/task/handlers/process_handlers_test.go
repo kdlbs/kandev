@@ -773,6 +773,9 @@ func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*mo
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
 	return nil
 }
+func (m *mockRepository) UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error {
+	return nil
+}
 func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
 	return nil, nil

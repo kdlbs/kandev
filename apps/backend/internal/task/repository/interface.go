@@ -463,6 +463,18 @@ type RepositoryEntityRepository interface {
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
 }
 
+// DesktopDiscoveryRootRepository stores install-wide desktop discovery roots
+// and one-time migration state. These records are not owned by a workspace.
+type DesktopDiscoveryRootRepository interface {
+	ListDesktopDiscoveryRoots(ctx context.Context) ([]*models.DesktopDiscoveryRoot, error)
+	GetDesktopDiscoveryRoot(ctx context.Context, path string) (*models.DesktopDiscoveryRoot, error)
+	CreateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	UpdateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	DeleteDesktopDiscoveryRoot(ctx context.Context, path string) error
+	GetDesktopDiscoveryMigration(ctx context.Context) (*models.DesktopDiscoveryMigration, error)
+	SetDesktopDiscoveryMigration(ctx context.Context, migration *models.DesktopDiscoveryMigration) error
+}
+
 // RepositorySetRepository stores named, reusable groups of workspace
 // repositories. Membership order is authoritative: writes assign contiguous
 // positions from the supplied order, and reads return items in that order with
@@ -532,6 +544,7 @@ type ExecutorRepository interface {
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)

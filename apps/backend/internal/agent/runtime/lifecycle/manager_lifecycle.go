@@ -312,7 +312,6 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.agentctlLifecycleMu.Lock()
-	defer execution.agentctlLifecycleMu.Unlock()
 	sessionID := execution.SessionID
 
 	m.logger.Info("cleaning up stale agent execution",
@@ -324,6 +323,7 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
 	if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
+		execution.agentctlLifecycleMu.Unlock()
 		return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
 	}
 
@@ -335,6 +335,8 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
 		client.Close()
 	}
+	execution.detachAgentctlClient()
+	execution.agentctlLifecycleMu.Unlock()
 
 	// Remove from execution store
 	m.RemoveExecution(execution.ID)

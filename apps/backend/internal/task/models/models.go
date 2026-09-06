@@ -119,8 +119,10 @@ const (
 	// records the source step so stale deliveries cannot run the wrong exit.
 	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
 	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
-	// lifecycle finished. It remains as an idempotency marker until the next
-	// step-changing move replaces it.
+	// lifecycle finished. It is cleared once its continuation has run and no
+	// MetaKeyManualMoveLifecyclePending token remains, so it does not
+	// accumulate as permanent startup-recovery work; a fresh manual move
+	// replaces it with a new pending token before it would be cleared.
 	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
 	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
 	// been applied, preventing a stale queue rollback from replaying one.
@@ -1828,6 +1830,37 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// DesktopDiscoveryRootState describes whether an install-wide discovery root
+// can currently be read by the backend process.
+type DesktopDiscoveryRootState string
+
+const (
+	DesktopDiscoveryRootConnected         DesktopDiscoveryRootState = "connected"
+	DesktopDiscoveryRootReconnectRequired DesktopDiscoveryRootState = "reconnect_required"
+)
+
+// DesktopDiscoveryRoot is an install-wide root selected for automatic local
+// repository discovery. It is deliberately separate from a workspace-owned
+// repository grant.
+type DesktopDiscoveryRoot struct {
+	ID              string                    `json:"id"`
+	Path            string                    `json:"path"`
+	DisplayPath     string                    `json:"display_path"`
+	State           DesktopDiscoveryRootState `json:"state"`
+	LastScanAt      *time.Time                `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time                `json:"last_failure_at,omitempty"`
+	LastFailureCode string                    `json:"last_failure_code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// DesktopDiscoveryMigration records upgrade-only state without turning the
+// old implicit Home fallback into a new automatic scan.
+type DesktopDiscoveryMigration struct {
+	HomeConfirmationRequired bool      `json:"home_confirmation_required"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // RepositoryBranchPolicy is a reusable branch workflow owned by one repository.

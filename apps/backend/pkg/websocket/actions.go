@@ -88,7 +88,17 @@ const (
 	ActionTaskPlanRevisionsList = "task.plan.revisions.list"
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
-	ActionTaskPlanImplement     = "task.plan.implementation_started"
+
+	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
+	// workspace/task events and contain no application content or capabilities.
+	ActionCanvasCreated                   = "canvas.created"
+	ActionCanvasReleaseActivated          = "canvas.release.activated"
+	ActionCanvasReleasePermissionRequired = "canvas.release.permission_required"
+	ActionCanvasPromoted                  = "canvas.promoted"
+	ActionCanvasArchived                  = "canvas.archived"
+	ActionCanvasRestored                  = "canvas.restored"
+	ActionCanvasRemoved                   = "canvas.removed"
+	ActionTaskPlanImplement               = "task.plan.implementation_started"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
@@ -379,6 +389,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
@@ -445,12 +456,19 @@ const (
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
 
 	// Office task handoffs (cross-task context).
-	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
-	ActionMCPListTaskDocuments = "mcp.list_task_documents"
-	ActionMCPGetTaskDocument   = "mcp.get_task_document"
-	ActionMCPWriteTaskDocument = "mcp.write_task_document"
-	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
-	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
+	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
+	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
+	ActionMCPGetTaskDocument          = "mcp.get_task_document"
+	ActionMCPWriteTaskDocument        = "mcp.write_task_document"
+	ActionMCPListPluginTools          = "mcp.list_plugin_tools"
+	ActionMCPInvokePluginTool         = "mcp.invoke_plugin_tool"
+	ActionMCPListCanvases             = "mcp.list_canvases"
+	ActionMCPReadCanvasAuthoringSkill = "mcp.read_canvas_authoring_skill"
+	ActionMCPCreateCanvas             = "mcp.create_canvas"
+	ActionMCPGetCanvas                = "mcp.get_canvas"
+	ActionMCPPublishCanvas            = "mcp.publish_canvas"
+	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
+	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
 	// Office quorum decision recording.
 	ActionMCPRecordStepDecision = "mcp.record_step_decision"
@@ -552,61 +570,10 @@ const (
 	ActionGitHubCleanupIssueTasks  = "github.cleanup.issue_tasks"
 )
 
-// GitLab integration actions
+// GitLab integration notifications
 const (
-	ActionGitLabStatus            = "gitlab.status"
-	ActionGitLabTaskMRsList       = "gitlab.task_mrs.list"
-	ActionGitLabTaskMRGet         = "gitlab.task_mr.get"
-	ActionGitLabMRFeedbackGet     = "gitlab.mr_feedback.get"
-	ActionGitLabReviewWatchesList = "gitlab.review_watches.list"
-	ActionGitLabReviewWatchCreate = "gitlab.review_watches.create"
-	ActionGitLabReviewWatchUpdate = "gitlab.review_watches.update"
-	ActionGitLabReviewWatchDelete = "gitlab.review_watches.delete"
-	ActionGitLabReviewTrigger     = "gitlab.review_watches.trigger"
-	ActionGitLabReviewTriggerAll  = "gitlab.review_watches.trigger_all"
-	ActionGitLabMRWatchesList     = "gitlab.mr_watches.list"
-	ActionGitLabMRWatchDelete     = "gitlab.mr_watches.delete"
-	ActionGitLabMRFilesGet        = "gitlab.mr_files.get"
-	ActionGitLabMRCommitsGet      = "gitlab.mr_commits.get"
-	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
-	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
-	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
-	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
-	ActionGitLabStats             = "gitlab.stats"
-
+	ActionGitLabTaskMRUpdated           = "gitlab.task_mr.updated"         // Notification
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
-
-	ActionGitLabMRMerge                = "gitlab.mr.merge"
-	ActionGitLabMRApprove              = "gitlab.mr.approve"
-	ActionGitLabMRUnapprove            = "gitlab.mr.unapprove"
-	ActionGitLabMRSetLabels            = "gitlab.mr.set_labels"
-	ActionGitLabMRSetAssignees         = "gitlab.mr.set_assignees"
-	ActionGitLabMRDiscussionNew        = "gitlab.mr.discussion.new"
-	ActionGitLabMRDiscussionResolve    = "gitlab.mr.discussion.resolve"
-	ActionGitLabProjectMergeMethodsGet = "gitlab.project.merge_methods.get"
-
-	// Issue watch actions
-	ActionGitLabIssueWatchesList = "gitlab.issue_watches.list"
-	ActionGitLabIssueWatchCreate = "gitlab.issue_watches.create"
-	ActionGitLabIssueWatchUpdate = "gitlab.issue_watches.update"
-	ActionGitLabIssueWatchDelete = "gitlab.issue_watches.delete"
-	ActionGitLabIssueTrigger     = "gitlab.issue_watches.trigger"
-	ActionGitLabIssueTriggerAll  = "gitlab.issue_watches.trigger_all"
-	ActionGitLabNewIssueNotify   = "gitlab.new_issue.notify" // Notification
-
-	// Action preset actions for the /gitlab page quick-launch prompts.
-	ActionGitLabActionPresetsList   = "gitlab.action_presets.list"
-	ActionGitLabActionPresetsUpdate = "gitlab.action_presets.update"
-	ActionGitLabActionPresetsReset  = "gitlab.action_presets.reset"
-
-	// Project discovery / autocomplete.
-	ActionGitLabListUserProjects = "gitlab.projects.list"
-	ActionGitLabSearchProjects   = "gitlab.projects.search"
-	ActionGitLabProjectBranches  = "gitlab.project.branches"
-
-	// Manual cleanup sweeps.
-	ActionGitLabCleanupReviewTasks = "gitlab.cleanup.review_tasks"
-	ActionGitLabCleanupIssueTasks  = "gitlab.cleanup.issue_tasks"
 )
 
 // Jira integration actions

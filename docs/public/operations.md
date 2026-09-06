@@ -125,10 +125,34 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | `logs/` | Service and optional ACP debug logs |
 | `service/` | Owner-only managed-service install metadata plus update intents and helper files |
 | `lsp-servers/`, `runtime/`, `workspaces/` | Installed tools and feature-specific materialized state |
+| `plugins/webapps/` | Immutable static web-app release artifacts, required with the database for canvas recovery |
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
 The System Database and Backups pages use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
+
+### Canvas artifacts and recovery
+
+Canvas release metadata, grants, and app state live in the configured database.
+Validated web-app files live separately under `<home>/plugins/webapps/`. The
+artifact directory is part of the Kandev-home recovery boundary.
+
+SQLite snapshots do not contain canvas release artifacts. PostgreSQL backups
+also need a copy of `<home>/plugins/webapps/`. A complete Kandev recovery copy
+includes the configured database, its matching `<home>/data/master.key`, and
+the matching artifact directory. A cold copy of the complete Kandev home
+includes all three.
+
+If a database restore has no matching artifact, Kandev marks the retained
+release unavailable during startup. It checks the stored digest and path before
+it serves or runs the app. It does not execute a missing or changed artifact
+and does not remove it silently. Restore the matching artifact directory. Use
+the canvas recovery action to reload, roll back, or remove the canvas.
+
+Canvas removal creates an artifact cleanup job before release ownership is
+deleted. The worker runs after the database transaction and retries after a
+restart. Do not delete `<home>/plugins/webapps/` files while their release rows
+or cleanup jobs still exist.
 
 ## Storage maintenance
 
@@ -148,8 +172,15 @@ only when the active task work can tolerate cleanup running alongside it.
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
-snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
-clears the in-memory snapshot.
+snapshot was last analyzed. The first read can return before the scan finishes. The card then shows
+which sources are complete and labels the total as **Counted so far**. When an older snapshot
+expires, Kandev keeps it visible while the replacement scan runs. A failed replacement also keeps
+the last successful snapshot and shows the failure state.
+
+Select **Analyze** to force a fresh read-only scan. The timing information beside the completed
+snapshot shows the scan duration, the 15-minute cache lifetime, and the next refresh time. A page
+that remains open requests a new overview at that time. Restarting the backend clears the
+in-memory snapshot, so the next Storage-page read starts a new scan.
 
 The page also shows the current percentage used on the filesystem containing Kandev's storage,
 along with used, available, and total capacity. This is host-volume capacity, not just the bytes
@@ -362,8 +393,9 @@ Open **Settings > System > Backups**.
 2. Wait for the manual row to appear. The browser waits up to 15 seconds; on a large database the backend job can continue after that UI timeout, so reload before retrying.
 3. Download the snapshot and copy it off the host.
 4. Back up `<home>/data/master.key` with owner-only access if you need encrypted secrets to remain usable.
-5. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
-6. Restore into an isolated instance and verify tasks, workflows, secrets, and repository references before calling the backup tested.
+5. If canvases are enabled, copy the matching `<home>/plugins/webapps/` artifact directory.
+6. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
+7. Restore into an isolated instance and verify tasks, workflows, secrets, repository references, and canvas releases before calling the backup tested.
 
 Manual snapshots are never automatically pruned. When the recorded Kandev application version changes, or when a legacy database has user tables but no stored application-version metadata, Kandev takes a pre-migration `kandev-<stored-version-or-pre-meta>-<timestamp>.db` before repository schema initialization. Snapshot failure aborts SQLite startup, so keep the backup directory writable and leave enough free space. Kandev then attempts to retain the two newest `kandev-*.db` files, but pruning is best-effort and a failed delete does not abort startup. That two-file retention applies to automatic files, including older `kandev-pre-reset-*` snapshots; it does not apply to `manual-*` files. Monitor and delete obsolete manual files yourself.
 
@@ -580,5 +612,5 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 - [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
 - [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
 - [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Automation and MCP](automation-and-mcp.md); external MCP authentication and deployment trust boundaries
 - [Windows support](windows-support.md); Windows-native limitations and supported alternatives

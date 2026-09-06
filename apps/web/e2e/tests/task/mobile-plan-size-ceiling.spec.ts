@@ -10,20 +10,24 @@ const SUBMITTED_BYTES = 300_000;
 const MARKER = "MOBILE-PLAN-SIZE-CEILING-MARKER";
 
 function contentOfByteLength(totalBytes: number): string {
-  return `${MARKER}${"A".repeat(totalBytes - MARKER.length)}`;
+  const markerBytes = new TextEncoder().encode(MARKER).byteLength;
+  const fillerBytes = totalBytes - markerBytes;
+  return `${MARKER}${"€".repeat(Math.ceil(fillerBytes / 3))}`;
 }
 
 async function pasteIntoPlanEditor(session: SessionPage, content: string) {
   const editor = session.planEditor();
-  // Use a browser-level click before dispatching the paste. The click is
-  // supported by touch emulation and the ProseMirror paste handler then sees
-  // the same event as a user paste without typing 300,000 characters.
-  await editor.click();
+  // Dispatch a browser paste event so ProseMirror processes the text through
+  // its normal clipboard path.
   await editor.evaluate((element, pasted) => {
+    element.focus();
     const clipboardData = new DataTransfer();
     clipboardData.setData("text/plain", pasted);
-    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(pasteEvent, "clipboardData", { value: clipboardData });
+    const pasteEvent = new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData,
+    });
     element.dispatchEvent(pasteEvent);
   }, content);
 }
@@ -69,7 +73,7 @@ test.describe("mobile: plan content size ceiling", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
 
     await session.togglePlanMode();
-    await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
+    await testPage.getByRole("navigation").getByRole("button", { name: "Plan", exact: true }).tap();
     await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
 
     const rejectedCreate = wsWatcher.waitForResponse("task.plan.create", { timeout: 30_000 });

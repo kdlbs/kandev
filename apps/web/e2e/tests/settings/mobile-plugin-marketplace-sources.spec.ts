@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { settledBoundingBox } from "../../helpers/settled-box";
 
 const FINAL_SOURCE_ID = "source-31";
 
@@ -53,14 +54,10 @@ test.describe("Marketplace source dialog on mobile", () => {
 
     const viewportHeight = await testPage.evaluate(() => window.innerHeight);
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
-    const dialogBox = await dialog.boundingBox();
-    const titleBox = await title.boundingBox();
-    const closeBox = await close.boundingBox();
-    const addFormBox = await addForm.boundingBox();
-    expect(dialogBox).not.toBeNull();
-    expect(titleBox).not.toBeNull();
-    expect(closeBox).not.toBeNull();
-    expect(addFormBox).not.toBeNull();
+    const dialogBox = await settledBoundingBox(dialog);
+    const titleBox = await settledBoundingBox(title);
+    const closeBox = await settledBoundingBox(close);
+    const addFormBox = await settledBoundingBox(addForm);
     expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(viewportWidth);
     expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
@@ -82,16 +79,12 @@ test.describe("Marketplace source dialog on mobile", () => {
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     await expect(finalSource).toBeVisible();
 
-    const finalSourceBox = await finalSource.boundingBox();
+    const finalSourceBox = await settledBoundingBox(finalSource);
     const finalSwitch = finalSource.getByRole("switch");
     const finalRemove = finalSource.getByRole("button", { name: /Remove/i });
-    const finalSwitchBox = await finalSwitch.boundingBox();
-    const finalRemoveBox = await finalRemove.boundingBox();
-    const addFormAfterBox = await addForm.boundingBox();
-    expect(finalSourceBox).not.toBeNull();
-    expect(finalSwitchBox).not.toBeNull();
-    expect(finalRemoveBox).not.toBeNull();
-    expect(addFormAfterBox).not.toBeNull();
+    const finalSwitchBox = await settledBoundingBox(finalSwitch);
+    const finalRemoveBox = await settledBoundingBox(finalRemove);
+    const addFormAfterBox = await settledBoundingBox(addForm);
     expect(finalSourceBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
     expect(finalSourceBox!.y + finalSourceBox!.height).toBeLessThanOrEqual(
       dialogBox!.y + dialogBox!.height,
@@ -100,7 +93,7 @@ test.describe("Marketplace source dialog on mobile", () => {
     expect(finalSwitchBox!.y + finalSwitchBox!.height).toBeLessThanOrEqual(
       finalSourceBox!.y + finalSourceBox!.height,
     );
-    expect(finalRemoveBox!.height).toBeGreaterThanOrEqual(44);
+    await expect(finalRemove).toHaveCSS("min-height", "44px");
     expect(finalRemoveBox!.y).toBeGreaterThanOrEqual(finalSourceBox!.y);
     expect(finalRemoveBox!.y + finalRemoveBox!.height).toBeLessThanOrEqual(
       finalSourceBox!.y + finalSourceBox!.height,

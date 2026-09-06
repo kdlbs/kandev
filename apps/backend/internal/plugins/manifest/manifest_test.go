@@ -59,6 +59,68 @@ func TestParse_ValidManifestParsesID(t *testing.T) {
 	}
 }
 
+func TestValidate_StaticWebAppManifestPassesWithoutBackend(t *testing.T) {
+	m, err := Parse([]byte(`
+id: canvas-board
+api_version: 2
+version: 1.0.0
+display_name: Canvas Board
+description: A static board
+author: test
+ui:
+  web_apps:
+    - key: main
+      title: Task board
+      entry: ui/index.html
+      placements: [task-canvas, workspace-canvas]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if !m.IsStaticWebAppOnly() {
+		t.Fatal("IsStaticWebAppOnly() = false, want true")
+	}
+}
+
+func TestValidate_WebAppRejectsUnsafeEntryAndUnknownPlacement(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{Key: "main", Title: "Board", Entry: "../index.html", Placements: []string{"admin"}}}
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "ui.web_apps") || !strings.Contains(err.Error(), "unsupported placement") {
+		t.Fatalf("Validate() error = %v, want web-app entry and placement errors", err)
+	}
+}
+
+func TestValidate_WebAppNormalizesNetworkOrigins(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://API.example.com"},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if got := m.UI.WebApps[0].NetworkOrigins; len(got) != 1 || got[0] != "https://api.example.com" {
+		t.Fatalf("network origins = %#v, want canonical HTTPS origin", got)
+	}
+}
+
+func TestValidate_WebAppRejectsInvalidNetworkOrigin(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://api.example.com/v1"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "network_origins") {
+		t.Fatalf("Validate() error = %v, want network origin error", err)
+	}
+}
+
 // TestParse_UserStateCapabilityRoundTrips pins capabilities.user_state
 // (Approach D1 / AC17): a plugin declaring host-provided per-user storage
 // parses with Capabilities.UserState set.

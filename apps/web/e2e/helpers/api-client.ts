@@ -12,8 +12,10 @@ import type {
   WorkflowProfileSessionStartPolicy,
   WorkflowProfileSessionEndPolicy,
   TaskPriority,
+  SidebarTaskColorPatchApi,
 } from "../../lib/types/http";
-import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
+import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
   PRCommitDetail,
@@ -560,6 +562,10 @@ export class ApiClient {
       ...response,
       agents,
     };
+  }
+
+  async listAvailableAgents(): Promise<{ agents: AvailableAgent[]; total: number }> {
+    return this.request("GET", "/api/v1/agents/available");
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -1199,6 +1205,8 @@ export class ApiClient {
     task_create_last_used?: TaskCreateLastUsedApi;
     kanban_hidden_step_ids?: Record<string, string[]>;
     workflow_ids_with_auto_hide_empty_steps?: string[];
+    sidebar_task_color_automation?: SidebarTaskColorAutomation;
+    sidebar_task_color_patch?: SidebarTaskColorPatchApi;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -2721,6 +2729,16 @@ export class ApiClient {
 
   async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
+  }
+
+  async setQueueAutoRun(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
+    return this.wsRequest("message.queue.auto_run.set", {
+      session_id: sessionId,
+      enabled,
+    });
   }
 
   // --- Integration config seeding (real API, not mock) ---

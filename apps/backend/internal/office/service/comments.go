@@ -47,6 +47,7 @@ func (s *Service) publishCommentCreated(ctx context.Context, comment *models.Tas
 		CommentID:  comment.ID,
 		AuthorID:   comment.AuthorID,
 		AuthorType: comment.AuthorType,
+		Source:     comment.Source,
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-service", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

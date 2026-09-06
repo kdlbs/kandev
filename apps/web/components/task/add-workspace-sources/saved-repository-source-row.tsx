@@ -75,6 +75,7 @@ export function SavedRepositorySourceRow({
         repositories={repositories}
         discoveredRepositories={discoveredRepositories}
         workspaceId={workspaceId}
+        showDiscoveryControls
         canAddMore={false}
         onAdd={() => {}}
         onRemove={() => {}}

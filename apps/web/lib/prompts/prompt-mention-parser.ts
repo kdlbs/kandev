@@ -4,10 +4,51 @@ export type PromptMentionMatch = {
   name: string;
 };
 
+const MAX_PROMPT_MENTION_NAMES = 2000;
+const MAX_PROMPT_MENTION_NAME_LENGTH = 512;
+const MAX_PROMPT_MENTION_NAME_BYTES = 200_000;
+
 export function buildPromptMentionNames(promptNames: string[]) {
-  return Array.from(new Set(promptNames.filter(Boolean))).sort(
-    (a, b) => b.length - a.length || a.localeCompare(b),
-  );
+  const names = Array.from(
+    new Set(
+      promptNames.filter((name) => Boolean(name) && name.length <= MAX_PROMPT_MENTION_NAME_LENGTH),
+    ),
+  ).sort((a, b) => b.length - a.length || a.localeCompare(b));
+  const accepted: string[] = [];
+  let totalLength = 0;
+  for (const name of names) {
+    if (accepted.length >= MAX_PROMPT_MENTION_NAMES) break;
+    if (totalLength + name.length > MAX_PROMPT_MENTION_NAME_BYTES) continue;
+    accepted.push(name);
+    totalLength += name.length;
+  }
+  return accepted;
+}
+type PromptNameTrieNode = {
+  children: Map<string, PromptNameTrieNode>;
+  name?: string;
+};
+
+const promptNamePrefixCache = new WeakMap<readonly string[], PromptNameTrieNode>();
+
+function getPromptNamePrefixIndex(promptNames: string[]) {
+  const cached = promptNamePrefixCache.get(promptNames);
+  if (cached) return cached;
+  const root: PromptNameTrieNode = { children: new Map() };
+  for (const name of promptNames) {
+    let node = root;
+    for (const character of name) {
+      let child = node.children.get(character);
+      if (!child) {
+        child = { children: new Map() };
+        node.children.set(character, child);
+      }
+      node = child;
+    }
+    node.name = name;
+  }
+  promptNamePrefixCache.set(promptNames, root);
+  return root;
 }
 
 /**
@@ -22,13 +63,26 @@ export function matchPromptMention(
   if (content[index] !== "@" || !isMentionStart(content, index)) return null;
 
   const referenceStart = index + 1;
-  for (const name of promptNames) {
-    if (!content.startsWith(name, referenceStart)) continue;
-    const referenceEnd = referenceStart + name.length;
-    if (referenceEnd < content.length && isMentionNameChar(content[referenceEnd])) continue;
-    return { start: index, end: referenceEnd, name };
+  let node = getPromptNamePrefixIndex(promptNames);
+  let bestMatch: PromptMentionMatch | null = null;
+  for (let cursor = referenceStart; cursor < content.length; ) {
+    const codePoint = content.codePointAt(cursor);
+    if (codePoint === undefined) break;
+    const character = String.fromCodePoint(codePoint);
+    const child = node.children.get(character);
+    if (!child) break;
+    node = child;
+    cursor += character.length;
+    if (node.name && (cursor >= content.length || !isMentionNameCharAt(content, cursor))) {
+      bestMatch = { start: index, end: cursor, name: node.name };
+    }
   }
-  return null;
+  return bestMatch;
+}
+
+function isMentionNameCharAt(content: string, index: number) {
+  const codePoint = content.codePointAt(index);
+  return codePoint !== undefined && /[\p{L}\p{M}\p{N}_-]/u.test(String.fromCodePoint(codePoint));
 }
 
 function isMentionStart(content: string, index: number) {
@@ -37,8 +91,4 @@ function isMentionStart(content: string, index: number) {
 
 function isWhitespace(value: string) {
   return value === " " || value === "\n" || value === "\t" || value === "\r";
-}
-
-function isMentionNameChar(value: string) {
-  return /[A-Za-z0-9_-]/.test(value);
 }
