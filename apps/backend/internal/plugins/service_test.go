@@ -775,6 +775,29 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	}
 }
 
+func TestServiceUninstallFencesOldApprovalAsRevokedAfterRegistryRemoval(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-notes", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant approval: %v", err)
+	}
+
+	if err := svc.Uninstall(context.Background(), rec.ID); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	decision := svc.AuthorizeCapability(rec.InstallationID, "ws-1", "api_read:tasks", 1, "request-digest", "method-digest")
+	if decision.Allowed {
+		t.Fatalf("AuthorizeCapability() allowed tombstoned installation: %#v", decision)
+	}
+	if decision.Reason != ApprovalDenyRevokedApproval {
+		t.Fatalf("AuthorizeCapability() reason = %q, want %q", decision.Reason, ApprovalDenyRevokedApproval)
+	}
+}
+
 func TestServiceUninstallMissingReturnsNotFound(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	if err := svc.Uninstall(context.Background(), "missing"); !errors.Is(err, store.ErrNotFound) {

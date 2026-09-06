@@ -97,16 +97,16 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 		decision.Reason = ApprovalDenyMissingApproval
 		return decision
 	}
-	if reason, ok := s.manifestIntersectionDenyReason(installationID, capabilityID, current); !ok {
-		decision.Reason = reason
-		return decision
-	}
-	if current.State != ApprovalStateActive {
+	if current.State != ApprovalStateActive || current.TombstonedAt != nil {
 		decision.Reason = ApprovalDenyRevokedApproval
 		return decision
 	}
 	if current.Revision != requestedRevision {
 		decision.Reason = ApprovalDenyStaleRevision
+		return decision
+	}
+	if reason, ok := s.manifestIntersectionDenyReason(installationID, capabilityID, current); !ok {
+		decision.Reason = reason
 		return decision
 	}
 	for _, allowed := range current.CapabilityIDs {
