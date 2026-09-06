@@ -28,7 +28,6 @@ import {
 } from "@/components/task-create-dialog-repo-chip-parts";
 import { AddRepositoryButton } from "@/components/task-create-dialog-add-repository-button";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
 
 type WorkspaceRepoChipsProps = {
