@@ -382,6 +382,7 @@ test.describe("Mobile sidebar — view system", () => {
     await gear.tap();
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-sort-settings-toggle").tap();
     await popover.getByTestId("sort-key-select").tap();
     await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
       "Last task summary refresh. Background events can change it.",
@@ -530,6 +531,7 @@ test.describe("Mobile sidebar — view system", () => {
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(drawer).toBeVisible();
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-group-settings-toggle").tap();
     await popover.getByTestId("group-key-select").tap();
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },

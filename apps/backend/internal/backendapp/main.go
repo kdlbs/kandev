@@ -1142,7 +1142,7 @@ func startGatewayAndServe(
 		TaskSessions:         repos.Task,
 	})
 	storageComposition, err := provideStorageComposition(
-		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)

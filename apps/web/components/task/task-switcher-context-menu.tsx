@@ -246,6 +246,59 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
   );
 }
 
+type TaskHeaderMenuItemsProps = Pick<
+  TaskContextMenuItemsProps,
+  | "task"
+  | "isDeleting"
+  | "isPinned"
+  | "onClearSelection"
+  | "onTogglePin"
+  | "onEditTask"
+  | "onRenameTask"
+  | "onCreateSubtask"
+> & { actingOnSelection: boolean };
+
+function TaskHeaderMenuItems({
+  task,
+  isDeleting,
+  isPinned,
+  actingOnSelection,
+  onClearSelection,
+  onTogglePin,
+  onEditTask,
+  onRenameTask,
+  onCreateSubtask,
+}: TaskHeaderMenuItemsProps) {
+  const { t } = useTranslation();
+  const updateTaskPriority = useUpdateTaskPriority();
+  return (
+    <>
+      <TaskPinItem
+        taskId={task.id}
+        isPinned={isPinned}
+        disabled={isDeleting}
+        onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
+      />
+      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      {!task.isArchived && (
+        <TaskPriorityContextMenu
+          currentPriority={task.priority}
+          disabled={isDeleting}
+          onSelect={(priority) => void updateTaskPriority(task.id, priority)}
+        />
+      )}
+      <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
+      <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
+      {!task.isArchived && (
+        <ContextMenuItem disabled>
+          <IconCopy className="mr-2 h-4 w-4" />
+          {t("settings:duplicate")}
+        </ContextMenuItem>
+      )}
+    </>
+  );
+}
+
 function SingleSelectionMenuItems({
   task,
   workflows,
@@ -275,36 +328,23 @@ function SingleSelectionMenuItems({
   actingOnSelection,
   ...linkHandlers
 }: TaskContextMenuItemsProps & { actingIds: string[]; actingOnSelection: boolean }) {
-  const { t } = useTranslation();
-  const updateTaskPriority = useUpdateTaskPriority();
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
   const onDelete = withSelectionClear(actingOnSelection, onClearSelection, onDeleteTask);
   const onDetach = withSelectionClear(actingOnSelection, onClearSelection, onDetachTask);
   return (
     <>
-      <TaskPinItem
-        taskId={task.id}
+      <TaskHeaderMenuItems
+        task={task}
+        isDeleting={isDeleting}
         isPinned={isPinned}
-        disabled={isDeleting}
-        onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
+        actingOnSelection={actingOnSelection}
+        onClearSelection={onClearSelection}
+        onTogglePin={onTogglePin}
+        onEditTask={onEditTask}
+        onRenameTask={onRenameTask}
+        onCreateSubtask={onCreateSubtask}
       />
-      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
-      {!task.isArchived && (
-        <TaskPriorityContextMenu
-          currentPriority={task.priority}
-          disabled={isDeleting}
-          onSelect={(priority) => void updateTaskPriority(task.id, priority)}
-        />
-      )}
-      <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
-      <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
-      {!task.isArchived && (
-        <ContextMenuItem disabled>
-          <IconCopy className="mr-2 h-4 w-4" />
-          {t("settings:duplicate")}
-        </ContextMenuItem>
-      )}
       <TaskArchiveItem
         taskId={task.id}
         actingIds={actingIds}
@@ -313,7 +353,13 @@ function SingleSelectionMenuItems({
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
       />
-      {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
+      {!task.isArchived && (
+        <TaskColorMenu
+          taskId={task.id}
+          disabled={isDeleting}
+          automaticColorSource={task.automaticColorSource}
+        />
+      )}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskPluginPrimaryMenuItems task={task} disabled={isDeleting} />
       <TaskPluginLinkMenu

@@ -162,6 +162,30 @@ func TestHTTPUpdateUserSettingsKanbanHiddenStepIDsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHTTPUpdateUserSettingsSidebarTaskColorsRoundTrip(t *testing.T) {
+	router := newTestUserSettingsRouter(t)
+
+	patch := []byte(`{"sidebar_task_color_patch":{"colors":{"task-red":"red","task-cleared":null}}}`)
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/user/settings", bytes.NewReader(patch))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PATCH sidebar task colors status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var payload dto.UserSettingsResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode settings response: %v", err)
+	}
+	if value := payload.Settings.SidebarTaskColors["task-red"]; value == nil || *value != "red" {
+		t.Fatalf("response task-red = %#v, want red", value)
+	}
+	if value, present := payload.Settings.SidebarTaskColors["task-cleared"]; !present || value != nil {
+		t.Fatalf("response task-cleared = (%#v, %t), want (nil, true)", value, present)
+	}
+}
+
 func TestHTTPUpdateUserSettingsBodyTooLarge(t *testing.T) {
 	router := newTestUserSettingsRouter(t)
 

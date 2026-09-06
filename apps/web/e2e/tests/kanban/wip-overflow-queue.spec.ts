@@ -38,27 +38,30 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceBox = await sourceCard.boundingBox();
   expect(sourceBox).not.toBeNull();
 
-  // Press the card and cross the 8px pointer-sensor activation distance to start
-  // the drag.
-  await testPage.mouse.move(
-    sourceBox!.x + sourceBox!.width / 2,
-    sourceBox!.y + sourceBox!.height / 2,
-  );
+  const sourceX = sourceBox!.x + sourceBox!.width / 2;
+  const sourceY = sourceBox!.y + sourceBox!.height / 2;
+  await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
-  await testPage.mouse.move(
-    sourceBox!.x + sourceBox!.width / 2 + 20,
-    sourceBox!.y + sourceBox!.height / 2,
-    { steps: 6 },
-  );
+  // Cross the 8px pointer-sensor activation distance to start the drag.
+  await testPage.mouse.move(sourceX + 20, sourceY, { steps: 6 });
 
-  // Starting the drag can swap in the move-target columns (getDragDisplaySteps),
-  // shifting the feeder's on-screen position. Measure the feeder against its live
-  // box, then re-read and correct: the first move settles any relayout and the
-  // second lands the pointer on the feeder's true center, so the drop cannot miss
-  // on stale coordinates under load. The trailing +1px keeps pointerWithin's
-  // `over` resolved to the feeder at the moment of release.
+  const scrollWindowBox = await testPage.getByTestId("desktop-kanban-scroll-window").boundingBox();
+  expect(scrollWindowBox).not.toBeNull();
+
+  // Starting the drag swaps in the move-target columns (getDragDisplaySteps),
+  // which can shift the feeder's on-screen position or push it left of the
+  // viewport. Measure its live box each time and, if it has scrolled off-screen,
+  // drag toward the scroll window's left edge to bring it back before landing on
+  // it. Two corrective moves settle any relayout so the drop cannot miss on stale
+  // coordinates under load; the trailing +1px keeps pointerWithin's `over`
+  // resolved to the feeder at the moment of release. dnd-kit only holds the drag
+  // active while the pointer keeps moving, so this never pauses to poll the DOM.
   const moveOntoFeeder = async (settleOffsetY: number) => {
-    const feederBox = await feederColumn.boundingBox();
+    let feederBox = await feederColumn.boundingBox();
+    if (feederBox && feederBox.x + feederBox.width <= 0) {
+      await testPage.mouse.move(scrollWindowBox!.x + 2, sourceY, { steps: 12 });
+      feederBox = await feederColumn.boundingBox();
+    }
     expect(feederBox).not.toBeNull();
     await testPage.mouse.move(
       feederBox!.x + feederBox!.width / 2,

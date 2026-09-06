@@ -546,6 +546,7 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 		data["primary_session_id"] = nil
 		data["primary_session_state"] = nil
 		data["primary_session_pending_action"] = nil
+		data["primary_executor_profile_id"] = nil
 		return activity
 	}
 	s.addPrimarySessionEventFields(ctx, taskID, data, sessionInfo)
@@ -599,6 +600,11 @@ func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID strin
 	s.addPrimarySessionPendingActionEventField(ctx, taskID, sessionInfo, data)
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID
+	}
+	if sessionInfo.ExecutorProfileID != "" {
+		data["primary_executor_profile_id"] = sessionInfo.ExecutorProfileID
+	} else {
+		data["primary_executor_profile_id"] = nil
 	}
 	data["primary_agent_profile_id"] = nil
 	data["primary_agent_name"] = nil
