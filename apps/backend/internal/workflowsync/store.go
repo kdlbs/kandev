@@ -79,7 +79,7 @@ func (s *Store) addCircuitColumns() error {
 		`ALTER TABLE workflow_sync_configs ADD COLUMN credential_fingerprint TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range statements {
-		if _, err := s.db.Exec(stmt); err != nil && !db.IsDuplicateColumnError(err) {
+		if _, err := s.db.Exec(schemaSQLForDriver(stmt, s.db.DriverName())); err != nil && !db.IsDuplicateColumnError(err) {
 			return err
 		}
 	}

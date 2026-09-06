@@ -168,6 +168,24 @@ func TestStore_addCircuitColumns_Idempotent(t *testing.T) {
 	require.NoError(t, store.addCircuitColumns())
 }
 
+func TestStore_addCircuitColumns_UsesPostgresTimestampType(t *testing.T) {
+	rawDB, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	rawDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(rawDB, "pgx")
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`CREATE TABLE workflow_sync_configs (workspace_id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+
+	store := &Store{db: db, ro: db}
+	require.NoError(t, store.addCircuitColumns())
+
+	var columnType string
+	err = db.Get(&columnType, `SELECT type FROM pragma_table_info('workflow_sync_configs') WHERE name = 'next_retry_at'`)
+	require.NoError(t, err)
+	assert.Equal(t, "TIMESTAMPTZ", columnType)
+}
+
 func TestStore_ListConfigs(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
