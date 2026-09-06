@@ -10,6 +10,21 @@ import {
 import { createMentionSuggestion } from "./tiptap-suggestion";
 import * as entityReferenceSuggestions from "./tiptap-entity-reference-suggestion";
 
+function createSuggestionPositioningProps() {
+  return {
+    placement: "bottom-start" as const,
+    offset: { mainAxis: 4, crossAxis: 0 },
+    flip: true,
+    floatingUi: {
+      placement: "bottom-start" as const,
+      strategy: "absolute" as const,
+      middleware: [],
+    },
+    mount: vi.fn(() => vi.fn()),
+    loading: false,
+  };
+}
+
 describe("entity reference suggestion", () => {
   it("provides an independent # suggestion config", () => {
     expect(
@@ -236,6 +251,7 @@ describe("entity reference suggestion lifecycle", () => {
       command: vi.fn(),
       decorationNode: null,
       clientRect: () => new DOMRect(10, 20, 1, 10),
+      ...createSuggestionPositioningProps(),
     };
 
     expect(lifecycle).toBeDefined();
@@ -356,6 +372,7 @@ describe("createMentionSuggestion", () => {
       command,
       decorationNode: null,
       clientRect: null,
+      ...createSuggestionPositioningProps(),
     });
 
     const menu = setMenuState.mock.calls[0]?.[0];
