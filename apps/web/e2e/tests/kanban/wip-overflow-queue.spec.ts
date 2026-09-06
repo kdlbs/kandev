@@ -42,35 +42,30 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceY = sourceBox!.y + sourceBox!.height / 2;
   await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
-  // Cross the 8px pointer-sensor activation distance to start the drag.
-  await testPage.mouse.move(sourceX + 20, sourceY, { steps: 6 });
+  await testPage.mouse.move(sourceX + 20, sourceY, { steps: 4 });
+  await expect(sourceCard).toHaveClass(/opacity-50/, { timeout: 5_000 });
 
+  // Dragging can temporarily move destinations before the anchored source
+  // column, so scroll them back into the viewport before dropping.
+  let feederBox = await feederColumn.boundingBox();
   const scrollWindowBox = await testPage.getByTestId("desktop-kanban-scroll-window").boundingBox();
   expect(scrollWindowBox).not.toBeNull();
-
-  // Starting the drag swaps in the move-target columns (getDragDisplaySteps),
-  // which can shift the feeder's on-screen position or push it left of the
-  // viewport. Measure its live box each time and, if it has scrolled off-screen,
-  // drag toward the scroll window's left edge to bring it back before landing on
-  // it. Two corrective moves settle any relayout so the drop cannot miss on stale
-  // coordinates under load; the trailing +1px keeps pointerWithin's `over`
-  // resolved to the feeder at the moment of release. dnd-kit only holds the drag
-  // active while the pointer keeps moving, so this never pauses to poll the DOM.
-  const moveOntoFeeder = async (settleOffsetY: number) => {
-    let feederBox = await feederColumn.boundingBox();
-    if (feederBox && feederBox.x + feederBox.width <= 0) {
-      await testPage.mouse.move(scrollWindowBox!.x + 2, sourceY, { steps: 12 });
-      feederBox = await feederColumn.boundingBox();
-    }
-    expect(feederBox).not.toBeNull();
-    await testPage.mouse.move(
-      feederBox!.x + feederBox!.width / 2,
-      feederBox!.y + feederBox!.height / 2 + settleOffsetY,
-      { steps: 10 },
-    );
-  };
-  await moveOntoFeeder(0);
-  await moveOntoFeeder(1);
+  if (feederBox && feederBox.x + feederBox.width <= 0) {
+    await testPage.mouse.move(scrollWindowBox!.x + 2, sourceY, { steps: 12 });
+    await expect
+      .poll(async () => {
+        const box = await feederColumn.boundingBox();
+        return box ? box.x + box.width / 2 : -1;
+      })
+      .toBeGreaterThan(0);
+    feederBox = await feederColumn.boundingBox();
+  }
+  expect(feederBox).not.toBeNull();
+  await testPage.mouse.move(
+    feederBox!.x + feederBox!.width / 2,
+    feederBox!.y + feederBox!.height / 2,
+    { steps: 12 },
+  );
   await testPage.mouse.up();
 
   await expect(pullColumn).toContainText("1/1");

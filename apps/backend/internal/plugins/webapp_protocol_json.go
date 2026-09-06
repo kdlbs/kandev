@@ -139,7 +139,7 @@ func webAppTaskFromSDK(task pluginsdk.Task) webAppTask {
 		WorkflowStepID:         task.WorkflowStepID,
 		Position:               task.Position,
 		AssigneeAgentProfileID: task.AssigneeAgentProfileID,
-		Labels:                 task.Labels,
+		Labels:                 task.Labels, //nolint:staticcheck // retain API v1 label compatibility
 		Autopilot:              task.Autopilot,
 		WIPAdmitted:            task.WIPAdmitted,
 		QueuedForStepID:        task.QueuedForStepID,

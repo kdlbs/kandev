@@ -126,8 +126,10 @@ const (
 	// records the source step so stale deliveries cannot run the wrong exit.
 	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
 	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
-	// lifecycle finished. It remains as an idempotency marker until the next
-	// step-changing move replaces it.
+	// lifecycle finished. It is cleared once its continuation has run and no
+	// MetaKeyManualMoveLifecyclePending token remains, so it does not
+	// accumulate as permanent startup-recovery work; a fresh manual move
+	// replaces it with a new pending token before it would be cleared.
 	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
 	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
 	// been applied, preventing a stale queue rollback from replaying one.
