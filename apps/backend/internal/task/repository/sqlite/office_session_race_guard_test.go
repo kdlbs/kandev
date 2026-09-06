@@ -18,10 +18,19 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-// insertOfficeSessionWithStartedAt is insertOfficeSession
-// (office_task_session_uniqueness_test.go) with an explicit started_at, so
-// ordering tests can control which row is "newer" independent of insertion
-// order.
+// officeSessionSeed describes a task_sessions row to insert directly,
+// bypassing CreateTaskSession so tests can construct rows with a specific
+// (task_id, agent_profile_id, state) shape.
+type officeSessionSeed struct {
+	id             string
+	taskID         string
+	agentProfileID string
+	state          models.TaskSessionState
+}
+
+// insertOfficeSessionWithStartedAt inserts a task_sessions row directly with
+// an explicit started_at, so ordering tests can control which row is "newer"
+// independent of insertion order.
 func insertOfficeSessionWithStartedAt(t *testing.T, db *sqlx.DB, s officeSessionSeed, startedAt time.Time) {
 	t.Helper()
 	now := time.Now().UTC()

@@ -5044,6 +5044,9 @@ func (s *Service) claimSessionRunningForPrompt(
 	if s.isSessionResetInProgress(sessionID) {
 		return nil, "", "", false, nil, ErrSessionResetInProgress
 	}
+	if s.isRouteActionInFlight(sessionID) {
+		return nil, "", "", false, nil, fmt.Errorf("%w, route action is in progress", ErrAgentPromptInProgress)
+	}
 	if expectedCurrentTurnID != "" {
 		if s.turnService == nil {
 			return nil, "", "", false, nil, errors.New("cannot verify expected prompt turn without turn service")
@@ -5151,6 +5154,9 @@ func (s *Service) claimLifecycleSessionRunning(
 	}
 	if s.isSessionResetInProgress(sessionID) {
 		return nil, "", "", false, ErrSessionResetInProgress
+	}
+	if s.isRouteActionInFlight(sessionID) {
+		return nil, "", "", false, fmt.Errorf("%w, route action is in progress", ErrAgentPromptInProgress)
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {

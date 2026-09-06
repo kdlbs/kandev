@@ -389,6 +389,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions

@@ -627,17 +627,12 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 }
 
 // FindMessagesByPendingID returns every message that carries the given pending_id
-// in its metadata, ordered by creation time (oldest first). Multi-question
-// clarification requests emit one message per question, all sharing the same
-// pending_id; this lookup lets the canceller / status-update path touch all of
-// them without N round-trips.
+// in its metadata, ordered by creation time and message ID (oldest first).
+// Multi-question clarification requests emit one message per question, all
+// sharing the same pending_id; this lookup lets the canceller / status-update
+// path touch all of them without N round-trips.
 func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error) {
-	drv := r.ro.DriverName()
-	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages WHERE %s = ?
-		ORDER BY created_at ASC
-	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
+	query := findMessagesByPendingIDQuery(r.ro.DriverName())
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), pendingID)
 	if err != nil {
 		return nil, err
@@ -645,6 +640,16 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 	defer func() { _ = rows.Close() }()
 	result, _, err := scanMessageRows(rows, 0)
 	return result, err
+}
+
+// findMessagesByPendingIDQuery is shared with query-plan tests so the
+// production lookup and its planner witness cannot drift apart.
+func findMessagesByPendingIDQuery(driverName string) string {
+	return fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages WHERE %s = ?
+		ORDER BY created_at ASC, id ASC
+	`, dialect.JSONExtract(driverName, "metadata", "pending_id"))
 }
 
 // FindActiveClarificationMessagesBySessionID returns pending clarification rows
