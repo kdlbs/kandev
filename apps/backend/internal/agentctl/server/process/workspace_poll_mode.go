@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"time"
 
 	"go.uber.org/zap"
@@ -91,6 +92,13 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	// what the grace demotion exists to detect the absence of.
 	wt.pollModePushed = true
 	wt.disarmPollModeGraceLocked()
+	if mode == PollModeFast {
+		// Focus is an explicit visible-user retry after an access denial.
+		wt.accessDenied.Store(false)
+	}
+	if mode == PollModeSlow && wt.accessDenied.Load() {
+		mode = PollModePaused
+	}
 	prev := wt.pollMode
 	if prev == mode {
 		wt.pollModeMu.Unlock()
@@ -102,20 +110,36 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	wt.wakePollLoops()
 }
 
-// demoteUnpushedPollMode drops the tracker to slow once pollModeGracePeriod
-// elapses with no explicit SetPollMode. Fires at most once — the timer is not
-// rearmed — so a later push always wins.
-func (wt *WorkspaceTracker) demoteUnpushedPollMode() {
+// demoteUnpushedPollMode performs the one startup-grace scan, then pauses the
+// tracker when no gateway mode ever arrived. Fires at most once — the timer is
+// not rearmed — so a later push always wins. The caller owns the context so
+// Stop can cancel both the scan and the transition before it publishes.
+func (wt *WorkspaceTracker) demoteUnpushedPollMode(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	wt.pollModeMu.Lock()
 	wt.pollModeGraceTimer = nil
-	if wt.pollModePushed || wt.pollMode == PollModeSlow {
+	if ctx.Err() != nil || wt.pollModePushed || wt.pollMode == PollModePaused {
 		wt.pollModeMu.Unlock()
 		return
 	}
-	wt.pollMode = PollModeSlow
 	wt.pollModeMu.Unlock()
 
-	wt.logger.Info("no poll mode pushed within grace period, demoting to slow",
+	wt.RefreshWorkspace(withWorkspaceTrigger(ctx, "startup_grace"), "startup_grace")
+	if ctx.Err() != nil {
+		return
+	}
+
+	wt.pollModeMu.Lock()
+	if ctx.Err() != nil || wt.pollModePushed {
+		wt.pollModeMu.Unlock()
+		return
+	}
+	wt.pollMode = PollModePaused
+	wt.pollModeMu.Unlock()
+
+	wt.logger.Info("no poll mode pushed within grace period, final scan complete, pausing workspace polling",
 		zap.Duration("grace", wt.pollModeGrace),
 		zap.String("workDir", wt.workDir))
 	wt.wakePollLoops()

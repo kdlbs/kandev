@@ -28,6 +28,12 @@ async function beginPointerDrag(page: Page, card: Locator) {
   await page.mouse.move(x + 20, y, { steps: 4 });
 }
 
+async function renderedColumnWidths(page: Page) {
+  return page
+    .locator("[data-kanban-step-id]")
+    .evaluateAll((columns) => columns.map((column) => column.getBoundingClientRect().width));
+}
+
 test("auto-hides empty columns without changing drag destinations", async ({
   testPage,
   apiClient,
@@ -58,6 +64,32 @@ test("auto-hides empty columns without changing drag destinations", async ({
   await expect(kanban.columnByStepId(sourceStep.id)).toBeVisible();
   await expect(kanban.columnByStepId(autoHiddenStep.id)).toBeVisible();
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toBeVisible();
+
+  // @covers AC-UI-ADAPTIVE-KANBAN-001.9
+  const widthsBeforeDrag = await renderedColumnWidths(testPage);
+  expect(widthsBeforeDrag.length).toBe(3);
+  await beginPointerDrag(testPage, kanban.taskCard(task.id));
+  await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+  const widthsDuringDrag = await renderedColumnWidths(testPage);
+  expect(widthsDuringDrag).toHaveLength(widthsBeforeDrag.length);
+  widthsDuringDrag.forEach((width, index) => {
+    expect(Math.abs(width - widthsBeforeDrag[index])).toBeLessThanOrEqual(1);
+  });
+  const dragOverflow = await testPage.evaluate(() => {
+    const scrollWindow = document.querySelector<HTMLElement>(
+      '[data-testid="desktop-kanban-scroll-window"]',
+    );
+    if (!scrollWindow) throw new Error("desktop Kanban scroll window is missing");
+    return {
+      documentClientWidth: document.documentElement.clientWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      scrollbarWidth: getComputedStyle(scrollWindow).scrollbarWidth,
+    };
+  });
+  expect(dragOverflow.documentScrollWidth).toBe(dragOverflow.documentClientWidth);
+  expect(dragOverflow.scrollbarWidth).toBe("none");
+  await testPage.keyboard.press("Escape");
+  await testPage.mouse.up();
 
   await openColumnsMenu(testPage, workflow.id);
   const autoHideToggle = testPage.getByTestId(`columns-menu-auto-hide-empty-${workflow.id}`);
@@ -119,4 +151,43 @@ test("auto-hides empty columns without changing drag destinations", async ({
   expect(settledDestinationBox.x).toBeLessThan(viewportWidth);
   expect(settledDestinationBox.x + settledDestinationBox.width).toBeGreaterThan(0);
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toHaveCount(0);
+});
+
+test("keeps the drag reserve after overflowing minimum-width tracks", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Overflow reserve E2E");
+  const steps = await Promise.all(
+    ["Source", "Second", "Third", "Fourth", "Fifth", "Sixth"].map((title, index) =>
+      apiClient.createWorkflowStep(workflow.id, title, index, { is_start_step: index === 0 }),
+    ),
+  );
+  const task = await apiClient.createTask(seedData.workspaceId, "Overflow reserve sample", {
+    workflow_id: workflow.id,
+    workflow_step_id: steps[0].id,
+  });
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: workflow.id,
+    kanban_hidden_step_ids: {},
+    workflow_ids_with_auto_hide_empty_steps: [],
+  });
+
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto();
+  await expect(kanban.columnByStepId(steps[5].id)).toBeVisible();
+
+  const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
+  const scrollWidthBeforeDrag = await scrollWindow.evaluate((element) => element.scrollWidth);
+  const clientWidth = await scrollWindow.evaluate((element) => element.clientWidth);
+  await beginPointerDrag(testPage, kanban.taskCard(task.id));
+  const scrollWidthDuringDrag = await scrollWindow.evaluate((element) => element.scrollWidth);
+  expect(scrollWidthDuringDrag - scrollWidthBeforeDrag).toBeGreaterThanOrEqual(
+    clientWidth - 280 - 1,
+  );
+  await testPage.keyboard.press("Escape");
+  await testPage.mouse.up();
 });

@@ -15,6 +15,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/prompt-history";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
@@ -247,7 +248,9 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
-  const absoluteTime = new Date(createdAt).toLocaleString();
+  if (parseStrictRfc3339Timestamp(createdAt) === null) return null;
+  const date = new Date(createdAt);
+  const absoluteTime = date.toLocaleString();
   const timeEl = (
     <time
       dateTime={createdAt}

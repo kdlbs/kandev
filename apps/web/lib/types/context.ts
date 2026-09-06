@@ -32,7 +32,7 @@ export type FileContextItem = ContextItemBase & {
 export type PromptContextItem = ContextItemBase & {
   kind: "prompt";
   promptContent?: string;
-  onClick: () => void;
+  onClick?: () => void;
 };
 
 export type CommentContextItem = ContextItemBase & {

@@ -93,6 +93,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
+	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
+	}
 	if prior != nil {
 		if strings.TrimSpace(prior.ExecutorID) != "" {
 			running.ExecutorID = prior.ExecutorID

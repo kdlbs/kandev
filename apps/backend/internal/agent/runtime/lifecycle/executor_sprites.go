@@ -452,6 +452,9 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 		step.Output = output
 		report(spriteStepRunPrepareScript, step)
 	})
+	if projectSkillDir := spriteProjectSkillDir(req.Metadata); projectSkillDir != "" {
+		r.ensureSpriteGitExclude(ctx, sprite, projectSkillDir)
+	}
 	if err != nil {
 		completeStepError(&step, err.Error())
 		report(spriteStepRunPrepareScript, step)

@@ -1163,7 +1163,7 @@ func metadataWithoutEntityReferences(metadata map[string]interface{}) map[string
 // handleAgentCompleted handles agent completion events
 func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
-		s.handleAgentCompletedLocked(ctx, data)
+		s.handleAgentCompletedLocked(ctx, data, nil)
 		return
 	}
 
@@ -1184,22 +1184,22 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// cancel/interrupt decision for this session. If coordinator stop won while
 	// the event waited, the guarded state reload below observes CANCELLED and
 	// suppresses all workflow/on_enter side effects.
-	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	if !lock.TryLock() {
+	mutex, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !mutex.TryLock() {
 		go func() {
-			defer release()
-			lock.Lock()
-			defer lock.Unlock()
-			s.handleAgentCompletedAfterGuard(context.WithoutCancel(ctx), data)
+			mutex.Lock()
+			guard := &lockedCancelInFlightGuard{mutex: mutex, releaseRef: release, locked: true}
+			defer guard.release()
+			s.handleAgentCompletedAfterGuard(context.WithoutCancel(ctx), data, guard)
 		}()
 		return
 	}
-	defer release()
-	defer lock.Unlock()
-	s.handleAgentCompletedAfterGuard(ctx, data)
+	guard := &lockedCancelInFlightGuard{mutex: mutex, releaseRef: release, locked: true}
+	defer guard.release()
+	s.handleAgentCompletedAfterGuard(ctx, data, guard)
 }
 
-func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watcher.AgentEventData, guard *lockedCancelInFlightGuard) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, data.AgentExecutionID)
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("deferring agent.completed while cancellation is in progress",
@@ -1209,10 +1209,19 @@ func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watch
 		return
 	}
 
-	s.handleAgentCompletedLocked(ctx, data)
+	s.handleAgentCompletedLocked(ctx, data, guard)
 }
 
-func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.AgentEventData) {
+// handleAgentCompletedLocked runs with the per-session cancel-in-flight guard
+// held, except around calls that themselves acquire the session lifecycle
+// lock (reclaimIdleSession, directly or via setSessionWaitingForInputIfRequested):
+// those release the guard first and reacquire it after, mirroring
+// quiesceActiveResetTurn's yield/reacquire protocol, to keep this lock pair's
+// global acquisition order (lifecycle outer, cancel guard inner) intact. guard
+// is nil when data.SessionID == "" (handleAgentCompletedLocked is called directly,
+// with no cancel guard ever acquired); every unlock/relock is a safe no-op on
+// a nil guard.
+func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.AgentEventData, guard *lockedCancelInFlightGuard) {
 	s.logger.Info("handling agent completed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1328,7 +1337,22 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	}
 
 	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session, completionOperationID)
+	s.finishAgentCompletedTurn(ctx, data, session, transitioned, guard)
+}
 
+// finishAgentCompletedTurn runs the settle steps after
+// processOnTurnCompleteViaEngine has decided whether the turn advanced the
+// workflow: the WAITING_FOR_INPUT / subtask-terminal-collapse decision,
+// execution cleanup, automation finalize, and the reclaimIdleSession settle
+// point. guard's unlock/relock calls around the lifecycle-lock-acquiring
+// steps follow handleAgentCompletedLocked's doc comment.
+func (s *Service) finishAgentCompletedTurn(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	transitioned bool,
+	guard *lockedCancelInFlightGuard,
+) {
 	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
 	// on_turn_complete transitions. If it did not transition, ensure the
 	// completed session leaves RUNNING and let setSessionWaitingForInput perform
@@ -1349,7 +1373,9 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		// itself inspects the task row to pick the path; for sibling
 		// sessions the call is a no-op pass-through to the unconditional
 		// helper, preserving the pre-fix behavior.
+		guard.unlock()
 		s.setSessionWaitingForInputIfRequested(ctx, data.TaskID, data.SessionID, session)
+		guard.relock()
 	}
 
 	// Capture a git status snapshot before cleanup so it can be served
@@ -1372,6 +1398,7 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// collapsed to COMPLETED inside setSessionWaitingForInputIfRequested
 	// reclaimed earlier; this call covers sibling/office flows whose
 	// settled shape has no live runtime.
+	guard.unlock()
 	if err := s.reclaimIdleSession(context.WithoutCancel(ctx), data.SessionID); err != nil {
 		s.logger.Warn("agent.completed settle: reclaim failed; row preserved",
 			zap.String("task_id", data.TaskID),
