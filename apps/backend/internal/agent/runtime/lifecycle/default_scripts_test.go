@@ -3,8 +3,12 @@ package lifecycle
 import (
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestKandevBranchCheckoutPostlude_HasInvariantSteps asserts the kandev-
@@ -233,5 +237,51 @@ func TestDefaultPrepareScript_SSHMaterializesPrimaryWorkspace(t *testing.T) {
 	}
 	if strings.Contains(script, "git checkout -B {{worktree.branch}} origin/{{worktree.branch}}") {
 		t.Fatal("SSH default prepare script must leave feature-branch selection to the postlude")
+	}
+}
+
+// TestManagedScripts_BraceParameterExpansionsBeforeColon guards every managed
+// script that can run under a user-selected login shell. zsh parses an
+// unbraced `$name:r` as a modifier, so `refs/heads/$branch:refs/...` silently
+// became `refs/heads/mainefs/...` on macOS SSH targets. Bracing is the only
+// form that sh, bash, and zsh all read the same way.
+func TestManagedScripts_BraceParameterExpansionsBeforeColon(t *testing.T) {
+	unbraced := regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*:`)
+	destination := models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "contributor/kandev", ProviderID: "200", RemoteURL: "https://github.com/contributor/kandev.git",
+		},
+	}
+	destinationScript, err := scriptengine.ContributionDestinationSetupScriptAt(&destination, "/workspace")
+	if err != nil {
+		t.Fatalf("build contribution destination script: %v", err)
+	}
+	scripts := map[string]string{
+		"branch checkout postlude": KandevBranchCheckoutPostlude(),
+		"ssh remote contribution": strings.Join(
+			append(sshRemoteContributionSetupLines(), sshRemoteContributionCheckoutLines()...), "\n"),
+		"ssh contribution destination": destinationScript,
+	}
+	for _, executorType := range []string{"local", "worktree", "local_docker", "k8s", "sprites", executorTypeSSH} {
+		scripts["default prepare script for "+executorType] = DefaultPrepareScript(executorType)
+	}
+	for name, script := range scripts {
+		if script == "" {
+			t.Fatalf("%s: empty script", name)
+		}
+		for index, line := range strings.Split(script, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			if match := unbraced.FindString(line); match != "" {
+				t.Errorf("%s line %d: %q must be written as ${name}: so zsh does not treat the colon as a modifier:\n%s",
+					name, index+1, match, strings.TrimSpace(line))
+			}
+		}
 	}
 }

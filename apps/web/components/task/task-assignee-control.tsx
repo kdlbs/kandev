@@ -9,6 +9,7 @@ import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAppStore } from "@/components/state-provider";
 import { useAssignablePeople } from "@/hooks/domains/users/use-assignable-people";
 import { updateTask } from "@/lib/api/domains/kanban-api";
+import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import { initialsFor } from "@/lib/user-initials";
 
 // i18n-exempt: sentinels compared with ===, never displayed.
@@ -35,6 +36,7 @@ type Props = {
  */
 export function TaskAssigneeControl({ taskId, workspaceId, isArchived }: Props) {
   const { t } = useTranslation();
+  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
   const currentUser = useAppStore((s) => s.auth.user);
   // Read from the store rather than through props: `task.updated` lands the
   // new assignee there, so another person taking the task over shows up here
@@ -42,7 +44,7 @@ export function TaskAssigneeControl({ taskId, workspaceId, isArchived }: Props) 
   const assigneeUserId = useAppStore(
     (s) => s.kanban.tasks.find((entry: { id: string }) => entry.id === taskId)?.assigneeUserId,
   );
-  const enabled = Boolean(currentUser) && Boolean(taskId) && !isArchived;
+  const enabled = showHumanAssignee && Boolean(taskId) && !isArchived;
   const { people, nameFor } = useAssignablePeople(workspaceId, { enabled });
   const [pending, setPending] = useState(false);
 

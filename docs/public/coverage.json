@@ -61,11 +61,19 @@
       ],
       "sources": [
         "apps/backend/internal/task/handlers/workspace_handlers.go",
-        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"
+        "apps/backend/internal/task/service/repository_discovery.go",
+        "apps/backend/internal/task/service/repository_discovery_state.go",
+        "apps/backend/internal/task/repository/sqlite/desktop_discovery_root.go",
+        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx",
+        "apps/web/hooks/domains/workspace/use-repository-discovery.ts",
+        "apps/web/app/settings/workspace/workspace-repositories-dialog.tsx"
       ],
       "tests": [
         "apps/backend/internal/task/handlers/workspace_handlers_test.go",
-        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"
+        "apps/backend/internal/task/service/repository_discovery_test.go",
+        "apps/backend/internal/task/repository/sqlite/desktop_discovery_root_test.go",
+        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx",
+        "apps/web/hooks/domains/workspace/use-repository-discovery.test.ts"
       ],
       "settingsRoutes": [
         "/settings/workspace",

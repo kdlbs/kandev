@@ -197,6 +197,7 @@ const (
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
+	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -370,6 +371,7 @@ var persistentMetadataKeys = map[string]bool{
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
 	MetadataKeyImageTagOverride:         true,
+	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	MetadataKeyRemoteContributions:      true,

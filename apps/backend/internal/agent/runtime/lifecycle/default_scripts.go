@@ -298,7 +298,7 @@ if [ -n "$repository_url" ]; then
     echo 'kandev: target repository has no base branch' >&2
     exit 1
   fi
-  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch" >/dev/null 2>&1; then
+  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}" >/dev/null 2>&1; then
     echo 'kandev: target base branch is unavailable' >&2
     exit 1
   fi

@@ -119,6 +119,12 @@ jobs:
       - name: Test external runner planner
         run: python3 .github/scripts/runner-plan_test.py
 
+      - name: Test bounded step summary
+        run: python3 .github/scripts/bounded-step-summary_test.py
+
+      - name: Test backend tests workflow contract
+        run: python3 .github/scripts/backend-tests-workflow-contract_test.py
+
       - name: Test stale merge approval revocation workflow contract
         run: python3 .github/scripts/revoke-ready-to-merge-workflow-contract_test.py
 

@@ -97,6 +97,7 @@ jobs:
             scripts/check-make-shells
             .github/workflows/backend-tests.yml
             .github/scripts/changed-paths.py
+            .github/scripts/bounded-step-summary.py
             !**/*.md
             !**/*.mdx
             !**/*.markdown
@@ -346,12 +347,41 @@ jobs:
                   end
               '
 
-      - name: Generate test report
-        uses: robherley/go-test-action@2f859e0c8769d755d3174eecb9af8f64660827f3 # v1.1.0
+      # Run the pinned reporter as a child process so its summary target can be
+      # redirected. A `uses:` step cannot override GITHUB_STEP_SUMMARY because
+      # the runner reapplies its own file-command environment to JS actions.
+      - name: Checkout Go test reporter
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: always()
         with:
-          fromJSONFile: apps/backend/test-results-${{ matrix.shard }}.json
-          omit: successful
+          repository: robherley/go-test-action
+          ref: 2f859e0c8769d755d3174eecb9af8f64660827f3 # v1.1.0
+          path: .github/vendor/go-test-action
+          persist-credentials: false
+
+      - name: Generate test report
+        if: always()
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          report_summary="$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
+          : > "$report_summary"
+          GITHUB_STEP_SUMMARY="$report_summary" \
+          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${{ matrix.shard }}.json" \
+          INPUT_MODULEDIRECTORY="$GITHUB_WORKSPACE/apps/backend" \
+          INPUT_OMIT="successful" \
+            node ".github/vendor/go-test-action/dist/index.js"
+
+      - name: Publish bounded test report summary
+        if: always()
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 .github/scripts/bounded-step-summary.py \
+            --input "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md" \
+            --output "$GITHUB_STEP_SUMMARY" \
+            --diagnostics-label "backend-test-results-${{ matrix.shard }}" \
+            --diagnostics-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

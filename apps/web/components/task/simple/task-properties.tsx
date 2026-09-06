@@ -21,6 +21,7 @@ import { PendingApprovalBadge } from "./components/pending-approval-badge";
 import { QuorumStatusBadge } from "./components/quorum-status-badge";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 
 type TaskPropertiesProps = {
   task: Task;
@@ -60,8 +61,8 @@ function NoneLabel() {
 // user, so the control would offer a choice that cannot mean anything.
 function HumanAssigneeRow({ task }: { task: Task }) {
   const { t } = useTranslation();
-  const hasIdentity = useAppStore((s) => Boolean(s.auth.user));
-  if (!hasIdentity) return null;
+  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
+  if (!showHumanAssignee) return null;
   return (
     <PropertyRow label={t("task:assignedTo")} valueClassName="ml-auto">
       <HumanAssigneePicker task={task} />
