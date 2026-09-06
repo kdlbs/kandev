@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
@@ -18,6 +19,26 @@ const appsDir = ".."
 
 // goDockerImage is used to cross-compile CGO binaries on non-linux/amd64 hosts.
 const goDockerImage = "golang:1.26-bookworm"
+
+var untrustedBuildCredentialNames = map[string]struct{}{
+	"SPRITES_API_TOKEN":              {},
+	"GH_TOKEN":                       {},
+	"GITHUB_TOKEN":                   {},
+	"ACTIONS_ID_TOKEN_REQUEST_TOKEN": {},
+	"ACTIONS_RUNTIME_TOKEN":          {},
+}
+
+// untrustedBuildEnv removes credentials before starting build tooling from a fork checkout.
+func untrustedBuildEnv(env []string) []string {
+	sanitized := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, isCredential := untrustedBuildCredentialNames[name]; !isCredential {
+			sanitized = append(sanitized, entry)
+		}
+	}
+	return sanitized
+}
 
 // buildLinuxBinaries compiles kandev, agentctl, and mock-agent for linux/amd64.
 // Run this from apps/backend/. agentctl and mock-agent use CGO_ENABLED=0 and
@@ -36,7 +57,7 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 		out := filepath.Join(outDir, b.name)
 		fmt.Fprintf(os.Stderr, "  go build %s -> %s\n", b.pkg, out)
 		cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-s -w", "-o", out, b.pkg)
-		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+		cmd.Env = append(untrustedBuildEnv(os.Environ()), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("build %s: %w", b.name, err)
@@ -82,6 +103,7 @@ func buildKandevDocker(ctx context.Context, out string) error {
 		"-o", containerOut,
 		"./cmd/kandev",
 	)
+	cmd.Env = untrustedBuildEnv(os.Environ())
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build kandev: %w", err)
@@ -131,6 +153,7 @@ func buildWeb(ctx context.Context, skipInstall bool) error {
 		fmt.Fprintf(os.Stderr, "  %s\n", step.desc)
 		cmd := exec.CommandContext(ctx, step.args[0], step.args[1:]...)
 		cmd.Dir = appsDir
+		cmd.Env = untrustedBuildEnv(os.Environ())
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
