@@ -32,6 +32,10 @@ import { useTranslation } from "react-i18next";
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Element to return keyboard focus to on close, confirmed or cancelled
+   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
+   * default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
   taskTitle?: string;
   isBulkOperation?: boolean;
   count?: number;
@@ -47,10 +51,6 @@ type TaskArchiveConfirmDialogProps = {
   confirmTestId?: string;
   /** Preflight result supplied by the local confirmation adapter. */
   subtaskClassification?: SubtaskCountResult;
-  /** Element to return keyboard focus to on close, confirmed or cancelled
-   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
-   * default restore-to-previously-focused-element behavior. */
-  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type ArchiveOpenMode = "pending" | "confirm" | "bypass";
@@ -110,6 +110,7 @@ function isArchiveActionDisabled(
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
+  focusReturnRef,
   taskTitle,
   isBulkOperation,
   count,
@@ -122,7 +123,6 @@ export function TaskArchiveConfirmDialog({
   onConfirm,
   confirmTestId,
   subtaskClassification,
-  focusReturnRef,
 }: TaskArchiveConfirmDialogProps) {
   const { t } = useTranslation();
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
@@ -138,6 +138,12 @@ export function TaskArchiveConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
+  const confirmedRef = useRef(false);
+  const restoreFocus = () => {
+    if (confirmedRef.current) return;
+    const focusReturnTarget = focusReturnRef?.current;
+    if (focusReturnTarget?.isConnected) focusReturnTarget.focus();
+  };
   const requiresConfirmation = useArchiveConfirmationMode(
     open,
     confirmTaskArchive,
@@ -157,7 +163,10 @@ export function TaskArchiveConfirmDialog({
   const taskIsInFlight = computeTaskIsInFlight(isInFlight, storeInFlight);
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) setCascade(false);
+    if (!next) {
+      setCascade(false);
+      restoreFocus();
+    }
     onOpenChange(next);
   };
 
@@ -170,10 +179,9 @@ export function TaskArchiveConfirmDialog({
         className={TASK_CONFIRM_CLASS}
         onClick={stopDialogPropagation}
         onCloseAutoFocus={(event) => {
-          const target = focusReturnRef?.current;
-          if (!target || !document.contains(target)) return;
           event.preventDefault();
-          target.focus();
+          restoreFocus();
+          confirmedRef.current = false;
         }}
       >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
@@ -217,6 +225,7 @@ export function TaskArchiveConfirmDialog({
             data-testid={confirmTestId}
             onClick={() => {
               if (archiveDisabled) return;
+              confirmedRef.current = true;
               onConfirm({ cascade });
               handleOpenChange(false);
             }}

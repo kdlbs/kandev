@@ -7,8 +7,9 @@ status: experimental
 # Authoring a Plugin
 
 This is the canonical developer entry point for Kandev runtime plugins. Use it
-to choose a supported surface, edit manifest.yaml, implement the backend or
-native UI, package it, and test it against a disposable development instance.
+to choose a supported surface, edit manifest.yaml, implement the backend,
+native UI, or isolated web app, package it, and test it against a disposable
+development instance.
 The [plugin manifest reference](plugins-manifest.md) owns field-by-field schema
 details; [Plugins](plugins.md) covers operator installation and lifecycle.
 
@@ -20,9 +21,10 @@ support, not a starter repository.
 ## Quick workflow
 
 1. Choose the closest recipe in this page.
-2. Copy the template and edit manifest.yaml: identity, runtime executable, UI
-   paths, capabilities, events, webhooks, and config.
-3. Implement only through the Go pluginsdk and the frontend registry/Host API.
+2. Copy the template and edit manifest.yaml: identity, runtime executable or
+   `ui.web_apps`, UI paths, capabilities, events, webhooks, and config.
+3. Implement through the Go pluginsdk, the native frontend registry/Host API,
+   or the relative canvas protocol for an isolated web app.
 4. Run the plugin repository tests, vet/lint, and build.
 5. Stage the package, run plugin-pack, inspect the archive and generated
    checksums, then install it in a disposable Kandev instance.
@@ -77,10 +79,14 @@ exactly once; late callbacks from an expired generation are fenced from host sta
 
 runtime.executables maps a platform key such as linux-amd64 to a clean
 package-relative path such as server/plugin-linux-amd64. Windows values must
-end in .exe. The host platform's key must be present at install time. A
-UI-focused plugin still ships a managed backend executable because the current
-installer requires runtime.type: binary; that executable can be a no-op
-pluginsdk.UnimplementedPlugin server.
+end in .exe. The host platform's key must be present at install time.
+A UI-focused native plugin still ships a managed backend executable because the
+current installer requires `runtime.type: binary`. That executable can be a
+no-op pluginsdk.UnimplementedPlugin server.
+
+An isolated web-app package can omit `runtime`. It contains a static entry
+document and the files that document imports. Use the `ui.web_apps` fields in
+the [manifest reference](plugins-manifest.md#isolated-web-applications).
 
 Kandev injects KANDEV_PLUGIN_DATA_DIR into the subprocess. It is the durable,
 per-plugin directory for arbitrary files or a plugin-owned database:
@@ -101,6 +107,55 @@ directory.
 | Backend plugin    | Go binary and manifest                                     | events, webhooks, Host data, state, secrets, or utility-agent calls     | only the capabilities used by the backend              |
 | UI-focused plugin | no-op managed binary, ui/bundle.js, optional styles/assets | routes, nav, named slots, WebSocket handlers, keybindings, shared store | ui.bundle; add ui.keybindings when declaring shortcuts |
 | Combined plugin   | Go binary plus UI bundle                                   | UI calls a declared webhook or backend API; backend uses Host           | union of the two surfaces, kept least-privilege        |
+| Isolated web app  | manifest plus static HTML, CSS, JS, and assets             | task or workspace canvas inside a sandboxed iframe                     | only the Kandev data, event, state, and network access it needs |
+
+## Build an isolated web application
+
+Use this shape for a canvas app that runs packaged browser code. The package
+does not need a Go backend or an injected Kandev JavaScript API.
+
+1. Add one or more `ui.web_apps` entries with a package-relative HTML entry.
+2. Set `placements` to `task-canvas`, `workspace-canvas`, or both.
+3. Build the app with relative `./_kandev/v1` requests.
+4. Declare only the Kandev capabilities and exact HTTPS `network_origins` that
+   the app needs.
+5. Package the manifest and static files as a gzip-compressed tar archive.
+
+For example, a page can read task data with the browser Fetch API:
+
+```js
+const response = await fetch("./_kandev/v1/data/tasks");
+if (!response.ok) {
+  throw new Error("The task data request failed");
+}
+const tasks = await response.json();
+```
+
+Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
+relative so the same package works in task and workspace scope. Do not copy a
+capability URL from the host into the app.
+
+The frame has an opaque browser origin. Do not use `localStorage`,
+`sessionStorage`, IndexedDB, or service workers. Use the state protocol for
+small app-specific shared values and JavaScript memory for temporary values.
+
+Network access uses exact HTTPS origins that a user approves. Wildcards,
+origin paths, query strings, credentials, and remote scripts are not allowed.
+Keep scripts, styles, fonts, and images in the package.
+
+Forms cannot submit to external origins. The runtime sets `form-action 'none'`.
+External requests to approved origins are sent directly by the browser. Kandev
+cannot inspect them after they leave the browser, so a release, grant, scope,
+archive, disable, or removal notification immediately tears down the matching
+iframe. A replacement iframe gets a fresh runtime binding.
+
+The validator rejects unsafe paths and unsupported files. It also limits a
+package to 10 MiB compressed, 25 MiB expanded, 512 files, and 5 MiB per file.
+The manifest limit is 64 KiB and the normalized path limit is 240 bytes.
+
+Build and test the archive outside Kandev. Kandev validates the archive before
+it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
+creation, permission review, promotion, Quick Chat editing, and recovery.
 
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements
@@ -181,12 +236,20 @@ curated React, UI, and app-store surface.
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
 
+An isolated web app has a separate browser boundary. Kandev loads it in a
+sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
+host authentication headers, popups, top-level navigation, or a global Kandev
+JavaScript API. See [Security and trust](security.md#isolated-web-applications)
+for the runtime boundary.
+
 ## Storage decision table
 
 | Need                                      | Use                                                                  | Scope/lifecycle                                                                                       | Capability or rule                                                              |
 | ----------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
+| Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
 | Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Opaque origin blocks browser storage and service workers                        |
 | Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
 | Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |
@@ -195,6 +258,9 @@ Host state is not host.storage: Host state is plugin-scoped backend state with
 no transaction primitive, so design updates to be idempotent; host.storage
 (below) is per-user, per-scope frontend storage with an optional
 ifUnmodifiedSince compare-and-swap.
+
+`host.storage` belongs to the native plugin frontend contract. An isolated web
+app does not receive that API. Use the canvas state protocol instead.
 
 ## Authoritative contracts
 
@@ -272,7 +338,7 @@ Nested plugin settings routes remain fully plugin-owned.
 | registerSettingsRoute           | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                                           | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent               | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler               | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
-| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo on the installed plugin detail page at **Settings > Plugins > `<plugin>`**                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
+| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo on the installed plugin detail page at **Settings > Plugins > `<plugin>`**                                                                                                       | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
 | registerIntegrationSettings     | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                                                             | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`          | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle })                                     |
 | registerTranslations            | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider      | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
@@ -462,6 +528,7 @@ to strings, but an unmounted name renders nowhere.
 | chat-input-actions        | Task or Quick Chat composer toolbar                                                        | PluginComposerSlotProps                                          |
 | task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
+| chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
 | chat-top-bar              | Session top bar                                                                            | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
 | main-top-bar              | Home/Kanban/Tasks top bar                                                                  | { workspaceId, workspaceLabel?, currentPage }                    |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
@@ -968,7 +1035,7 @@ Kandev invokes the active manifest owner from the backend. It supplies a verifie
 workspace context and a body with only the submitted URL:
 
 ```json
-{"url":"https://code.example.com/owner/repository"}
+{ "url": "https://code.example.com/owner/repository" }
 ```
 
 The preferred response nests the complete descriptor under `repository`:
@@ -1186,7 +1253,8 @@ interface PluginRegistry {
     registration: IntegrationSettingsRegistration,
   ): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
-  // "main-nav-footer", "chat-input-actions", "chat-top-bar", "main-top-bar",
+  // "main-nav-footer", "chat-input-actions", "chat-submit-decoration",
+  // "chat-top-bar", "main-top-bar",
   // "app-status-bar-left", "app-status-bar-right", and "plugin-settings"
   // (see "Named slots" below).
   registerComponent(
@@ -1553,6 +1621,7 @@ plugins at once. Available slots:
 | `chat-input-actions`        | Task or Quick Chat composer toolbar                                                                    | `PluginComposerSlotProps`                                         |
 | `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
+| `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
 | `chat-top-bar`              | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 | `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
@@ -1684,6 +1753,56 @@ metric chips.
 ```js
 // inside initialize(registry, host):
 registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+```
+
+### Decorating the send button
+
+`chat-input-actions` contributes a _sibling_ icon button. When the adornment
+belongs on the send affordance itself -- a progress ring, a state dot -- register
+a `chat-submit-decoration` component instead. The host layers it over the send
+button's own box:
+
+```ts
+import type { ChatSubmitDecorationSlotProps } from "@kandev/plugin-sdk";
+```
+
+```ts
+type ChatSubmitDecorationSlotProps = {
+  taskId: string | null; // null for task-less quick chat
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[]; // every kandev session id on the task
+  presentation: "desktop" | "mobile";
+  isSending: boolean; // the composer is dispatching this message
+  isAgentBusy: boolean; // agent mid-turn; the next send queues
+  disabled: boolean; // the send button is disabled
+  planModeEnabled: boolean; // the button sends a plan request
+};
+```
+
+Two rules the host enforces for you:
+
+- **The layer is `pointer-events-none`**, so a decoration can never swallow a
+  click meant for send. For hover or focus disclosure, keep the decoration
+  inert and observe the host send button from an effect; remove those listeners
+  when the component unmounts. Your component renders inside the decoration
+  layer, not beside the button, so its immediate `parentElement` is not the
+  positioned button wrapper. Use `pointer-events-auto` only as a last resort
+  for a separate hit target that does not obstruct send. If the plugin needs
+  its own action, prefer a sibling `chat-input-actions` contribution.
+- **The layer is positioned to the button's box**, so size against `inset-0`
+  rather than measuring the DOM. Stay inside that box: the desktop toolbar takes
+  `overflow-x-auto` when it collapses at narrow widths, which makes CSS compute
+  the vertical axis to `auto` as well, so anything drawn on a negative inset is
+  clipped there. Put a ring on the button's rim, not around it.
+
+The decoration renders only while the send button does. Mid-turn with an empty
+composer the button is replaced by Cancel, and the decoration goes with it.
+Use `isSending` to stand down while the host's own spinner owns the button.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("chat-submit-decoration", makeCacheRing(host));
 ```
 
 ### Default app top bar

@@ -7,6 +7,7 @@ export const APP_SIDEBAR_SECTION_IDS = {
   projects: "projects",
   agents: "agents",
   integrations: "integrations",
+  canvases: "canvases",
   settings: "settings",
 } as const;
 

@@ -295,5 +295,6 @@
   "dynamicRouteRetryDescription": "Tenta novamente o mesmo candidato depois de um erro do fornecedor. Use esta opção quando a falha puder ser temporária.",
   "dynamicRouteTryNextDescription": "Ignora este candidato nesta execução e continua com o próximo perfil elegível.",
   "dynamicRouteStopDescription": "Para o encaminhamento quando este candidato falha. A tarefa aguarda uma ação manual de recuperação.",
-  "dynamicProfileSaved": "Perfil dinâmico guardado."
+  "dynamicProfileSaved": "Perfil dinâmico guardado.",
+  "adminOnly": "Só os administradores podem alterar agentes e perfis de agente."
 }

@@ -89,6 +89,7 @@ signals, and task-scoped scheduling contracts.
 - [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
 - [Task Subtree Controls](requirements/subtree-controls.md)
 - [Create Task Escape Dismissal](requirements/task-create-escape-dismissal.md)
+- [Task Create Agent Compatibility Recovery](requirements/task-create-agent-executor-compatibility.md)
 - [Task Create Executor Default](requirements/task-create-executor-default.md)
 - [Task Create Workflow Memory](requirements/task-create-workflow-memory.md)
 - [Task-create advanced settings disclosure](requirements/task-dependencies-create-dialog-advanced-settings.md)
@@ -121,6 +122,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
 - [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
+- [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
 
@@ -161,6 +163,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
+- [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)
 
 ## Migration record
 

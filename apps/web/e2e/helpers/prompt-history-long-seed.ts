@@ -4,6 +4,7 @@ import type { ApiClient } from "./api-client";
 export const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 export const FIRST_PROMPT_MARKER = "prompt-history-auto-load-first-7f1c";
 export const SECOND_PROMPT_MARKER = "prompt-history-auto-load-second-2b9e";
+export const MIDDLE_PROMPT_MARKER = "prompt-history-unloaded-middle-8c42";
 
 type SeedContext = {
   workspaceId: string;
@@ -16,10 +17,11 @@ type SeedContext = {
 /**
  * Seeds a 121-prompt session: the boot description becomes user prompt #1,
  * the SECOND_PROMPT_MARKER gets the earliest seed timestamp (absolute ordinal
- * #2), and 119 more user prompts follow at one-microsecond-aligned timestamps
- * at least 1ms apart, so the last seed is #121. Returns the task id. The
- * pre-seed count (exactly one user message) pins the marker's absolute
- * ordinal deterministically.
+ * #2), and 119 more user prompts follow at least 2ms apart with one agent
+ * response between each prompt. The response rows make a middle prompt absent
+ * from the transcript's newest-message page while it remains in the history
+ * panel's newest-prompt page. The pre-seed count (exactly one user message)
+ * pins the marker's absolute ordinal.
  */
 export async function seedLongPromptHistory(
   apiClient: ApiClient,
@@ -63,8 +65,7 @@ export async function seedLongPromptHistory(
   );
   const seedBaseMs = maxCreatedAt + 1000;
   // RFC3339 with a zero-padded 6-digit (microsecond) fraction: pad the
-  // millisecond fraction instead of replacing it, so every seed is a distinct,
-  // strictly increasing, one-microsecond-aligned timestamp.
+  // millisecond fraction instead of replacing it, so every seed is distinct.
   const aligned = (offsetMs: number): string =>
     new Date(seedBaseMs + offsetMs)
       .toISOString()
@@ -75,12 +76,24 @@ export async function seedLongPromptHistory(
     authorType: "user",
     createdAt: aligned(0),
   });
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: "auto-load agent response 0",
+    authorType: "agent",
+    createdAt: aligned(1),
+  });
   for (let i = 1; i < 120; i++) {
     await apiClient.seedSessionMessage(sessionId, {
       type: "message",
-      content: `auto-load filler prompt ${i}`,
+      content: i === 59 ? MIDDLE_PROMPT_MARKER : `auto-load filler prompt ${i}`,
       authorType: "user",
-      createdAt: aligned(i),
+      createdAt: aligned(i * 2),
+    });
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: `auto-load agent response ${i}`,
+      authorType: "agent",
+      createdAt: aligned(i * 2 + 1),
     });
   }
 

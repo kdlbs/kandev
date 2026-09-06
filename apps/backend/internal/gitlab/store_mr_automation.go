@@ -86,7 +86,7 @@ const createMRAutomationTablesSQL = `
 // migrateMRAutomationAutomationColumns (called from Store.createTables
 // after this) adds them via idempotent ALTER TABLE.
 func (s *Store) createMRAutomationTables() error {
-	_, err := s.db.Exec(createMRAutomationTablesSQL)
+	_, err := s.db.Exec(gitlabSchemaSQLForDriver(createMRAutomationTablesSQL, s.db.DriverName()))
 	return err
 }
 
@@ -181,7 +181,7 @@ func (s *Store) fanOutMROptionsToMRScope(row legacyMROptionsRow) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC()
-	if _, err := tx.Exec(`
+	if _, err := tx.Exec(tx.Rebind(`
 		INSERT INTO gitlab_task_mr_automation_options (
 			task_id, repository_id, project_path, mr_iid, auto_fix_enabled, auto_merge_enabled,
 			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
@@ -189,13 +189,13 @@ func (s *Store) fanOutMROptionsToMRScope(row legacyMROptionsRow) error {
 		SELECT task_id, repository_id, project_path, mr_iid, ?, ?, ?, ?, ?, ?, ?
 		FROM gitlab_task_mrs
 		WHERE task_id = ?
-		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO NOTHING`,
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO NOTHING`),
 		row.autoFix, row.autoMerge, row.promptReview, row.promptMerged, row.promptClosed,
 		now, now, row.taskID); err != nil {
 		return fmt.Errorf("fan out task MR options for %s: %w", row.taskID, err)
 	}
-	if _, err := tx.Exec(
-		`UPDATE gitlab_task_mr_options SET mr_scope_migrated_at = ? WHERE task_id = ?`, now, row.taskID,
+	if _, err := tx.Exec(tx.Rebind(
+		`UPDATE gitlab_task_mr_options SET mr_scope_migrated_at = ? WHERE task_id = ?`), now, row.taskID,
 	); err != nil {
 		return fmt.Errorf("stamp mr_scope_migrated_at for %s: %w", row.taskID, err)
 	}
@@ -211,7 +211,8 @@ func addMissingColumns(s *Store, table string, columns []struct{ name, ddl strin
 		if _, ok := existing[column.name]; ok {
 			continue
 		}
-		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)); err != nil {
+		statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)
+		if _, err := s.db.Exec(gitlabSchemaSQLForDriver(statement, s.db.DriverName())); err != nil {
 			return fmt.Errorf("migrate %s.%s: %w", table, column.name, err)
 		}
 	}
@@ -223,6 +224,7 @@ func addMissingColumns(s *Store, table string, columns []struct{ name, ddl strin
 // existing ResetWorkspaceE2E transaction.
 type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	Rebind(query string) string
 }
 
 const mrAutomationOptionsSelectCols = `task_id, automation_revision, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override,
@@ -233,9 +235,9 @@ const mrAutomationOptionsSelectCols = `task_id, automation_revision, auto_fix_en
 // implicit all-false default when no row has been persisted yet (AC1).
 func (s *Store) GetTaskMRAutomationOptions(ctx context.Context, taskID string) (*TaskMRAutomationOptions, error) {
 	var row TaskMRAutomationOptions
-	err := s.ro.GetContext(ctx, &row, `
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT `+mrAutomationOptionsSelectCols+`
-		FROM gitlab_task_mr_options WHERE task_id = ?`, taskID)
+		FROM gitlab_task_mr_options WHERE task_id = ?`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &TaskMRAutomationOptions{TaskID: taskID}, nil
 	}
@@ -319,16 +321,16 @@ func updateTaskMRAutomationOptionsTx(
 	ctx context.Context, tx *sqlx.Tx, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
 ) error {
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO gitlab_task_mr_options (task_id, created_at, updated_at)
 		VALUES (?, ?, ?)
-		ON CONFLICT(task_id) DO NOTHING`, taskID, now, now); err != nil {
+		ON CONFLICT(task_id) DO NOTHING`), taskID, now, now); err != nil {
 		return err
 	}
 	var previous TaskMRAutomationOptions
-	if err := tx.GetContext(ctx, &previous,
+	if err := tx.GetContext(ctx, &previous, tx.Rebind(
 		`SELECT `+mrAutomationOptionsSelectCols+`
-		 FROM gitlab_task_mr_options WHERE task_id = ?`, taskID); err != nil {
+		 FROM gitlab_task_mr_options WHERE task_id = ?`), taskID); err != nil {
 		return err
 	}
 
@@ -339,13 +341,13 @@ func updateTaskMRAutomationOptionsTx(
 	if reviewerSet {
 		reviewerValue = *reviewerUsername
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE gitlab_task_mr_options SET
 			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
 			review_reviewer_username = CASE WHEN ? THEN ? ELSE review_reviewer_username END,
 			automation_revision = automation_revision + 1,
 			updated_at = ?
-		WHERE task_id = ?`,
+		WHERE task_id = ?`),
 		promptSet, promptValue, reviewerSet, reviewerValue, now, taskID); err != nil {
 		return err
 	}
@@ -371,10 +373,10 @@ func (s *Store) GetTaskMRAutomationOptionsForMR(
 	ctx context.Context, taskID string, id MRIdentity,
 ) (*TaskMRAutomationOptionsForMR, error) {
 	var row TaskMRAutomationOptionsForMR
-	err := s.ro.GetContext(ctx, &row, `
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT `+mrAutomationSwitchSelectCols+`
 		FROM gitlab_task_mr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &TaskMRAutomationOptionsForMR{
@@ -391,10 +393,10 @@ func (s *Store) GetTaskMRAutomationOptionsForMR(
 // ListTaskMRAutomationOptions returns every stored per-MR switch row for a task.
 func (s *Store) ListTaskMRAutomationOptions(ctx context.Context, taskID string) ([]*TaskMRAutomationOptionsForMR, error) {
 	var rows []TaskMRAutomationOptionsForMR
-	if err := s.ro.SelectContext(ctx, &rows, `
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT `+mrAutomationSwitchSelectCols+`
 		FROM gitlab_task_mr_automation_options
-		WHERE task_id = ? ORDER BY project_path ASC, mr_iid ASC`, taskID); err != nil {
+		WHERE task_id = ? ORDER BY project_path ASC, mr_iid ASC`), taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMRAutomationOptionsForMR, 0, len(rows))
@@ -472,23 +474,23 @@ func applyMRSwitchPatchTx(
 	if err := ensureTaskMRLinkTx(ctx, tx, taskID, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO gitlab_task_mr_automation_options (
 			task_id, repository_id, project_path, mr_iid, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO NOTHING`,
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO NOTHING`),
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID, now, now); err != nil {
 		return err
 	}
 	var previous TaskMRAutomationOptionsForMR
-	if err := tx.GetContext(ctx, &previous, `
+	if err := tx.GetContext(ctx, &previous, tx.Rebind(`
 		SELECT `+mrAutomationSwitchSelectCols+`
 		FROM gitlab_task_mr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE gitlab_task_mr_automation_options SET
 			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
 			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
@@ -496,7 +498,7 @@ func applyMRSwitchPatchTx(
 			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
 			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
 			updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		fields.autoFixSet, fields.autoFixValue, fields.autoMergeSet, fields.autoMergeValue,
 		fields.reviewSet, fields.reviewValue, fields.mergedSet, fields.mergedValue,
 		fields.closedSet, fields.closedValue,
@@ -513,9 +515,9 @@ func ensureTaskMRLinkTx(ctx context.Context, tx *sqlx.Tx, taskID string, id MRId
 	// The no-op UPDATE takes a write lock on the association row and is portable
 	// across PostgreSQL and SQLite. The unlink transaction must wait until this
 	// transaction commits, then removes the association and its options.
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE gitlab_task_mrs SET updated_at = updated_at
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
 	if err != nil {
 		return err
@@ -622,7 +624,7 @@ func resetMRTerminalCheckpointsOnReenable(
 // exhaustion error is cleared along with it; any other kind of error (sync,
 // merge) is left untouched.
 func resetMRAutoFixState(ctx context.Context, exec execContext, taskID string, id MRIdentity, now time.Time) error {
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE gitlab_task_mr_state
 		SET auto_fix_round_count = 0,
 		    last_fix_signature = '',
@@ -632,7 +634,7 @@ func resetMRAutoFixState(ctx context.Context, exec execContext, taskID string, i
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		now, taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
 	return err
 }
@@ -649,9 +651,9 @@ const mrLifecycleStateSelectCols = `task_id, repository_id, project_path, mr_iid
 // nil when no evaluation has run yet (silent-baseline case, AC10).
 func (s *Store) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*TaskMRLifecycleState, error) {
 	var row TaskMRLifecycleState
-	err := s.ro.GetContext(ctx, &row, `
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT `+mrLifecycleStateSelectCols+` FROM gitlab_task_mr_state
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		taskID, repositoryID, projectPath, mrIID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -665,9 +667,9 @@ func (s *Store) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryI
 // ListTaskMRLifecycleStates returns every checkpoint row for a task.
 func (s *Store) ListTaskMRLifecycleStates(ctx context.Context, taskID string) ([]*TaskMRLifecycleState, error) {
 	var rows []TaskMRLifecycleState
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT `+mrLifecycleStateSelectCols+` FROM gitlab_task_mr_state
-		 WHERE task_id = ? ORDER BY project_path ASC, mr_iid ASC`, taskID); err != nil {
+		 WHERE task_id = ? ORDER BY project_path ASC, mr_iid ASC`), taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMRLifecycleState, 0, len(rows))
@@ -684,15 +686,15 @@ func (s *Store) ListTaskMRLifecycleStates(ctx context.Context, taskID string) ([
 // write to this same row.
 func (s *Store) SetTaskMRReviewRequestState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, requested bool) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid,
 			review_request_initialized, last_review_requested, created_at, updated_at
-		) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, TRUE, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
-			review_request_initialized = 1,
+			review_request_initialized = TRUE,
 			last_review_requested = excluded.last_review_requested,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, requested, now, now)
 	return err
 }
@@ -703,7 +705,7 @@ func (s *Store) SetTaskMRReviewRequestState(ctx context.Context, taskID, reposit
 // fire its prompt again (matches GitHub's SetTaskPRObservedState).
 func (s *Store) SetTaskMRObservedState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, state string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_observed_state, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -713,7 +715,7 @@ func (s *Store) SetTaskMRObservedState(ctx context.Context, taskID, repositoryID
 				WHEN excluded.last_observed_state IN (?, ?)
 				THEN gitlab_task_mr_state.last_lifecycle_event
 				ELSE '' END,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, state, now, now, gitlabStateMerged, gitlabStateClosed)
 	return err
 }
@@ -733,15 +735,15 @@ func (s *Store) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLi
 		sessionID = &prompt.SessionID
 	}
 	isReviewRequested := prompt.Event == mrLifecycleEventReviewRequested
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, review_request_initialized,
 			last_review_requested, last_observed_state, last_lifecycle_event,
 			last_lifecycle_prompt_at, last_lifecycle_session_id, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
-			review_request_initialized = CASE
-				WHEN excluded.last_lifecycle_event = ? THEN 1
+				review_request_initialized = CASE
+				WHEN excluded.last_lifecycle_event = ? THEN TRUE
 				ELSE gitlab_task_mr_state.review_request_initialized END,
 			last_review_requested = CASE
 				WHEN excluded.last_lifecycle_event = ? THEN excluded.last_review_requested
@@ -752,8 +754,8 @@ func (s *Store) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLi
 			last_lifecycle_event = excluded.last_lifecycle_event,
 			last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
 			last_lifecycle_session_id = excluded.last_lifecycle_session_id,
-			last_error = NULL,
-			updated_at = excluded.updated_at`,
+		last_error = NULL,
+			updated_at = excluded.updated_at`),
 		prompt.TaskID, prompt.RepositoryID, prompt.ProjectPath, prompt.MRIID, isReviewRequested,
 		prompt.ReviewRequested, prompt.ObservedState, prompt.Event, promptedAt, sessionID, now, now,
 		mrLifecycleEventReviewRequested, mrLifecycleEventReviewRequested)
@@ -767,13 +769,13 @@ func (s *Store) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLi
 // from the poller's sync-error column.
 func (s *Store) RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_error, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
 			last_error = excluded.last_error,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, message, now, now)
 	return err
 }
@@ -785,9 +787,9 @@ func (s *Store) RecordTaskMRAutomationError(ctx context.Context, taskID, reposit
 // must not clear this column (that call goes through
 // ClearTaskMRSyncError instead).
 func (s *Store) ClearTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE gitlab_task_mr_state SET last_error = NULL, updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		time.Now().UTC(), taskID, repositoryID, projectPath, mrIID)
 	return err
 }
@@ -798,13 +800,13 @@ func (s *Store) ClearTaskMRAutomationError(ctx context.Context, taskID, reposito
 // error in last_error.
 func (s *Store) RecordTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_sync_error, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
 			last_sync_error = excluded.last_sync_error,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, message, now, now)
 	return err
 }
@@ -813,9 +815,9 @@ func (s *Store) RecordTaskMRSyncError(ctx context.Context, taskID, repositoryID,
 // succeeds. A blind conditional UPDATE — idempotent, does not require the
 // row to already exist, and only touches last_sync_error.
 func (s *Store) ClearTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE gitlab_task_mr_state SET last_sync_error = NULL, updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		time.Now().UTC(), taskID, repositoryID, projectPath, mrIID)
 	return err
 }
@@ -834,7 +836,7 @@ func (s *Store) RebindTaskMRReviewer(ctx context.Context, taskID, username strin
 	defer func() { _ = tx.Rollback() }()
 
 	var current string
-	err = tx.GetContext(ctx, &current, `SELECT review_reviewer_username FROM gitlab_task_mr_options WHERE task_id = ?`, taskID)
+	err = tx.GetContext(ctx, &current, tx.Rebind(`SELECT review_reviewer_username FROM gitlab_task_mr_options WHERE task_id = ?`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -845,8 +847,8 @@ func (s *Store) RebindTaskMRReviewer(ctx context.Context, taskID, username strin
 		return false, tx.Commit()
 	}
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE gitlab_task_mr_options SET review_reviewer_username = ?, updated_at = ? WHERE task_id = ?`,
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE gitlab_task_mr_options SET review_reviewer_username = ?, updated_at = ? WHERE task_id = ?`),
 		username, now, taskID); err != nil {
 		return false, err
 	}
@@ -864,19 +866,19 @@ func (s *Store) RebindTaskMRReviewer(ctx context.Context, taskID, username strin
 // invalidates all of them at once; a single MR's switch flip goes through
 // resetReviewBaselineForMR instead.
 func resetReviewBaselinesForTask(ctx context.Context, exec execContext, taskID string) error {
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE gitlab_task_mr_state
-		SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
-		WHERE task_id = ?`, time.Now().UTC(), taskID)
+		SET review_request_initialized = FALSE, last_review_requested = FALSE, updated_at = ?
+		WHERE task_id = ?`), time.Now().UTC(), taskID)
 	return err
 }
 
 // resetReviewBaselineForMR clears one linked MR's review-request baseline.
 func resetReviewBaselineForMR(ctx context.Context, exec execContext, taskID string, id MRIdentity) error {
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE gitlab_task_mr_state
-		SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		SET review_request_initialized = FALSE, last_review_requested = FALSE, updated_at = ?
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		time.Now().UTC(), taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
 	return err
 }
@@ -889,7 +891,7 @@ func resetReviewBaselineForMR(ctx context.Context, exec execContext, taskID stri
 func resetMRTerminalCheckpoint(
 	ctx context.Context, exec execContext, taskID string, id MRIdentity, state string, now time.Time,
 ) error {
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE gitlab_task_mr_state
 		SET last_observed_state = '',
 		    last_lifecycle_event = '',
@@ -897,7 +899,7 @@ func resetMRTerminalCheckpoint(
 		    last_lifecycle_session_id = NULL,
 		    updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
-		  AND (last_observed_state = ? OR last_lifecycle_event = ?)`,
+		  AND (last_observed_state = ? OR last_lifecycle_event = ?)`),
 		now, taskID, id.RepositoryID, id.ProjectPath, id.MRIID, state, state)
 	return err
 }
@@ -911,16 +913,16 @@ func resetMRTerminalCheckpoint(
 // polled just because a sibling MR has a switch on.
 func (s *Store) ListAutomationSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
 	var mrs []TaskMR
-	if err := s.ro.SelectContext(ctx, &mrs, `
+	if err := s.ro.SelectContext(ctx, &mrs, s.ro.Rebind(`
 		SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
 		INNER JOIN gitlab_task_mr_automation_options o
 			ON o.task_id = gtm.task_id
 			AND o.repository_id = gtm.repository_id
 			AND o.project_path = gtm.project_path
 			AND o.mr_iid = gtm.mr_iid
-		WHERE o.prompt_on_review_requested = 1 OR o.prompt_on_merged = 1 OR o.prompt_on_closed = 1
-			OR o.auto_fix_enabled = 1 OR o.auto_merge_enabled = 1
-		ORDER BY gtm.created_at ASC`); err != nil {
+		WHERE o.prompt_on_review_requested = TRUE OR o.prompt_on_merged = TRUE OR o.prompt_on_closed = TRUE
+			OR o.auto_fix_enabled = TRUE OR o.auto_merge_enabled = TRUE
+		ORDER BY gtm.created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMR, 0, len(mrs))
@@ -945,7 +947,7 @@ func (s *Store) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAtt
 	if attempt.IncrementRound {
 		roundCount = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_fix_signature, last_fix_checkpoint_json,
 			last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
@@ -958,7 +960,7 @@ func (s *Store) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAtt
 			last_fix_session_id = excluded.last_fix_session_id,
 			auto_fix_round_count = gitlab_task_mr_state.auto_fix_round_count + excluded.auto_fix_round_count,
 			last_error = NULL,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		attempt.TaskID, attempt.RepositoryID, attempt.ProjectPath, attempt.MRIID, attempt.Signature,
 		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
 	return err
@@ -972,7 +974,7 @@ func (s *Store) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAtt
 func (s *Store) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, signature, checkpointJSON string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_fix_signature, last_fix_checkpoint_json, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -982,7 +984,7 @@ func (s *Store) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, reposito
 			last_fix_enqueued_at = NULL,
 			last_fix_session_id = NULL,
 			last_error = NULL,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, signature, checkpointJSON, now, now)
 	return err
 }
@@ -992,14 +994,14 @@ func (s *Store) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, reposito
 func (s *Store) MarkTaskMRAutoFixExhausted(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, auto_fix_exhausted_at, last_error, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
 			auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
 			last_error = excluded.last_error,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		taskID, repositoryID, projectPath, mrIID, now, strings.TrimSpace(message), now, now)
 	return err
 }
@@ -1014,7 +1016,7 @@ func (s *Store) RecordTaskMRMergeAttempt(ctx context.Context, attempt TaskMRMerg
 		when = time.Now().UTC()
 	}
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid, last_merge_signature, last_merge_attempt_at, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1022,7 +1024,7 @@ func (s *Store) RecordTaskMRMergeAttempt(ctx context.Context, attempt TaskMRMerg
 			last_merge_signature = excluded.last_merge_signature,
 			last_merge_attempt_at = excluded.last_merge_attempt_at,
 			last_error = NULL,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		attempt.TaskID, attempt.RepositoryID, attempt.ProjectPath, attempt.MRIID, attempt.Signature, when, now, now)
 	return err
 }
@@ -1043,19 +1045,19 @@ func nullableString(value string) *string {
 // deletion; E2E reset deletes tasks directly via SQL without going through
 // that path in every deployment configuration, so this stays explicit.
 func (s *Store) deleteMRAutomationForWorkspace(ctx context.Context, tx execContext, workspaceID string) error {
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_state WHERE task_id IN
-			(SELECT id FROM tasks WHERE workspace_id = ?)`, workspaceID); err != nil {
+			(SELECT id FROM tasks WHERE workspace_id = ?)`), workspaceID); err != nil {
 		return fmt.Errorf("delete gitlab_task_mr_state: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_automation_options WHERE task_id IN
-			(SELECT id FROM tasks WHERE workspace_id = ?)`, workspaceID); err != nil {
+			(SELECT id FROM tasks WHERE workspace_id = ?)`), workspaceID); err != nil {
 		return fmt.Errorf("delete gitlab_task_mr_automation_options: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_options WHERE task_id IN
-			(SELECT id FROM tasks WHERE workspace_id = ?)`, workspaceID); err != nil {
+			(SELECT id FROM tasks WHERE workspace_id = ?)`), workspaceID); err != nil {
 		return fmt.Errorf("delete gitlab_task_mr_options: %w", err)
 	}
 	return nil

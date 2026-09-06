@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   IconArchive,
   IconArrowRight,
@@ -46,6 +47,7 @@ import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 type ItemEntry = {
   kind: "item";
@@ -504,14 +506,21 @@ export function useKanbanCardMoveTargets(
   steps?: WorkflowStep[],
 ): KanbanCardMoveTargets {
   const workflows = useAppStore((state) => state.workflows.items);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-
-  const currentWorkflowId = useMemo(() => {
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
+  const currentWorkflowId = useAppStore((state) => {
+    for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
       if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
     }
     return null;
-  }, [snapshots, taskId]);
+  });
+  const snapshotStepsByWorkflowId = useAppStore(
+    useShallow((state): Record<string, WorkflowSnapshotData["steps"]> => {
+      const result: Record<string, WorkflowSnapshotData["steps"]> = {};
+      for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+        result[workflowId] = snapshot.steps;
+      }
+      return result;
+    }),
+  );
 
   const workflowItems = useMemo<TaskMoveWorkflow[]>(() => {
     const current = workflows.find((workflow) => workflow.id === currentWorkflowId);
@@ -522,8 +531,8 @@ export function useKanbanCardMoveTargets(
 
   const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
     const result: Record<string, TaskMoveStep[]> = {};
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-      result[workflowId] = sortWorkflowStepsByPosition(snapshot.steps).map((step) => ({
+    for (const [workflowId, snapshotSteps] of Object.entries(snapshotStepsByWorkflowId)) {
+      result[workflowId] = sortWorkflowStepsByPosition(snapshotSteps).map((step) => ({
         id: step.id,
         title: step.title,
         color: step.color,
@@ -539,7 +548,7 @@ export function useKanbanCardMoveTargets(
       }));
     }
     return result;
-  }, [snapshots, currentWorkflowId, steps]);
+  }, [snapshotStepsByWorkflowId, currentWorkflowId, steps]);
 
   return { currentWorkflowId, workflowItems, stepsByWorkflowId };
 }

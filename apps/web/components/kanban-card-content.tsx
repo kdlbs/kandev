@@ -13,10 +13,10 @@ import {
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
@@ -26,6 +26,7 @@ import {
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
 import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
+import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -70,66 +71,6 @@ export type KanbanCardShellProps = KanbanCardActionProps &
     onClick: (e: React.MouseEvent) => void;
     onCheckboxClick: (e: React.MouseEvent) => void;
   };
-
-const REPO_CHIPS_VISIBLE = 2;
-
-function RepoChip({ chip }: { chip: RepositoryChip }) {
-  const badge = (
-    <span
-      title={chip.path}
-      className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
-    >
-      {chip.label}
-    </span>
-  );
-  if (!chip.path) return badge;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent side="top" align="start">
-        <span className="max-w-[22rem] break-all text-xs">{chip.path}</span>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function OverflowRepoTooltip({ chips }: { chips: RepositoryChip[] }) {
-  return (
-    <div className="flex max-w-[24rem] flex-col gap-1 text-xs">
-      {chips.map((chip) => (
-        <div key={`${chip.label}:${chip.path ?? ""}`} className="min-w-0">
-          <div className="font-medium">{chip.label}</div>
-          {chip.path && <div className="break-all text-muted-foreground">{chip.path}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
-  if (chips.length === 0) return null;
-  const visible = chips.slice(0, REPO_CHIPS_VISIBLE);
-  const overflow = chips.slice(REPO_CHIPS_VISIBLE);
-  return (
-    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
-      {visible.map((chip) => (
-        <RepoChip key={`${chip.label}:${chip.path ?? ""}`} chip={chip} />
-      ))}
-      {overflow.length > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
-              +{overflow.length}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" align="start">
-            <OverflowRepoTooltip chips={overflow} />
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
 
 export function KanbanCardBody({
   task,
@@ -211,6 +152,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
       {task.blocked && <BlockedBadge task={task} />}
+      {task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
@@ -294,6 +236,7 @@ function hasCardBadges(task: Task): boolean {
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
+    task.assigneeUserId ||
     task.blocked,
   );
 }

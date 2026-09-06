@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
@@ -71,7 +70,6 @@ type Controller struct {
 	automationDeps              AutomationDependencyChecker
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
-	modelCache                  *modelfetcher.Cache
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
@@ -256,7 +254,6 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:             agentRegistry,
 		sessionChecker:            sessionChecker,
 		mcpService:                mcpconfig.NewService(repo),
-		modelCache:                modelfetcher.NewCache(),
 		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
