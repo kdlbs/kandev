@@ -22,7 +22,7 @@ func (s *seatSpyDispatcher) HandleTrigger(
 	return nil
 }
 
-func (s *seatSpyDispatcher) ResolveParticipantRole(
+func (s *seatSpyDispatcher) ResolveParticipantRoleReadOnly(
 	_ context.Context, _, _, _ string,
 ) (string, string, error) {
 	if s.err != nil {

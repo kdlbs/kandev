@@ -12,9 +12,14 @@ import (
 // decisionSeatDispatcher is the additive capability HoldsDecisionSeat needs
 // from s.engineDispatcher. Named locally and reached via a type assertion
 // rather than widening shared.WorkflowEngineDispatcher, mirroring
-// dashboard.roleResolvingDispatcher.
+// dashboard.roleResolvingDispatcher. HoldsDecisionSeat only observes seat
+// occupancy — it neither evaluates a guard nor records a decision — so it
+// asserts on the read-only variant rather than ResolveParticipantRole:
+// the latter emits AC-004.8's unresolved-agent counter/log, which
+// AC-OFFICE-REVIEW-SEATS-004.10 scopes to "per guard evaluation", and a
+// capability grant runs once per run launch, not once per guard evaluation.
 type decisionSeatDispatcher interface {
-	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
+	ResolveParticipantRoleReadOnly(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
 
 // HoldsDecisionSeat reports whether agentProfileID currently holds a
@@ -40,7 +45,7 @@ func (s *Service) HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID 
 	if stepID == "" {
 		return false, nil
 	}
-	_, _, err = dispatcher.ResolveParticipantRole(ctx, taskID, stepID, agentProfileID)
+	_, _, err = dispatcher.ResolveParticipantRoleReadOnly(ctx, taskID, stepID, agentProfileID)
 	if err != nil {
 		if errors.Is(err, engine.ErrParticipantNotFound) {
 			return false, nil
