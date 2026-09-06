@@ -141,6 +141,12 @@ func TestReevaluateGuardedTransitions_IdempotentOnRepeatedDecisionID(t *testing.
 	if store.casCalls != 1 {
 		t.Fatalf("expected 1 CAS call after first reevaluate, got %d", store.casCalls)
 	}
+	// AC-EO-9: the operation id is marked applied once this call has itself
+	// determined and committed the outcome, unlike EvaluateOnly's deferred
+	// mark — this is what makes the second call idempotent below.
+	if !store.applied["decision:task-1:review:decision-1"] {
+		t.Fatalf("expected the decision operation id marked applied after the committing reevaluate")
+	}
 
 	second, err := eng.reevaluateGuardedTransitions(context.Background(), "task-1", "sess-1", "review", "decision-1")
 	if err != nil {
