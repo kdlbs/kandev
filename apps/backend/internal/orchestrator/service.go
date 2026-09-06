@@ -13,7 +13,6 @@ package orchestrator
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -223,7 +222,10 @@ type StepHistoryRecorder interface {
 }
 
 type asyncStepHistoryRecorder interface {
-	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+	// EnqueueStepTransition returns false when the bounded worker cannot accept
+	// the row. Signal-bearing callers can then use their bounded synchronous
+	// fallback instead of silently losing the audit payload.
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) bool
 }
 
 // AgentFamilyResolver maps a hand-written agent family reference onto the
@@ -368,15 +370,6 @@ type sessionExecutorStore interface {
 	// check and the write cannot be separated by a concurrent archive).
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
-	// TakeTaskMetadataKeyIfDestinationStep is the compare-and-swap claim
-	// behind the completion-handoff carry token (MetaKeyStepHandoffCarry): it
-	// removes tasks.metadata[key] only when the stored object's nested
-	// step_id and stamp both equal the caller's expectations, returning the
-	// removed value's raw JSON.
-	TakeTaskMetadataKeyIfDestinationStep(
-		ctx context.Context,
-		taskID, key, expectedStepID, expectedStamp string,
-	) (json.RawMessage, bool, error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)

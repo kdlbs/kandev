@@ -6,7 +6,43 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+type rejectingAsyncStepHistoryRecorder struct {
+	fakeStepHistoryRecorder
+}
+
+func (*rejectingAsyncStepHistoryRecorder) EnqueueStepTransition(
+	string, string, string, wfmodels.StepTransitionTrigger, *string, map[string]interface{},
+) bool {
+	return false
+}
+
+// TestRecordAutoStepTransition_FallsBackWhenHistoryQueueIsFull covers the
+// signal-audit durability boundary: a bounded asynchronous writer may reject
+// an enqueue, but the consumed signal's blockers and handoff must still be
+// written through the bounded synchronous path.
+func TestRecordAutoStepTransition_FallsBackWhenHistoryQueueIsFull(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	recorder := &rejectingAsyncStepHistoryRecorder{}
+	svc.stepHistoryRecorder = recorder
+
+	svc.recordAutoStepTransition(context.Background(), "session-1", "step-a", "step-b", &models.PendingStepCompletionSignal{
+		Source:   models.StepCompletionSourceAgent,
+		Summary:  "completed",
+		Handoff:  "carry this",
+		Blockers: "needs review",
+	}, wfmodels.StepTransitionTriggerAutoComplete)
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected synchronous fallback to record one transition, got %d", len(calls))
+	}
+	if calls[0].metadata["signal_handoff"] != "carry this" || calls[0].metadata["signal_blockers"] != "needs review" {
+		t.Fatalf("fallback metadata = %#v, want signal handoff and blockers", calls[0].metadata)
+	}
+}
 
 // TestExecuteStepTransition_RecordsHandoffAndBlockersMetadata covers
 // AC-002.1: the legacy funnel's audit metadata gains signal_blockers and

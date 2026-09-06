@@ -357,7 +357,8 @@ func (s *Service) updateTaskStateIfSessionState(
 	return true, nil
 }
 
-// UpdateTaskMetadata updates only the metadata of a task (merges with existing)
+// UpdateTaskMetadata updates ordinary task metadata while preserving
+// server-managed deferred-launch and step-handoff records.
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
@@ -374,7 +375,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	for k, v := range metadata {
 		// Deferred launch ownership is server-managed. Preserve it even if a
 		// future metadata endpoint forwards the whole request map here.
-		if k == models.MetaKeyDeferredLaunch {
+		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry {
 			continue
 		}
 		task.Metadata[k] = v
@@ -1024,10 +1025,13 @@ func (s *Service) recordQueuedPromotion(ctx context.Context, taskID, fromStepID,
 		return
 	}
 	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
-		asyncRecorder.EnqueueStepTransition(session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil)
-		return
+		if asyncRecorder.EnqueueStepTransition(session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil) {
+			return
+		}
 	}
-	if err := s.stepHistoryRecorder.CreateStepTransition(ctx, session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil); err != nil {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(writeCtx, session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil); err != nil {
 		s.logger.Warn("failed to record queued task promotion", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
@@ -1372,8 +1376,9 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 		}
 	}
 	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
-		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, actorID, nil)
-		return
+		if asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, actorID, nil) {
+			return
+		}
 	}
 	// The step change is already durably persisted by the time this runs.
 	// Use a detached, bounded context so a cancelled request context (client

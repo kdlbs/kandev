@@ -95,11 +95,14 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 		trigger = triggers[0]
 	}
 	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
-		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, nil, metadata)
-		return
+		if asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, nil, metadata) {
+			return
+		}
+		// A full or closed worker must not discard a consumed signal's audit
+		// payload. Fall through to the bounded synchronous write below.
 	}
-	// Test doubles can remain synchronous. Production workflow service uses the
-	// queue branch above.
+	// Test doubles remain synchronous, and production falls back here when its
+	// bounded worker cannot accept the row.
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
 	defer cancel()
 	if err := s.stepHistoryRecorder.CreateStepTransition(
@@ -126,12 +129,14 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 	}
 	// Test doubles can remain synchronous. Production workflow service uses the
 	// queue branch below.
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		if asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil) {
+			return
+		}
+		// Fall through when the bounded worker is full or closed.
+	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
 	defer cancel()
-	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
-		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil)
-		return
-	}
 	if err := s.stepHistoryRecorder.CreateStepTransition(
 		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
 	); err != nil {

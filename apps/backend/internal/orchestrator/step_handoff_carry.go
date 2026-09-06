@@ -91,36 +91,30 @@ func stepHandoffFromQueuedMetadata(metadata map[string]interface{}) string {
 // user.
 const stepHandoffPromptHeading = "## Context from the previous workflow step"
 
-// recordStepHandoffCarryToken writes or removes the completion-handoff carry
-// token for the step a consuming transition is entering. Call this under the
-// exact same gate the caller uses to clear the completion-signal bag (both
-// consuming-transition sites already have one) so a non-consuming transition
-// never touches the token. A nil signal, or one with a blank handoff, removes
-// any existing token instead of writing one. Best-effort: never blocks or
-// fails the transition it rides on.
-func (s *Service) recordStepHandoffCarryToken(ctx context.Context, taskID, nextStepID string, signal *models.PendingStepCompletionSignal) {
-	if taskID == "" || nextStepID == "" || s.repo == nil {
+// setStepHandoffCarryMetadata applies the same single-slot carry semantics to
+// a task snapshot before a workflow transition is persisted. Keeping the token
+// on that snapshot makes admission and carry publication one database write,
+// so a queued task cannot be promoted in the gap between the transition and a
+// later metadata update.
+func setStepHandoffCarryMetadata(task *models.Task, nextStepID string, signal *models.PendingStepCompletionSignal) {
+	if task == nil || nextStepID == "" {
 		return
 	}
-	var handoff string
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	handoff := ""
 	if signal != nil {
 		handoff = strings.TrimSpace(signal.Handoff)
 	}
 	if handoff == "" {
-		if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyStepHandoffCarry); err != nil {
-			s.logger.Debug("failed to clear step handoff carry token",
-				zap.String("task_id", taskID), zap.Error(err))
-		}
+		delete(task.Metadata, models.MetaKeyStepHandoffCarry)
 		return
 	}
-	token := models.StepHandoffCarryToken{
+	task.Metadata[models.MetaKeyStepHandoffCarry] = models.StepHandoffCarryToken{
 		Handoff: handoff,
 		StepID:  nextStepID,
 		Stamp:   uuid.NewString(),
-	}
-	if err := s.repo.SetTaskMetadataKey(ctx, taskID, models.MetaKeyStepHandoffCarry, token); err != nil {
-		s.logger.Debug("failed to write step handoff carry token",
-			zap.String("task_id", taskID), zap.String("step_id", nextStepID), zap.Error(err))
 	}
 }
 
@@ -200,6 +194,22 @@ func appendStepHandoffToPrompt(prompt, handoffText string) string {
 		return section
 	}
 	return prompt + "\n\n" + section
+}
+
+// joinStepHandoffText combines raw handoff payloads for a queue entry. The
+// queue adds one heading when it dispatches, so the payload stays free of
+// formatting and remains safe to append after reference expansion.
+func joinStepHandoffText(previous, current string) string {
+	previous = strings.TrimSpace(previous)
+	current = strings.TrimSpace(current)
+	switch {
+	case previous == "":
+		return current
+	case current == "":
+		return previous
+	default:
+		return previous + "\n\n" + current
+	}
 }
 
 // stepHandoffOnce memoizes one step entry's handoff claim so a replacement

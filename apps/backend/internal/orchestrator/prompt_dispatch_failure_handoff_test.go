@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -77,17 +78,19 @@ func TestHandlePromptDispatchFailure_ComposedPromptSurvivesInternalFallback(t *t
 	// and the specific ErrExecutionNotFound this recovery targets.
 	result, err := svc.handlePromptDispatchFailure(
 		ctx, taskID, sessionID, composedPrompt,
-		false, true,
+		true, true,
 		nil,
 		promptClaimRollback{},
 		false, false,
 		executor.ErrExecutionNotFound,
-		true, composedPrompt,
+		true, sysprompt.InjectPlanMode(composedPrompt), composedPrompt,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Contains(t, launchedDescription, handoff,
 		"the already-composed prompt (with the claimed handoff) must survive promptTask's own internal fallback")
+	require.Contains(t, launchedDescription, sysprompt.PlanMode(),
+		"the fallback must retain the plan-mode transform")
 	require.NotEqual(t, "Recomposed step instructions.", strings.TrimSpace(launchedDescription),
 		"promptAlreadyComposed must skip StartCreatedSession's own step-template recomposition")
 }
