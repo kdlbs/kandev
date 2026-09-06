@@ -20,6 +20,9 @@ func TestTableColumnsSQLite(t *testing.T) {
 
 func TestTableColumnsPostgres(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create workspaces fixture: %v", err)
+	}
 	store, err := NewStore(db, db)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
