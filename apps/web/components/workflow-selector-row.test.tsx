@@ -28,7 +28,7 @@ function renderSelector(preview: TaskCreateLaunchPreview | null = launchPreview)
 }
 
 describe("WorkflowSelectorRow launch destination", () => {
-  it("shows the launch step outside and to the right of the selector", () => {
+  it("shows the launch controls immediately after the selector", () => {
     renderSelector();
 
     const trigger = screen.getByTestId("workflow-selector-trigger");
@@ -41,11 +41,14 @@ describe("WorkflowSelectorRow launch destination", () => {
     expect(row.contains(launchStep)).toBe(true);
     expect(trigger.className).not.toContain("flex-1");
     expect(launchStep.textContent).toBe("Start step: In Progress");
-    expect(launchStep.className).toContain("ml-auto");
+    expect(launchStep.className).not.toContain("ml-auto");
 
     const launchStepInfo = screen.getByTestId("task-create-launch-step-info");
     expect(trigger.contains(launchStepInfo)).toBe(false);
     expect(launchStepInfo.getAttribute("aria-label")).toBe("Learn about the task start step");
+    expect(Array.from(row.children).indexOf(launchStepInfo)).toBeLessThan(
+      Array.from(row.children).indexOf(launchStep),
+    );
   });
 
   it("does not show a destination when the selected workflow has no preview", () => {

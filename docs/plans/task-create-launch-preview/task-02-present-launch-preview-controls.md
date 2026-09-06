@@ -31,8 +31,8 @@ component coverage, and public task guidance.
 
 ## In scope
 
-- Render the muted **Start step: {{step}}** label outside the selected workflow
-  trigger and aligned to its right.
+- Render an information button immediately after the selected workflow trigger,
+  followed by the muted **Start step: {{step}}** label.
 - Keep the workflow selector trigger independent from the adjacent launch-step
   label and information button.
 - Add localized launch-step help to the information button with a coarse-pointer
@@ -121,9 +121,10 @@ git diff --check
   updated the public task creation guide.
 - Wrapped the disabled preview button in the shared focusable tooltip-trigger
   pattern so its explanation remains reachable by keyboard and pointer.
-- Follow-up refinement moved the launch-step label outside the selector and
-  aligned it to the right, changed the copy to **Start step: {{step}}**, and
-  made the preview tooltip identify its workflow step prompt.
+- Follow-up refinement moved the launch-step controls outside the selector,
+  placed the information button immediately after the trigger, changed the
+  copy to **Start step: {{step}}**, and made the preview tooltip identify its
+  workflow step prompt.
 - Focused component tests passed (43 tests), typecheck passed, and the focused
   ESLint command passed with zero warnings.
 - `cd apps/web && pnpm run i18n:check` passed; `pnpm run i18n:ratchet` passed.

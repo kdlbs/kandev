@@ -55,12 +55,16 @@ test.describe("mobile task-create launch prompt preview", () => {
       await expect(workflowSelector).not.toContainText("Start step:");
       const selectorBox = await workflowSelector.boundingBox();
       const launchStepBox = await launchStep.boundingBox();
-      if (!selectorBox || !launchStepBox) throw new Error("launch step has no layout box");
-      expect(launchStepBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
       const launchStepInfo = dialog.getByTestId("task-create-launch-step-info");
       await expect(launchStepInfo).toHaveAttribute("aria-label", "Learn about the task start step");
       const launchStepInfoBox = await launchStepInfo.boundingBox();
-      if (!launchStepInfoBox) throw new Error("launch step info has no layout box");
+      if (!selectorBox || !launchStepInfoBox || !launchStepBox) {
+        throw new Error("launch step controls have no layout box");
+      }
+      expect(launchStepInfoBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
+      expect(launchStepBox.x).toBeGreaterThanOrEqual(
+        launchStepInfoBox.x + launchStepInfoBox.width - 1,
+      );
       expect(launchStepInfoBox.width).toBeGreaterThanOrEqual(44);
 
       await dialog.getByTestId("task-title-input").fill("Mobile launch preview");

@@ -106,12 +106,13 @@ context. Its purpose is to show how the launch step applies its own template.
 ## Workflow selector
 
 The selected workflow trigger renders only the workflow name and existing
-chevron. The launch destination renders as a muted sibling outside the trigger,
-aligned to its right, with the localized **Start step: {{step}}** label.
-The trigger keeps its intrinsic selector width and does not claim the full row.
-An adjacent information button exposes localized help on hover and focus. On
-coarse pointers, the information button has a hit area of at least 44 CSS
-pixels. Truncation keeps the selector row within its available width.
+chevron. The launch destination renders as a sibling group outside the trigger,
+immediately to its right. The group contains the information button first and
+the muted localized **Start step: {{step}}** label second. The trigger keeps its
+intrinsic selector width and does not claim the full row. The information
+button exposes localized help on hover and focus. On coarse pointers, the
+information button has a hit area of at least 44 CSS pixels. Truncation keeps
+the selector row within its available width.
 
 The existing selector visibility rules remain unchanged. A single implicit
 workflow can still omit the selector when it has no override information.

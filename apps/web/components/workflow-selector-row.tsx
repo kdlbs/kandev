@@ -147,7 +147,7 @@ function LaunchDestinationLabel({ stepName }: { stepName: string }) {
   const { t } = useTranslation();
   return (
     <span
-      className="ml-auto min-w-0 max-w-[45vw] shrink truncate text-right text-xs text-muted-foreground"
+      className="min-w-0 max-w-[45vw] shrink truncate text-xs text-muted-foreground"
       data-testid="task-create-launch-step"
     >
       {t("task:launchDestination", { step: stepName })}
@@ -179,8 +179,8 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
         <WorkflowSelectorTrigger selectedWorkflow={selectedWorkflow} placeholder={placeholder} />
         {launchPreview && (
           <>
-            <LaunchDestinationLabel stepName={launchPreview.stepName} />
             <LaunchDestinationInfo />
+            <LaunchDestinationLabel stepName={launchPreview.stepName} />
           </>
         )}
       </div>
