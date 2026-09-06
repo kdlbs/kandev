@@ -39,6 +39,10 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.6:** Has a `source` discriminator (see table below) plus a typed payload.
 - **AC-OFFICE-SCHEDULER-001.7:** Carries an `idempotency_key`. The queue uses a 24-hour lookup for recent duplicates and a durable unique key for persisted identities.
 - **AC-OFFICE-SCHEDULER-001.8:** Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
+- **AC-OFFICE-SCHEDULER-001.9:** A cron routine trigger's day-of-month and day-of-week fields are ORed when both are restricted, matching `crontab(5)` (`0 0 13 * 5` fires on the 13th of the month OR any Friday, not only Friday the 13th).
+- **AC-OFFICE-SCHEDULER-001.10:** A cron routine trigger's wall-clock slot fires at most once across a DST transition: a slot that does not exist (spring-forward) is skipped, and a slot that occurs twice (fall-back) fires only on its first occurrence.
+- **AC-OFFICE-SCHEDULER-001.11:** A cron routine trigger that can never fire (an impossible date, or an empty expression) is rejected at trigger-create time with a client error, not accepted as a silent no-op or a wrong daily fallback.
+- **AC-OFFICE-SCHEDULER-001.12:** A routine trigger's timezone defaults to UTC when not supplied; there is no workspace-level timezone.
 
 ## System design
 

@@ -27,6 +27,10 @@ import (
 // imports office/repository/sqlite directly (see routineWakeupAdapter).
 var ErrWakeupAlreadyRequested = errors.New("wakeup request already requested")
 
+// ErrInvalidTrigger indicates a trigger create request that failed
+// validation (a client error, not a server failure).
+var ErrInvalidTrigger = errors.New("invalid routine trigger")
+
 // Repository is the persistence interface required by RoutineService.
 type Repository interface {
 	CreateRoutine(ctx context.Context, routine *Routine) error
@@ -329,11 +333,20 @@ func (s *RoutineService) ListRoutinesFromConfig(ctx context.Context, workspaceID
 // -- Trigger management --
 
 // CreateRoutineTrigger creates a trigger and computes next_run_at for cron.
+// A cron trigger requires a satisfiable expression: an empty expression, or
+// one that can never fire, is rejected here rather than becoming a silent
+// no-op or a wrong daily fallback at tick time.
 func (s *RoutineService) CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error {
-	if t.Kind == "cron" && t.CronExpression != "" {
+	if t.Timezone == "" {
+		t.Timezone = "UTC"
+	}
+	if t.Kind == "cron" {
+		if t.CronExpression == "" {
+			return fmt.Errorf("%w: cron trigger requires a cron_expression", ErrInvalidTrigger)
+		}
 		next, err := shared.NextCronTime(t.CronExpression, t.Timezone, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
+			return fmt.Errorf("%w: invalid cron expression: %v", ErrInvalidTrigger, err)
 		}
 		t.NextRunAt = &next
 	}

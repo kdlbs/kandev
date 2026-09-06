@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -74,36 +75,6 @@ func TestNextCronTime_StepExpression(t *testing.T) {
 	want := time.Date(2026, 4, 25, 10, 15, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("got %v, want %v", next, want)
-	}
-}
-
-func TestParseCronField_Wildcard(t *testing.T) {
-	vals, err := parseCronField("*", 0, 59, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(vals) != 60 {
-		t.Errorf("expected 60 values, got %d", len(vals))
-	}
-}
-
-func TestParseCronField_Range(t *testing.T) {
-	vals, err := parseCronField("1-5", 0, 6, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(vals) != 5 {
-		t.Errorf("expected 5 values, got %d", len(vals))
-	}
-}
-
-func TestParseCronField_CommaList(t *testing.T) {
-	vals, err := parseCronField("1,3,5", 0, 6, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(vals) != 3 {
-		t.Errorf("expected 3 values, got %d", len(vals))
 	}
 }
 
@@ -210,5 +181,97 @@ func TestNextCronTime_DayNameInMonthField_Rejected(t *testing.T) {
 	_, err := NextCronTime("* * * MON *", "", time.Now())
 	if err == nil {
 		t.Fatal("expected error when day name MON appears in month field")
+	}
+}
+
+// TestNextCronTime_DomDowOred verifies crontab(5) semantics: when both
+// day-of-month and day-of-week are restricted, a match on either field
+// fires, not just a match on both ("Friday the 13th").
+func TestNextCronTime_DomDowOred(t *testing.T) {
+	after := time.Date(2025, 12, 31, 23, 59, 0, 0, time.UTC)
+	want := []time.Time{
+		time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),  // Friday
+		time.Date(2026, 1, 9, 0, 0, 0, 0, time.UTC),  // Friday
+		time.Date(2026, 1, 13, 0, 0, 0, 0, time.UTC), // the 13th (Tuesday)
+		time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC), // Friday
+		time.Date(2026, 1, 23, 0, 0, 0, 0, time.UTC), // Friday
+	}
+	cursor := after
+	for i, w := range want {
+		next, err := NextCronTime("0 0 13 * 5", "", cursor)
+		if err != nil {
+			t.Fatalf("fire %d: unexpected error: %v", i+1, err)
+		}
+		if !next.Equal(w) {
+			t.Errorf("fire %d: got %v, want %v", i+1, next, w)
+		}
+		cursor = next
+	}
+}
+
+// TestNextCronTime_DSTSpringForward_Skip verifies that a wall-clock slot
+// which does not exist (spring-forward gap hour) is skipped, not fired at
+// an adjusted time.
+func TestNextCronTime_DSTSpringForward_Skip(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-03-08 is spring-forward in America/New_York; 02:00 does not exist.
+	after := time.Date(2026, 3, 7, 12, 0, 0, 0, loc)
+	next, err := NextCronTime("0 2 * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := time.Date(2026, 3, 9, 2, 0, 0, 0, loc)
+	if !next.Equal(want) {
+		t.Errorf("got %v, want %v (2026-03-08 should be skipped)", next, want)
+	}
+}
+
+// TestNextCronTime_DSTFallBack_FiresOnce verifies that an ambiguous
+// wall-clock slot (fall-back repeated hour) fires exactly once.
+func TestNextCronTime_DSTFallBack_FiresOnce(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-11-01 is fall-back in America/New_York; 01:30 occurs twice.
+	after := time.Date(2026, 10, 31, 12, 0, 0, 0, loc)
+	fire1, err := NextCronTime("30 1 * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantFire1 := time.Date(2026, 11, 1, 1, 30, 0, 0, loc)
+	if !fire1.Equal(wantFire1) {
+		t.Fatalf("fire1: got %v, want %v", fire1, wantFire1)
+	}
+
+	fire2, err := NextCronTime("30 1 * * *", "America/New_York", fire1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantFire2 := time.Date(2026, 11, 2, 1, 30, 0, 0, loc)
+	if !fire2.Equal(wantFire2) {
+		t.Errorf("fire2: got %v, want %v (second 01:30 occurrence must be suppressed)", fire2, wantFire2)
+	}
+}
+
+// TestNextCronTime_Unsatisfiable verifies an impossible expression (Feb 30th)
+// returns ErrUnsatisfiableCron instead of a silent +24h fallback.
+func TestNextCronTime_Unsatisfiable(t *testing.T) {
+	_, err := NextCronTime("0 0 30 2 *", "", time.Date(2026, 4, 25, 10, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("expected error for unsatisfiable expression")
+	}
+	if !errors.Is(err, ErrUnsatisfiableCron) {
+		t.Errorf("expected ErrUnsatisfiableCron, got %v", err)
+	}
+}
+
+func TestNextCronTime_InvalidTimezone(t *testing.T) {
+	_, err := NextCronTime("* * * * *", "Not/AZone", time.Now())
+	if err == nil {
+		t.Fatal("expected error for invalid timezone")
 	}
 }

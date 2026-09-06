@@ -467,7 +467,7 @@ func (r *Repository) createRoutineTables() error {
 		routine_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
 		cron_expression TEXT DEFAULT '',
-		timezone TEXT DEFAULT '',
+		timezone TEXT DEFAULT 'UTC',
 		public_id TEXT DEFAULT '',
 		signing_mode TEXT DEFAULT '',
 		secret TEXT DEFAULT '',
