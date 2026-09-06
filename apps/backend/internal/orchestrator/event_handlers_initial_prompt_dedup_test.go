@@ -158,7 +158,7 @@ func TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff(t *testing
 
 	if err := fixture.svc.autoStartStepPrompt(
 		context.Background(), fixture.taskID, fixture.session, fixture.step,
-		fixture.step.Prompt, false, true,
+		fixture.step.Prompt, false, true, nil,
 	); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
