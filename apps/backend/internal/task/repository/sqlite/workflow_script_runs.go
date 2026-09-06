@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -47,7 +48,7 @@ func (r *Repository) ClaimWorkflowScriptRun(ctx context.Context, run *models.Wor
 		run.WorkflowStepName, string(run.Trigger), run.ActionPosition, run.SessionID, run.ExecutionID,
 		run.Command, run.TimeoutSeconds, run.FailurePolicy, run.ProcessRequestID,
 		run.MessageID, run.ProcessID, string(run.Status), run.AdmissionAttemptedAt,
-		run.ExitCode, run.Output, run.OutputTruncated, run.FailureReason,
+		run.ExitCode, run.Output, dialect.BoolToInt(run.OutputTruncated), run.FailureReason,
 		run.CreatedAt, run.UpdatedAt, run.StartedAt, run.CompletedAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("create workflow script run: %w", err)
@@ -211,7 +212,7 @@ func (r *Repository) CompleteWorkflowScriptRun(ctx context.Context, id string, c
 			completed_at = ?, updated_at = ?
 		WHERE id = ? AND status IN (?, ?, ?)
 	`), completion.Status, completion.ProcessID, completion.ProcessID,
-		completion.ExitCode, completion.Output, completion.OutputTruncated,
+		completion.ExitCode, completion.Output, dialect.BoolToInt(completion.OutputTruncated),
 		completion.FailureReason, completedAt, r.nowUTC(), id,
 		models.WorkflowScriptRunPending, models.WorkflowScriptRunStarting, models.WorkflowScriptRunRunning)
 	if err != nil {
