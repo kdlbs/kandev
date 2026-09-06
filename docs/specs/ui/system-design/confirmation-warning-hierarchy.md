@@ -20,11 +20,11 @@ existing components and runtime contracts.
 
 ## Requirement mapping
 
-| Requirement                            | Design section                                                                                                                                                                                                                               |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-TASKS-CONFIRMATION-WARNING-001`   | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                    |
-| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                    |
-| `REQ-UI-TASK-CLEANUP-CONFIRMATION-001` | [Task cleanup content model](#task-cleanup-content-model), [Full-dialog composition](#full-dialog-composition), [Compact archive surfaces](#compact-archive-surfaces), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
+| Requirement                            | Design section                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-TASKS-CONFIRMATION-WARNING-001`   | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                                                                                         |
+| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                                                         |
+| `REQ-UI-TASK-CLEANUP-CONFIRMATION-001` | [Task cleanup content model](#task-cleanup-content-model), [Full-dialog composition](#full-dialog-composition), [Compact archive surfaces](#compact-archive-surfaces), [Source-specific archive routing](#source-specific-archive-routing), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
 
 ## Components and responsibilities
 
@@ -32,8 +32,9 @@ existing components and runtime contracts.
   markup and style owner.
 - `TaskArchiveConfirmDialog` and `TaskDeleteConfirmDialog` render it inside the
   existing full confirmation dialog.
-- `TaskArchiveConfirmation` renders the same component through
-  `ArchiveDescription` for the desktop popover and phone inline branch.
+- `TaskArchiveConfirmation` routes the card-owned request to the existing
+  dialog, desktop popover, or explicitly inline branch while reusing the same
+  cleanup content and callbacks.
 - Consumers continue to decide whether a warning mounts. The shared component
   does not inspect task state or alter callbacks.
 
@@ -93,6 +94,24 @@ touch density, callbacks, and focus-return behavior. Only the internal copy
 hierarchy changes: direct archive outcome, ordered effects, then supporting
 notes and the existing still-working warning.
 
+### Source-specific archive routing
+
+Archive presentation is selected by the source surface, not by coarse-pointer
+classification alone. The mobile Kanban card opts into the existing full
+`TaskArchiveConfirmDialog` through `TaskArchiveConfirmation`'s internal
+`forceDialog` presentation prop. This keeps the confirmation portaled over the
+board, so a virtualized card row does not grow when a zero-descendant task is
+being archived.
+
+Fine-pointer desktop and compact-desktop Kanban retain the anchored
+`ActionConfirmPopover`. Coarse-pointer tablet Kanban retains its existing
+coarse-pointer routing, including the current inline zero-descendant surface.
+The task-switcher/task-row adapter may explicitly own the coarse-pointer inline
+confirmation, and command-panel callers that request `inline` retain their
+existing row-owned surface. These callers keep their established focus,
+containment, and action contracts; only the mobile Kanban card changes its
+surface selection.
+
 ### Popover width contract
 
 `ActionConfirmPopover` gains a small width/size contract whose default remains
@@ -137,15 +156,23 @@ No API, WebSocket, state, or persisted-data contract changes are required.
 Localization catalogs change only for task confirmation presentation; executor
 cleanup semantics remain unchanged.
 
+`forceDialog` is an optional internal presentation prop with a default of
+`false`. It is passed from the card-owned source to the existing routing
+component and does not change archive commands, descendant classification,
+preference state, mutation state, or callbacks.
+
 ## Control flow
 
 The existing task-level `foregroundActivity` projection and explicit
 `isInFlight` props continue to determine whether the warning is rendered. The
 dialog computes the localized task outcome and cleanup model during render,
 then passes the model to the shared task-local renderer. Archive/delete
-callbacks and dialog state remain untouched. The context-menu adapter only
-chooses the mounting branch described above based on the existing responsive
-pointer classification.
+callbacks and dialog state remain untouched. The source adapter supplies the
+existing `presentation` value and, for mobile Kanban only, maps it to
+`forceDialog`; pointer classification continues to select the fine-pointer
+popover or the explicitly inline row surface. This changes rendering only,
+not archive commands, descendant classification, preference state, or
+callbacks.
 
 ## Failure and recovery
 
@@ -177,8 +204,15 @@ the archive popover is visible, and after Cancel; all three values must remain
 stable within subpixel precision. It also verifies the archive popover is
 strictly wider than 256px and remains inside the viewport at compact widths.
 
-The phone check keeps the existing coarse-pointer sidebar inline flow. It
-expects the inline confirmation to remain intentionally row-owned, keeps
+The phone Kanban check enters through a card overflow menu and expects the
+mobile presentation to use the full alert dialog even for a zero-descendant
+task. It records the card height before and during the dialog, verifies the
+centered/inset surface, stacked actions, cleanup copy, dark theme tokens, and
+zero document horizontal overflow, then cancels and repeats the existing
+archive callback flow. The card remains unchanged while the dialog is open.
+
+The phone task-switcher check keeps the existing coarse-pointer sidebar inline
+flow. It expects that confirmation to remain intentionally row-owned, keeps
 actions at or above 44px, and asserts zero document horizontal overflow.
 
 The task-delete phone check enters through the real task drawer action menu and

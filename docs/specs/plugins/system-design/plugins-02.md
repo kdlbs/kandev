@@ -249,7 +249,7 @@ domain structs. See [ADR 0043](../../../decisions/0043-plugin-host-data-api.md) 
 
 | RPC                     | Capability                   | Returns                                                                                                                                                                                                                                           |
 | ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                                                      |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, workflow-step ID, title, description, state, priority, timestamps, parent, identifier, repositories, metadata, and deprecated API v1 labels compatibility)                                             |
 | `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
 | `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (`id`, `workflow_id`, `name`, `position`, `stage_type`, `color`, `is_start_step`, `wip_limit`, `agent_profile_id`, `on_enter_action_types`)                                                                                   |
@@ -266,6 +266,11 @@ the token business. `SessionCodeStats` is a deliberately computed shape — the
 aggregate the agent-stats plugin previously re-derived by hand from
 `task_session_commits` and `task_session_git_snapshots` — so plugins never touch
 those raw rows.
+
+`Task.labels` field 23 shipped in v0.93.0 and remains generated/readable because
+API v1 DTO evolution is additive-only. It is deprecated: new provider plugins
+keep tracker annotations in plugin-owned task state and UI slot data, and the
+plugin task write contract does not expose label mutation.
 
 `on_enter_action_types` on a step lists the on-enter action *types* configured
 for that step (e.g. `auto_start_agent`, `queue_run`), never the action
@@ -299,8 +304,9 @@ placement defaults when the plugin omits them (single workspace; that
 workspace's first workflow — ambiguous → `InvalidArgument`), accepts an optional
 `start_agent` that best-effort auto-launches an agent, and requires a title.
 `UpdateTask` accepts a conservative field mask — `title` / `description` /
-`state` / `workflow_step_id`, each optional (a nil field is left unchanged); a
-missing task returns gRPC `NotFound`.
+`state` / `priority`, each optional (a nil field is left unchanged);
+a present `workflow_step_id` is rejected and workflow transitions use
+`MoveTask`. A missing task returns gRPC `NotFound`.
 
 `Host.Messages().Send` (capability `api_write:messages`) delivers a prompt to a
 task session through the orchestrator's real delivery path — the same one

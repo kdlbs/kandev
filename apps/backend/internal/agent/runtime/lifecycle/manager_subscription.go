@@ -74,6 +74,9 @@ type workspacePollAggregator struct {
 	// Last-write-wins queue: pendingPush + pushInFlight serialize per-workspace HTTP pushes so order matches enqueue.
 	pendingPush  map[string]workspacePushTarget
 	pushInFlight map[string]bool
+	// dirtyPush records a desired mode whose last RPC failed. The next
+	// contribution event retries it even when the effective mode is unchanged.
+	dirtyPush map[string]bool
 }
 
 // workspacePushTarget bundles the queued mode and execution resolved at enqueue time.
@@ -95,6 +98,7 @@ func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 		runtimeWorkspaceBySession: make(map[string]string),
 		pendingPush:               make(map[string]workspacePushTarget),
 		pushInFlight:              make(map[string]bool),
+		dirtyPush:                 make(map[string]bool),
 	}
 }
 
@@ -240,16 +244,18 @@ func (a *workspacePollAggregator) effectiveModeLocked(workspacePath string) Work
 // to retry a mode that may have been sent before agentctl accepted requests.
 func (a *workspacePollAggregator) applyEffectiveModeLocked(workspacePath string, effective WorkspacePollMode, force bool) bool {
 	prev, hadPrev := a.lastPushed[workspacePath]
-	shouldPush := force || !hadPrev || prev != effective
-	if !force && !hadPrev && effective == WorkspacePollModePaused {
+	shouldPush := force || a.dirtyPush[workspacePath] || !hadPrev || prev != effective
+	if !force && !hadPrev && effective == WorkspacePollModePaused && !a.dirtyPush[workspacePath] {
 		return false
 	}
 	if effective == WorkspacePollModePaused {
 		delete(a.lastPushed, workspacePath)
-	} else {
-		a.lastPushed[workspacePath] = effective
+		// Keep the mode map bounded, but still report a transition from an
+		// already-managed mode so pushAsync delivers the paused state.
+		return shouldPush
 	}
-	return shouldPush && effective != WorkspacePollModePaused
+	a.lastPushed[workspacePath] = effective
+	return shouldPush
 }
 
 // recordAndCompute updates the per-session mode for the given workspace and
@@ -325,11 +331,18 @@ func (a *workspacePollAggregator) pushLoop(workspacePath string) {
 		cancel()
 		releaseClient()
 		if err != nil {
+			a.mu.Lock()
+			a.dirtyPush[workspacePath] = true
+			a.mu.Unlock()
 			a.mgr.logger.Warn("failed to push workspace poll mode",
 				zap.String("workspace", workspacePath),
 				zap.String("mode", string(target.mode)),
 				zap.Error(err))
+			continue
 		}
+		a.mu.Lock()
+		delete(a.dirtyPush, workspacePath)
+		a.mu.Unlock()
 	}
 }
 

@@ -121,6 +121,41 @@ The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close
 
 Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](operations.md).
 
+## Repository discovery and macOS access
+
+The desktop backend does not scan your Home directory until you select a
+discovery folder. Open **Settings → Workspaces → Repositories → Add Local
+Repository**, then choose Home or a narrower folder. The selected folders are
+saved for the desktop installation and are available to its workspaces. A
+normal browser connected to the same backend uses the HTTP folder picker. The
+browser does not receive the desktop app's native picker authority.
+
+After an upgrade, an existing installation can show **Continue Home
+Discovery**. This is a confirmation action. Kandev does not start a new Home
+scan without that action. A Home scan skips repositories directly below
+`Desktop`, `Documents`, and `Downloads` on macOS. Select one of those folders
+explicitly when it contains repositories you want to discover. Selecting that
+protected folder itself is allowed.
+
+Discovery results are cached for up to 30 minutes while a visible repository
+surface is open. Empty or filtered results have a **Refresh** action. If a
+selected folder becomes unavailable, automatic refresh stops and the folder
+shows **Reconnect** and **Remove** actions. Reconnect selects the folder again
+and starts a fresh scan. Removal forgets that desktop discovery folder; it does
+not remove repositories or files.
+
+macOS privacy access belongs to the application identity. A replacement that
+is unsigned, re-signed, or otherwise has a different identity can require
+access again. Kandev cannot promise that consent survives every unsigned
+update. Use **Reconnect** or choose the folder again when macOS asks for
+access. Do not grant broad Full Disk Access only to work around a missing
+repository.
+
+Backend logs and exported diagnostics can contain local repository, workspace,
+and task paths. Treat log files and diagnostic bundles as sensitive data before
+sharing them. Redact paths and command output that are not required for the
+investigation.
+
 ## Agent CLI discovery
 
 Applications started from Finder, Launchpad, desktop menus, or the Windows Start menu often receive less `PATH` configuration than terminal shells. Kandev preserves the available path and appends common locations:

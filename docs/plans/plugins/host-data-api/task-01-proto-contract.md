@@ -19,8 +19,7 @@ later task compiles against.
 - Read RPCs: `ListTasks`, `GetTask`, `ListWorkspaces`, `ListWorkflows`,
   `ListWorkflowSteps`, `ListAgentProfiles`, `ListRepositories`, `ListSessions`,
   `ListSessionCodeStats`.
-- Deferred write RPCs (declared in proto, not implemented later this phase):
-  `CreateTask`, `UpdateTask`, `CreateComment`.
+- Implemented write RPCs: `CreateTask`, `UpdateTask`, and `SendMessage`.
 - DTOs + `Page`/`PageInfo`/filter messages from the draft.
 - Decide placement: add RPCs to the existing `service Host` (recommended — reuses
   the single broker connection and the capability interceptor) rather than a new
@@ -30,7 +29,7 @@ later task compiles against.
   string timestamps and `optional` nullables per ADR 0043.
 
 ## Acceptance
-- `apps/backend/proto/kandev/plugin/v1/plugin.proto` contains the read + deferred
+- `apps/backend/proto/kandev/plugin/v1/plugin.proto` contains the read + write
   write RPCs and DTOs; existing `Host`/`Plugin` RPCs are unchanged.
 - `make -C apps/backend proto` regenerates `plugin.pb.go` / `plugin_grpc.pb.go`
   with no manual edits, and the tree builds.

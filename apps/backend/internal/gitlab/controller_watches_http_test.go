@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const respKeyDeleted = "deleted"
+
 // newWatchHTTPFixture builds the full v1 HTTP surface over a store seeded with
 // two workspaces, the dependency validators that accept the "ws-1" fixture
 // identifiers, and a per-workspace mock client. Watch CRUD over HTTP is
