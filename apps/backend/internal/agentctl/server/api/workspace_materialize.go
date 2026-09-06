@@ -259,7 +259,7 @@ func attestRegularGitMetadata(ctx context.Context, destination string) (GitMetad
 }
 
 func attestRegularGitReferenceMetadata(gitDir string) error {
-	for _, path := range []string{filepath.Join(gitDir, "refs"), filepath.Join(gitDir, "logs")} {
+	for _, path := range []string{filepath.Join(gitDir, "refs"), filepath.Join(gitDir, "logs"), filepath.Join(gitDir, "packed-refs")} {
 		if err := rejectGitMetadataSymlink(path); err != nil {
 			return errors.New("git reference metadata is unsafe")
 		}

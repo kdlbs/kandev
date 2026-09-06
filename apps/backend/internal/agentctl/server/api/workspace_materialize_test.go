@@ -90,6 +90,19 @@ func TestAttestRegularGitMetadataRejectsUnsafeGitReferenceMetadata(t *testing.T)
 			},
 		},
 		{
+			name: "symlinked packed refs",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				packedRefs := filepath.Join(checkout, ".git", "packed-refs")
+				if err := os.Remove(packedRefs); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(t.TempDir(), "packed-refs"), packedRefs); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
 			name: "invalid symbolic HEAD ref",
 			prepare: func(t *testing.T, checkout string) {
 				t.Helper()
