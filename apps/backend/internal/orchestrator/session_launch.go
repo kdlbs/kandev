@@ -81,7 +81,9 @@ type LaunchSessionRequest struct {
 	SpawnOrigin *SpawnOrigin `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
-	AllowBranchReplacement bool `json:"-"`
+	AllowBranchReplacement           bool   `json:"-"`
+	RepairWorkspaceInventory         bool   `json:"-"`
+	WorkspaceInventoryIdempotencyKey string `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -95,14 +97,15 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
-	Success          bool    `json:"success"`
-	TaskID           string  `json:"task_id"`
-	SessionID        string  `json:"session_id,omitempty"`
-	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
-	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
-	State            string  `json:"state"`
-	WorktreePath     *string `json:"worktree_path,omitempty"`
-	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
+	Success                           bool                                      `json:"success"`
+	TaskID                            string                                    `json:"task_id"`
+	SessionID                         string                                    `json:"session_id,omitempty"`
+	AgentExecutionID                  string                                    `json:"agent_execution_id,omitempty"`
+	AgentProfileID                    string                                    `json:"agent_profile_id,omitempty"`
+	State                             string                                    `json:"state"`
+	WorktreePath                      *string                                   `json:"worktree_path,omitempty"`
+	WorktreeBranch                    *string                                   `json:"worktree_branch,omitempty"`
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt `json:"workspace_inventory_recovery_receipt,omitempty"`
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.
@@ -350,7 +353,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		AllowBranchReplacement: req.AllowBranchReplacement,
+		AllowBranchReplacement:           req.AllowBranchReplacement,
+		RepairWorkspaceInventory:         req.RepairWorkspaceInventory,
+		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,
 	})
 	if err != nil {
 		return nil, err
@@ -410,10 +415,21 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
-// action is "resume" (retry with existing ACP session), "resume_new_branch"
-// (retry after replacing a confirmed missing branch), or "fresh_start" (clear
-// token, start fresh).
+// action selects one of the explicit retry, branch replacement, fresh start,
+// or preservation-only inventory repair paths.
+type RecoverSessionOptions struct {
+	IdempotencyKey string
+}
+
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
+	return s.RecoverSessionWithOptions(ctx, taskID, sessionID, action, RecoverSessionOptions{})
+}
+
+func (s *Service) RecoverSessionWithOptions(
+	ctx context.Context,
+	taskID, sessionID, action string,
+	options RecoverSessionOptions,
+) (*LaunchSessionResponse, error) {
 	// Guard before the switch: "fresh_start" clears the resume token, so an
 	// unauthorized call would mutate the session even if the launch failed.
 	// Recovering a session resumes an agent turn: session.prompt.
@@ -440,15 +456,21 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	case "resume_new_branch":
 		// The launch carries the explicit permission. It is not persisted on the
 		// session and cannot be inferred from a previous failed attempt.
+	case "repair_workspace_inventory":
+		if strings.TrimSpace(options.IdempotencyKey) == "" {
+			return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+		}
 	default:
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:                 taskID,
-		SessionID:              sessionID,
-		Intent:                 IntentResume,
-		AllowBranchReplacement: action == "resume_new_branch",
+		TaskID:                           taskID,
+		SessionID:                        sessionID,
+		Intent:                           IntentResume,
+		AllowBranchReplacement:           action == "resume_new_branch",
+		RepairWorkspaceInventory:         action == "repair_workspace_inventory",
+		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
@@ -485,12 +507,13 @@ func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *Lau
 		}
 	}
 	resp := &LaunchSessionResponse{
-		Success:          true,
-		TaskID:           taskID,
-		SessionID:        exec.SessionID,
-		AgentExecutionID: exec.AgentExecutionID,
-		AgentProfileID:   exec.AgentProfileID,
-		State:            string(exec.SessionState),
+		Success:                           true,
+		TaskID:                            taskID,
+		SessionID:                         exec.SessionID,
+		AgentExecutionID:                  exec.AgentExecutionID,
+		AgentProfileID:                    exec.AgentProfileID,
+		State:                             string(exec.SessionState),
+		WorkspaceInventoryRecoveryReceipt: exec.WorkspaceInventoryRecoveryReceipt,
 	}
 	if exec.WorktreePath != "" {
 		resp.WorktreePath = &exec.WorktreePath

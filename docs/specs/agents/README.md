@@ -65,6 +65,7 @@ surface shared by task and Office consumers.
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
+- [Preserved workspace inventory repair](requirements/workspace-inventory-repair.md)
 
 ### System design
 
@@ -79,6 +80,7 @@ surface shared by task and Office consumers.
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
+- [Preserved workspace inventory repair](system-design/workspace-inventory-repair.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
 - [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
 - [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)
