@@ -5,7 +5,9 @@ import { IconAlertCircle, IconLock, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
+import { useAppStore } from "@/components/state-provider";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import { cn } from "@/lib/utils";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
@@ -132,13 +134,17 @@ function BlockedBadge({ task }: { task: Task }) {
   );
 }
 
-function hasCardBadges(task: Task, hideSessionCount?: boolean): boolean {
+function hasCardBadges(
+  task: Task,
+  hideSessionCount: boolean | undefined,
+  showHumanAssignee: boolean,
+): boolean {
   return Boolean(
     (!hideSessionCount && task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
-    task.assigneeUserId ||
+    (showHumanAssignee && task.assigneeUserId) ||
     task.blocked,
   );
 }
@@ -158,14 +164,15 @@ export function KanbanCardBadges({
   className?: string;
 }) {
   const { t } = useTranslation();
-  const showRow = hasCardBadges(task, hideSessionCount);
+  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
+  const showRow = hasCardBadges(task, hideSessionCount, showHumanAssignee);
 
   if (!showRow) return null;
 
   return (
     <div className={cn("flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0", className)}>
       {task.blocked && <BlockedBadge task={task} />}
-      {task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
+      {showHumanAssignee && task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
