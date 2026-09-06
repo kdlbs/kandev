@@ -119,6 +119,7 @@ signals, and task-scoped scheduling contracts.
 - [Conditional Workflow Session Settings](requirements/workflow-session-settings.md)
 - [Workflow Settings Autosave](requirements/workflow-settings-autosave.md)
 - [Workflow Step Agent Start Ownership](requirements/workflow-step-agent-start-ownership.md)
+- [Workflow Step Script Actions](requirements/workflow-step-script-actions.md)
 - [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
 - [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
@@ -164,6 +165,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
+- [Workflow Step Script Actions](system-design/workflow-step-script-actions.md)
 - [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
@@ -171,10 +173,10 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The seven requirements above now have
-authoritative, wrapper-free requirement/design pairs. Other migrated files still
-need the same extraction before this system can return to a complete migration
-state.
+Migration remains in progress. The migrated requirements above have
+authoritative requirement/design pairs where both links are present. Other
+migrated files still need the same extraction before this system can return to
+a complete migration state.
 
 ## Related systems
 

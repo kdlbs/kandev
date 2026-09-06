@@ -33,6 +33,7 @@ type WorkflowCreationArgs = {
   workflowItems: Workflow[];
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
+  onCreateWorkflow?: (args: { name: string; templateId: string | null }) => void;
 };
 
 function newClientId(prefix: string): string {
@@ -107,6 +108,7 @@ export function useWorkflowCreation({
   workflowItems,
   workflowTemplates,
   setWorkflowItems,
+  onCreateWorkflow,
 }: WorkflowCreationArgs) {
   const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState("");
@@ -126,6 +128,11 @@ export function useWorkflowCreation({
     const template = selectedTemplateId
       ? workflowTemplates.find((item) => item.id === selectedTemplateId)
       : undefined;
+    if (onCreateWorkflow) {
+      onCreateWorkflow({ name: newWorkflowName.trim(), templateId: template?.id ?? null });
+      setIsAddWorkflowDialogOpen(false);
+      return;
+    }
     const tempId = newClientId("temp-workflow");
     // i18n-exempt: persisted workflow name. See the comment below.
     const workflow: Workflow = {

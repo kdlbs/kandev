@@ -96,7 +96,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			Position:                   s.Position,
 			Color:                      s.Color,
 			Prompt:                     s.Prompt,
-			Events:                     ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
+			Events:                     normalizeWorkflowScriptEvents(ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile)),
 			IsStartStep:                s.IsStartStep,
 			ShowInCommandPanel:         s.ShowInCommandPanel,
 			AllowManualMove:            s.AllowManualMove,

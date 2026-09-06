@@ -21,6 +21,7 @@ const template = {
 function renderCreationHook(
   workflowTemplates: WorkflowTemplate[] = [],
   initialWorkflows: Workflow[] = [],
+  onCreateWorkflow?: (args: { name: string; templateId: string | null }) => void,
 ) {
   let workflows: Workflow[] = initialWorkflows;
   const setWorkflowItems = vi.fn((update: React.SetStateAction<Workflow[]>) => {
@@ -32,6 +33,7 @@ function renderCreationHook(
       workflowItems: workflows,
       workflowTemplates,
       setWorkflowItems,
+      onCreateWorkflow,
     }),
   );
   return { ...view, setWorkflowItems, getWorkflows: () => workflows };
@@ -119,6 +121,24 @@ describe("useWorkflowCreation", () => {
       color: "bg-blue-500",
       cancel_triggers_turn_complete: true,
     });
+  });
+
+  it("hands new workflow creation to the dedicated editor route when configured", () => {
+    const onCreateWorkflow = vi.fn();
+    const { result, getWorkflows } = renderCreationHook([template], [], onCreateWorkflow);
+
+    act(() => {
+      result.current.setNewWorkflowName("Draft workflow");
+      result.current.setSelectedTemplateId(template.id);
+    });
+    act(() => result.current.handleCreateWorkflow());
+
+    expect(onCreateWorkflow).toHaveBeenCalledWith({
+      name: "Draft workflow",
+      templateId: template.id,
+    });
+    expect(getWorkflows()).toEqual([]);
+    expect(result.current.isAddWorkflowDialogOpen).toBe(false);
   });
 });
 

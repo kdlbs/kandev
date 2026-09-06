@@ -1286,6 +1286,35 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 	return err
 }
 
+// CreateWorkflowScriptMessage creates the durable chat projection for a
+// workflow-bound script before its managed process is admitted. The caller
+// owns the deterministic ID so a lost response can be replayed safely.
+func (a *messageCreatorAdapter) CreateWorkflowScriptMessage(ctx context.Context, messageID, taskID, sessionID, content string, metadata map[string]interface{}) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeScriptExecution),
+		Metadata:      metadata,
+		CompletedTurn: true,
+		SkipTurn:      true,
+	})
+	return err
+}
+
+// UpdateWorkflowScriptMessage projects bounded process output and lifecycle
+// metadata through the normal task-message update path.
+func (a *messageCreatorAdapter) UpdateWorkflowScriptMessage(ctx context.Context, messageID, content string, metadata map[string]interface{}) error {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	message.Content = content
+	message.Metadata = metadata
+	return a.svc.UpdateMessage(ctx, message)
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{

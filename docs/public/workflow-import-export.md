@@ -159,10 +159,10 @@ An event contains an ordered list of actions. Each action has a `type` and an op
 
 | Trigger | Runtime meaning | Recognized action types |
 |---------|-----------------|-------------------------|
-| `on_enter` | Step-entry processing. | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` |
+| `on_enter` | Step-entry processing. | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `run_script`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` |
 | `on_turn_start` | A user sends a message. | `move_to_next`, `move_to_previous`, `move_to_step` |
-| `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` |
-| `on_exit` | A task leaves the step. | `disable_plan_mode` |
+| `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode`, `run_script` |
+| `on_exit` | A task leaves the step. | `disable_plan_mode`, `run_script` |
 | `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, all child tasks complete, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
 
 `set_session_mode` requires `config.mode` to be a non-empty string. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
@@ -177,7 +177,20 @@ on_turn_complete:
 
 Internally, transitions use database `step_id` values. Export converts `step_id` to `step_position`; import creates all new IDs and converts positions back to them. Additional config keys are copied. Do not copy the embedded template files verbatim: those are an internal template schema and use symbolic `step_id` values rather than the portable envelope and positions.
 
-Portable validation is deliberately narrow. Beyond `set_session_mode` and position references, it does not currently reject every unknown action string or malformed action config. An accepted file can therefore contain an inert action. Use the action names and shapes documented here and exercise the workflow after import.
+`run_script` requires a command in `config.command`. `config.timeout_seconds` is an integer from 1 through 86,400 and defaults to 600. `config.failure_policy` is `block` or `continue` and defaults to `block`:
+
+```yaml
+on_enter:
+  - type: run_script
+    config:
+      command: ./scripts/prepare-worktree.sh
+      timeout_seconds: 600
+      failure_policy: block
+```
+
+The command is stored in the portable workflow and executes only when its lifecycle trigger occurs. The destination session owns `on_enter`; the source session owns `on_turn_complete` and `on_exit`. A command runs in the bound task session's executor workspace with that executor's filesystem, network, and credential permissions. Output is persisted in the task chat. Import and export do not execute commands, and a synchronized workflow remains read-only in the settings editor. Treat synchronized workflow files as executable code and review them before use.
+
+Portable validation is deliberately narrow. `run_script` validates its command, timeout, and failure policy, while other action types may still accept unknown or incomplete configuration. Use the action names and shapes documented here and exercise the workflow after import.
 
 ### Office / Phase-2 triggers
 

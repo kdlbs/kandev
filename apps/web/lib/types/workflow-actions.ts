@@ -15,7 +15,28 @@ export type OnEnterActionType =
   | "enable_plan_mode"
   | "auto_start_agent"
   | "reset_agent_context"
-  | "configure_session";
+  | "configure_session"
+  | "set_session_mode"
+  | "clear_decisions"
+  | "queue_run_for_each_participant"
+  | "queue_run"
+  | "ensure_participant_seat"
+  | "run_code_review"
+  | "run_script";
+
+export type WorkflowScriptFailurePolicy = "block" | "continue";
+
+export type WorkflowScriptActionConfig = {
+  command: string;
+  timeout_seconds?: number;
+  failure_policy?: WorkflowScriptFailurePolicy;
+  [key: string]: unknown;
+};
+
+export type WorkflowScriptAction = {
+  type: "run_script";
+  config: WorkflowScriptActionConfig;
+};
 
 export type ConfigureSessionOperation = "set" | "keep" | "restore_original";
 
@@ -45,10 +66,11 @@ export type OnTurnCompleteActionType =
   | "move_to_next"
   | "move_to_previous"
   | "move_to_step"
-  | "disable_plan_mode";
+  | "disable_plan_mode"
+  | "run_script";
 
 // On Exit action types
-export type OnExitActionType = "disable_plan_mode";
+export type OnExitActionType = "disable_plan_mode" | "run_script";
 
 /**
  * Optional config flags shared by transition actions (move_to_next /
@@ -97,7 +119,14 @@ export type OnEnterAction =
       };
     }
   | { type: "reset_agent_context" }
-  | { type: "configure_session"; config: ConfigureSessionActionConfig };
+  | { type: "configure_session"; config: ConfigureSessionActionConfig }
+  | { type: "set_session_mode"; config: { mode: string } }
+  | { type: "clear_decisions"; config?: Record<string, never> }
+  | { type: "queue_run_for_each_participant"; config?: QueueRunForEachParticipantConfig }
+  | { type: "queue_run"; config?: QueueRunConfig }
+  | { type: "ensure_participant_seat"; config?: { role?: string } }
+  | { type: "run_code_review"; config?: { agent_profile_id?: string } }
+  | WorkflowScriptAction;
 
 export type OnTurnStartAction =
   | { type: "move_to_next"; config?: TransitionConfig }
@@ -108,9 +137,10 @@ export type OnTurnCompleteAction =
   | { type: "move_to_next"; config?: TransitionConfig }
   | { type: "move_to_previous"; config?: TransitionConfig }
   | { type: "move_to_step"; config: MoveToStepConfig }
-  | { type: "disable_plan_mode" };
+  | { type: "disable_plan_mode" }
+  | WorkflowScriptAction;
 
-export type OnExitAction = { type: "disable_plan_mode" };
+export type OnExitAction = { type: "disable_plan_mode" } | WorkflowScriptAction;
 
 export type GenericActionType =
   | "move_to_next"

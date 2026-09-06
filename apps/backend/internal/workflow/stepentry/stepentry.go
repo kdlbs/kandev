@@ -6,8 +6,10 @@
 // already-resolved PendingAllocation/AllocationResult shapes carried on
 // context, mirroring how internal/steptelemetry threads attribution.
 //
-// Scope note: this package only recognises clear_decisions and
-// queue_run_for_each_participant as engine-owned on_enter kinds for now.
+// Scope note: this package recognises clear_decisions and
+// queue_run_for_each_participant as engine-owned on_enter kinds, and allocates
+// an entry identity for run_script even though that session-shaped action is
+// dispatched by the arriving session's lifecycle handler.
 // queue_run and run_code_review on_enter dispatch (AC-A7/AC-A8 in
 // docs/specs/workflow-on-enter-action-dispatch/spec.md) are explicitly
 // deferred to a later Build round — see that spec's Verification section and
@@ -111,16 +113,21 @@ func IsEngineOwnedOnEnter(t wfmodels.OnEnterActionType) bool {
 }
 
 // BuildPendingAllocation inspects a step's on_enter declaration and returns
-// the PendingAllocation the write site should allocate, plus false when the
-// step declares no engine-owned on_enter actions (nothing to allocate).
+// the PendingAllocation the write site should allocate. Script-only entries
+// still need a durable entry identity for their occurrence key, even though
+// their action position is not dispatched by DispatchStepEntry.
 func BuildPendingAllocation(stepID string, actions []wfmodels.OnEnterAction) (PendingAllocation, bool) {
 	positions := make([]EnginePosition, 0, len(actions))
+	needsEntryIdentity := false
 	for i, action := range actions {
 		if IsEngineOwnedOnEnter(action.Type) {
 			positions = append(positions, EnginePosition{Position: i, Kind: string(action.Type)})
 		}
+		if action.Type == wfmodels.OnEnterRunScript {
+			needsEntryIdentity = true
+		}
 	}
-	if len(positions) == 0 {
+	if len(positions) == 0 && !needsEntryIdentity {
 		return PendingAllocation{}, false
 	}
 	return PendingAllocation{

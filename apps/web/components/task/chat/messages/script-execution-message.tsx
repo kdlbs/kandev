@@ -12,16 +12,33 @@ import { useTranslation } from "react-i18next";
 import { isSuccessfulScriptExecutionMetadata } from "@/hooks/processed-message-filtering";
 
 interface ScriptExecutionMetadata {
-  script_type: "setup" | "cleanup" | "agent_boot";
+  script_type: "setup" | "cleanup" | "agent_boot" | "workflow_step";
   agent_name?: string;
   command: string;
-  status: "starting" | "running" | "exited" | "failed";
+  status:
+    | "pending"
+    | "starting"
+    | "running"
+    | "exited"
+    | "succeeded"
+    | "failed"
+    | "timed_out"
+    | "interrupted"
+    | "stopped";
   exit_code?: number;
   is_resuming?: boolean;
   started_at?: string;
   completed_at?: string;
   process_id?: string;
   error?: string;
+  workflow_id?: string;
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  trigger?: string;
+  action_position?: number;
+  timeout_seconds?: number;
+  failure_policy?: "block" | "continue";
+  output_truncated?: boolean;
 }
 
 // Returns the catalog key for the whole "<verb> agent <name>" line rather than
@@ -90,6 +107,73 @@ function ScriptHeader({
   );
 }
 
+function WorkflowScriptHeader({
+  metadata,
+  isRunning,
+  isSuccess,
+}: {
+  metadata: ScriptExecutionMetadata;
+  isRunning: boolean;
+  isSuccess: boolean;
+}) {
+  const { t } = useTranslation();
+  const triggerKey = workflowTriggerKey(metadata.trigger);
+  return (
+    <div className="min-w-0 text-xs">
+      <div className="flex min-w-0 items-center gap-2">
+        <Badge variant="secondary" className="shrink-0 text-xs">
+          {t("workflows:runScript")}
+        </Badge>
+        <span className="min-w-0 truncate text-muted-foreground">
+          {t("workflows:workflowScriptContext", {
+            stepName: metadata.workflow_step_name || t("workflows:workflow"),
+            trigger: t(triggerKey),
+          })}
+        </span>
+        {isRunning && <GridSpinner className="shrink-0 text-muted-foreground" />}
+        {isSuccess && !isRunning && <IconCheck className="h-3.5 w-3.5 shrink-0 text-green-500" />}
+        {!isSuccess && !isRunning && <IconX className="h-3.5 w-3.5 shrink-0 text-red-500" />}
+      </div>
+      <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+        {metadata.command}
+      </div>
+    </div>
+  );
+}
+
+function workflowTriggerKey(trigger: string | undefined): string {
+  if (trigger === "on_enter") return "workflows:onEnterActions";
+  if (trigger === "on_turn_complete") return "workflows:onTurnCompleteTrigger";
+  if (trigger === "on_exit") return "workflows:onExit";
+  return "workflows:workflow";
+}
+
+function ScriptExecutionHeader({
+  metadata,
+  command,
+  isSetup,
+  isWorkflowScript,
+  isRunning,
+  isSuccess,
+}: {
+  metadata: ScriptExecutionMetadata;
+  command: string;
+  isSetup: boolean;
+  isWorkflowScript: boolean;
+  isRunning: boolean;
+  isSuccess: boolean;
+}) {
+  if (metadata.script_type === "agent_boot") {
+    return <AgentBootHeader metadata={metadata} isSuccess={isSuccess} isRunning={isRunning} />;
+  }
+  if (isWorkflowScript) {
+    return <WorkflowScriptHeader metadata={metadata} isSuccess={isSuccess} isRunning={isRunning} />;
+  }
+  return (
+    <ScriptHeader command={command} isSetup={isSetup} isRunning={isRunning} isSuccess={isSuccess} />
+  );
+}
+
 // Helper function to calculate duration
 function calculateDuration(startedAt: string, completedAt: string): string {
   try {
@@ -144,27 +228,31 @@ function ScriptFooter({ isAgentBoot, isRunning, metadata, exitCode }: ScriptFoot
 
 type ScriptBodyProps = {
   isAgentBoot: boolean;
+  showCommand: boolean;
   command: string;
   content: string;
   error: string | undefined;
   isRunning: boolean;
   metadata: ScriptExecutionMetadata;
   exitCode: number | undefined;
+  outputTruncated: boolean;
 };
 
 function ScriptExpandedContent({
   isAgentBoot,
+  showCommand,
   command,
   content,
   error,
   isRunning,
   metadata,
   exitCode,
+  outputTruncated,
 }: ScriptBodyProps) {
   const { t } = useTranslation();
   return (
     <div className="pl-4 border-l-2 border-border/30 space-y-2">
-      {isAgentBoot && command && (
+      {showCommand && command && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
             {t("task:command")}
@@ -183,6 +271,11 @@ function ScriptExpandedContent({
             {stripAnsi(content)}
           </pre>
         </div>
+      )}
+      {outputTruncated && (
+        <p className="text-xs text-muted-foreground">
+          {t("workflows:workflowScriptOutputTruncated")}
+        </p>
       )}
       {error && (
         <div>
@@ -208,7 +301,7 @@ function parseScriptMetadata(comment: Message) {
   const metadata = comment.metadata as ScriptExecutionMetadata | undefined;
   const status = metadata?.status;
   const scriptType = metadata?.script_type;
-  const isRunning = status === "starting" || status === "running";
+  const isRunning = status === "pending" || status === "starting" || status === "running";
   const isSuccess = isSuccessfulScriptExecutionMetadata(metadata);
   return { metadata, status, scriptType, isRunning, isSuccess };
 }
@@ -253,6 +346,7 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
 
   const { command, exit_code, error } = metadata;
   const isAgentBoot = scriptType === "agent_boot";
+  const isWorkflowScript = scriptType === "workflow_step";
   const isSetup = scriptType === "setup";
   const hasDuration = !!(metadata.started_at && metadata.completed_at);
   const hasExpandableContent = !!(
@@ -267,16 +361,14 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
     <ExpandableRow
       icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
       header={
-        isAgentBoot ? (
-          <AgentBootHeader metadata={metadata} isSuccess={isSuccess} isRunning={isRunning} />
-        ) : (
-          <ScriptHeader
-            command={command}
-            isSetup={isSetup}
-            isRunning={isRunning}
-            isSuccess={isSuccess}
-          />
-        )
+        <ScriptExecutionHeader
+          metadata={metadata}
+          command={command}
+          isSetup={isSetup}
+          isWorkflowScript={isWorkflowScript}
+          isRunning={isRunning}
+          isSuccess={isSuccess}
+        />
       }
       hasExpandableContent={hasExpandableContent}
       isExpanded={isExpanded}
@@ -284,12 +376,14 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
     >
       <ScriptExpandedContent
         isAgentBoot={isAgentBoot}
+        showCommand={isAgentBoot || isWorkflowScript}
         command={command}
         content={comment.content}
         error={error}
         isRunning={isRunning}
         metadata={metadata}
         exitCode={exit_code}
+        outputTruncated={metadata.output_truncated === true}
       />
     </ExpandableRow>
   );

@@ -50,9 +50,13 @@ type WorkflowPipelineEditorProps = {
 // --- Helpers ---
 
 function getTransitionType(step: WorkflowStep): string {
-  const action = step.events?.on_turn_complete?.find((a) =>
-    ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
-  );
+  const transitionTypes = ["move_to_next", "move_to_previous", "move_to_step"];
+  const actions = [
+    ...(step.events?.on_turn_complete ?? []),
+    ...(step.events?.on_children_completed ?? []),
+    ...(step.events?.on_turn_start ?? []),
+  ];
+  const action = actions.find((candidate) => transitionTypes.includes(candidate.type));
   return action?.type ?? "none";
 }
 
@@ -218,7 +222,7 @@ function PipelineArea({
   readOnly,
 }: PipelineAreaProps) {
   return (
-    <div className="flex items-center gap-0 py-2 px-1">
+    <div className="flex min-w-max items-center gap-0 py-2 px-1">
       {steps.map((step, index) => (
         <div key={step.id} className="flex items-center">
           {index > 0 && <PipelineConnector labelKey={transitionLabelKey(steps[index - 1])} />}

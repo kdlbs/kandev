@@ -27,6 +27,7 @@ type fakeAgentctlProcessServer struct {
 
 	startStatus   agentctl.ProcessStatus
 	knownProcess  string
+	knownSession  string
 	sessionProcs  []agentctl.ProcessInfo
 	stopShouldErr bool
 	healthy       bool
@@ -86,7 +87,7 @@ func newFakeAgentctlProcessServer(t *testing.T) (*fakeAgentctlProcessServer, *ag
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(agentctl.ProcessInfo{ID: id, Status: "running"})
+			_ = json.NewEncoder(w).Encode(agentctl.ProcessInfo{ID: id, SessionID: f.knownSession, Status: "running"})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

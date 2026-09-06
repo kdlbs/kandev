@@ -858,6 +858,15 @@ func (m *Manager) GetProcess(id string, includeOutput bool) (*ProcessInfo, bool)
 	return m.processRunner.Get(id, includeOutput)
 }
 
+// GetProcessByRequestID returns an active or retained process by stable start
+// request identity.
+func (m *Manager) GetProcessByRequestID(requestID string, includeOutput bool) (*ProcessInfo, bool) {
+	if m.processRunner == nil {
+		return nil, false
+	}
+	return m.processRunner.GetByRequestID(requestID, includeOutput)
+}
+
 // ListProcesses returns processes for a session (or all if sessionID empty).
 func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 	if m.processRunner == nil {

@@ -44,6 +44,7 @@ const (
 	ActionSetWorkflowData   ActionKind = "set_workflow_data"
 	ActionSetSessionMode    ActionKind = "set_session_mode"
 	ActionRunCodeReview     ActionKind = "run_code_review"
+	ActionRunScript         ActionKind = "run_script"
 
 	// New Phase 2 action kinds (ADR-0004). Defined and exposed via callbacks
 	// that intentionally return ErrActionNotYetWired — they will be wired
@@ -94,6 +95,7 @@ type Action struct {
 	SetWorkflowData            *SetWorkflowDataAction
 	SetSessionMode             *SetSessionModeAction
 	RunCodeReview              *RunCodeReviewAction
+	RunScript                  *wfmodels.WorkflowScriptAction
 	QueueRun                   *QueueRunAction
 	ClearDecisions             *ClearDecisionsAction
 	QueueRunForEachParticipant *QueueRunForEachParticipantAction
@@ -349,6 +351,12 @@ func CompileOnEnterAction(action wfmodels.OnEnterAction) (Action, bool) {
 			Kind:          ActionRunCodeReview,
 			RunCodeReview: &RunCodeReviewAction{AgentProfileID: readReviewAgentProfileID(action.Config)},
 		}, true
+	case wfmodels.OnEnterRunScript:
+		action, err := wfmodels.ParseWorkflowScriptAction(action.Config)
+		if err != nil {
+			return Action{}, false
+		}
+		return Action{Kind: ActionRunScript, RunScript: &action}, true
 	case wfmodels.OnEnterClearDecisions:
 		return Action{
 			Kind:           ActionClearDecisions,
@@ -416,6 +424,11 @@ func compileOnTurnComplete(step *wfmodels.WorkflowStep) []Action {
 			actions = append(actions, Action{Kind: ActionMoveToStep, RequiresApproval: ra, Guard: guard, MoveToStep: &MoveToStepAction{StepID: stepID}})
 		case wfmodels.OnTurnCompleteDisablePlanMode:
 			actions = append(actions, Action{Kind: ActionDisablePlanMode})
+		case wfmodels.OnTurnCompleteRunScript:
+			script, err := wfmodels.ParseWorkflowScriptAction(action.Config)
+			if err == nil {
+				actions = append(actions, Action{Kind: ActionRunScript, RunScript: &script})
+			}
 		}
 	}
 	return actions
@@ -424,8 +437,14 @@ func compileOnTurnComplete(step *wfmodels.WorkflowStep) []Action {
 func compileOnExit(step *wfmodels.WorkflowStep) []Action {
 	actions := make([]Action, 0, len(step.Events.OnExit))
 	for _, action := range step.Events.OnExit {
-		if action.Type == wfmodels.OnExitDisablePlanMode {
+		switch action.Type {
+		case wfmodels.OnExitDisablePlanMode:
 			actions = append(actions, Action{Kind: ActionDisablePlanMode})
+		case wfmodels.OnExitRunScript:
+			script, err := wfmodels.ParseWorkflowScriptAction(action.Config)
+			if err == nil {
+				actions = append(actions, Action{Kind: ActionRunScript, RunScript: &script})
+			}
 		}
 	}
 	return actions

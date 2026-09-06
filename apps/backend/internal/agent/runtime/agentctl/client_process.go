@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
 // StartProcessRequest contains the parameters for starting a process.
 type StartProcessRequest struct {
+	RequestID      string            `json:"request_id,omitempty"`
 	SessionID      string            `json:"session_id"`
 	Kind           ProcessKind       `json:"kind"`
 	ScriptName     string            `json:"script_name,omitempty"`
@@ -18,6 +20,7 @@ type StartProcessRequest struct {
 	WorkingDir     string            `json:"working_dir"`
 	Env            map[string]string `json:"env,omitempty"`
 	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"`
+	Timeout        time.Duration     `json:"timeout,omitempty"`
 }
 
 // ProcessOutputChunk is a single chunk of process output.
@@ -29,17 +32,18 @@ type ProcessOutputChunk struct {
 
 // ProcessInfo contains information about a running or completed process.
 type ProcessInfo struct {
-	ID         string               `json:"id"`
-	SessionID  string               `json:"session_id"`
-	Kind       ProcessKind          `json:"kind"`
-	ScriptName string               `json:"script_name,omitempty"`
-	Command    string               `json:"command"`
-	WorkingDir string               `json:"working_dir"`
-	Status     ProcessStatus        `json:"status"`
-	ExitCode   *int                 `json:"exit_code,omitempty"`
-	StartedAt  time.Time            `json:"started_at"`
-	UpdatedAt  time.Time            `json:"updated_at"`
-	Output     []ProcessOutputChunk `json:"output,omitempty"`
+	ID              string               `json:"id"`
+	SessionID       string               `json:"session_id"`
+	Kind            ProcessKind          `json:"kind"`
+	ScriptName      string               `json:"script_name,omitempty"`
+	Command         string               `json:"command"`
+	WorkingDir      string               `json:"working_dir"`
+	Status          ProcessStatus        `json:"status"`
+	ExitCode        *int                 `json:"exit_code,omitempty"`
+	StartedAt       time.Time            `json:"started_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	Output          []ProcessOutputChunk `json:"output,omitempty"`
+	OutputTruncated bool                 `json:"output_truncated,omitempty"`
 }
 
 type startProcessResponse struct {
@@ -175,6 +179,38 @@ func (c *Client) GetProcess(ctx context.Context, id string, includeOutput bool) 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("get process failed with status %d", resp.StatusCode)
+	}
+	var result ProcessInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetProcessByRequestID retrieves a process through its stable start-request
+// identity. Recovery uses this endpoint for a run whose process ID was not
+// persisted before a restart.
+func (c *Client) GetProcessByRequestID(ctx context.Context, requestID string, includeOutput bool) (*ProcessInfo, error) {
+	if requestID == "" {
+		return nil, fmt.Errorf("request id is required")
+	}
+	reqURL := c.baseURL + "/api/v1/processes/request/" + url.PathEscape(requestID)
+	if includeOutput {
+		reqURL += "?include_output=true"
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get process by request id failed with status %d", resp.StatusCode)
 	}
 	var result ProcessInfo
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

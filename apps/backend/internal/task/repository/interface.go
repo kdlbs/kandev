@@ -227,6 +227,19 @@ type WorkflowRepository interface {
 	ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error
 }
 
+// WorkflowScriptRunRepository stores immutable workflow script claims and
+// their one-way managed-process results.
+type WorkflowScriptRunRepository interface {
+	ClaimWorkflowScriptRun(ctx context.Context, run *models.WorkflowScriptRun) (*models.WorkflowScriptRun, bool, error)
+	GetWorkflowScriptRun(ctx context.Context, id string) (*models.WorkflowScriptRun, error)
+	GetWorkflowScriptRunByOccurrence(ctx context.Context, occurrenceKey string) (*models.WorkflowScriptRun, error)
+	ListNonTerminalWorkflowScriptRuns(ctx context.Context) ([]*models.WorkflowScriptRun, error)
+	MarkWorkflowScriptRunStarting(ctx context.Context, id, messageID string) (bool, error)
+	MarkWorkflowScriptRunRunning(ctx context.Context, id, processID string) (bool, error)
+	CompleteWorkflowScriptRun(ctx context.Context, id string, completion models.WorkflowScriptRunCompletion) (bool, error)
+	InterruptWorkflowScriptRuns(ctx context.Context, reason string) (int, error)
+}
+
 // MessageRepository handles message persistence and lookups.
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error

@@ -802,6 +802,9 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
 	}
+	if occurrenceID := workflowMoveOccurrenceID(task); occurrenceID != "" {
+		data["workflow_step_occurrence_id"] = occurrenceID
+	}
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
 	} else {
@@ -813,6 +816,27 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}
+}
+
+func workflowMoveOccurrenceID(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	for _, key := range []string{models.MetaKeyManualMoveLifecyclePending, models.MetaKeyQueuedMoveExitPending} {
+		value, ok := task.Metadata[key]
+		if !ok {
+			continue
+		}
+		descriptor, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		occurrenceID, _ := descriptor["occurrence_id"].(string)
+		if occurrenceID != "" {
+			return occurrenceID
+		}
+	}
+	return ""
 }
 
 func (s *Service) publishEventToBus(ctx context.Context, eventType, resourceType, resourceID string, data map[string]interface{}) {

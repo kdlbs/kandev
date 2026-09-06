@@ -425,7 +425,11 @@ Regular Kanban does not currently expose label editing or label filters. Do not 
 
 ## Configure a workflow
 
-Open **Settings → Workspaces → _workspace_ → Workflows**, then open a workflow card. A workflow has a name, an optional **Default Agent Profile**, and ordered steps. When the workflow has a default profile, users cannot choose another profile in the task-creation dialog.
+Open **Settings → Workspaces → _workspace_ → Workflows**, then select **Edit** on a workflow. The focused workflow editor shows the ordered pipeline and one selected step at a time. On desktop, the step inspector has **Agent**, **Automation**, and **Policies** tabs. On a phone, select a step from the vertical journey, then use its full-height step screen. A new workflow uses the same editor at `/workflows/new` and is created only when you save it.
+
+The editor uses one manual **Save changes** action for the workflow draft. Moving between steps or inspector tabs does not save or discard changes. If a workflow is synchronized from GitHub or GitLab, the editor stays available for inspection but its mutation controls are disabled; edit the source file and synchronize again.
+
+A workflow has a name, an optional **Default Agent Profile**, and ordered steps. When the workflow has a default profile, users cannot choose another profile in the task-creation dialog.
 
 You can add, reorder, edit, and delete steps. Deleting a step that still contains tasks opens a migration flow instead of silently stranding them. A GitHub-synchronized workflow is read-only in Kandev; change its source file in the synchronized repository.
 
@@ -504,6 +508,18 @@ Pull configuration rejects self-references, cycles, and cross-workflow feeders. 
 The child-completion event ignores archived and ephemeral children, does not inspect grandchildren, and does nothing when the parent has no children. It also requires a parent session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`; a parent with no session, or only an `IDLE`, `COMPLETED`, `FAILED`, or `CANCELLED` session, does not transition.
 
 Generic comment, blocker-resolution, approval, heartbeat, budget, and error triggers, plus participant quorum, belong to the in-progress Office workflow surface. They are not configurable regular-Kanban step events.
+
+### Run lifecycle scripts
+
+Use the **Automation** tab to add one or more **Run script** actions to a step. Each lifecycle list keeps its own order. The supported lists are:
+
+- **On Enter:** runs in the destination session after profile and session routing completes.
+- **On Turn Complete:** runs in the source session before the step transition is applied.
+- **On Exit:** runs in the source session before the step transition is applied.
+
+Each script has a command, a timeout, and a failure policy. The default timeout is 600 seconds. **Block** stops the current lifecycle operation when the script fails or times out. **Continue** records the failure and lets the remaining lifecycle operation continue. Multiple scripts run in their configured order.
+
+The command runs in the bound session's executor workspace with that executor's managed environment. Kandev does not execute a script during editing or saving. The task chat shows one durable script message with the lifecycle, command, status, exit code, output, and truncation state. A process admission that becomes ambiguous during recovery is recorded as interrupted and is not automatically run again. Treat workflow script definitions as executable code and review their repository, workflow, and executor access before enabling them.
 
 When **On Turn Complete** moves a task, **Wait for agent completion signal** is available. With it enabled, a bare turn end leaves the task waiting; the agent must call `step_complete_kandev`. The call requires a summary and can include a handoff or blockers. It is idempotent within the step, runs asynchronously, and a user message sent before the transition is applied cancels that pending signal. Without the option, turn end counts as completion.
 

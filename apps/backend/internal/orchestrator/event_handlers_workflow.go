@@ -98,8 +98,8 @@ const (
 
 // processOnTurnComplete processes the on_turn_complete events for the current step.
 // Returns true if a transition occurred (step change happened).
-func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, session *models.TaskSession) bool {
-	return s.processOnTurnCompleteWithCause(ctx, task, session, turnCompletionCauseAgentTurn)
+func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, session *models.TaskSession, operationIDs ...string) bool {
+	return s.processOnTurnCompleteWithCause(ctx, task, session, turnCompletionCauseAgentTurn, operationIDs...)
 }
 
 func (s *Service) processOnTurnCompleteWithCause(
@@ -107,6 +107,7 @@ func (s *Service) processOnTurnCompleteWithCause(
 	task *models.Task,
 	session *models.TaskSession,
 	cause turnCompletionCause,
+	operationIDs ...string,
 ) bool {
 	if s.shouldSkipLegacyTurnCompletion(task, session, cause) {
 		return false
@@ -119,8 +120,27 @@ func (s *Service) processOnTurnCompleteWithCause(
 		return false
 	}
 
-	// Process side-effect actions first, then find the first transition action
-	transitionAction := s.processTurnCompleteActions(ctx, session, currentStep)
+	operationID := ""
+	if len(operationIDs) > 0 {
+		operationID = operationIDs[0]
+	}
+	if operationID == "" {
+		operationID = s.activeWorkflowTurnOccurrenceID(ctx, sessionID)
+	}
+	if operationID == "" {
+		operationID = workflowTransitionOccurrenceID(taskID, sessionID, currentStep.ID, "", "turn-complete")
+	}
+
+	// Process side-effect actions first, then find the first transition action.
+	// Script callbacks run during evaluation, before the legacy transition
+	// commit below, and therefore share the same source-turn occurrence.
+	transitionAction, err := s.processTurnCompleteActionsWithOperation(ctx, taskID, operationID, session, currentStep)
+	if err != nil {
+		s.logger.Warn("workflow turn completion blocked by script",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+		return false
+	}
 
 	// If no transition action found, just apply side effects and wait
 	if transitionAction == nil {
@@ -134,7 +154,7 @@ func (s *Service) processOnTurnCompleteWithCause(
 	if cause == turnCompletionCauseUserCancellation {
 		ctx = cancellationTransitionAttribution(ctx)
 	}
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
+	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true, operationID)
 	return true
 }
 
@@ -326,7 +346,8 @@ func (s *Service) processOnTurnStart(ctx context.Context, task *models.Task, ses
 
 	// Execute the step transition WITHOUT triggering on_enter auto-start
 	// (user is about to send a message, the prompt will come from them)
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, false)
+	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, false,
+		s.activeWorkflowTurnOccurrenceID(ctx, sessionID))
 	return true
 }
 
@@ -377,7 +398,7 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 // executeStepTransition moves a task/session from one step to another.
 // If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
-func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
+func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool, occurrenceIDs ...string) {
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
@@ -388,22 +409,84 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
-	// Get the task to update its workflow step
+	// Exit scripts are source-session work and a transition gate. Run them
+	// after the destination has been selected, but before the task admission
+	// can make the move visible.
+	occurrenceID := s.stepTransitionOccurrenceID(ctx, taskID, sessionID, fromStep, toStepID, occurrenceIDs)
+	exitSession, ok := s.runStepTransitionExit(ctx, taskID, sessionID, fromStep, targetStep, occurrenceID)
+	if !ok {
+		return
+	}
+
+	task, ok := s.admitStepTransition(ctx, taskID, sessionID, fromStep, targetStep, toStepID, triggerOnEnter)
+	if !ok {
+		return
+	}
+
+	s.finishStepTransition(ctx, taskID, sessionID, fromStep, targetStep, task, exitSession, occurrenceID, triggerOnEnter)
+}
+
+func (s *Service) stepTransitionOccurrenceID(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep *wfmodels.WorkflowStep,
+	toStepID string,
+	occurrenceIDs []string,
+) string {
+	if len(occurrenceIDs) > 0 && occurrenceIDs[0] != "" {
+		return occurrenceIDs[0]
+	}
+	if occurrenceID := s.activeWorkflowTurnOccurrenceID(ctx, sessionID); occurrenceID != "" {
+		return occurrenceID
+	}
+	return workflowTransitionOccurrenceID(taskID, sessionID, fromStep.ID, toStepID, "legacy")
+}
+
+func (s *Service) runStepTransitionExit(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	occurrenceID string,
+) (*models.TaskSession, bool) {
+	exitSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for on_exit",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return nil, false
+	}
+	if err := s.processOnExit(ctx, taskID, exitSession, fromStep, occurrenceID); err != nil {
+		s.logger.Warn("workflow transition blocked by on_exit script",
+			zap.String("task_id", taskID),
+			zap.String("from_step", fromStep.Name),
+			zap.String("to_step", targetStep.Name),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, exitSession)
+		return nil, false
+	}
+	return exitSession, true
+}
+
+func (s *Service) admitStepTransition(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	toStepID string,
+	triggerOnEnter bool,
+) (*models.Task, bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to get task for workflow transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
+		return nil, false
 	}
 	// Atomically admit the target step before exit side effects. A full target
 	// is represented as a durable destination queue entry instead of a failed
 	// transition.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
-	// executeStepTransition's two callers are always a genuine session turn:
-	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
 	legacyTrigger := engine.TriggerOnTurnStart
 	if triggerOnEnter {
 		legacyTrigger = engine.TriggerOnTurnComplete
@@ -416,19 +499,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
+		return nil, false
 	}
 	queued := task.QueuedForStepID != ""
-
-	// Process on_exit only after the transition is durably admitted. Freshly
-	// load the session since the caller may not have it (legacy path).
-	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
-	if exitErr != nil {
-		s.logger.Warn("failed to load session for on_exit",
-			zap.String("session_id", sessionID), zap.Error(exitErr))
-	} else {
-		s.processOnExit(ctx, taskID, exitSession, fromStep)
-	}
 
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
@@ -436,55 +509,60 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if !queued {
 		s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 	}
-
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("from_step", fromStep.Name),
 		zap.String("to_step", targetStep.Name),
 		zap.Bool("trigger_on_enter", triggerOnEnter))
-
 	if s.workflowStore != nil {
 		s.workflowStore.pullNextTaskOnVacate(ctx, fromStep.ID, taskID)
 	}
 	if queued {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return nil, false
+	}
+	return task, true
+}
+
+func (s *Service) finishStepTransition(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	task *models.Task,
+	exitSession *models.TaskSession,
+	occurrenceID string,
+	triggerOnEnter bool,
+) {
+	if triggerOnEnter {
+		s.finishAutomatedStepTransition(ctx, taskID, sessionID, fromStep, targetStep, task, exitSession, occurrenceID)
 		return
 	}
+	s.finishTurnStartStepTransition(ctx, taskID, sessionID, fromStep, targetStep)
+}
 
-	// ADR 0015 — record the audit row before the pending signal (if any)
-	// is cleared below. Only the triggerOnEnter=true (legacy
-	// on_turn_complete) branch could have consumed a signal; the
-	// on_turn_start branch records with no signal metadata.
+func (s *Service) finishAutomatedStepTransition(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	task *models.Task,
+	exitSession *models.TaskSession,
+	occurrenceID string,
+) {
+	// Record the audit row before the pending signal is cleared.
 	var consumedSignal *models.PendingStepCompletionSignal
-	if triggerOnEnter && exitSession != nil {
+	if exitSession != nil {
 		if signal, has := models.LoadPendingStepSignal(exitSession.Metadata); has && signal.StepID == fromStep.ID {
 			consumedSignal = &signal
 		}
 	}
-	trigger := wfmodels.StepTransitionTriggerTurnStart
-	if triggerOnEnter {
-		trigger = wfmodels.StepTransitionTriggerAutoComplete
-	}
-	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
-
-	if triggerOnEnter {
-		// ADR 0015 — clear any pending completion-signal bag for the
-		// step we just left. Only on_turn_complete transitions trigger
-		// gating, so the triggerOnEnter=true branch is the only one
-		// that could have consumed a signal; on_turn_start moves leave
-		// the bag alone (it's still tied to an unsignaled step we have
-		// not left). The session struct isn't used after this point,
-		// so skip the extra GetTaskSession round-trip and write
-		// straight to the DB by session_id.
-		s.clearPendingStepSignalByID(ctx, sessionID)
-		// Automated transitions always clear review: the agent just completed
-		// a turn, so any pending review from a prior step is stale regardless
-		// of whether the new step has auto_start_agent. Match the engine path's
-		// asynchronous on_enter dispatch: terminal-event handlers own the
-		// session cancel guard through this transition, and inline auto-start
-		// would re-enter that non-reentrant guard from PromptTask.
-		go s.finalizeStepEnter(
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, targetStep.ID, consumedSignal, wfmodels.StepTransitionTriggerAutoComplete)
+	s.clearPendingStepSignalByID(ctx, sessionID)
+	// Automated transitions always clear review: the agent just completed a
+	// turn, so any pending review from a prior step is stale regardless of
+	// whether the new step has auto_start_agent.
+	go func() {
+		if err := s.finalizeStepEnter(
 			context.WithoutCancel(ctx),
 			taskID,
 			sessionID,
@@ -492,24 +570,37 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			task.Description,
 			true,
 			fromStep,
-		)
-	} else {
-		// on_turn_start transitions: user is about to send a message, no on_enter needed.
-		// However, we still need to switch the agent profile if the target step requires
-		// a different one — the user's prompt should go to the correct agent.
-		currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("failed to load session for profile switch",
-				zap.String("session_id", sessionID), zap.Error(err))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return
+			occurrenceID,
+		); err != nil {
+			s.logger.Warn("failed to finalize workflow step entry",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_id", targetStep.ID),
+				zap.Error(err))
 		}
-		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, currentSession, targetStep, fromStep)
-		if !ok {
-			return
-		}
-		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
+	}()
+}
+
+func (s *Service) finishTurnStartStepTransition(
+	ctx context.Context,
+	taskID, sessionID string,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+) {
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, targetStep.ID, nil, wfmodels.StepTransitionTriggerTurnStart)
+	// The user is about to send a message, so switch to the target profile
+	// before the prompt is delivered.
+	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for profile switch",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
 	}
+	effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, currentSession, targetStep, fromStep)
+	if !ok {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 }
 
 func (s *Service) updateTransitionTaskWithCapacity(
@@ -1899,6 +1990,7 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	if data.QueuedForStepID != "" && !data.WIPAdmitted {
 		go s.processQueuedMoveExit(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, data.FromStepID,
+			workflowMoveOccurrenceID(data, session.ID, "queued"),
 		)
 		return
 	}
@@ -1906,6 +1998,7 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 		go s.processManualMoveLifecycleWithFeederBarrier(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
 			data.FromStepID, data.ToStepID, data.TaskDescription,
+			workflowMoveOccurrenceID(data, session.ID, "moved"),
 		)
 		return
 	}
@@ -1913,6 +2006,7 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 		if err := s.processStepExitAndEnterWithSteps(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
 			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, queuePromotionToken,
+			workflowMoveOccurrenceID(data, session.ID, "moved"),
 		); err != nil {
 			s.logger.Warn("task.moved: step exit and enter lifecycle failed",
 				zap.String("task_id", data.TaskID),
@@ -1923,20 +2017,27 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	}()
 }
 
-func (s *Service) processStepExit(ctx context.Context, taskID string, session *models.TaskSession, fromStepID string) {
+func workflowMoveOccurrenceID(data watcher.TaskMovedEventData, sessionID, route string) string {
+	if data.WorkflowStepOccurrenceID != "" {
+		return data.WorkflowStepOccurrenceID
+	}
+	return workflowStepTransitionOccurrenceID(data.StepTransitionID, data.TaskID, sessionID, data.FromStepID, data.ToStepID, route)
+}
+
+func (s *Service) processStepExit(ctx context.Context, taskID string, session *models.TaskSession, fromStepID string, occurrenceIDs ...string) {
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, fromStepID, "queued move source")
 	if err != nil {
 		s.logger.Warn("failed to load from-step for queued move on_exit",
 			zap.String("step_id", fromStepID), zap.Error(err))
 		return
 	}
-	if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID); err != nil {
+	if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID, occurrenceIDs...); err != nil {
 		s.logger.Warn("failed to process queued move on_exit",
 			zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
 	}
 }
 
-func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, session *models.TaskSession, fromStep *wfmodels.WorkflowStep, fromStepID string) error {
+func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, session *models.TaskSession, fromStep *wfmodels.WorkflowStep, fromStepID string, occurrenceIDs ...string) error {
 	if fromStep == nil {
 		var err error
 		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "queued move source")
@@ -1944,8 +2045,11 @@ func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, se
 			return err
 		}
 	}
-	s.processOnExit(ctx, taskID, session, fromStep)
-	return nil
+	occurrenceID := workflowTransitionOccurrenceID(taskID, session.ID, fromStepID, "", "queued")
+	if len(occurrenceIDs) > 0 && occurrenceIDs[0] != "" {
+		occurrenceID = occurrenceIDs[0]
+	}
+	return s.processOnExit(ctx, taskID, session, fromStep, occurrenceID)
 }
 
 // ensureQueuedMoveExitDescriptor records the source step on the durable
@@ -2023,6 +2127,70 @@ func manualMoveLifecycleSourceStep(task *models.Task) string {
 	return ""
 }
 
+func manualMoveLifecycleExitCompleted(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	value, ok := task.Metadata[models.MetaKeyManualMoveLifecyclePending]
+	if !ok {
+		return false
+	}
+	descriptor, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	completed, _ := descriptor["exit_completed"].(bool)
+	return completed
+}
+
+func manualMoveLifecycleOccurrence(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	value, ok := task.Metadata[models.MetaKeyManualMoveLifecyclePending]
+	if !ok {
+		return ""
+	}
+	descriptor, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	occurrenceID, _ := descriptor["occurrence_id"].(string)
+	return occurrenceID
+}
+
+func queuedMoveExitDescriptorCompleted(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	value, ok := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !ok {
+		return false
+	}
+	descriptor, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	completed, _ := descriptor["exit_completed"].(bool)
+	return completed
+}
+
+func queuedMoveExitOccurrence(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	value, ok := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !ok {
+		return ""
+	}
+	descriptor, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	occurrenceID, _ := descriptor["occurrence_id"].(string)
+	return occurrenceID
+}
+
 // processQueuedMoveExit runs the source-step side effect exactly once per
 // task. The in-memory lock serializes duplicate event deliveries, while the
 // pending/completed metadata pair makes the ordering recoverable after a
@@ -2033,6 +2201,7 @@ func (s *Service) processQueuedMoveExit(
 	session *models.TaskSession,
 	fromStep *wfmodels.WorkflowStep,
 	fromStepID string,
+	occurrenceIDs ...string,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2051,13 +2220,18 @@ func (s *Service) processQueuedMoveExit(
 		// marker for a newer queued move on the same task.
 		return
 	}
-	if s.onQueuedMoveExitStart != nil {
-		s.onQueuedMoveExitStart()
-	}
-	if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID); err != nil {
-		s.logger.Warn("failed to process queued move on_exit",
-			zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
-		return
+	if !queuedMoveExitDescriptorCompleted(task) {
+		if s.onQueuedMoveExitStart != nil {
+			s.onQueuedMoveExitStart()
+		}
+		if storedOccurrenceID := queuedMoveExitOccurrence(task); storedOccurrenceID != "" {
+			occurrenceIDs = []string{storedOccurrenceID}
+		}
+		if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID, occurrenceIDs...); err != nil {
+			s.logger.Warn("failed to process queued move on_exit",
+				zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
+			return
+		}
 	}
 	if !s.persistQueuedMoveExitCompletion(ctx, taskID) {
 		return
@@ -2169,6 +2343,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string,
+	occurrenceIDs ...string,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2188,13 +2363,32 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if s.onManualMoveLifecycleStart != nil {
 		s.onManualMoveLifecycleStart()
 	}
-	if err := s.processStepExitAndEnterWithSteps(
-		ctx, taskID, session, fromStep, targetStep,
-		fromStepID, toStepID, taskDescription, false, nil,
-	); err != nil {
+	occurrenceID := ""
+	if len(occurrenceIDs) > 0 {
+		occurrenceID = occurrenceIDs[0]
+	}
+	if storedOccurrenceID := manualMoveLifecycleOccurrence(task); storedOccurrenceID != "" {
+		occurrenceID = storedOccurrenceID
+	}
+	var lifecycleErr error
+	if manualMoveLifecycleExitCompleted(task) {
+		if targetStep == nil {
+			targetStep, lifecycleErr = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
+		}
+		if lifecycleErr == nil {
+			clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
+			lifecycleErr = s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep, occurrenceID)
+		}
+	} else {
+		lifecycleErr = s.processStepExitAndEnterWithSteps(
+			ctx, taskID, session, fromStep, targetStep,
+			fromStepID, toStepID, taskDescription, false, nil, occurrenceID,
+		)
+	}
+	if lifecycleErr != nil {
 		s.logger.Warn("manual move lifecycle stopped before completion",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
-			zap.String("to_step_id", toStepID), zap.Error(err))
+			zap.String("to_step_id", toStepID), zap.Error(lifecycleErr))
 		return
 	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
@@ -2218,9 +2412,9 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
 // sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
 // already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) error {
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, occurrenceIDs ...string) error {
 	// Process on_exit for the step we're leaving
-	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, nil); err != nil {
+	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, nil, occurrenceIDs...); err != nil {
 		s.logger.Warn("step exit and enter lifecycle failed",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
 			zap.String("to_step_id", toStepID), zap.Error(err))
@@ -2235,6 +2429,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string, queuePromotion bool, queuePromotionToken interface{},
+	occurrenceIDs ...string,
 ) error {
 	if fromStep == nil {
 		var err error
@@ -2246,8 +2441,6 @@ func (s *Service) processStepExitAndEnterWithSteps(
 			return err
 		}
 	}
-	s.processOnExit(ctx, taskID, session, fromStep)
-
 	if targetStep == nil {
 		var err error
 		targetStep, err = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
@@ -2258,9 +2451,19 @@ func (s *Service) processStepExitAndEnterWithSteps(
 			return err
 		}
 	}
+	occurrenceID := workflowTransitionOccurrenceID(taskID, session.ID, fromStepID, toStepID, "moved")
+	if len(occurrenceIDs) > 0 && occurrenceIDs[0] != "" {
+		occurrenceID = occurrenceIDs[0]
+	}
+	if err := s.processOnExit(ctx, taskID, session, fromStep, occurrenceID); err != nil {
+		if queuePromotion {
+			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved on_exit")
+		}
+		return err
+	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep); err != nil {
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep, occurrenceID); err != nil {
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved")
 		}
@@ -2272,7 +2475,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep) error {
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep, occurrenceIDs ...string) error {
 	if clearReview {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
@@ -2298,7 +2501,7 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// path" and skip with a log rather than executing — see
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, sourceStep)
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, sourceStep, occurrenceIDs...)
 	return nil
 }
 
@@ -2890,7 +3093,75 @@ type onEnterDispatchResult struct {
 	aborted      bool
 }
 
-func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) onEnterDispatchResult {
+func (s *Service) dispatchOnEnterRunScript(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	action wfmodels.OnEnterAction,
+	position int,
+	entryID int64,
+	occurrenceIDs ...string,
+) bool {
+	compiled, ok := engine.CompileOnEnterAction(action)
+	if !ok || compiled.RunScript == nil || s.workflowScripts == nil {
+		return false
+	}
+	occurrenceID := ""
+	if len(occurrenceIDs) > 0 {
+		occurrenceID = occurrenceIDs[0]
+	}
+	if occurrenceID == "" && entryID > 0 {
+		occurrenceID = strconv.FormatInt(entryID, 10)
+	}
+	if occurrenceID == "" {
+		occurrenceID = fmt.Sprintf("legacy-entry:%s:%s:%s", taskID, step.ID, session.ID)
+	}
+	if err := s.workflowScripts.Execute(ctx, workflowScriptExecutionRequest{
+		TaskID: taskID, WorkflowID: step.WorkflowID, WorkflowStepID: step.ID,
+		WorkflowStepName: step.Name, Trigger: models.WorkflowScriptRunTriggerOnEnter,
+		ActionPosition: position, OccurrenceID: occurrenceID, SessionID: session.ID,
+		ExecutionID: s.workflowSessionExecutionID(ctx, session), Action: *compiled.RunScript,
+	}); err != nil {
+		s.logger.Warn("processOnEnter: workflow script blocked entry",
+			zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.Int("action_position", position), zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func (s *Service) dispatchOnEnterEngineOwned(
+	ctx context.Context,
+	taskID string,
+	step *wfmodels.WorkflowStep,
+	action wfmodels.OnEnterAction,
+	position int,
+	entryID int64,
+) bool {
+	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, entryID)
+	if abandon {
+		s.logger.Debug("processOnEnter: lost a live claim to a concurrent dispatch of this step entry, abandoning remaining on_enter actions",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.String("task_id", taskID),
+			zap.String("action_type", string(action.Type)),
+		)
+		return false
+	}
+	if failed && action.Type == wfmodels.OnEnterClearDecisions {
+		s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.String("task_id", taskID),
+			zap.String("cause", cause),
+		)
+		return false
+	}
+	return true
+}
+
+func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool, occurrenceIDs ...string) onEnterDispatchResult {
 	result := onEnterDispatchResult{}
 dispatchLoop:
 	for i, action := range step.Events.OnEnter {
@@ -2909,25 +3180,13 @@ dispatchLoop:
 		case wfmodels.OnEnterResetAgentContext, wfmodels.OnEnterConfigureSession:
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
-		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
-			abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
-			if abandon {
-				s.logger.Debug("processOnEnter: lost a live claim to a concurrent dispatch of this step entry, abandoning remaining on_enter actions",
-					zap.String("workflow_id", step.WorkflowID),
-					zap.String("step_id", step.ID),
-					zap.String("task_id", taskID),
-					zap.String("action_type", string(action.Type)),
-				)
+		case wfmodels.OnEnterRunScript:
+			if !s.dispatchOnEnterRunScript(ctx, taskID, session, step, action, i, entryID, occurrenceIDs...) {
 				result.aborted = true
 				break dispatchLoop
 			}
-			if failed && action.Type == wfmodels.OnEnterClearDecisions {
-				s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
-					zap.String("workflow_id", step.WorkflowID),
-					zap.String("step_id", step.ID),
-					zap.String("task_id", taskID),
-					zap.String("cause", cause),
-				)
+		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
+			if !s.dispatchOnEnterEngineOwned(ctx, taskID, step, action, i, entryID) {
 				result.aborted = true
 				break dispatchLoop
 			}
@@ -2960,7 +3219,7 @@ dispatchLoop:
 // non-zero entryID lets the engine-owned on_enter cases below dispatch;
 // this is this Build round's E1-only scope boundary, not a general
 // precondition of the marker CAS mechanism itself.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64, sourceStep *wfmodels.WorkflowStep) {
+func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64, sourceStep *wfmodels.WorkflowStep, occurrenceIDs ...string) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 
@@ -3020,8 +3279,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// auto-start prompt is dispatched. It never switches or creates a tab.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
 
-	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode)
+	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode, occurrenceIDs...)
 	if dispatchResult.aborted {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		return
 	}
 
@@ -3529,7 +3790,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	if stored, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && stored != nil && stored.QueuedForStepID == move.WorkflowStepID && !stored.WIPAdmitted {
 		// The destination is visible and queued, but its entry lifecycle is
 		// deferred until promotion. The source exit still runs once now.
-		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
+		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID, move.MoveID)
 		return
 	}
 
@@ -3543,7 +3804,15 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// for the same session. The DB transition is already persisted above, so
 	// it's safe to defer the rest.
 	taskDescription := task.Description
-	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+	go func() {
+		if err := s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription, move.MoveID); err != nil {
+			s.logger.Warn("failed to apply pending move lifecycle",
+				zap.String("task_id", taskID),
+				zap.String("from_step_id", fromStepID),
+				zap.String("to_step_id", move.WorkflowStepID),
+				zap.Error(err))
+		}
+	}()
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
@@ -4885,15 +5154,23 @@ func (s *Service) resolveSessionMCPSupport(ctx context.Context, session *models.
 // processOnExit processes the on_exit events for a step when leaving it.
 // This is called before transitioning to the next step. Only side-effect actions
 // are supported (no transitions — those are decided by on_turn_complete).
-func (s *Service) processOnExit(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep) {
-	if len(step.Events.OnExit) == 0 {
-		return
+func (s *Service) processOnExit(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, occurrenceIDs ...string) error {
+	if session == nil || step == nil || len(step.Events.OnExit) == 0 {
+		return nil
 	}
 
 	// Skip plan mode management for passthrough sessions — the CLI manages its own state.
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, session.ID)
+	occurrenceID := ""
+	if len(occurrenceIDs) > 0 {
+		occurrenceID = occurrenceIDs[0]
+	}
+	if occurrenceID == "" {
+		occurrenceID = fmt.Sprintf("legacy-exit:%s:%s:%s", taskID, step.ID, session.ID)
+	}
+	executionID := s.workflowSessionExecutionID(ctx, session)
 
-	for _, action := range step.Events.OnExit {
+	for position, action := range step.Events.OnExit {
 		if action.Type == wfmodels.OnExitDisablePlanMode && !isPassthrough {
 			s.clearSessionPlanMode(ctx, session)
 			s.logger.Debug("on_exit: disabled plan mode",
@@ -4901,7 +5178,26 @@ func (s *Service) processOnExit(ctx context.Context, taskID string, session *mod
 				zap.String("session_id", session.ID),
 				zap.String("step_name", step.Name))
 		}
+		if action.Type != wfmodels.OnExitRunScript {
+			continue
+		}
+		if s.workflowScripts == nil {
+			return fmt.Errorf("on_exit workflow script at position %d cannot run: workflow script runner is unavailable", position)
+		}
+		script, err := wfmodels.ParseWorkflowScriptAction(action.Config)
+		if err != nil {
+			return fmt.Errorf("parse on_exit workflow script at position %d: %w", position, err)
+		}
+		if err := s.workflowScripts.Execute(ctx, workflowScriptExecutionRequest{
+			TaskID: taskID, WorkflowID: step.WorkflowID, WorkflowStepID: step.ID,
+			WorkflowStepName: step.Name, Trigger: models.WorkflowScriptRunTriggerOnExit,
+			ActionPosition: position, OccurrenceID: occurrenceID, SessionID: session.ID,
+			ExecutionID: executionID, Action: script,
+		}); err != nil {
+			return fmt.Errorf("execute on_exit workflow script at position %d: %w", position, err)
+		}
 	}
+	return nil
 }
 
 // clearSessionPlanMode clears plan mode from session metadata.
@@ -4982,12 +5278,46 @@ func (s *Service) applyStepSessionMode(ctx context.Context, session *models.Task
 // processTurnCompleteActions processes on_turn_complete actions for a step:
 // it executes side-effect actions and returns the first eligible transition action.
 func (s *Service) processTurnCompleteActions(ctx context.Context, session *models.TaskSession, step *wfmodels.WorkflowStep) *wfmodels.OnTurnCompleteAction {
+	transitionAction, _ := s.processTurnCompleteActionsWithOperation(ctx, "", "", session, step)
+	return transitionAction
+}
+
+// processTurnCompleteActionsWithOperation is the legacy evaluator's
+// result-bearing counterpart. It preserves the declared action order while
+// giving workflow scripts the same source-turn occurrence used by the engine
+// path.
+func (s *Service) processTurnCompleteActionsWithOperation(
+	ctx context.Context,
+	taskID, operationID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+) (*wfmodels.OnTurnCompleteAction, error) {
 	var transitionAction *wfmodels.OnTurnCompleteAction
 	for i := range step.Events.OnTurnComplete {
 		action := &step.Events.OnTurnComplete[i]
 		switch action.Type {
 		case wfmodels.OnTurnCompleteDisablePlanMode:
 			s.clearSessionPlanMode(ctx, session)
+		case wfmodels.OnTurnCompleteRunScript:
+			if s.workflowScripts == nil {
+				return nil, fmt.Errorf("on_turn_complete workflow script at position %d cannot run: workflow script runner is unavailable", i)
+			}
+			script, err := wfmodels.ParseWorkflowScriptAction(action.Config)
+			if err != nil {
+				return nil, fmt.Errorf("parse on_turn_complete workflow script at position %d: %w", i, err)
+			}
+			occurrence := operationID
+			if occurrence == "" {
+				occurrence = workflowTransitionOccurrenceID(taskID, session.ID, step.ID, "", "turn-complete")
+			}
+			if err := s.workflowScripts.Execute(ctx, workflowScriptExecutionRequest{
+				TaskID: taskID, WorkflowID: step.WorkflowID, WorkflowStepID: step.ID,
+				WorkflowStepName: step.Name, Trigger: models.WorkflowScriptRunTriggerOnTurnComplete,
+				ActionPosition: i, OccurrenceID: occurrence, SessionID: session.ID,
+				ExecutionID: s.workflowSessionExecutionID(ctx, session), Action: script,
+			}); err != nil {
+				return nil, fmt.Errorf("execute on_turn_complete workflow script at position %d: %w", i, err)
+			}
 		case wfmodels.OnTurnCompleteMoveToNext, wfmodels.OnTurnCompleteMoveToPrevious, wfmodels.OnTurnCompleteMoveToStep:
 			if engine.ConfigRequiresApproval(action.Config) {
 				continue
@@ -4997,7 +5327,7 @@ func (s *Service) processTurnCompleteActions(ctx context.Context, session *model
 			}
 		}
 	}
-	return transitionAction
+	return transitionAction, nil
 }
 
 // publishSessionWaitingEvent publishes a session state change event for WAITING_FOR_INPUT.
@@ -5120,7 +5450,50 @@ func (s *Service) resolveTurnStartTargetStep(ctx context.Context, currentStep *w
 // avoiding redundant DB reads in the workflow engine.
 func (s *Service) buildMachineState(ctx context.Context, task *models.Task, session *models.TaskSession) engine.MachineState {
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, session.ID)
-	return assembleMachineState(task, session, isPassthrough)
+	state := assembleMachineState(task, session, isPassthrough)
+	state.ExecutionID = s.workflowSessionExecutionID(ctx, session)
+	return state
+}
+
+// workflowSessionExecutionID resolves the current runtime execution for a
+// session. The lifecycle manager is authoritative after the session
+// execution-id columns were removed from task_sessions; the model field is a
+// compatibility fallback for focused callers that still provide it directly.
+func (s *Service) workflowSessionExecutionID(ctx context.Context, session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	if s.agentManager != nil {
+		if executionID, err := s.agentManager.GetExecutionIDForSession(ctx, session.ID); err == nil && executionID != "" {
+			return executionID
+		}
+	}
+	return session.AgentExecutionID
+}
+
+func (s *Service) activeWorkflowTurnOccurrenceID(ctx context.Context, sessionID string) string {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to resolve active turn for workflow occurrence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return ""
+	}
+	return turnID
+}
+
+// workflowTransitionOccurrenceID gives legacy and event-driven transition
+// paths one stable identity for ordered source-session exit actions. Engine
+// paths pass their own operation ID when one exists; this helper covers
+// routes that receive only the durable task-move coordinates.
+func workflowTransitionOccurrenceID(taskID, sessionID, fromStepID, toStepID, route string) string {
+	return fmt.Sprintf("workflow-transition:%s:%s:%s:%s:%s", route, taskID, sessionID, fromStepID, toStepID)
+}
+
+func workflowStepTransitionOccurrenceID(stepTransitionID int64, taskID, sessionID, fromStepID, toStepID, route string) string {
+	if stepTransitionID > 0 {
+		return fmt.Sprintf("workflow-step-transition:%s:%d", route, stepTransitionID)
+	}
+	return workflowTransitionOccurrenceID(taskID, sessionID, fromStepID, toStepID, route)
 }
 
 // assembleMachineState creates an engine.MachineState from pre-loaded models.
@@ -5143,6 +5516,7 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 		return state
 	}
 	state.SessionID = session.ID
+	state.ExecutionID = session.AgentExecutionID
 	state.SessionState = string(session.State)
 	if session.Metadata != nil {
 		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
@@ -5155,8 +5529,8 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 // processOnTurnCompleteViaEngine uses the workflow engine to evaluate on_turn_complete
 // actions and drive step transitions. Falls back to the legacy method when the engine
 // is not initialized. Returns true if a step transition occurred.
-func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
-	return s.processOnTurnCompleteViaEngineWithCause(ctx, taskID, session, turnCompletionCauseAgentTurn)
+func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID string, session *models.TaskSession, operationIDs ...string) bool {
+	return s.processOnTurnCompleteViaEngineWithCause(ctx, taskID, session, turnCompletionCauseAgentTurn, operationIDs...)
 }
 
 func (s *Service) processOnTurnCompleteViaEngineWithCause(
@@ -5164,6 +5538,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	taskID string,
 	session *models.TaskSession,
 	cause turnCompletionCause,
+	operationIDs ...string,
 ) bool {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -5180,7 +5555,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
+		return s.processOnTurnCompleteWithCause(ctx, task, session, cause, operationIDs...)
 	}
 
 	if !s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause) {
@@ -5188,10 +5563,18 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	}
 
 	state := s.buildMachineState(ctx, task, session)
+	operationID := ""
+	if len(operationIDs) > 0 {
+		operationID = operationIDs[0]
+	}
+	if operationID == "" {
+		operationID = s.activeWorkflowTurnOccurrenceID(ctx, session.ID)
+	}
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:         taskID,
 		SessionID:      session.ID,
 		Trigger:        engine.TriggerOnTurnComplete,
+		OperationID:    operationID,
 		EvaluateOnly:   true,
 		PreloadedState: &state,
 	})
@@ -5585,7 +5968,20 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		return false
 	}
 	if sessionLifecycle {
-		s.processOnExit(ctx, taskID, session, fromStep)
+		exitOccurrenceID := result.OperationID
+		if exitOccurrenceID == "" {
+			exitOccurrenceID = workflowTransitionOccurrenceID(taskID, session.ID, result.FromStepID, result.ToStepID, "engine")
+		}
+		if err := s.processOnExit(ctx, taskID, session, fromStep, exitOccurrenceID); err != nil {
+			s.logger.Warn("workflow transition blocked by on_exit script",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("from_step_id", result.FromStepID),
+				zap.String("to_step_id", result.ToStepID),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
 	}
 
 	// A ResultHolder is only attached when this transition will actually
@@ -5769,10 +6165,12 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 	}
 
 	state := s.buildMachineState(ctx, task, session)
+	operationID := s.activeWorkflowTurnOccurrenceID(ctx, session.ID)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:         taskID,
 		SessionID:      session.ID,
 		Trigger:        engine.TriggerOnTurnStart,
+		OperationID:    operationID,
 		EvaluateOnly:   true,
 		PreloadedState: &state,
 	})

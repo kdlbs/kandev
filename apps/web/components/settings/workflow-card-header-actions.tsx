@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
-import { handleExportWorkflow } from "./workflow-card-actions";
+import { handleExportWorkflow } from "./workflow-card-export-actions";
 
 type WorkflowCardHeaderActionsProps = {
   workflowId: string;
