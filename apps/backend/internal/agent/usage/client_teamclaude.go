@@ -21,11 +21,18 @@ type TeamClaudeUsageClient struct {
 }
 
 // NewTeamClaudeUsageClient creates a client for a validated TeamClaude status
-// URL. The backend adapter limits automatic discovery to loopback URLs.
+// URL. The backend adapter limits automatic discovery to loopback URLs; the
+// client refuses to follow a redirect away from that destination, since
+// nothing revalidates a redirect target against the same loopback rule.
 func NewTeamClaudeUsageClient(statusURL string) *TeamClaudeUsageClient {
 	return &TeamClaudeUsageClient{
-		statusURL:  statusURL,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		statusURL: statusURL,
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 

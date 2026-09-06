@@ -62,3 +62,24 @@ func TestTeamClaudeFetchUsageRejectsNonStatusPayload(t *testing.T) {
 		t.Fatal("FetchUsage succeeded for a non-TeamClaude payload")
 	}
 }
+
+// TestTeamClaudeFetchUsageDoesNotFollowRedirect pins that discovery's
+// loopback-only guarantee holds for the response as well as the request: the
+// validated URL is loopback, but nothing revalidates a redirect target, so the
+// client must treat a 3xx as a failure rather than follow it wherever it
+// points.
+func TestTeamClaudeFetchUsageDoesNotFollowRedirect(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"accounts":[{"status":"active","quota":{"unified5h":0.5}}]}`))
+	}))
+	defer target.Close()
+
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirecting.Close()
+
+	if _, err := NewTeamClaudeUsageClient(redirecting.URL).FetchUsage(context.Background()); err == nil {
+		t.Fatal("FetchUsage followed a redirect instead of failing on the 3xx response")
+	}
+}

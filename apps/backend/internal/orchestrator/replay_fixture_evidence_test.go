@@ -118,29 +118,47 @@ func TestReplayFixtureEvidenceLayer(t *testing.T) {
 }
 
 // TestReplayFixtureEvidenceLayerIsReplayIdempotent pins the design's
-// determinism claim: replaying the same fixture twice in the same process
-// produces the same fence verdict, because beginPromptAttempt stores a fresh
-// evidence record under the fixture's session id, replacing any record left
-// behind by an earlier run.
+// determinism claim: beginPromptAttempt stores a fresh evidence record under
+// the session id, replacing rather than merging with any record left behind
+// by an earlier attempt. A same-fixture-twice replay alone can't falsify this
+// (the same frames applied to a stale-but-identical record converge on the
+// same values regardless), so each round first plants a record under a
+// different execution id and generation — evidence a genuinely earlier,
+// unrelated attempt would leave — and asserts the fixture's own replay still
+// reaches its declared verdict rather than inheriting the contamination.
 func TestReplayFixtureEvidenceLayerIsReplayIdempotent(t *testing.T) {
 	fixtures := replayfixtures.MustLoad()
-	fx := fixtures[0]
+	var fx replayfixtures.Fixture
+	found := false
+	for _, candidate := range fixtures {
+		if candidate.Case == replayfixtures.CaseMatched && candidate.Classifying && candidate.Expect.PreResultSafe {
+			fx = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no classifying matched fixture with preResultSafe=true in the corpus")
+	}
 
-	var first, second bool
-	{
-		var service Service
-		data, _ := replayEvidenceLayer(&service, fx)
-		first = service.promptAttemptPreResultSafe(data)
+	var service Service
+	contaminate := func(executionID string, generation uint64) {
+		service.beginPromptAttempt(fx.Identity.SessionID, executionID, generation, false)
+		service.observeProviderDiagnostic(fx.Identity.SessionID, executionID, generation, gatewayServerFailureSample)
 	}
-	{
-		var service Service
-		data, _ := replayEvidenceLayer(&service, fx)
-		second = service.promptAttemptPreResultSafe(data)
-	}
+
+	contaminate("stale-execution-1", 111)
+	data, _ := replayEvidenceLayer(&service, fx)
+	first := service.promptAttemptPreResultSafe(data)
+
+	contaminate("stale-execution-2", 222)
+	data, _ = replayEvidenceLayer(&service, fx)
+	second := service.promptAttemptPreResultSafe(data)
+
 	if first != second {
 		t.Fatalf("replay was not idempotent: first=%v second=%v", first, second)
 	}
 	if first != fx.Expect.PreResultSafe {
-		t.Fatalf("preResultSafe = %v, want %v", first, fx.Expect.PreResultSafe)
+		t.Fatalf("preResultSafe = %v, want %v (a stale record under the session id leaked through beginPromptAttempt instead of being replaced)", first, fx.Expect.PreResultSafe)
 	}
 }

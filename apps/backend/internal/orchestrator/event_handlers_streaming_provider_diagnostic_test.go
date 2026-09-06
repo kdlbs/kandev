@@ -89,13 +89,15 @@ func TestHandleAgentStreamEvent_MessageStreamingTracksMarkedProviderDiagnosticFo
 
 // TestHandleAgentStreamEvent_MessageStreamingMarkedDiagnosticDoesNotAdvanceTurnProgress
 // pins AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.21's "shall not advance turn
-// progress" clause at the message_streaming dispatch site. A marked chunk
+// progress" clause at the message_streaming dispatch site, and its "shall stay
+// visible in the transcript" clause in the same breath: a marked chunk
 // arriving while the session has yielded to background work has the exact
-// same shape as a genuine foreground resumption (non-empty text) but must not
-// flip the session back to generating or publish the operator-facing
-// activity signal.
+// same shape as a genuine foreground resumption (non-empty text), so an
+// early-return implementation that suppresses turn progress by skipping the
+// transcript write too would leave this test's activity assertions green
+// while silently dropping the diagnostic the operator is meant to see.
 func TestHandleAgentStreamEvent_MessageStreamingMarkedDiagnosticDoesNotAdvanceTurnProgress(t *testing.T) {
-	svc, _ := newTransientTestService(t)
+	svc, mc := newTransientTestService(t)
 	eb := &recordingEventBus{}
 	svc.eventBus = eb
 
@@ -123,5 +125,11 @@ func TestHandleAgentStreamEvent_MessageStreamingMarkedDiagnosticDoesNotAdvanceTu
 	}
 	if got := svc.foregroundActivityValue("s1"); got != v1.ForegroundActivityBackground {
 		t.Fatalf("marked provider-diagnostic chunk flipped the session out of background-idle, got %q", got)
+	}
+	if mc.agentStreamWrites != 1 {
+		t.Fatalf("marked provider-diagnostic chunk must still reach the transcript, got %d writes", mc.agentStreamWrites)
+	}
+	if len(mc.agentStreamTexts) != 1 || mc.agentStreamTexts[0] != gatewayServerFailureSample {
+		t.Fatalf("transcript write = %v, want [%q]", mc.agentStreamTexts, gatewayServerFailureSample)
 	}
 }

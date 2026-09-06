@@ -160,10 +160,12 @@ func TestValidateFixtureAllowsPublicDocumentationURLInProvenance(t *testing.T) {
 // the same ground by other means.
 func TestValidateFixtureRejectsAbsolutePathRegardlessOfPrecedingPunctuation(t *testing.T) {
 	cases := map[string]string{
-		"key-value form":  "env dump: path=/Users/alice/.ssh/id_rsa",
-		"file URI form":   "resolved to file:///Users/alice/.config/kandev/token",
-		"bracketed form":  "error[path:/home/bob/.aws/credentials]",
-		"paren form, var": "wrote to(/var/secrets/kandev/token)",
+		"key-value form":         "env dump: path=/Users/alice/.ssh/id_rsa",
+		"file URI form":          "resolved to file:///Users/alice/.config/kandev/token",
+		"bracketed form":         "error[path:/home/bob/.aws/credentials]",
+		"paren form, var":        "wrote to(/var/secrets/kandev/token)",
+		"nested path, macOS tmp": "captured tmp path /private/var/folders/zz/T/tmp.abc123/out.log",
+		"nested path, opt var":   "config found at /opt/var/lib/foo/state.json",
 	}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {

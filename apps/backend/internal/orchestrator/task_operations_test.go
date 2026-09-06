@@ -4629,6 +4629,7 @@ type mockMessageCreator struct {
 	agentMessages          []mockAgentMessage
 	agentMessageWrites     int
 	agentStreamWrites      int
+	agentStreamTexts       []string
 	thinkingWrites         int
 	toolCallWrites         int
 	toolUpdateWrites       int
@@ -4732,13 +4733,15 @@ func (m *mockMessageCreator) GetPermissionResolutionAudit(ctx context.Context, t
 	return nil, nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessageStreaming(_ context.Context, _, _, content, _, _ string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
-func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+func (m *mockMessageCreator) AppendAgentMessage(_ context.Context, _, content string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
