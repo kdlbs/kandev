@@ -113,7 +113,11 @@ test.describe("Mobile clarification multiline answer", () => {
     });
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
       await heldResponse;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
     });
 
     try {
@@ -385,7 +389,11 @@ test.describe("Mobile clarification multiline answer", () => {
     });
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
       await heldResponse;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
     });
 
     const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
