@@ -69,6 +69,53 @@ func TestCredentialStateRotateIsIdempotentUnderRetryWithSupersededCredential(t *
 	}
 }
 
+// TestCredentialStateRotateConcurrentCallersConvergeOnOneRotation pins
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.4/002.10 under genuine concurrency, not
+// just sequential retry: two backends racing AttemptAdoptControlServer
+// against the same agentctl both present the recorded server's current
+// credential to Rotate at effectively the same time. The mutex serializes
+// them, so exactly one becomes the real rotation and the other -- now
+// presenting what has become the superseded credential -- takes the
+// idempotent-retry branch and converges on the identical (rotationID,
+// replacement) pair rather than either erroring, allocating a second
+// rotation, or corrupting the shared state. Neither racer is left believing
+// it owns a distinct credential from the other.
+func TestCredentialStateRotateConcurrentCallersConvergeOnOneRotation(t *testing.T) {
+	c := newCredentialState("initial-token")
+
+	type result struct {
+		id          int64
+		replacement string
+		err         error
+	}
+	results := make(chan result, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			id, replacement, err := c.Rotate("initial-token")
+			results <- result{id: id, replacement: replacement, err: err}
+		}()
+	}
+	close(start)
+
+	first := <-results
+	second := <-results
+
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent Rotate errors = %v, %v, want both nil", first.err, second.err)
+	}
+	if first.id != 1 || second.id != 1 {
+		t.Fatalf("rotation ids = %d, %d, want both 1 (no second rotation allocated)", first.id, second.id)
+	}
+	if first.replacement == "" || first.replacement != second.replacement {
+		t.Fatalf("replacements = %q, %q, want both equal and non-empty", first.replacement, second.replacement)
+	}
+	if got := c.Latest(); got != first.replacement {
+		t.Fatalf("Latest() = %q, want the converged replacement %q", got, first.replacement)
+	}
+}
+
 // TestCredentialStateAcceptsAdoptionOnlyForSupersededUntilConfirmed pins
 // AC-002.7: the superseded credential authenticates adoption-only
 // operations until confirmed, and the replacement authenticates everything
