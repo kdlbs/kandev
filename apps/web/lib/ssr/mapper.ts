@@ -105,7 +105,6 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primaryAgentProfileId: task.primary_agent_profile_id ?? undefined,
         primaryAgentName: task.primary_agent_name ?? undefined,
         labels: parseLabels(task.labels),
-        origin: task.origin,
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,

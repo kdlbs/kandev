@@ -97,6 +97,7 @@ func TestFromTaskWithSessionInfoSerializesExecutorProfileID(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	if got.PrimaryExecutorProfileID == nil || *got.PrimaryExecutorProfileID != profileID {

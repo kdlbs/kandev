@@ -110,7 +110,6 @@ export function toSheetItem(
     workflowStepId: task.workflowStepId,
     workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
     workspaceId: facts.workspaceId,
-    priority: task.priority,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
     workflowStepColor: facts.workflowStepColor,

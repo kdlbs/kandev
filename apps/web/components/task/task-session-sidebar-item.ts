@@ -149,7 +149,6 @@ export function buildSidebarItem(
     workflowStepId: task.workflowStepId as string | undefined,
     workflowStepTitle: workflowStepTitle(task, context.stepTitleById),
     workspaceId: facts.workspaceId,
-    priority: task.priority,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
     workflowStepColor: facts.workflowStepColor,
