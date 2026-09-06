@@ -84,6 +84,44 @@ func TestEvaluateOnlyOperationMarkingCallSitesArePinned(t *testing.T) {
 	}
 }
 
+// TestFunctionPairsEvaluateOnlyWithOperationID_UnrelatedHandleInputType pins
+// the false-positive fix: a HandleInput composite literal from a package
+// other than internal/workflow/engine must not register as a call site this
+// spec governs, even though it pairs the same two field names.
+func TestFunctionPairsEvaluateOnlyWithOperationID_UnrelatedHandleInputType(t *testing.T) {
+	const src = `package other
+
+import unrelated "some/other/package"
+
+func Call() {
+	unrelated.HandleInput{EvaluateOnly: true, OperationID: "x"}
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "unrelated.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	engineAlias := engineImportAlias(file)
+	isEnginePackage := file.Name != nil && file.Name.Name == "engine"
+
+	var fn *ast.FuncDecl
+	ast.Inspect(file, func(n ast.Node) bool {
+		if decl, ok := n.(*ast.FuncDecl); ok {
+			fn = decl
+			return false
+		}
+		return true
+	})
+	if fn == nil || fn.Body == nil {
+		t.Fatalf("fixture did not parse a function body")
+	}
+
+	if functionPairsEvaluateOnlyWithOperationID(fn.Body, engineAlias, isEnginePackage) {
+		t.Fatalf("unrelated package's HandleInput{EvaluateOnly, OperationID} literal must not match")
+	}
+}
+
 func findEvaluateOnlyOperationMarkingSites(root string) (map[string]bool, error) {
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -120,12 +158,14 @@ func findEvaluateOnlyOperationMarkingSites(root string) (map[string]bool, error)
 		if relErr != nil {
 			return nil, relErr
 		}
+		engineAlias := engineImportAlias(file)
+		isEnginePackage := file.Name != nil && file.Name.Name == "engine"
 		ast.Inspect(file, func(n ast.Node) bool {
 			fn, ok := n.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				return true
 			}
-			if functionPairsEvaluateOnlyWithOperationID(fn.Body) {
+			if functionPairsEvaluateOnlyWithOperationID(fn.Body, engineAlias, isEnginePackage) {
 				found[agentErrorFuncIdentity(fn, relDir)] = true
 			}
 			return true
@@ -134,19 +174,39 @@ func findEvaluateOnlyOperationMarkingSites(root string) (map[string]bool, error)
 	return found, nil
 }
 
+// engineImportAlias returns the local qualifier a file uses to refer to
+// internal/workflow/engine ("" if the file does not import it), resolving a
+// renamed import instead of assuming the package name "engine".
+func engineImportAlias(file *ast.File) string {
+	const enginePath = "github.com/kandev/kandev/internal/workflow/engine"
+	for _, imp := range file.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || path != enginePath {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		return "engine"
+	}
+	return ""
+}
+
 // functionPairsEvaluateOnlyWithOperationID reports whether body contains a
-// HandleInput composite literal — either engine-qualified (external callers)
-// or bare (a call site inside package engine itself; spec.md's detection
-// predicate names both forms) — with both an EvaluateOnly: true key and an
-// OperationID key whose value is not the empty-string literal.
-func functionPairsEvaluateOnlyWithOperationID(body *ast.BlockStmt) bool {
+// HandleInput composite literal resolved to internal/workflow/engine — either
+// qualified via engineAlias (external callers) or bare when the file itself
+// is package engine (isEnginePackage; spec.md's detection predicate names
+// both forms) — with both an EvaluateOnly: true key and an OperationID key
+// whose value is not the empty-string literal. A HandleInput literal from an
+// unrelated package is not a match.
+func functionPairsEvaluateOnlyWithOperationID(body *ast.BlockStmt, engineAlias string, isEnginePackage bool) bool {
 	pairs := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
 		if !ok {
 			return true
 		}
-		if !isHandleInputLitType(lit.Type) {
+		if !isHandleInputLitType(lit.Type, engineAlias, isEnginePackage) {
 			return true
 		}
 		hasEvaluateOnlyTrue := false
@@ -179,16 +239,20 @@ func functionPairsEvaluateOnlyWithOperationID(body *ast.BlockStmt) bool {
 	return pairs
 }
 
-// isHandleInputLitType reports whether t names the HandleInput type, either
-// package-qualified (engine.HandleInput, the shape every external caller
-// uses) or bare (HandleInput, the shape a call site inside package engine
-// itself would use).
-func isHandleInputLitType(t ast.Expr) bool {
+// isHandleInputLitType reports whether t names internal/workflow/engine's
+// HandleInput type, either package-qualified (engineAlias.HandleInput, the
+// shape every external caller uses — engineAlias resolves the file's actual
+// import qualifier, empty if the file does not import the engine package at
+// all) or bare (HandleInput, accepted only when the literal's own file is
+// package engine itself). A same-named HandleInput type from an unrelated
+// package matches neither branch.
+func isHandleInputLitType(t ast.Expr, engineAlias string, isEnginePackage bool) bool {
 	switch typ := t.(type) {
 	case *ast.SelectorExpr:
-		return typ.Sel.Name == "HandleInput"
+		ident, ok := typ.X.(*ast.Ident)
+		return ok && engineAlias != "" && ident.Name == engineAlias && typ.Sel.Name == "HandleInput"
 	case *ast.Ident:
-		return typ.Name == "HandleInput"
+		return isEnginePackage && typ.Name == "HandleInput"
 	default:
 		return false
 	}
