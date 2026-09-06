@@ -957,10 +957,10 @@ func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 	require.Contains(t, mock.getWSActions(), "agent.prompt")
 }
 
-// TestManager_ResetAgentContext_ReappliesSessionModel is the regression test
-// for an ACP fast-path reset replacing the task's selected model with the
-// provider default from the freshly-created session.
-func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
+// TestManager_ResetAgentContext_FailsWhenSessionModelCannotBeRestored ensures
+// a fresh ACP session never continues on its provider default after losing a
+// persisted model selection.
+func TestManager_ResetAgentContext_FailsWhenSessionModelCannotBeRestored(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
@@ -994,7 +994,9 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 	exec.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})
 	require.NoError(t, mgr.executionStore.Add(exec))
 
-	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+	err := mgr.ResetAgentContext(ctx, exec.ID)
+	require.ErrorContains(t, err, `requested model "mock-smart" is unavailable (reason: catalog_empty)`)
+	require.Equal(t, v1.AgentStatusFailed, exec.Status)
 
 	actions := mock.getWSActions()
 	resetIndex := slices.Index(actions, "agent.session.reset")
@@ -1003,7 +1005,7 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 	require.Equal(t, -1, modelIndex,
 		"an empty fresh-session model catalog must not receive a model-selection request")
 	require.Empty(t, mock.getSetModelIDs(),
-		"reset must continue on the fresh-session provider default when no model is advertised")
+		"reset must not send a speculative model-selection request")
 }
 
 func TestManager_ResetAgentContext_UsesSynchronousSessionModelCatalog(t *testing.T) {

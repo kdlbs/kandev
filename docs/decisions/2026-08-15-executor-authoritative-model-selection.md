@@ -1,6 +1,6 @@
 # ADR-2026-08-15: Let the Executor Own Model Selection
 
-**Status:** accepted
+**Status:** superseded by 2026-09-06-exact-profile-model-identity
 **Date:** 2026-08-15
 **Area:** backend, frontend, protocol, persistence
 

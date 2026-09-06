@@ -112,9 +112,10 @@ Kandev must keep the task operational and explain the effective model.**
 - **Gone model**: a model ID that is configured (profile start model, active
   session model, fallback model) but absent from the currently advertised
   list. Deterministic on the frontend: `configured ∉ advertised`.
-- **Default-on-mismatch mode**: profile has `auto_fallback = false` and no
-  `fallback_model`. If the executor omits the start model, Kandev skips model
-  selection and the agent uses its default. Kandev persists a warning.
+- **Exact mode**: profile has a non-empty model, `auto_fallback = false`, and
+  no `fallback_model`. If the executor cannot advertise and apply the start
+  model, Kandev fails the session before inference with sanitized mismatch
+  evidence.
 - **Fallback-model mode**: profile has `auto_fallback = false` and a
   non-empty `fallback_model`. The only permitted automatic switch is to
   that single model when the executor advertises it. Otherwise, the agent uses
@@ -132,12 +133,12 @@ Kandev must keep the task operational and explain the effective model.**
 Per agent profile, one of three modes (precedence: `auto_fallback` wins
 over `fallback_model`):
 
-| Scenario | Default-on-mismatch | Fallback-model | Auto-fallback |
+| Scenario | Exact mode | Fallback-model | Auto-fallback |
 |---|---|---|---|
-| Session start, start model not advertised | Do not call `SetModel`. Continue on the agent default and persist a warning. | If the fallback is advertised, apply it and persist a warning. Otherwise, use the agent default and persist a warning. | Do not call `SetModel`. Continue on the agent default and persist a warning. |
+| Session start, start model not advertised | Do not call `SetModel`. Fail before inference. | If the fallback is advertised, apply it and persist a warning. Otherwise fail before inference. | Do not call `SetModel`. Continue on the agent default and persist a warning. |
 | Session start, advertised start model fails to apply | Fail explicitly. | Fail explicitly. | Continue on the agent default and persist a warning. |
-| Session start, model selection unsupported | Continue on the agent default and persist a warning. | Same | Same |
-| Mid-session model/auth failure (office run, post-start) | Unchanged ADR behavior: office re-dispatches via the workspace routing chain (`routingerr.Decide(ContextOffice)`; availability codes → `DecisionFallback`). The profile's model policy does **not** gate office fallback — the workspace routing configuration is the office authorization owner. | Same as default-on-mismatch: `fallback_model` is a session-start policy, not an office routing input. | Legacy: re-dispatch to next candidate in the provider order (unchanged). |
+| Session start, model selection unsupported | Fail before inference. | Fail before inference. | Continue on the agent default and persist a warning. |
+| Mid-session model/auth failure (office run, post-start) | Unchanged ADR behavior: office re-dispatches via the workspace routing chain (`routingerr.Decide(ContextOffice)`; availability codes → `DecisionFallback`). The profile's model policy does **not** gate office fallback — the workspace routing configuration is the office authorization owner. | Same as exact mode: `fallback_model` is a session-start policy, not an office routing input. | Legacy: re-dispatch to next candidate in the provider order (unchanged). |
 | Boot reconciliation | Never overwrite a gone start model (keep it; UI shows it red). Same for a gone `fallback_model`. | Same | Same (reconciler is mode-independent). |
 | New-task / new-agent profile picker | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. |
 | Model picker (profile editor, session toolbar) | Gone models greyed out, unselectable, visible. | Same. | Same. |
@@ -146,7 +147,8 @@ over `fallback_model`):
 (JSON-RPC `-32601`, `sessionmodel.MethodNone` / `IsMethodNotFound`) do not stop
 the launch. The agent uses its default and Kandev persists a warning.
 
-The executor ACP catalog is authoritative for launch.
+The executor ACP catalog is authoritative for launch. Exact-profile model
+identity is enforced by [ADR-2026-09-06](../../../decisions/2026-09-06-exact-profile-model-identity.md).
 The host probe remains an editing hint and does not block profile selection.
 
 ## Unique model-variation resolution
@@ -318,7 +320,8 @@ The policy applies this order:
 
 1. If the start model is advertised, call `SetModel(start_model)`.
 2. If the start model is absent and the explicit fallback is advertised, call `SetModel(fallback_model)`.
-3. Otherwise, do not call `SetModel` and continue with the agent default.
+3. Otherwise, exact and explicit-fallback profiles fail before inference. Only
+   `auto_fallback` profiles continue with the agent default.
 
 An empty advertised list follows step 3.
 It does not authorize a speculative `SetModel` request.
@@ -329,8 +332,9 @@ Transport and protocol errors remain explicit.
 If `auto_fallback` is enabled, an apply error remains best-effort.
 The launch continues with the agent default and persists a warning.
 
-If `sessionmodel.IsMethodNotFound(err)` is true, continue with the agent default.
-Persist a warning because the profile requested a model that Kandev could not apply.
+If `sessionmodel.IsMethodNotFound(err)` is true, exact and explicit-fallback
+profiles fail before inference. `auto_fallback` continues with the agent
+default and persists a warning.
 
 The start-model policy owns every model-selection attempt.
 Later profile or configuration layers must not repeat a handled attempt.

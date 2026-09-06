@@ -14,6 +14,19 @@ export async function createMismatchedProfile(
   const { agents } = await apiClient.listAgents();
   const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
   if (!agent) throw new Error("The E2E fixture must provide a mock agent");
+  return apiClient.createAgentProfile(agent.id, name, {
+    model: UNADVERTISED_MODEL,
+    auto_fallback: true,
+  });
+}
+
+export async function createStrictMismatchedProfile(
+  apiClient: ApiClient,
+  name: string,
+): Promise<AgentProfile> {
+  const { agents } = await apiClient.listAgents();
+  const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+  if (!agent) throw new Error("The E2E fixture must provide a mock agent");
   return apiClient.createAgentProfile(agent.id, name, { model: UNADVERTISED_MODEL });
 }
 
