@@ -1143,6 +1143,10 @@ func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, 
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
+func (w *orchestratorWrapper) AgentHasHandoffPermission(ctx context.Context, agentProfileID string) (bool, error) {
+	return w.svc.AgentHasHandoffPermission(ctx, agentProfileID)
+}
+
 // subagentContextAdapter adapts the task service to the
 // orchestrator.SubagentContextRecorder interface.
 type subagentContextAdapter struct {

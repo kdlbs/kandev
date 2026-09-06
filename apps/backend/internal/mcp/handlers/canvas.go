@@ -11,6 +11,11 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// jsonNullLiteral is the trimmed-whitespace form of a JSON `null` value,
+// shared by every handler that must distinguish an absent field from one
+// explicitly set to null.
+const jsonNullLiteral = "null"
+
 // CanvasAgentContext is derived from the stream that carried the MCP call.
 // None of these fields are accepted from a canvas tool payload.
 type CanvasAgentContext struct {
@@ -235,7 +240,7 @@ func (h *Handlers) canvasRequestContext(ctx context.Context, msg *ws.Message) (m
 
 func canvasPayloadFields(msg *ws.Message) (map[string]json.RawMessage, *ws.Message, error) {
 	fields := make(map[string]json.RawMessage)
-	if len(msg.Payload) == 0 || string(msg.Payload) == "null" {
+	if len(msg.Payload) == 0 || string(msg.Payload) == jsonNullLiteral {
 		return fields, nil, nil
 	}
 	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
@@ -282,7 +287,7 @@ func optionalCanvasString(fields map[string]json.RawMessage, name string) (strin
 
 func optionalCanvasRevision(fields map[string]json.RawMessage) (*int64, error) {
 	raw, ok := fields["expected_revision"]
-	if !ok || string(raw) == "null" {
+	if !ok || string(raw) == jsonNullLiteral {
 		return nil, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))

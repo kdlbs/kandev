@@ -71,6 +71,7 @@ const mcpToolNameSuffix = "_kandev"
 // doesn't flag the literals as repeated string occurrences.
 const (
 	mcpKeyTaskID           = "task_id"
+	mcpKeySessionID        = "session_id"
 	mcpKeyRepositoryID     = "repository_id"
 	mcpKeyTaskRepositoryID = "task_repository_id"
 	mcpKeyRepositoryURL    = "repository_url"
@@ -1095,6 +1096,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
 		{name: "office-decisions", enabled: office, register: func(s *Server) { s.registerRecordStepDecisionTool() }},
+		{name: "office-handoff", enabled: andProfilePredicates(office, capabilityEnabled(mcpprofile.CapabilityHandoffTask)), register: func(s *Server) { s.registerHandoffTaskTool() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()
 			s.registerAddWorkspaceSourcesTool()

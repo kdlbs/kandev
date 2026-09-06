@@ -427,6 +427,7 @@ const (
 	ActionMCPListRepositories           = "mcp.list_repositories"
 	ActionMCPListTasks                  = "mcp.list_tasks"
 	ActionMCPCreateTask                 = "mcp.create_task"
+	ActionMCPHandoffTask                = "mcp.handoff_task"
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"

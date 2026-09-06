@@ -47,6 +47,10 @@ type OrchestratorService interface {
 	// SteerTask delivers a prompt into a still-generating turn. It returns a typed
 	// steer sentinel when the message must be queued/blocked instead.
 	SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+	// AgentHasHandoffPermission reports whether the agent profile has the
+	// can_handoff_tasks permission, used to decide whether the first-turn
+	// Office prompt advertises handoff_task_kandev (AC-3).
+	AgentHasHandoffPermission(ctx context.Context, agentProfileID string) (bool, error)
 }
 
 type taskTitleSessionClaimer interface {
@@ -159,8 +163,18 @@ func (h *MessageHandlers) injectMessageContext(
 		content, h.taskPullRequestTargets(ctx, task),
 	)
 	if task.IsFromOffice {
+		includeHandoff := false
+		if h.orchestrator != nil {
+			granted, err := h.orchestrator.AgentHasHandoffPermission(ctx, sessionResp.Session.AgentProfileID)
+			if err != nil {
+				h.logger.Warn("resolve handoff permission for office prompt failed",
+					zap.String("task_id", req.TaskID), zap.Error(err))
+			} else {
+				includeHandoff = granted
+			}
+		}
 		return sysprompt.InjectOfficeContextWithOptions(
-			req.TaskID, req.TaskSessionID, content, requiresSignal,
+			req.TaskID, req.TaskSessionID, content, requiresSignal, includeHandoff,
 			referenceContext, trustedPromptContext, pullRequestTargetContext,
 		)
 	}

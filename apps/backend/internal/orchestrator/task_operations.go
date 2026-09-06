@@ -783,9 +783,15 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
+		includeHandoff, handoffErr := s.executor.AgentHasHandoffPermission(ctx, session.AgentProfileID)
+		if handoffErr != nil {
+			s.logger.Warn("resolve handoff permission for office prompt failed",
+				zap.String("task_id", taskID), zap.Error(handoffErr))
+			includeHandoff = false
+		}
 		return sysprompt.InjectOfficeContextWithOptions(
 			taskID, sessionID, prompt,
-			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID), includeHandoff,
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
 	default:
@@ -1007,9 +1013,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	ctx = withWorkflowMetaCache(ctx)
 	// Fail before task-state or session mutations when the selected logical
 	// profile belongs to a disabled dynamic family. The workflow step may later
-	// override the caller profile, so repeat the check after that resolution.
+	// override the caller profile, so repeat the check after that resolution —
+	// unless opts.ProfileExplicit says the caller's profile must be used
+	// exactly as supplied, in which case the step's pin is never consulted
+	// and must not gate this preflight either.
 	if s.profileExecutionResolver != nil {
-		preflightProfileID := s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		preflightProfileID := agentProfileID
+		if !opts.ProfileExplicit {
+			preflightProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		}
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, preflightProfileID); err != nil {
 			return nil, err
 		}
@@ -1251,6 +1263,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			includeTaskTitleTool:      !configMode && titleOwner,
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
+			agentProfileID:            launchSession.AgentProfileID,
 			spawnOrigin:               opts.SpawnOrigin,
 		})
 	}
@@ -1342,6 +1355,7 @@ type launchPromptContext struct {
 	includeParentQuestionTool bool
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
+	agentProfileID            string
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -1368,9 +1382,15 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
+		includeHandoff, handoffErr := s.executor.AgentHasHandoffPermission(ctx, p.agentProfileID)
+		if handoffErr != nil {
+			s.logger.Warn("resolve handoff permission for office prompt failed",
+				zap.String("task_id", p.taskID), zap.Error(handoffErr))
+			includeHandoff = false
+		}
 		return sysprompt.InjectOfficeContextWithOptions(
 			p.taskID, p.sessionID, prompt,
-			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			s.StepRequiresCompletionSignal(ctx, p.taskID), includeHandoff,
 			p.referenceContext, spawnContext, pullRequestTargetContext,
 		)
 	}

@@ -174,6 +174,10 @@ func (*firstTurnCaptureOrchestrator) SteerTask(
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (*firstTurnCaptureOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAndDispatch(t *testing.T) {
 	now := time.Now().UTC()
 	reference := v1.EntityReference{
@@ -597,6 +601,10 @@ func (*switchingTurnStartOrchestrator) SteerTask(
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (*switchingTurnStartOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
 }
@@ -863,6 +871,10 @@ func (fgActivityOrchestrator) SteerTask(
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (fgActivityOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (o *recordingAdmissionOrchestrator) PromptTask(_ context.Context, _ string, sessionID string, _ string, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
 	o.prompted <- sessionID
 	return &orchestrator.PromptResult{}, nil
@@ -894,6 +906,10 @@ func (*recordingAdmissionOrchestrator) SteerTask(
 	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
 ) (*orchestrator.PromptResult, error) {
 	return &orchestrator.PromptResult{}, nil
+}
+
+func (*recordingAdmissionOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 // steerRecordingOrchestrator advertises a generating, steer-eligible RUNNING
@@ -946,6 +962,10 @@ func (o *steerRecordingOrchestrator) SteerTask(
 		return nil, o.steerErr
 	}
 	return &orchestrator.PromptResult{}, nil
+}
+
+func (*steerRecordingOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func (o *steerRecordingOrchestrator) PromptTask(

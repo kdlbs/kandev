@@ -3949,12 +3949,18 @@ func (s *Service) autoStartStepPrompt(
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
+			includeHandoff, handoffErr := s.executor.AgentHasHandoffPermission(ctx, session.AgentProfileID)
+			if handoffErr != nil {
+				s.logger.Warn("resolve handoff permission for office prompt failed",
+					zap.String("task_id", taskID), zap.Error(handoffErr))
+				includeHandoff = false
+			}
 			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(
-				taskID, sessionID, recordedPrompt, requiresSignal,
+				taskID, sessionID, recordedPrompt, requiresSignal, includeHandoff,
 				referenceContext, pullRequestTargetContext,
 			)
 			dispatchPrompt = sysprompt.InjectOfficeContextWithOptions(
-				taskID, sessionID, dispatchPrompt, requiresSignal,
+				taskID, sessionID, dispatchPrompt, requiresSignal, includeHandoff,
 				referenceContext, pullRequestTargetContext,
 			)
 		} else {

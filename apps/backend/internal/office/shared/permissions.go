@@ -13,7 +13,10 @@ const (
 	PermCanCreateProjects  = "can_create_projects"
 	PermCanApprove         = "can_approve"
 	PermCanManageOwnSkills = "can_manage_own_skills"
-	PermMaxSubtaskDepth    = "max_subtask_depth"
+	// PermCanHandoffTasks grants handoff_task_kandev: creating a delivery
+	// task in a different workspace. Default true only for the ceo role.
+	PermCanHandoffTasks = "can_handoff_tasks"
+	PermMaxSubtaskDepth = "max_subtask_depth"
 )
 
 // ErrForbidden is returned when an agent lacks the required permission.
@@ -28,6 +31,7 @@ func AllPermissionKeys() []string {
 		PermCanCreateProjects,
 		PermCanApprove,
 		PermCanManageOwnSkills,
+		PermCanHandoffTasks,
 		PermMaxSubtaskDepth,
 	}
 }
@@ -50,6 +54,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  true,
 			PermCanApprove:         true,
 			PermCanManageOwnSkills: true,
+			PermCanHandoffTasks:    true,
 			PermMaxSubtaskDepth:    3,
 		}
 	case AgentRoleAssistant:
@@ -60,6 +65,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	case AgentRoleWorker:
@@ -70,6 +76,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: false,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	case AgentRoleSecurity:
@@ -80,6 +87,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         true,
 			PermCanManageOwnSkills: true,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	case AgentRoleQA:
@@ -90,6 +98,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	case AgentRoleDevOps:
@@ -100,6 +109,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	default: // specialist and any unknown roles
@@ -110,6 +120,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: false,
+			PermCanHandoffTasks:    false,
 			PermMaxSubtaskDepth:    1,
 		}
 	}
