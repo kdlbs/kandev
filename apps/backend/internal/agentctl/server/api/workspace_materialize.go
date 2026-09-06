@@ -285,10 +285,13 @@ func regularGitHeadRef(headPath string) (string, error) {
 		return "", err
 	}
 	value := strings.TrimSpace(string(content))
-	if !strings.HasPrefix(value, "ref:") {
+	if strings.HasPrefix(value, "ref:") && !strings.HasPrefix(value, "ref: ") {
+		return "", errors.New("invalid HEAD ref")
+	}
+	if !strings.HasPrefix(value, "ref: ") {
 		return "", nil
 	}
-	ref := strings.TrimSpace(strings.TrimPrefix(value, "ref:"))
+	ref := strings.TrimSpace(strings.TrimPrefix(value, "ref: "))
 	if !worktree.ValidBranchRef(ref) {
 		return "", errors.New("invalid HEAD ref")
 	}
