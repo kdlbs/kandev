@@ -136,6 +136,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 ### Design
+- [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)
 - [Descriptive select options](system-design/descriptive-select-options.md)
@@ -165,6 +166,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [Sidebar task row](system-design/sidebar-task-row-presentation.md)
+- [PR walkthrough](system-design/pr-walkthrough.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
