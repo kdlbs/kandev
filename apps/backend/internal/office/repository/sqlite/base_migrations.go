@@ -44,6 +44,68 @@ func (r *Repository) runMigrations() {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateLaunchSafetyColumns()
+}
+
+// migrateLaunchSafetyColumns adds the nine causation/priority/actor/
+// workspace columns to runs (docs/specs/office/requirements/
+// run-causation-chain.md, launch-backpressure.md) for databases created
+// before this capability, plus the two new tables it introduces. Every
+// ALTER is NOT NULL with a default so existing rows converge in place: an
+// empty causation_id is the legacy marker AC-OFFICE-RUN-CAUSATION-001.6
+// reads as "its own root at depth 0", and the fresh-install CREATE TABLE
+// in base.go carries the identical column set inline.
+func (r *Repository) migrateLaunchSafetyColumns() {
+	r.migrate.Apply("runs.causation_id",
+		`ALTER TABLE runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("runs.parent_run_id",
+		`ALTER TABLE runs ADD COLUMN parent_run_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("runs.causation_depth",
+		`ALTER TABLE runs ADD COLUMN causation_depth INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("runs.priority_class",
+		`ALTER TABLE runs ADD COLUMN priority_class INTEGER NOT NULL DEFAULT 2`)
+	r.migrate.Apply("runs.human_rooted",
+		`ALTER TABLE runs ADD COLUMN human_rooted INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("runs.routine_id",
+		`ALTER TABLE runs ADD COLUMN routine_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("runs.actor_kind",
+		`ALTER TABLE runs ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'system'`)
+	r.migrate.Apply("runs.actor_id",
+		`ALTER TABLE runs ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("runs.workspace_id",
+		`ALTER TABLE runs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`)
+
+	// Indexes reference the new columns, so they run after the ADD
+	// COLUMN statements above rather than in schema init.
+	r.migrate.Apply("idx_run_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_run_causation_id ON runs(causation_id)`)
+	r.migrate.Apply("idx_run_claim_order",
+		`CREATE INDEX IF NOT EXISTS idx_run_claim_order ON runs(status, priority_class, requested_at, id)`)
+	r.migrate.Apply("idx_run_self_trigger_window",
+		`CREATE INDEX IF NOT EXISTS idx_run_self_trigger_window ON runs(agent_profile_id, reason, actor_id, requested_at)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_launch_ledger (
+		id           TEXT      PRIMARY KEY,
+		run_id       TEXT      NOT NULL,
+		workspace_id TEXT      NOT NULL,
+		causation_id TEXT      NOT NULL DEFAULT '',
+		routine_id   TEXT      NOT NULL DEFAULT '',
+		human_rooted INTEGER   NOT NULL DEFAULT 0,
+		claimed_at   TIMESTAMP NOT NULL
+	)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_launch_ledger_ws_time ON office_launch_ledger(workspace_id, claimed_at)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_launch_ledger_routine_time ON office_launch_ledger(routine_id, claimed_at)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_gate_failure_state (
+		workspace_id         TEXT      NOT NULL,
+		gate                 TEXT      NOT NULL,
+		consecutive_failures INTEGER   NOT NULL DEFAULT 0,
+		last_escalation_at   TIMESTAMP,
+		updated_at           TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, gate)
+	)`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

@@ -381,10 +381,27 @@ func (r *Repository) createRunTables() error {
 		continuation_scope TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
-		finished_at TIMESTAMP
+		finished_at TIMESTAMP,
+		-- Causation chain identity, priority class, actor and workspace
+		-- (docs/specs/office/requirements/run-causation-chain.md,
+		-- launch-backpressure.md). Kept byte-identical to
+		-- migrateLaunchSafetyColumns's ADD COLUMN set so a fresh database
+		-- and a migrated one converge on the same shape.
+		causation_id TEXT NOT NULL DEFAULT '',
+		parent_run_id TEXT NOT NULL DEFAULT '',
+		causation_depth INTEGER NOT NULL DEFAULT 0,
+		priority_class INTEGER NOT NULL DEFAULT 2,
+		human_rooted INTEGER NOT NULL DEFAULT 0,
+		routine_id TEXT NOT NULL DEFAULT '',
+		actor_kind TEXT NOT NULL DEFAULT 'system',
+		actor_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+	CREATE INDEX IF NOT EXISTS idx_run_causation_id ON runs(causation_id);
+	CREATE INDEX IF NOT EXISTS idx_run_claim_order ON runs(status, priority_class, requested_at, id);
+	CREATE INDEX IF NOT EXISTS idx_run_self_trigger_window ON runs(agent_profile_id, reason, actor_id, requested_at);
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,

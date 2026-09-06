@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -17,6 +18,28 @@ import (
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
+
+// testWorkspaceID is the workspace stamped on every agent profile seeded by
+// seedAgentProfile, so causation resolution can resolve a workspace for
+// every agent id these tests use without each test declaring its own.
+const testWorkspaceID = "ws-test"
+
+// seedAgentProfile inserts a minimal agent_profiles row so
+// resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
+// succeeds for hand-picked test agent ids that were never created through
+// the office agent CRUD API.
+func seedAgentProfile(t *testing.T, db *sqlx.DB, id string) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := db.Exec(`
+		INSERT INTO agent_profiles (
+			id, agent_id, name, agent_display_name, created_at, updated_at, workspace_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, id, "test-agent", id, id, now, now, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("seed agent profile %s: %v", id, err)
+	}
+}
 
 // newTestService spins up an in-memory SQLite, builds the office repo
 // (which creates the runs / run_events tables under the new names),
@@ -37,11 +60,24 @@ func newTestServiceWithRepo(t *testing.T) (
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
 
 	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
+	}
+
+	// Every agent_profile_id literal used across this file's tests, seeded
+	// once here so causation resolution's workspace lookup succeeds.
+	for _, id := range []string{
+		"a1", "agent-primary", "mentioned-agent", "payload-agent",
+	} {
+		seedAgentProfile(t, db, id)
 	}
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
@@ -710,11 +746,16 @@ func TestQueueRun_ResolverPathPickedOverPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
 	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	seedAgentProfile(t, db, "resolved-agent")
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	eb := bus.NewMemoryEventBus(log)
 

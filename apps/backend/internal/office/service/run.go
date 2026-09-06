@@ -74,16 +74,30 @@ const CoalesceWindowSeconds = 5
 // IdempotencyWindowHours is the deduplication window.
 const IdempotencyWindowHours = 24
 
-// QueueRun enqueues a run request for an agent instance.
+// QueueRun enqueues a run request for an agent instance, attributed to
+// the system actor. It exists for the RunQueuer/RunSpawner shared
+// interfaces and their existing callers/mocks, which predate the actor
+// contract (AC-OFFICE-RUN-CAUSATION-001.15) and are out of scope to
+// widen here. New call sites that know their actor should call
+// QueueRunWithActor directly instead.
+func (s *Service) QueueRun(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey string,
+) error {
+	return s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+}
+
+// QueueRunWithActor enqueues a run request for an agent instance.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
 //
 // When a runs service is wired (via SetRunsService) the insert +
 // publish + scheduler signal are delegated to it so the engine and
 // office paths share one queue implementation. The agent status guard
 // stays here because it depends on office-specific tables.
-func (s *Service) QueueRun(
+func (s *Service) QueueRunWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
 ) error {
 	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
 		return err
@@ -94,6 +108,8 @@ func (s *Service) QueueRun(
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        payloadWithAgent(payload, agentInstanceID),
+			ActorKind:      actorKind,
+			ActorID:        actorID,
 		})
 		return err
 	}

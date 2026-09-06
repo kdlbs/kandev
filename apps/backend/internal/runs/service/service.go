@@ -89,6 +89,32 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+
+	// ActorKind and ActorID declare who caused this enqueue
+	// (AC-OFFICE-RUN-CAUSATION-001.15). ActorKind is treated as required:
+	// an empty, invalid, or unrecognized value — or ActorKindAgent with an
+	// empty ActorID — resolves to ActorKindSystem and increments
+	// office_launch_actor_missing_total, per AC-OFFICE-RUN-CAUSATION-001.16.
+	// It never resolves to ActorKindUser, so a rule keyed on a human actor
+	// fails toward the restrictive answer.
+	ActorKind models.ActorKind
+	ActorID   string
+
+	// CausingRunID is the run this enqueue happened inside, empty for a
+	// root cause. When set but unreadable, the enqueue is refused
+	// (AC-OFFICE-RUN-CAUSATION-001.21) rather than rooted.
+	CausingRunID string
+	// RoutineID is the routine this enqueue is chargeable to, empty for
+	// none (AC-OFFICE-RUN-CAUSATION-001.14). Must only be set by a
+	// trusted internal caller (a routine fire, or the task-boundary
+	// carrier) — never accepted verbatim from agent-supplied input.
+	RoutineID string
+	// CarrierHumanRooted carries the human-rooted flag across a task
+	// boundary without requiring a read of the creating run
+	// (AC-OFFICE-RUN-CAUSATION-001.13). Nil when the caller has no carrier
+	// to report (a direct CausingRunID enqueue derives human-rooted from
+	// that run instead).
+	CarrierHumanRooted *bool
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -137,6 +163,51 @@ type Service struct {
 	log      *logger.Logger
 	resolver AgentResolver
 	signalCh chan struct{}
+
+	// maxCausationDepth and selfTriggerAllowance back
+	// REQ-OFFICE-LAUNCH-SAFETY-003/004. Zero means "use the documented
+	// default", so a Service built via New without SetLaunchSafetyLimits
+	// still enforces the spec defaults rather than being unbounded.
+	maxCausationDepth    int
+	selfTriggerAllowance int
+}
+
+// DefaultMaxCausationDepth is the documented default for
+// AC-OFFICE-LAUNCH-SAFETY-003.1.
+const DefaultMaxCausationDepth = 8
+
+// DefaultSelfTriggerAllowance is the documented default for
+// AC-OFFICE-LAUNCH-SAFETY-004.3.
+const DefaultSelfTriggerAllowance = 3
+
+// SelfTriggerWindow is the rolling window AC-OFFICE-LAUNCH-SAFETY-004.3
+// counts against. Unlike the allowance, the window itself is not
+// configurable.
+const SelfTriggerWindow = 60 * time.Minute
+
+// SetLaunchSafetyLimits configures the causation-depth ceiling and the
+// self-trigger allowance. A value less than 1 is replaced by the
+// documented default, per AC-OFFICE-LAUNCH-SAFETY-003.1 / 004.3: a
+// configured 0 must not mean "unlimited" or "no self-triggering ever
+// allowed by accident of an unset override".
+func (s *Service) SetLaunchSafetyLimits(maxCausationDepth, selfTriggerAllowance int) {
+	s.maxCausationDepth = clampToDefault(maxCausationDepth, DefaultMaxCausationDepth)
+	s.selfTriggerAllowance = clampToDefault(selfTriggerAllowance, DefaultSelfTriggerAllowance)
+}
+
+func clampToDefault(value, def int) int {
+	if value < 1 {
+		return def
+	}
+	return value
+}
+
+func (s *Service) effectiveMaxCausationDepth() int {
+	return clampToDefault(s.maxCausationDepth, DefaultMaxCausationDepth)
+}
+
+func (s *Service) effectiveSelfTriggerAllowance() int {
+	return clampToDefault(s.selfTriggerAllowance, DefaultSelfTriggerAllowance)
 }
 
 // New constructs a Service. The signal channel is created here so
@@ -244,11 +315,18 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 	return QueueOutcomeQueued, nil
 }
 
-// insertRun creates the runs row and returns it. Pulled out of
-// QueueRun to keep the latter under the funlen budget.
+// insertRun resolves causation (actor, workspace, depth, self-trigger,
+// priority class) and creates the runs row, returning it. A refusal from
+// resolveCausation is returned unchanged: no row is inserted and no
+// idempotency key is consumed, per AC-OFFICE-LAUNCH-SAFETY-003.4.
 func (s *Service) insertRun(
 	ctx context.Context, agentInstanceID string, req QueueRunRequest, payload string,
 ) (*models.Run, error) {
+	causation, err := s.resolveCausation(ctx, agentInstanceID, req)
+	if err != nil {
+		return nil, err
+	}
+
 	var idemKeyPtr *string
 	if req.IdempotencyKey != "" {
 		k := req.IdempotencyKey
@@ -263,6 +341,21 @@ func (s *Service) insertRun(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		ParentRunID:    causation.ParentRunID,
+		CausationDepth: causation.CausationDepth,
+		PriorityClass:  causation.PriorityClass,
+		HumanRooted:    causation.HumanRooted,
+		RoutineID:      causation.RoutineID,
+		ActorKind:      causation.ActorKind,
+		ActorID:        causation.ActorID,
+		WorkspaceID:    causation.WorkspaceID,
+	}
+	if causation.CausationID != "" {
+		row.CausationID = causation.CausationID
+	} else {
+		// AC-OFFICE-RUN-CAUSATION-001.2: a root's causation id is its own
+		// run id. Known only now that the row's ID has been minted.
+		row.CausationID = row.ID
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
 		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
