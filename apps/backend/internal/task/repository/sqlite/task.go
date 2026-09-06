@@ -880,14 +880,17 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
 // step. A limited full target stores the task in that destination as queued;
-// it never rejects the move for WIP capacity.
+// it never rejects the move for WIP capacity. sourceStepID is the step the
+// task is leaving ("" when there is none, e.g. this task's first placement);
+// see updateTaskWithWorkflowStepAdmission for why it must be locked too.
 func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "", "", nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil)
 	return admitted, err
 }
 
@@ -904,6 +907,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 	admittedState *v1.TaskState,
@@ -911,7 +915,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil,
 	)
 	return admitted, err
 }
@@ -932,7 +936,9 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	targetStepID string,
 	limit int,
 ) (applied bool, err error) {
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID, "", nil)
+	// expectedStepID doubles as the source step to lock: it is, by
+	// construction, the step this task is expected to currently occupy.
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil)
 	return applied, err
 }
 
@@ -943,8 +949,10 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	limit int,
 	record messagequeue.PendingMoveRecord,
 ) (admitted, applied bool, err error) {
+	// expectedStepID doubles as the source step to lock: it is, by
+	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, targetStepID, limit, nil, false, expectedStepID, "", &record,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record,
 	)
 }
 
@@ -1163,6 +1171,7 @@ const (
 func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 	admittedState *v1.TaskState,
@@ -1177,8 +1186,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		task.Metadata = map[string]interface{}{}
 	}
 
+	// A cross-step move leaves sourceStepID as well as arriving into
+	// targetStepID, and REQ-TASKS-KANBAN-TASK-REORDERING-001.26 makes it
+	// conflict with a reorder of either — a reorder of sourceStepID that
+	// races this departure must see it (and report step_changed) rather than
+	// committing against stale membership. Both locks are acquired here,
+	// sorted, mirroring lockWorkflowStepsForAdmission's target+feeder pair.
 	var unlock func()
-	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
+	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID, sourceStepID)
 	defer unlock()
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -1209,6 +1224,9 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		if err := r.validateDeferredMoveGuardTx(ctx, tx, *deferredMove); err != nil {
 			return false, false, err
 		}
+	}
+	if err := r.lockWorkflowStepsForAdmission(ctx, tx, targetStepID, sourceStepID); err != nil {
+		return false, false, err
 	}
 
 	// AC-46/48 compare-and-swap precondition, only for CAS callers (see

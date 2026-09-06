@@ -45,13 +45,13 @@ export function mergeVisibleReorderIntoBand(
     return result;
   }
 
-  const prevVisibleId = visibleOrderAfterMove[draggedIndex - 1];
-  if (prevVisibleId !== undefined) {
-    const insertAt = withoutDragged.indexOf(prevVisibleId);
-    if (insertAt === -1) return fullBandOrder;
-    const result = [...withoutDragged];
-    result.splice(insertAt + 1, 0, draggedId);
-    return result;
+  // The dragged card is last among the currently visible members: per
+  // REQ-TASKS-KANBAN-TASK-REORDERING-001.34 it lands last in the whole band,
+  // not merely after its visible predecessor — a hidden member trailing that
+  // predecessor must not keep outranking a card the user moved to the bottom
+  // of what they can see.
+  if (visibleOrderAfterMove[draggedIndex - 1] !== undefined) {
+    return [...withoutDragged, draggedId];
   }
 
   // Only one visible member — a reorder should never have been offered

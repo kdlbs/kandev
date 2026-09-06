@@ -485,13 +485,14 @@ type workflowLimitedMoveRepository interface {
 }
 
 type workflowMoveAdmissionRepository interface {
-	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
+	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
 type workflowMoveAdmissionWithStateRepository interface {
 	UpdateTaskWithWorkflowStepAdmissionAndState(
 		ctx context.Context,
 		task *models.Task,
+		sourceStepID string,
 		targetStepID string,
 		limit int,
 		admittedState *v1.TaskState,
@@ -1028,7 +1029,7 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	if supported {
 		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -1112,7 +1113,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote feeder queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -1289,7 +1290,7 @@ func (s *Service) updateMovedTask(
 	if targetStep == nil || oldStepID == targetStep.ID {
 		return s.updateMovedTaskSameStep(ctx, task, opts)
 	}
-	return s.updateMovedTaskCrossStep(ctx, task, targetStep, admittedState, opts)
+	return s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts)
 }
 
 // updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
@@ -1327,6 +1328,7 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 func (s *Service) updateMovedTaskCrossStep(
 	ctx context.Context,
 	task *models.Task,
+	oldStepID string,
 	targetStep *wfmodels.WorkflowStep,
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
@@ -1341,7 +1343,7 @@ func (s *Service) updateMovedTaskCrossStep(
 	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
-			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
 		)
 	}
 	if expectedWorkflowID != "" {
@@ -1356,7 +1358,7 @@ func (s *Service) updateMovedTaskCrossStep(
 	// Keep compatibility with narrow test/dry-run repositories that expose
 	// only the original admission method. Production repositories implement the
 	// atomic variant above, so this fallback is never used for real moves.
-	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit)
 	if err != nil {
 		return false, err
 	}

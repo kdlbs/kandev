@@ -179,6 +179,7 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -235,6 +236,7 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -295,6 +297,7 @@ describe("kanban.update handler — taskPendingAction preservation", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -351,6 +354,7 @@ describe("kanban.update handler — taskPendingAction preservation", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -474,6 +478,7 @@ describe("kanban.update handler — repository switch", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -540,6 +545,7 @@ describe("kanban.update handler — explicit-null primary preservation", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           wf1: {
             workflowId: "wf1",
@@ -579,6 +585,7 @@ describe("kanban.update handler — multi-snapshot primary lookup", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           wf1: {
             workflowId: "wf1",

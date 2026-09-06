@@ -18,15 +18,19 @@ type FakeTask = {
   queuedForStepId?: string;
 };
 
+type WithheldEntry = { revision: number; tasks: Array<{ id: string; position: number }> };
+
 let storeState: {
   kanbanMulti: {
     snapshots: Record<string, { tasks: FakeTask[] }>;
     pendingReorderBandKeys: Record<string, true>;
     orderRevisionByStepId: Record<string, number>;
+    withheldReorderByBandKey: Record<string, WithheldEntry | undefined>;
   };
   setWorkflowSnapshot: (wfId: string, snapshot: { tasks: FakeTask[] }) => void;
   setBandReorderPending: (stepId: string, band: string, pending: boolean) => void;
   setStepOrderRevision: (stepId: string, revision: number) => void;
+  setWithheldReorder: (stepId: string, band: string, payload: WithheldEntry | null) => void;
 };
 
 const WORKFLOW_ID = "wf1";
@@ -42,6 +46,7 @@ function resetStore(tasks: FakeTask[]) {
       snapshots: { [WORKFLOW_ID]: { tasks } },
       pendingReorderBandKeys: {},
       orderRevisionByStepId: {},
+      withheldReorderByBandKey: {},
     },
     setWorkflowSnapshot(wfId, snapshot) {
       storeState.kanbanMulti.snapshots[wfId] = snapshot;
@@ -53,6 +58,11 @@ function resetStore(tasks: FakeTask[]) {
     },
     setStepOrderRevision(stepId, revision) {
       storeState.kanbanMulti.orderRevisionByStepId[stepId] = revision;
+    },
+    setWithheldReorder(stepId, band, payload) {
+      const key = `${stepId}:${band}`;
+      if (payload) storeState.kanbanMulti.withheldReorderByBandKey[key] = payload;
+      else delete storeState.kanbanMulti.withheldReorderByBandKey[key];
     },
   };
 }
@@ -166,6 +176,23 @@ describe("useStepReorder", () => {
         band: "admitted",
         draggedId: "a",
         visibleOrderAfterMove: ["a", "b", "c"],
+      });
+    });
+
+    expect(reorderStepTasks).not.toHaveBeenCalled();
+  });
+
+  it("issues no request for a band with fewer than two tasks (AC.32)", async () => {
+    resetStore([admittedTask("solo", 0)]);
+    const { result } = renderHook(() => useStepReorder());
+
+    await act(async () => {
+      await result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "solo",
+        visibleOrderAfterMove: ["solo"],
       });
     });
 

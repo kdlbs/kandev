@@ -59,6 +59,7 @@ describe("useChangeRequestProviderTarget", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           "workflow-b": {
             tasks: [

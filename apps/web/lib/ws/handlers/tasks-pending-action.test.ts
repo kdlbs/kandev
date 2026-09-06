@@ -19,6 +19,7 @@ function pendingStore(taskPendingAction?: PendingAction) {
       isLoading: false,
       orderRevisionByStepId: {},
       pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
       snapshots: {
         wf1: { workflowId: "wf1", workflowName: "Workflow", steps: [], tasks: [task] },
       },

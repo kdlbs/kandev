@@ -83,6 +83,7 @@ function makeSnapshotTaskStore(primarySessionId: string) {
     isLoading: false,
     orderRevisionByStepId: {},
     pendingReorderBandKeys: {},
+    withheldReorderByBandKey: {},
     snapshots: {
       "wf-1": {
         workflowId: "wf-1",
@@ -201,6 +202,7 @@ describe("session.state_changed -> non-primary kanban card state", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           "wf-1": {
             workflowId: "wf-1",
@@ -284,6 +286,7 @@ describe("session.state_changed -> kanban sync guards", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           "wf-1": {
             workflowId: "wf-1",

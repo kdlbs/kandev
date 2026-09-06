@@ -44,7 +44,7 @@ type workflowLimitedMoveRepository interface {
 }
 
 type workflowMoveAdmissionRepository interface {
-	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
+	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
 // workflowMoveAdmissionCASRepository is the AC-46/48 compare-and-swap
@@ -392,7 +392,7 @@ func (s *workflowStore) applyTransition(
 		); err != nil {
 			return fmt.Errorf("update task workflow step: %w", err)
 		}
-	} else if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
+	} else if err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -609,7 +609,7 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 	return nil
 }
 
-func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) error {
 	if targetStep == nil {
 		return s.repo.UpdateTask(ctx, task)
 	}
@@ -617,7 +617,7 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 	if !ok {
 		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	return err
 }
 
@@ -803,7 +803,7 @@ func (s *workflowStore) pullOneFeederTask(
 				continue
 			}
 		} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, vacatedStep.ID, vacatedStep.WIPLimit)
+			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
 			if err != nil {
 				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
 				skipped[candidate.ID] = struct{}{}
@@ -868,7 +868,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 		}
 	} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, step.ID, step.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}

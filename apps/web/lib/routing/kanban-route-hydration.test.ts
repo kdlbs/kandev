@@ -20,6 +20,7 @@ function state(overrides: Partial<HydrationState> = {}): HydrationState {
       isLoading: false,
       orderRevisionByStepId: {},
       pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
     },
     ...overrides,
   };
@@ -48,6 +49,7 @@ describe("hasHydratedKanbanRouteState", () => {
             isLoading: false,
             orderRevisionByStepId: {},
             pendingReorderBandKeys: {},
+            withheldReorderByBandKey: {},
           },
         }),
         {},

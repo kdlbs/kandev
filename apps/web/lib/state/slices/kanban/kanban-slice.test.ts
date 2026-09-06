@@ -100,6 +100,7 @@ describe("kanban slice workspace transition", () => {
         isLoading: true,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
       },
       workflows: {
         items: [{ id: WORKFLOW_ID, workspaceId: ARCHIVED_WORKSPACE_ID, name: "Workflow A" }],

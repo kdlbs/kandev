@@ -242,7 +242,7 @@ type agentErrorCommitErrorRepo struct {
 }
 
 func (r *agentErrorCommitErrorRepo) UpdateTaskWithWorkflowStepAdmission(
-	_ context.Context, _ *models.Task, _ string, _ int,
+	_ context.Context, _ *models.Task, _, _ string, _ int,
 ) (bool, error) {
 	return false, r.err
 }
@@ -612,7 +612,7 @@ func (r *agentErrorBlockingCommitRepo) sessionCallCount() int {
 }
 
 func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
-	ctx context.Context, task *models.Task, targetStepID string, limit int,
+	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
 ) (bool, error) {
 	r.commitMu.Lock()
 	r.commitCalls++
@@ -622,7 +622,7 @@ func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
 		close(r.entered)
 		<-r.release
 	}
-	return r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit)
+	return r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit)
 }
 
 // TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit

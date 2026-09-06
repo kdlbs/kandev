@@ -74,6 +74,7 @@ describe("useTaskSubtasks", () => {
         isLoading: false,
         orderRevisionByStepId: {},
         pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           "wf-2": {
             workflowId: "wf-2",

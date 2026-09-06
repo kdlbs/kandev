@@ -67,7 +67,7 @@ func TestPostgresUpdateTaskWithWorkflowStepAdmission_ConcurrentLastSlot(t *testi
 		go func(task *models.Task) {
 			defer wg.Done()
 			<-start
-			admitted, err := repo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep, 2)
+			admitted, err := repo.UpdateTaskWithWorkflowStepAdmission(ctx, task, "postgres-wip-source", targetStep, 2)
 			results <- struct {
 				admitted bool
 				err      error

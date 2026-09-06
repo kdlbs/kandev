@@ -75,6 +75,19 @@ describe("mergeVisibleReorderIntoBand", () => {
       fullBandOrder,
     );
   });
+
+  it("moves the dragged task to the true end of the band when a hidden task trails the last visible member (AC.34)", () => {
+    // Full band: v1, v2, h(hidden). Visible: v1, v2. Dragging v1 below v2 —
+    // the last visible member — must land last in the WHOLE band, after h,
+    // not merely after v2.
+    const fullBandOrder = ["v1", "v2", "h"];
+    const visibleOrderAfterMove = ["v2", "v1"];
+    expect(mergeVisibleReorderIntoBand(fullBandOrder, visibleOrderAfterMove, "v1")).toEqual([
+      "v2",
+      "h",
+      "v1",
+    ]);
+  });
 });
 
 describe("arraysEqual", () => {

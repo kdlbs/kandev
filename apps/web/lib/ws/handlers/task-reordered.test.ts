@@ -9,10 +9,20 @@ import { registerKanbanHandlers } from "./kanban";
 const WORKFLOW_ID = "wf1";
 const STEP_ID = "step-1";
 
-type FakeTask = { id: string; workflowStepId: string; position: number };
+type FakeTask = {
+  id: string;
+  workflowStepId: string;
+  position: number;
+  wipAdmitted?: boolean;
+  queuedForStepId?: string;
+};
 
 function makeTask(id: string, position: number): FakeTask {
-  return { id, workflowStepId: STEP_ID, position };
+  return { id, workflowStepId: STEP_ID, position, wipAdmitted: true };
+}
+
+function makeQueuedTask(id: string, position: number): FakeTask {
+  return { id, workflowStepId: STEP_ID, position, wipAdmitted: false, queuedForStepId: STEP_ID };
 }
 
 function makeStore(overrides: {
@@ -27,6 +37,7 @@ function makeStore(overrides: {
       isLoading: false,
       orderRevisionByStepId: overrides.orderRevisionByStepId ?? {},
       pendingReorderBandKeys: overrides.pendingReorderBandKeys ?? {},
+      withheldReorderByBandKey: {},
       snapshots: {
         [WORKFLOW_ID]: { workflowId: WORKFLOW_ID, workflowName: "WF1", steps: [], tasks },
       },
@@ -117,5 +128,60 @@ describe("task.reordered handler", () => {
     handler(makeReorderedMessage(1, [{ id: "a", position: 9 }], "admitted"));
 
     expect(store.getState().kanban.tasks.find((t) => t.id === "a")?.position).toBe(9);
+  });
+
+  it("applies the sibling band's positions from the same whole-step payload even when the event's own band matches the in-flight one (AC.27)", () => {
+    const store = makeStore({
+      tasks: [makeTask("a", 0), makeQueuedTask("q", 1)],
+      pendingReorderBandKeys: { [`${STEP_ID}:admitted`]: true },
+    });
+    const handler = registerKanbanHandlers(store)["task.reordered"]!;
+
+    handler(
+      makeReorderedMessage(
+        1,
+        [
+          { id: "a", position: 9 },
+          { id: "q", position: 5 },
+        ],
+        "admitted",
+      ),
+    );
+
+    const tasks = store.getState().kanban.tasks;
+    expect(tasks.find((t) => t.id === "a")?.position).toBe(0);
+    expect(tasks.find((t) => t.id === "q")?.position).toBe(5);
+    expect(store.getState().kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`]).toEqual({
+      revision: 1,
+      tasks: [{ id: "a", position: 9 }],
+    });
+  });
+
+  it("holds the pending band's positions from an event for the other band instead of applying them wholesale", () => {
+    const store = makeStore({
+      tasks: [makeTask("a", 0), makeQueuedTask("q", 1)],
+      pendingReorderBandKeys: { [`${STEP_ID}:admitted`]: true },
+    });
+    const handler = registerKanbanHandlers(store)["task.reordered"]!;
+
+    handler(
+      makeReorderedMessage(
+        1,
+        [
+          { id: "a", position: 9 },
+          { id: "q", position: 5 },
+        ],
+        "queued",
+      ),
+    );
+
+    const tasks = store.getState().kanban.tasks;
+    expect(tasks.find((t) => t.id === "a")?.position).toBe(0);
+    expect(tasks.find((t) => t.id === "q")?.position).toBe(5);
+    expect(store.getState().kanbanMulti.orderRevisionByStepId[STEP_ID]).toBe(1);
+    expect(store.getState().kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`]).toEqual({
+      revision: 1,
+      tasks: [{ id: "a", position: 9 }],
+    });
   });
 });

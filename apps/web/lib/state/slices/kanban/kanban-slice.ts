@@ -16,6 +16,7 @@ export const defaultKanbanState: KanbanSliceState = {
     isLoading: false,
     orderRevisionByStepId: {},
     pendingReorderBandKeys: {},
+    withheldReorderByBandKey: {},
   },
   sidebarArchivedTasks: {
     itemsByWorkspaceId: {},
@@ -274,6 +275,15 @@ export const createKanbanSlice: StateCreator<
         draft.kanbanMulti.pendingReorderBandKeys[key] = true;
       } else {
         delete draft.kanbanMulti.pendingReorderBandKeys[key];
+      }
+    }),
+  setWithheldReorder: (stepId, band, payload) =>
+    set((draft) => {
+      const key = `${stepId}:${band}`;
+      if (payload) {
+        draft.kanbanMulti.withheldReorderByBandKey[key] = payload;
+      } else {
+        delete draft.kanbanMulti.withheldReorderByBandKey[key];
       }
     }),
 });

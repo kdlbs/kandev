@@ -269,7 +269,7 @@ export type WorkflowMoveEntryOptions = {
 export type MoveTaskPayload = {
   workflow_id: string;
   workflow_step_id: string;
-  position: number;
+  position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
 };
 

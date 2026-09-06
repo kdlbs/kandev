@@ -1,6 +1,7 @@
 import type {
   ForegroundActivity,
   ReorderBand,
+  ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
   TaskPriority,
@@ -206,6 +207,17 @@ export type KanbanMultiState = {
    * published order to it.
    */
   pendingReorderBandKeys: Record<string, true>;
+  /**
+   * The most recent published order withheld from a band because it arrived
+   * while that band's own reorder request was in flight, keyed
+   * `${stepId}:${band}`. Reconciled against the request's own resolution by
+   * revision (the higher of the two wins, the response breaking a tie) when
+   * that request settles, then cleared either way.
+   */
+  withheldReorderByBandKey: Record<
+    string,
+    { revision: number; tasks: ReorderedTaskPosition[] } | undefined
+  >;
 };
 
 export type SidebarArchivedTasksState = {
@@ -302,6 +314,11 @@ export type KanbanSliceActions = {
   removeMultiTask: (workflowId: string, taskId: string) => void;
   setStepOrderRevision: (stepId: string, revision: number) => void;
   setBandReorderPending: (stepId: string, band: ReorderBand, pending: boolean) => void;
+  setWithheldReorder: (
+    stepId: string,
+    band: ReorderBand,
+    payload: { revision: number; tasks: ReorderedTaskPosition[] } | null,
+  ) => void;
   setSidebarArchivedTasks: (
     workspaceId: string,
     tasks: KanbanState["tasks"],

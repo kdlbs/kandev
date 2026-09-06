@@ -68,6 +68,7 @@ function makeAutoStartFailedStore(kanbanFlag: boolean, snapshotFlag: boolean) {
       isLoading: false,
       orderRevisionByStepId: {},
       pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
       snapshots: {
         [WORKFLOW_ID]: {
           workflowId: WORKFLOW_ID,

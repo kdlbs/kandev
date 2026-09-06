@@ -35,7 +35,7 @@ export type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskError) => void) {
+export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskError) => void) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
 
@@ -45,16 +45,17 @@ function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskErro
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
-      const targetTasks = snapshot.tasks.filter(
-        (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
-      );
-      const nextPosition = targetTasks.length;
       const originalTasks = snapshot.tasks;
 
+      // The server always computes a cross-step arrival's position itself
+      // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: it sorts last in the
+      // destination), so there is no locally-computed position to apply
+      // here — the eventual task.updated/task.moved event carries the real
+      // one. Until then the card just needs to show the right step.
       state.setWorkflowSnapshot(workflowId, {
         ...snapshot,
         tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
+          t.id === taskId ? { ...t, workflowStepId: targetStepId } : t,
         ),
       });
 
@@ -62,7 +63,6 @@ function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskErro
         await moveTaskById(taskId, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
-          position: nextPosition,
         });
       } catch (error) {
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
@@ -79,7 +79,7 @@ function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskErro
   );
 }
 
-function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
+export function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
   const { reorderBand } = useStepReorder();
   const moveTaskAcrossSteps = useCrossStepMove(workflowId, onMoveError);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);

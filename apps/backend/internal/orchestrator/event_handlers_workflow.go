@@ -467,7 +467,11 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		legacyTrigger = engine.TriggerOnTurnComplete
 	}
 	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, targetStep); err != nil {
+	fromStepID := ""
+	if fromStep != nil {
+		fromStepID = fromStep.ID
+	}
+	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStepID, targetStep); err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -578,6 +582,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 func (s *Service) updateTransitionTaskWithCapacity(
 	ctx context.Context,
 	task *models.Task,
+	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	if targetStep == nil {
@@ -587,7 +592,7 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	if !ok {
 		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	return err
 }
 

@@ -11,7 +11,11 @@ import { arraysEqual, mergeVisibleReorderIntoBand } from "@/lib/kanban/reorder-m
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 import { getTaskReorderErrorMessage } from "@/components/task/task-move-error-message";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { ReorderBand, ReorderStepTasksResponse } from "@/lib/types/http";
+import type {
+  ReorderBand,
+  ReorderedTaskPosition,
+  ReorderStepTasksResponse,
+} from "@/lib/types/http";
 
 type SnapshotTask = KanbanState["tasks"][number];
 
@@ -37,14 +41,42 @@ function applyBandPositions(
   );
 }
 
-function applyResponsePositions(
+function bandTaskIds(tasks: SnapshotTask[], stepId: string, band: ReorderBand): Set<string> {
+  return new Set(bandOrder(tasks, stepId, band).map((task) => task.id));
+}
+
+/**
+ * Applies `orderedTasks`' positions, restricted to `allowedIds` when given.
+ * Restricting to the band under reconciliation keeps a whole-step response or
+ * withheld snapshot from clobbering the sibling band's positions, which may
+ * already be fresher (REQ-TASKS-KANBAN-TASK-REORDERING-001.27).
+ */
+function applyOrderedPositions(
   tasks: SnapshotTask[],
-  response: ReorderStepTasksResponse,
+  orderedTasks: ReorderedTaskPosition[],
+  allowedIds?: Set<string>,
 ): SnapshotTask[] {
-  const positionById = new Map(response.tasks.map((t) => [t.id, t.position]));
+  const positionById = new Map(
+    orderedTasks.filter((t) => !allowedIds || allowedIds.has(t.id)).map((t) => [t.id, t.position]),
+  );
   return tasks.map((task) =>
     positionById.has(task.id) ? { ...task, position: positionById.get(task.id)! } : task,
   );
+}
+
+/**
+ * Picks the causally-later of a withheld WS order (received while this
+ * band's own request was in flight) and the request's own resolution: the
+ * higher revision wins, and the response breaks a tie since an equal
+ * revision from the withheld side was necessarily observed before this
+ * request's own commit (REQ-TASKS-KANBAN-TASK-REORDERING-001.27).
+ */
+function pickReconciledOrder(
+  withheld: { revision: number; tasks: ReorderedTaskPosition[] } | undefined,
+  response: { revision: number; tasks: ReorderedTaskPosition[] },
+): { revision: number; tasks: ReorderedTaskPosition[] } {
+  if (withheld && withheld.revision > response.revision) return withheld;
+  return response;
 }
 
 /**
@@ -100,16 +132,38 @@ export function useStepReorder() {
       });
       state.setBandReorderPending(stepId, band, true);
 
+      const bandKey = `${stepId}:${band}`;
+
+      // Reconciles `candidate` against anything withheld while this band's
+      // request was in flight (REQ-TASKS-KANBAN-TASK-REORDERING-001.27),
+      // applies the result scoped to this band only, advances the revision
+      // without ever regressing it, and clears the withheld entry.
+      const reconcileAndApply = (
+        current: { tasks: SnapshotTask[] },
+        candidate: { revision: number; tasks: ReorderedTaskPosition[] },
+      ) => {
+        const withheld = store.getState().kanbanMulti.withheldReorderByBandKey[bandKey];
+        const chosen = pickReconciledOrder(withheld, candidate);
+        const allowedIds = bandTaskIds(
+          current.tasks.filter((task) => task.workflowStepId === stepId),
+          stepId,
+          band,
+        );
+        const recordedRevision = store.getState().kanbanMulti.orderRevisionByStepId[stepId] ?? -1;
+        state.setWorkflowSnapshot(workflowId, {
+          ...store.getState().kanbanMulti.snapshots[workflowId]!,
+          tasks: applyOrderedPositions(current.tasks, chosen.tasks, allowedIds),
+        });
+        state.setStepOrderRevision(stepId, Math.max(chosen.revision, recordedRevision));
+        state.setWithheldReorder(stepId, band, null);
+      };
+
       try {
         const response = await reorderStepTasks(stepId, { band, ordered_task_ids: nextBandOrder });
         const current = store.getState().kanbanMulti.snapshots[workflowId];
         if (current) {
-          state.setWorkflowSnapshot(workflowId, {
-            ...current,
-            tasks: applyResponsePositions(current.tasks, response),
-          });
+          reconcileAndApply(current, response);
         }
-        state.setStepOrderRevision(stepId, response.revision);
       } catch (error) {
         const current = store.getState().kanbanMulti.snapshots[workflowId];
         if (current) {
@@ -123,15 +177,14 @@ export function useStepReorder() {
               : null;
           if (conflictBody) {
             // step_changed (.19): reconcile silently, no error toast.
-            state.setWorkflowSnapshot(workflowId, {
-              ...current,
-              tasks: applyResponsePositions(current.tasks, conflictBody),
-            });
-            if (typeof conflictBody.revision === "number") {
-              state.setStepOrderRevision(stepId, conflictBody.revision);
-            }
+            reconcileAndApply(current, conflictBody);
           } else {
-            state.setWorkflowSnapshot(workflowId, { ...current, tasks: originalTasks });
+            const withheld = store.getState().kanbanMulti.withheldReorderByBandKey[bandKey];
+            if (withheld) {
+              reconcileAndApply({ tasks: originalTasks }, withheld);
+            } else {
+              state.setWorkflowSnapshot(workflowId, { ...current, tasks: originalTasks });
+            }
             toast({
               title: t("task:failedToReorderTasks"),
               description: getTaskReorderErrorMessage(error, t("task:taskReorderErrorGeneric"), t),

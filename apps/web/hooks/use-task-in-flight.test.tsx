@@ -45,6 +45,7 @@ function snapshotWrapper(tasks: Task[]) {
             isLoading: false,
             orderRevisionByStepId: {},
             pendingReorderBandKeys: {},
+            withheldReorderByBandKey: {},
           },
         }}
       >

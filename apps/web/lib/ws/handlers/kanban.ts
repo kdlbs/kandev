@@ -2,7 +2,9 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { ReorderBand, ReorderedTaskPosition } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
+import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 
 type KanbanTask = KanbanState["tasks"][number];
 type KanbanStep = KanbanState["steps"][number];
@@ -144,19 +146,42 @@ function applyPositionsToTasks<T extends { id: string; position: number }>(
   return changed ? next : tasks;
 }
 
+const REORDER_BANDS: readonly ReorderBand[] = ["admitted", "queued"];
+
+/**
+ * Classifies every task id in an event's whole-step payload into the band it
+ * currently belongs to, using this client's own last-known membership flags
+ * (a reorder never changes band membership, so a stale-but-recent local copy
+ * is a safe classifier). A task not found locally (e.g. not yet hydrated on
+ * this client) is left unclassified so its position is applied rather than
+ * held against nothing.
+ */
+function classifyTasksByBand(
+  tasks: ReorderedTaskPosition[],
+  stepId: string,
+  membershipSources: KanbanTask[][],
+): Map<string, ReorderBand> {
+  const byId = new Map<string, ReorderBand>();
+  for (const source of membershipSources) {
+    const stepTasks = source.filter((task) => task.workflowStepId === stepId);
+    if (stepTasks.length === 0) continue;
+    const { admitted, queued } = partitionWipTasks(stepTasks, stepId);
+    for (const task of admitted) if (!byId.has(task.id)) byId.set(task.id, "admitted");
+    for (const task of queued) if (!byId.has(task.id)) byId.set(task.id, "queued");
+  }
+  const result = new Map<string, ReorderBand>();
+  for (const task of tasks) {
+    const band = byId.get(task.id);
+    if (band) result.set(task.id, band);
+  }
+  return result;
+}
+
 function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.reordered"] {
   return (message) => {
-    const { workflow_step_id: stepId, band, revision, tasks } = message.payload;
-    const pendingKey = `${stepId}:${band}`;
-    const positionById = new Map(tasks.map((task) => [task.id, task.position]));
+    const { workflow_step_id: stepId, revision, tasks } = message.payload;
 
     store.setState((state) => {
-      // AC.27: this band's optimistic order owns the view until the
-      // in-flight request resolves — an unsolicited event for the same band
-      // must not clobber it.
-      if (state.kanbanMulti.pendingReorderBandKeys[pendingKey]) {
-        return state;
-      }
       // Asymmetric revision gate (Decision 11 / F31): an unsolicited event
       // only applies on a strictly-greater revision. A step with no recorded
       // revision (-1) accepts the first order it ever receives.
@@ -165,10 +190,60 @@ function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.r
         return state;
       }
 
-      const nextKanbanTasks = applyPositionsToTasks(state.kanban.tasks, positionById);
+      // AC.27: a band with a reorder request in flight keeps its optimistic
+      // order until that request resolves; this whole-step payload's
+      // position for such a task is held rather than applied, while every
+      // other task in the same payload (the sibling band, or another step
+      // entirely) is applied immediately.
+      const pendingBands = REORDER_BANDS.filter(
+        (band) => state.kanbanMulti.pendingReorderBandKeys[`${stepId}:${band}`],
+      );
+      const bandByTaskId = pendingBands.length
+        ? classifyTasksByBand(tasks, stepId, [
+            state.kanban.tasks,
+            ...Object.values(state.kanbanMulti.snapshots).map((s) => s.tasks),
+          ])
+        : new Map<string, ReorderBand>();
+
+      const held: Record<ReorderBand, ReorderedTaskPosition[]> = { admitted: [], queued: [] };
+      const applyNow: ReorderedTaskPosition[] = [];
+      for (const task of tasks) {
+        const band = bandByTaskId.get(task.id);
+        if (band && pendingBands.includes(band)) {
+          held[band].push(task);
+        } else {
+          applyNow.push(task);
+        }
+      }
+
+      let nextState = state;
+      for (const band of pendingBands) {
+        if (held[band].length === 0) continue;
+        nextState = {
+          ...nextState,
+          kanbanMulti: {
+            ...nextState.kanbanMulti,
+            withheldReorderByBandKey: {
+              ...nextState.kanbanMulti.withheldReorderByBandKey,
+              [`${stepId}:${band}`]: { revision, tasks: held[band] },
+            },
+          },
+        };
+      }
+
+      if (applyNow.length === 0) {
+        // Every task in this payload belongs to a band still in flight —
+        // nothing observable changes yet, so the revision scalar is left
+        // alone; the withheld snapshot above carries the revision forward
+        // for reconciliation once the in-flight request resolves.
+        return nextState;
+      }
+
+      const positionById = new Map(applyNow.map((task) => [task.id, task.position]));
+      const nextKanbanTasks = applyPositionsToTasks(nextState.kanban.tasks, positionById);
       let snapshotsChanged = false;
-      const nextSnapshots: typeof state.kanbanMulti.snapshots = {};
-      for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+      const nextSnapshots: typeof nextState.kanbanMulti.snapshots = {};
+      for (const [workflowId, snapshot] of Object.entries(nextState.kanbanMulti.snapshots)) {
         const nextTasks = applyPositionsToTasks(snapshot.tasks, positionById);
         if (nextTasks !== snapshot.tasks) {
           snapshotsChanged = true;
@@ -179,16 +254,16 @@ function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.r
       }
 
       return {
-        ...state,
+        ...nextState,
         kanban:
-          nextKanbanTasks === state.kanban.tasks
-            ? state.kanban
-            : { ...state.kanban, tasks: nextKanbanTasks },
+          nextKanbanTasks === nextState.kanban.tasks
+            ? nextState.kanban
+            : { ...nextState.kanban, tasks: nextKanbanTasks },
         kanbanMulti: {
-          ...state.kanbanMulti,
-          snapshots: snapshotsChanged ? nextSnapshots : state.kanbanMulti.snapshots,
+          ...nextState.kanbanMulti,
+          snapshots: snapshotsChanged ? nextSnapshots : nextState.kanbanMulti.snapshots,
           orderRevisionByStepId: {
-            ...state.kanbanMulti.orderRevisionByStepId,
+            ...nextState.kanbanMulti.orderRevisionByStepId,
             [stepId]: revision,
           },
         },

@@ -88,6 +88,25 @@ describe("Graph2TaskPipeline — click routing (the regression that hid defect 1
   });
 });
 
+describe("Graph2TaskPipeline — no reorder surface (AC.38)", () => {
+  it("ignores the AC.12 keyboard-reorder commands: a row lays out one task, so none apply", () => {
+    const onMoveTask = vi.fn();
+    renderPipeline({ onMoveTask });
+
+    const card = screen.getByRole("button", { name: "A task" });
+    fireEvent.keyDown(card, { key: " " });
+    fireEvent.keyDown(card, { key: "ArrowDown" });
+    fireEvent.keyDown(card, { key: "ArrowUp" });
+    fireEvent.keyDown(card, { key: "Enter" });
+    fireEvent.keyDown(card, { key: "Escape" });
+
+    expect(onMoveTask).not.toHaveBeenCalled();
+    // AC.12 requires an assistive-technology announcement on pickup/move; its
+    // absence here confirms no reorder gesture was recognized.
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
 describe("Graph2TaskPipeline — actions cluster stays reachable off-screen (defect 2)", () => {
   it("wraps the actions cluster in a sticky, right-pinned, opaque, full-height, above-pill-controls container", () => {
     renderPipeline();

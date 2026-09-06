@@ -117,6 +117,101 @@ func TestService_ReorderStepTasksStepChangedCarriesAuthoritativeOrder(t *testing
 	}
 }
 
+// TestService_ReorderStepTasksLeavesTaskIdentityAndSessionUntouched pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.21: a reorder changes only position —
+// never workflow, step, WIP admission, queued destination/time, or state —
+// and publishes no task.updated or task.moved event alongside task.reordered.
+func TestService_ReorderStepTasksLeavesTaskIdentityAndSessionUntouched(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-reorder-untouched", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-reorder-untouched", WorkspaceID: "ws-reorder-untouched", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderTestStep(t, svc, repo, "step-reorder-untouched", "wf-reorder-untouched", 0)
+	mustCreateReorderServiceTask(t, ctx, repo, "untouched-a", "ws-reorder-untouched", "wf-reorder-untouched", "step-reorder-untouched")
+	mustCreateReorderServiceTask(t, ctx, repo, "untouched-b", "ws-reorder-untouched", "wf-reorder-untouched", "step-reorder-untouched")
+	before, err := repo.GetTask(ctx, "untouched-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBus.ClearEvents()
+
+	if _, err := svc.ReorderStepTasks(ctx, "step-reorder-untouched", "admitted", []string{"untouched-b", "untouched-a"}); err != nil {
+		t.Fatalf("ReorderStepTasks: %v", err)
+	}
+
+	after, err := repo.GetTask(ctx, "untouched-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Position == before.Position {
+		t.Fatal("position did not change; the reorder did not commit")
+	}
+	if after.WorkflowID != before.WorkflowID || after.WorkflowStepID != before.WorkflowStepID {
+		t.Fatalf("workflow/step changed: before=%s/%s after=%s/%s", before.WorkflowID, before.WorkflowStepID, after.WorkflowID, after.WorkflowStepID)
+	}
+	if after.WIPAdmitted != before.WIPAdmitted || after.QueuedForStepID != before.QueuedForStepID {
+		t.Fatalf("WIP admission changed: before admitted=%v queued=%q after admitted=%v queued=%q",
+			before.WIPAdmitted, before.QueuedForStepID, after.WIPAdmitted, after.QueuedForStepID)
+	}
+	if after.State != before.State {
+		t.Fatalf("state changed: before=%s after=%s", before.State, after.State)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TaskMoved || event.Type == events.TaskUpdated {
+			t.Fatalf("reorder must not publish %s", event.Type)
+		}
+	}
+}
+
+// TestService_ReorderStepTasksDeniesCallerWithoutWorkflowAccess pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.23: reorder authority is exactly the
+// existing move authority (authorizeWorkflowID), so a caller who cannot see
+// the workflow's workspace is denied before any membership is validated or
+// written.
+func TestService_ReorderStepTasksDeniesCallerWithoutWorkflowAccess(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-reorder-denied", Name: "Workspace", OwnerID: "user-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-reorder-denied", WorkspaceID: "ws-reorder-denied", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderTestStep(t, svc, repo, "step-reorder-denied", "wf-reorder-denied", 0)
+	mustCreateReorderServiceTask(t, ctx, repo, "denied-a", "ws-reorder-denied", "wf-reorder-denied", "step-reorder-denied")
+	mustCreateReorderServiceTask(t, ctx, repo, "denied-b", "ws-reorder-denied", "wf-reorder-denied", "step-reorder-denied")
+	before, err := repo.GetTask(ctx, "denied-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBus.ClearEvents()
+
+	_, err = svc.ReorderStepTasks(ctxAs("user-a"), "step-reorder-denied", "admitted", []string{"denied-b", "denied-a"})
+	if err == nil {
+		t.Fatal("ReorderStepTasks: want a denial for a caller with no access to the workflow's workspace")
+	}
+
+	after, err := repo.GetTask(ctx, "denied-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Position != before.Position {
+		t.Fatalf("position changed on denied reorder: before=%d after=%d", before.Position, after.Position)
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("denied reorder must publish no event, got %+v", eventBus.GetPublishedEvents())
+	}
+
+	// The workspace's own owner remains authorized.
+	if _, err := svc.ReorderStepTasks(ctxAs("user-b"), "step-reorder-denied", "admitted", []string{"denied-b", "denied-a"}); err != nil {
+		t.Fatalf("owner reorder: %v", err)
+	}
+}
+
 func TestService_ReorderStepTasksInvalidRequestReturnsNilResult(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
