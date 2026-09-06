@@ -1536,13 +1536,14 @@ func TestRecordActivity_MetadataDoesNotMarkPromptStarted(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	execution := createTestExecution("exec-metadata", "task-1", "session-1")
 	execution.agentEventSincePrompt = false
-	execution.lastActivityAt = time.Now().Add(-time.Minute)
+	dispatchTime := time.Now().Add(-time.Minute)
+	execution.lastActivityAt = dispatchTime
 
 	mgr.recordActivity(execution, agentctl.AgentEvent{Type: "session_models"})
 
 	lastActivity, agentEventSeen, epoch := execution.promptActivitySnapshot()
-	if time.Since(lastActivity) > time.Second {
-		t.Fatalf("metadata event did not refresh last activity: %v ago", time.Since(lastActivity))
+	if !lastActivity.Equal(dispatchTime) {
+		t.Fatalf("metadata event advanced last activity: got %v, want unchanged %v", lastActivity, dispatchTime)
 	}
 	if agentEventSeen {
 		t.Fatal("metadata event marked the prompt as started")

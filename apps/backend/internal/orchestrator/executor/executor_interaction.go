@@ -124,28 +124,107 @@ func (e *Executor) StopSessionDetailed(
 // stopWithSession preserves the legacy error-only contract. It intentionally
 // keeps session persistence best-effort and schedules teardown whenever a live
 // execution was found; existing UI and cleanup callers rely on that behavior.
+//
+// Stop ownership is registered before the CANCELLED write, not after: a
+// concurrent StartAgentProcess failure classifies CANCELLED as terminal and
+// claims forced cleanup for itself only when no owner is registered yet. If
+// the state write were visible first, that failure could win the claim and
+// issue its own teardown while this call also schedules one.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
-	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
-	if err != nil || executionID == "" {
-		if err != nil {
-			if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
-				return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
-			}
-			return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, session.ID, err)
-		}
-		return ErrExecutionNotFound
+	executionID, err := e.resolveExecutionIDForStop(ctx, session.ID)
+	if err != nil {
+		return err
 	}
 
 	e.logStop(session, executionID, reason, force)
-	if e.onExecutionStopOwnerRegistration != nil {
-		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
-	}
+	e.registerStopOwner(session.ID, executionID, force)
 	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
 		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
 			zap.Error(dbErr))
 	}
 	e.scheduleStop(ctx, session.ID, executionID, reason, force)
+	return nil
+}
+
+// resolveExecutionIDForStop looks up the live execution for sessionID,
+// applying the same not-found classification stopWithSession has always
+// used. Shared by stopWithSession and the registry-recovered paths in
+// StopByTaskID — it takes a bare session ID rather than a loaded row because
+// the registry-only path may not have one (see stopRegistryRecoveredByID).
+func (e *Executor) resolveExecutionIDForStop(ctx context.Context, sessionID string) (string, error) {
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || executionID == "" {
+		if err != nil {
+			if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+				return "", fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+			}
+			return "", fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, err)
+		}
+		return "", ErrExecutionNotFound
+	}
+	return executionID, nil
+}
+
+// registerStopOwner records advisory stop ownership ahead of a terminal
+// session mutation this call is about to make. Callers with no interleaved
+// mutation (stopRegistryRecoveredSession) may register and schedule together
+// via registerAndScheduleStop instead.
+func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) {
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(sessionID, executionID, force)
+	}
+}
+
+// registerAndScheduleStop records advisory stop ownership and schedules the
+// detached runtime teardown. Used by stopRegistryRecoveredSession, whose call
+// site performs no terminal-state write for the registration to race.
+func (e *Executor) registerAndScheduleStop(ctx context.Context, sessionID, executionID, reason string, force bool) {
+	e.registerStopOwner(sessionID, executionID, force)
+	e.scheduleStop(ctx, sessionID, executionID, reason, force)
+}
+
+// stopRegistryRecoveredSession stops the execution behind a session whose
+// database row is already terminal (e.g. FAILED after a never-started
+// stall's teardown attempt failed) but which is still registered in the
+// execution store. It deliberately skips the CANCELLED transition
+// stopWithSession performs, so the row's terminal state and error message
+// stay authoritative.
+func (e *Executor) stopRegistryRecoveredSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
+	executionID, err := e.resolveExecutionIDForStop(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	e.logger.Info("stopping registry-recovered execution",
+		zap.String("task_id", session.TaskID),
+		zap.String("session_id", session.ID),
+		zap.String("agent_execution_id", executionID),
+		zap.String("session_state", string(session.State)),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	e.registerAndScheduleStop(ctx, session.ID, executionID, reason, force)
+	return nil
+}
+
+// stopRegistryRecoveredByID stops the execution behind a registry-only
+// session whose database row itself could not be loaded (a store read error,
+// or a row deleted out from under a still-registered execution). It mirrors
+// stopRegistryRecoveredSession but resolves the execution from the bare
+// session ID instead of a loaded row, since resolveExecutionIDForStop never
+// needed the row's fields beyond the ID — a load failure here must not leave
+// the execution unreachable when the registry can still name it directly.
+func (e *Executor) stopRegistryRecoveredByID(ctx context.Context, taskID, sessionID, reason string, force bool) error {
+	executionID, err := e.resolveExecutionIDForStop(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	e.logger.Info("stopping registry-recovered execution with unloadable session row",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", executionID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	e.registerAndScheduleStop(ctx, sessionID, executionID, reason, force)
 	return nil
 }
 
@@ -242,7 +321,12 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 	return nil
 }
 
-// StopByTaskID stops all active executions for a task
+// StopByTaskID stops all active executions for a task. It resolves what to
+// stop from the union of the database's active-session query and the
+// in-memory execution registry, so a session that is terminal in the
+// database but still holds a registered execution (an orphan left by a
+// failed teardown attempt) is reachable too — see
+// docs/specs/tasks/system-design/task-stop-reachability.md.
 func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason string, force bool) error {
 	// Get all active sessions for this task from database
 	sessions, err := e.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
@@ -253,7 +337,9 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 		return ErrExecutionNotFound
 	}
 
-	if len(sessions) == 0 {
+	recovered, unloadable, recoverErr := e.recoverRegistryOnlySessions(ctx, taskID, sessions)
+
+	if len(sessions) == 0 && len(recovered) == 0 && len(unloadable) == 0 {
 		return ErrExecutionNotFound
 	}
 
@@ -270,12 +356,91 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 			stoppedCount++
 		}
 	}
+	for _, session := range recovered {
+		if err := e.stopRegistryRecoveredSession(ctx, session, reason, force); err != nil {
+			e.logger.Warn("failed to stop registry-recovered session",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			lastErr = err
+		} else {
+			stoppedCount++
+		}
+	}
+	for _, sessionID := range unloadable {
+		if err := e.stopRegistryRecoveredByID(ctx, taskID, sessionID, reason, force); err != nil {
+			e.logger.Warn("failed to stop registry-recovered execution with unloadable session row",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			lastErr = err
+		} else {
+			stoppedCount++
+		}
+	}
+
+	// A registry-only orphan whose row failed to load is still targeted for
+	// stop by session ID alone (stopRegistryRecoveredByID), so recoverErr no
+	// longer means that execution was unreachable — only that its terminal
+	// state could not be confirmed or corrected from here. Distinguish a
+	// caller that already saw at least one execution stop (soft: log and
+	// continue) from one where nothing could be reached at all (hard
+	// failure), same as before this recovery path existed.
+	if recoverErr != nil {
+		if stoppedCount > 0 {
+			return fmt.Errorf("%w: task %q: %w", ErrOrphanRecoveryIncomplete, taskID, recoverErr)
+		}
+		return fmt.Errorf("task %q has a registered execution but its session could not be loaded: %w", taskID, recoverErr)
+	}
 
 	if stoppedCount == 0 && lastErr != nil {
 		return lastErr
 	}
 
 	return nil
+}
+
+// recoverRegistryOnlySessions loads the session rows for executions the
+// registry still holds for taskID but that the active-session query did not
+// return — a session whose database state is already terminal. A row that
+// cannot be loaded is still returned by session ID, in unloadable, rather than
+// dropped: resolveExecutionIDForStop only ever needed the ID, so a caller can
+// still schedule that execution's stop without the row. Only the last load
+// error is kept; one surfaced failure is enough to stop the caller from
+// reporting a false all-clear, and a caller that wants to retry re-derives
+// the full set on the next call.
+func (e *Executor) recoverRegistryOnlySessions(
+	ctx context.Context, taskID string, activeSessions []*models.TaskSession,
+) (recovered []*models.TaskSession, unloadable []string, loadErr error) {
+	registeredSessionIDs := e.agentManager.ListSessionIDsForTask(taskID)
+	if len(registeredSessionIDs) == 0 {
+		return nil, nil, nil
+	}
+
+	alreadyActive := make(map[string]struct{}, len(activeSessions))
+	for _, session := range activeSessions {
+		alreadyActive[session.ID] = struct{}{}
+	}
+
+	for _, sessionID := range registeredSessionIDs {
+		if _, ok := alreadyActive[sessionID]; ok {
+			continue
+		}
+		session, err := e.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			e.logger.Warn("failed to load registry-recovered session row for task stop; stopping by session ID alone",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			if err != nil {
+				loadErr = err
+			}
+			unloadable = append(unloadable, sessionID)
+			continue
+		}
+		recovered = append(recovered, session)
+	}
+	return recovered, unloadable, loadErr
 }
 
 // stopReasonPassthrough is the StopReason returned by Executor.Prompt when a
