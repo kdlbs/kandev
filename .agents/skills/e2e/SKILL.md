@@ -104,13 +104,11 @@ See [resource-safety.md](references/resource-safety.md) before any full local te
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
-`--no-build` reuses every production E2E artifact, not only Vite assets and the
-backend executable. On a fresh worktree or after rebasing, confirm packaged
-fixtures also exist; global setup currently requires
-`apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`. If it is absent, run
-without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
-Prefer a normal managed build after source or base-branch changes and reserve
-`--no-build` for repeated runs against unchanged artifacts.
+`--no-build` reuses every production E2E artifact, including Vite assets, the backend executable,
+and packaged fixtures. Global setup requires `apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`;
+if absent, run without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
+Prefer a normal managed build after source or base-branch changes and reserve `--no-build` for
+unchanged artifacts. If intentional after either kind of change, rebuild and verify both artifacts with `make -C apps/backend build` and `make -C apps/backend e2e-plugin-package`.
 
 For a raw Docker/SSH/container run, `make build-backend` alone does not build
 the Linux mock-agent fixture. Prefer the managed runner; otherwise run
@@ -123,7 +121,7 @@ reports a missing `KANDEV_MOCK_AGENT_LINUX_BINARY`, run
 ```bash
 make test-e2e                                                      # all tests, headless (host)
 cd apps && pnpm --filter @kandev/web e2e:raw -- tests/task/my-test.spec.ts  # single file
-cd apps && pnpm --filter @kandev/web e2e:raw -- --grep "task creation" # by name
+cd apps && pnpm --filter @kandev/web e2e:raw -- --grep "task creation" # workspace-filter syntax; from apps/web use `pnpm e2e:raw --project=mobile-chrome e2e/tests/<area>/<spec>.spec.ts` without a standalone `--`; run `--list` first if forwarding syntax is uncertain
 ```
 
 ### Flake reproduction
@@ -160,7 +158,7 @@ rerun until it happens to pass. If isolated repeats stay green but the shard
 fails, binary-search preceding specs in one worker. The fix is complete only
 when the smallest reproducing sequence passes without retries.
 
-Record the exact command, resource limits, repeat number, and failure artifact path. For a failed shard, inspect every `error-context.md` in its downloaded
+Record the exact command, resource limits, repeat number, and failure artifact path. For an explicit no-flakes requirement, download `blob-report-*` with `gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>` and run `python3 scripts/playwright-blob-audit <tmp>`; aggregate green is not flake-free. For a failed shard, inspect every `error-context.md` in its downloaded
 `test-results-<shard>` artifact and compare shared page-object waits with `main`
 before changing product code; the context can expose duplicate active terminals
 or a terminal stuck on "Starting terminal...".
@@ -183,6 +181,8 @@ Without this, tests can exercise stale code: after backend changes run `make -C 
 1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects; use `data-testid` attributes for selectors — add them to components as needed
 2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner. Use `backend.baseUrl`.
 3. Use page objects for common interactions; create new ones for new pages. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+4. Workspace-scoped mock events must carry the real `workspace_id`. `mockGitHubAssociateTaskPR` defaults an omitted ID to the active workspace; pass it explicitly for foreign-workspace cases, and keep production handlers fail-closed for missing or mismatched IDs. Direct-store bridges that inject Git status or inspect Changes must resolve `environmentIdBySessionId[sessionId]` and use environment-keyed state; sessions can share one environment.
+5. For new status, hydration, or persistence assertions, inventory existing action/mutation scenarios and add coverage beside them, never replace them; preserve response/error, idempotency/duplicate-suppression, and desktop/mobile pointer/target checks, then run affected specs together.
 
 ### Input-modality behavior
 
@@ -214,9 +214,8 @@ expect(actionsBox).not.toBeNull();
 expect(metricsBox!.height).toBeCloseTo(actionsBox!.height, 1);
 ```
 
-Run the assertion in the relevant desktop and mobile projects when responsive
-layout can change the result. Do not rely on fixed pixels when the product
-contract is equality or alignment.
+Run the assertion in the relevant desktop and mobile projects when responsive layout can change the result. Do not rely on fixed pixels when the product contract is equality or alignment.
+For computed colors, parse alpha/opacity semantically or assert a deliberate class/data contract; do not compare serialized `getComputedStyle` strings because browsers may return `rgba()`, `oklab()`, or `color()`.
 
 **Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.
 
@@ -259,7 +258,7 @@ into a proper E2E test.
 
 ### Start the dev environment
 
-Multiple agents may run in parallel, so use random ports for dev servers. Managed runner shards are isolated, but separate raw Playwright processes are not automatically safe: fixture ports are backend `18080 + E2E_PORT_OFFSET + workerIndex` and agentctl `30001 + E2E_PORT_OFFSET*1000 + workerIndex*200`; `--repeat-each` advances `workerIndex`, so nearby fixed offsets can overlap later.
+Multiple agents may run in parallel, so use random ports for dev servers and inspect the calculated backend/agentctl ranges with `ss` or `lsof` before starting; choose an unused `E2E_PORT_OFFSET` and never kill unrelated Kandev processes. Managed runner shards are isolated, but separate raw Playwright processes are not automatically safe: fixture ports are backend `18080 + E2E_PORT_OFFSET + workerIndex` and agentctl `30001 + E2E_PORT_OFFSET*1000 + workerIndex*200`; `--repeat-each` advances `workerIndex`, so nearby fixed offsets can overlap later.
 
 ```bash
 OFFSET=$((RANDOM % 100))
@@ -365,12 +364,12 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
 - **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker. Fixtures are lazy: acquire `testPage` before setting a non-default persisted value in `beforeEach`, otherwise page initialization can reapply the default and silently undo setup. Verify with the focused test that depends on that setting.
 - **Restore patched shared persisted state.** The worker-scoped backend and
-  `e2eReset` do not reset every seeded record. A test that PATCHes a canonical
-  `seedData` profile, repository, executor, or setting must capture its
-  baseline and restore it in `test.afterEach` (so cleanup also runs after
-  failure); prefer a disposable record when the UI can select it. Verify by
-  running the mutating spec followed by its affected neighbour with
-  `--workers=1 --retries=0`.
+  `e2eReset` do not reset every seeded record. A test that creates or PATCHes a
+  canonical `seedData` profile, repository, executor, integration/workspace
+  preset, or other non-user setting must use unique names for shared/global
+  rows, capture every changed baseline, and restore every mutation in
+  `test.afterEach` or `finally` (not only delete rows created by the test).
+  Prefer a disposable record when the UI can select it. Verify by running the mutating spec followed by its affected neighbour with `--workers=1 --retries=0`. Remove temporary or untracked files written into worker-scoped checkouts in `finally`/`afterEach`, including assertion-failure paths.
 - **Pass browser-evaluation values explicitly.** `locator.evaluate` and
   `page.evaluate` callbacks execute in the browser, so they cannot close over
   Node/test variables. Pass expected values as the argument instead, for
@@ -430,19 +429,21 @@ When a test fails:
   application-only `window.resize` listener may not be observed in the test.
   Prefer synchronizing with the layout container/observer and assert the
   intended result after both viewport and container-only changes.
+- **Initial hydration/readiness regressions:** do not use a page-object readiness helper that can reload or re-navigate the page (for example `SessionPage.waitForLoad`) to prove first-render behavior. Wait directly for the invariant locator on the current navigation, using a bounded non-reloading wait when needed. Keep reload-capable helpers for persistence and recovery scenarios.
 - **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` before opening transient dialogs/drawers/popovers; it may reload and re-derive state from the Go boot payload. If it must run later, reopen the transient UI first. For WS/session hydration races, retain a bounded reload-and-retry fallback in the page object: keep the fast path immediate and the final check failing when genuinely stuck; remove it only with an equivalent deterministic readiness guarantee and focused regression.
+- **Editor readiness is not submit readiness** — a `contenteditable` may be present and writable while a session is still `STARTING`. Before submitting, wait for the scoped submit control to be enabled or for the exact session to reach `WAITING_FOR_INPUT`; use retries disabled when reproducing this boundary.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
-- Screenshots on failure, video on first retry (CI)
+- Screenshots on failure, video on first retry (CI). In workflow cache steps, `actions/cache/restore` sets `cache-hit` to `true` for an exact key, `false` for a restore-key/prefix hit, and empty on a miss; gate verification/fallback on empty versus non-empty, smoke-test Chromium before skipping image extraction, and use bounded backoff for transient registry metadata probes such as `docker buildx imagetools inspect`.
+- **Page-closed errors after timeouts** — `Target page, context or browser has been closed` can be teardown masking an earlier overlay interception. Inspect the preceding action and screenshot, for example with `rtk proxy unzip -p <trace.zip> 0-trace.trace | rtk proxy jq -c 'select(.type == "action" or .type == "error")'`, then close the overlay in the page object, assert it is closed, and rerun with retries disabled before changing timeouts or routes.
 
 ### Debugging CI shard failures
 
-CI splits host tests across 14 shards (plus 6 container shards); reproduce a specific shard locally:
+CI splits host tests across 14 shards (plus 6 container shards); reproduce a specific shard locally. Download `e2e-shard-manifests` when available, verify its selected file list matches the failed job, and prefer the CI runtime image:
 
 ```bash
-# List which tests are in a shard
-pnpm e2e:raw -- --shard=2/14 --list
-
-# Run that shard locally (requires production build)
+# Run the exact duration-aware manifest-selected shard
+E2E_SHARD=2 KANDEV_E2E_SKIP_FRESHNESS=1 bash e2e/scripts/run-planned-shard.sh <workspace>/e2e-manifests/normal/2.json
+# If no manifest exists, inspect the ordinal fallback with `npx playwright test --config e2e/playwright.config.ts --shard=2/14 --list`, then run it with a production build
 make build-backend build-web
 cd apps/web && pnpm e2e:raw -- --shard=2/14
 ```
@@ -485,16 +486,15 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 ## Selector guidelines
 
 - **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting. When translated labels intentionally identify multiple routes, scope by stable `href` or a dedicated test ID rather than role/name alone.
-- **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
-- **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
+- **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. For routes with multiple surfaces, scope controls to the active container first; portal overlays must be selected by visible overlay or the trigger's `aria-controls`, not assumed descendants. For portaled pickers, locate the active visible `role=listbox` or picker container first, then scope `getByRole('option')` within it. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
+- **Use exact dynamic labels and page objects:** `filter({ hasText })` is substring matching; for counts or sibling content, use a stable `data-*` attribute or `getByText(label, { exact: true })` and assert uniqueness. Prefer page object methods like `clickSessionChatTab()` (stable `data-testid`) over fragile text matches such as `sessionTabByText("1")`.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
 
 ## TDD workflow
 
 Follow `/tdd` when writing E2E tests:
 
-1. **RED** — Write the spec, run it, watch it fail (missing `data-testid`, feature not implemented, etc.)
+1. **RED** — Write the spec and run a defect-specific expected-vs-actual assertion that fails before production changes; a missing selector/testid is scaffold failure, not behavioral RED. Add stable selectors as setup, or label selector-only RED separately. For a pure state/data UI regression, if a component/unit RED test already proves the bug and the E2E fixture cannot deterministically reproduce the pre-fix state without production wiring, add the E2E assertion after the minimal fix, run it against a fresh managed production build, and record why E2E was not the RED gate.
 2. **GREEN** — Implement the feature/fix, add `data-testid` attributes, run the test until green
 3. **REFACTOR** — Extract page objects, clean up selectors, keep tests green
-4. Run the targeted E2E spec when done and report that final change-aware
-   verification is required as a separate planner assignment
+4. Run the targeted E2E spec when done and report that final change-aware verification is required as a separate planner assignment

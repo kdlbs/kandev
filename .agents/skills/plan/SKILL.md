@@ -24,6 +24,12 @@ Read these sources in full:
 Use the legacy feature specification during migration only when no replacement
 requirement or design exists.
 
+Read each spec's `Implementation Plans` and related-plan links, then inventory
+all existing companion plan directories. Treat linked packages as one
+synchronized implementation record: reconcile every affected task scope, E2E
+scenario matrix, status, and exact final verification results/counts before
+completion.
+
 ## Outputs
 
 Create:
@@ -198,8 +204,28 @@ Every work order needs exact commands. Use repository `make` targets when they
 exist. Frontend work in a fresh worktree includes the workspace dependency
 installation before the first package command.
 
+Write each verification block so that a user can run the complete block in one
+shell. If commands change directories, use one directory change or isolated
+subshells.
+
+When implementation is complete, replace `Pending` with every required command
+and its result. Include specification and diff gates that run outside the
+product test commands.
+
 User-facing behavior needs end-to-end evidence somewhere in the work package.
 A low-level work order does not need an artificial browser test.
+
+After implementation and targeted checks pass, run every listed verification
+command from its documented working directory. In a multi-command block, root
+each command independently with `(cd <dir> && ...)` or an explicit root reset;
+never rely on a preceding `cd`. Confirm each referenced path exists and stays
+inside the tool or package scope, and that every changed test suite is covered
+before marking Results complete. Record actual results, not planned or stale counts.
+
+Before marking a new plan package complete, run `git diff --check --
+docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;
+the status check catches untracked work orders. Confirm every work order names
+existing `REQ-*`/`AC-*` IDs and an existing system-design path.
 
 Do not add generic QA, review, simplify, security, or full-verification tasks.
 Task checks provide pre-PR evidence. Configured PR reviewers provide semantic

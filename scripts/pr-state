@@ -15,6 +15,8 @@
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
+#   - required_status_checks: [<status context>]
+#   - required_status_checks_known: <boolean>
 #   - approval_required_runs: [{ run_id, name, workflow, status, conclusion, head_sha, url }]
 #   - review_threads: [{ thread_id, is_resolved, path, comment_id, comment_created_at, author, body_preview }]
 #   - hidden_unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
@@ -38,9 +40,12 @@
 #   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
 #   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url, target_url }]
 #   - successful_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
+#   - terminal_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
 #   - passed_check_count: <N>
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
+#   - required_status_checks: [<status context>]
+#   - required_status_checks_known: <boolean>
 #   - approval_required_runs: [{ run_id, name, workflow, status, conclusion, head_sha, url }]
 #   - unresolved_review_thread_count: <N>
 #   - filtered_review_thread_count: <N>
@@ -154,6 +159,8 @@ pr_view_succeeded=false
 checks_json='[]'
 checks_head_sha=''
 checks_snapshot_complete=false
+required_status_checks_json='[]'
+required_status_checks_known=false
 base_ref_name=''
 base_head_oid=''
 merge_base_oid=''
@@ -328,6 +335,8 @@ extract_issue_comments_json() {
       actionable: (
         (((.author.login // "unknown") == "github-actions") or ((.author.login // "unknown") == "github-actions[bot]"))
         and (
+          (((.body // "") | contains("<!-- kandev-docs-cloudflare-preview -->")) | not)
+          and
           (((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; ""))
             | test("^<!-- opencode-review:no-findings -->\\n\\*\\*OpenCode review complete\\*\\*\\n\\nOpenCode model: `[^`\\n]+`\\n\\nNo suggestions found for commit `[0-9A-Fa-f]{7,40}`\\.$")
             | not)
@@ -562,29 +571,45 @@ summarize_state_json() {
       (.status == "completed" and .conclusion == "success")
       or (.status == "success" and (.conclusion == null or .conclusion == "success"));
 
-    {
+    (effective_checks) as $effective
+    | (if .required_status_checks_known == true then
+        [
+          (.required_status_checks // [])[] as $required
+          | select(any($effective[]?; .name == $required) | not)
+          | {name: $required, workflow: null, status: "missing", run_id: null,
+             job_id: null, details_url: null, target_url: null}
+        ]
+      else [] end) as $missing_required
+    | {
       pr,
       since,
       checks_head_sha,
       checks_snapshot_complete,
+      required_status_checks: (.required_status_checks // []),
+      required_status_checks_known: (.required_status_checks_known == true),
       approval_required_runs: (.approval_required_runs // []),
       failed_checks: [
-        effective_checks[]
+        $effective[]
         | select(terminal_failure_status and bad_conclusion)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
-      pending_checks: [
-        effective_checks[]
+      pending_checks: ([
+        $effective[]
         | select(pending_status and .conclusion == null)
         | {name, workflow, status, run_id, job_id, details_url, target_url}
-      ],
+      ] + $missing_required),
       successful_checks: [
-        effective_checks[]
+        $effective[]
         | select(successful_check)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
-      check_count: ([effective_checks[]] | length),
-      passed_check_count: ([effective_checks[] | select(successful_check)] | length),
+      terminal_checks: [
+        $effective[]
+        | select(.conclusion == "skipped" or .conclusion == "neutral")
+        | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
+      ],
+      check_count: (($effective | length) + ($missing_required | length)),
+      passed_check_count: ([$effective[] | select(successful_check)] | length),
       unresolved_review_thread_count,
       filtered_review_thread_count,
       review_evidence,
@@ -597,6 +622,11 @@ summarize_state_json() {
       hidden_unresolved_threads: (.hidden_unresolved_threads // []),
       summary_notes: (
         [
+          if .required_status_checks_known != true then
+            "required status check policy is unavailable; terminal check counts are not sufficient"
+          else
+            empty
+          end,
           if (
             (.unresolved_review_thread_count | type) == "number"
             and .unresolved_review_thread_count > 0
@@ -700,6 +730,83 @@ fetch_base_ref_json() {
     }'
 }
 
+fetch_required_status_checks_json() {
+  local owner=$1
+  local repo=$2
+  local base_ref=$3
+  local default_ref=$4
+  local rulesets_pages rulesets_json details='[]' ruleset_id detail protected_json
+  local ruleset_required='[]' legacy_required='[]'
+
+  [[ -n "$owner" && -n "$repo" && -n "$base_ref" ]] || return 1
+
+  # Rulesets expose the required status contexts, while the list endpoint only
+  # exposes their IDs. Fetch the active rule definitions before deciding that a
+  # small rollup is complete. Legacy branch protection can coexist with
+  # rulesets, so query it as well and union both policy sources.
+  if rulesets_pages="$(gh_json api --paginate "repos/$owner/$repo/rulesets?per_page=100")"; then
+    rulesets_json="$(jq -cs '[.[][]?]' <<<"$rulesets_pages")" || return 1
+    while IFS= read -r ruleset_id; do
+      [[ -n "$ruleset_id" ]] || continue
+      if ! detail="$(gh_json api "repos/$owner/$repo/rulesets/$ruleset_id")"; then
+        return 1
+      fi
+      jq -e . >/dev/null 2>&1 <<<"$detail" || return 1
+      details="$(jq -cn --argjson prev "$details" --argjson detail "$detail" '$prev + [$detail]')" || return 1
+    done < <(jq -r '.[] | select(.target == "branch" and .enforcement == "active") | .id // empty' <<<"$rulesets_json")
+
+    # GitHub uses fnmatch semantics for ref conditions. Exact names and the
+    # documented special values are evaluated below; unsupported glob syntax
+    # must make policy discovery unknown instead of silently dropping a rule.
+    ruleset_required="$(jq -c --arg base "$base_ref" --arg default "$default_ref" '
+      def matches_ref($candidate):
+        $candidate == "~ALL"
+        or $candidate == $base
+        or $candidate == ("refs/heads/" + $base)
+        or ($candidate == "~DEFAULT_BRANCH" and $default != "" and $base == $default);
+      def unsupported_ref_pattern:
+        contains("*") or contains("?") or contains("[") or contains("]") or contains("\\");
+      if any(
+        .[]
+        | select(.enforcement == "active")
+        | ((.conditions.ref_name.include // []) + (.conditions.ref_name.exclude // []))[]?
+        ; unsupported_ref_pattern
+      ) then
+        error("ruleset ref pattern cannot be evaluated safely")
+      else
+        [
+          .[]
+          | select(.enforcement == "active")
+          | select(any((.conditions.ref_name.include // [])[]?; matches_ref(.)))
+          | select(any((.conditions.ref_name.exclude // [])[]?; matches_ref(.)) | not)
+          | .rules[]?
+          | select(.type == "required_status_checks")
+          | .parameters.required_status_checks[]?
+        ] as $required_checks
+        | if any($required_checks[]?; (.integration_id? // null) != null) then
+            error("ruleset required check integration source cannot be verified")
+          else
+            [$required_checks[]? | .context // empty] | unique
+          end
+      end
+    ' <<<"$details" 2>/dev/null)" || return 1
+
+    if protected_json="$(gh_json api "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")"; then
+      legacy_required="$(jq -c '[.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$protected_json")" || return 1
+    fi
+
+    jq -cn --argjson ruleset "$ruleset_required" --argjson legacy "$legacy_required" '$ruleset + $legacy | unique'
+    return
+  fi
+
+  if protected_json="$(gh_json api "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")"; then
+    jq -c '[.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$protected_json"
+    return
+  fi
+
+  return 1
+}
+
 fetch_merge_base_json() {
   local owner=$1
   local repo=$2
@@ -790,9 +897,11 @@ fetch_review_threads_nodes_json() {
 
 repo_owner=''
 repo_name=''
-if repo_json="$(gh_json repo view --json owner,name)"; then
+default_branch_name=''
+if repo_json="$(gh_json repo view --json owner,name,defaultBranchRef)"; then
   repo_owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
   repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
+  default_branch_name="$(jq -r '.defaultBranchRef.name // ""' <<<"$repo_json")"
 else
   add_error "repo" "gh repo view failed"
 fi
@@ -842,6 +951,14 @@ if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -
     base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$base_context_json")"
   else
     add_error "base" "gh api graphql base ref lookup failed"
+  fi
+
+  if [[ -n "$base_ref_name" ]]; then
+    if required_status_checks_json="$(fetch_required_status_checks_json "$repo_owner" "$repo_name" "$base_ref_name" "$default_branch_name")"; then
+      required_status_checks_known=true
+    else
+      add_error "required_status_checks" "required status check policy lookup failed"
+    fi
   fi
 
   if [[ -n "$base_head_oid" && -n "$checks_head_sha" ]]; then
@@ -1013,6 +1130,7 @@ trap cleanup_state_tmp EXIT
 printf '%s\n' "$pr_json" >"$state_tmp_dir/pr.json"
 printf '%s\n' "$since_json" >"$state_tmp_dir/since.json"
 printf '%s\n' "$checks_json" >"$state_tmp_dir/checks.json"
+printf '%s\n' "$required_status_checks_json" >"$state_tmp_dir/required_status_checks.json"
 printf '%s\n' "$approval_required_runs_json" >"$state_tmp_dir/approval_required_runs.json"
 printf '%s\n' "$review_threads_json" >"$state_tmp_dir/review_threads.json"
 printf '%s\n' "$hidden_unresolved_threads_json" >"$state_tmp_dir/hidden_unresolved_threads.json"
@@ -1025,6 +1143,7 @@ state_json="$(jq -cn \
   --slurpfile pr "$state_tmp_dir/pr.json" \
   --slurpfile since "$state_tmp_dir/since.json" \
   --slurpfile checks "$state_tmp_dir/checks.json" \
+  --slurpfile required_status_checks "$state_tmp_dir/required_status_checks.json" \
   --slurpfile approval_required_runs "$state_tmp_dir/approval_required_runs.json" \
   --slurpfile review_threads "$state_tmp_dir/review_threads.json" \
   --slurpfile hidden_unresolved_threads "$state_tmp_dir/hidden_unresolved_threads.json" \
@@ -1033,6 +1152,7 @@ state_json="$(jq -cn \
   --slurpfile issue_comments "$state_tmp_dir/issue_comments.json" \
   --arg checks_head_sha "$checks_head_sha" \
   --argjson checks_snapshot_complete "$checks_snapshot_complete" \
+  --argjson required_status_checks_known "$required_status_checks_known" \
   --argjson unresolved_review_thread_count "$unresolved_review_thread_count" \
   --argjson filtered_review_thread_count "$filtered_review_thread_count" \
   --slurpfile errors "$state_tmp_dir/errors.json" \
@@ -1042,6 +1162,8 @@ state_json="$(jq -cn \
     checks: $checks[0],
     checks_head_sha: (if $checks_head_sha == "" then null else $checks_head_sha end),
     checks_snapshot_complete: $checks_snapshot_complete,
+    required_status_checks: $required_status_checks[0],
+    required_status_checks_known: $required_status_checks_known,
     approval_required_runs: $approval_required_runs[0],
     review_threads: $review_threads[0],
     hidden_unresolved_threads: $hidden_unresolved_threads[0],

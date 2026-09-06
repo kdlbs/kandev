@@ -88,6 +88,8 @@ snapshot() {
       failed_checks: $f, pending_checks: $p, passed_check_count: $passed,
       check_count: ($passed + $failed + $pending),
       checks_head_sha: $head, checks_snapshot_complete: $complete,
+      terminal_checks: [],
+      required_status_checks: [], required_status_checks_known: true,
       approval_required_runs: [], unresolved_review_thread_count: 0,
       unresolved_threads: [], hidden_unresolved_threads: [],
       actionable_issue_comment_count: 0, errors: [],
@@ -175,8 +177,8 @@ snapshot "$d" 1 20 0 0 false
 snapshot "$d" 2 20 0 0 true
 out="$(run_await "$d" 12 --interval-sec 1 2>"$d/err")" && rc=0 || rc=$?
 [[ "$rc" -eq 0 ]] || fail "expected 0 after snapshot completed, got $rc" "$out"
-grep -q '2 poll' <<<"$out" || fail "should have polled twice, not stopped on the incomplete snapshot" "$out"
-pass "checks_snapshot_complete=false keeps waiting"
+grep -q '3 poll' <<<"$out" || fail "should confirm the terminal rollup after the incomplete snapshot" "$out"
+pass "checks_snapshot_complete=false and the first terminal snapshot keep waiting"
 
 # --- deadline ---------------------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -213,6 +215,16 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 1 ]] || fail "conflict should exit 1, got $rc" "$out"
 grep -q 'resolve the merge conflict' <<<"$out" || fail "conflict should lead the NEXT line" "$out"
 pass "a merge conflict is surfaced even when every check passed"
+
+# --- clean checks can still require human approval --------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","headRefOid":"aaaaaaaaaaaa"}' > "$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "approval-gated clean checks should exit 0, got $rc" "$out"
+grep -q 'review: REVIEW_REQUIRED' <<<"$out" || fail "wait output should expose the review decision" "$out"
+grep -qi 'human approval is required' <<<"$out" || fail "wait output should distinguish the approval gate" "$out"
+pass "clean checks report the human approval gate without a code failure"
 
 # --- transient pr-state failures recover; sustained ones block --------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -282,8 +294,8 @@ d="$(make_tmp_dir)"; setup_fake "$d"
 for i in 1 2 3 4 5 6 7; do snapshot "$d" "$i" "$i" 0 $((8 - i)); done
 snapshot "$d" 8 20 0 0
 run_await "$d" 12 --interval-sec 1 --quiet >/dev/null 2>&1 || true
-[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 7 ]] || fail "expected 7 internal sleeps" "$(cat "$d/sleeps")"
-pass "eight polls happen inside a single invocation (7 internal sleeps, 0 caller round-trips)"
+[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 8 ]] || fail "expected 8 internal sleeps" "$(cat "$d/sleeps")"
+pass "nine polls happen inside a single invocation (8 internal sleeps, 0 caller round-trips)"
 
 # --- P1: a snapshot carrying errors is never clean ---------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -605,8 +617,8 @@ for i in 1 2 3; do snapshot "$d" "$i" 0 0 0; done
 snapshot "$d" 4 20 0 0
 out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 0 ]] || fail "expected clean once checks appeared, got $rc" "$out"
-grep -q '4 poll' <<<"$out" || fail "must wait for checks to appear, not stop at the empty rollup" "$out"
-pass "an empty check rollup keeps waiting instead of reporting clean"
+grep -q '5 poll' <<<"$out" || fail "must wait for checks to appear and stabilize, not stop at the empty rollup" "$out"
+pass "an empty check rollup keeps waiting until the terminal rollup stabilizes"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
 for i in 1 2 3 4 5; do snapshot "$d" "$i" 0 0 0; done
@@ -625,11 +637,81 @@ pass "a zero-check deadline is distinguished from a deadline with pending checks
 for conclusion in skipped neutral; do
   d="$(make_tmp_dir)"; setup_fake "$d"
   snapshot "$d" 1 0 0 0 true aaaaaaaaaaaa "{\"check_count\":1,\"terminal_conclusions\":[\"$conclusion\"]}"
-  out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
   [[ "$rc" -eq 0 ]] || fail "$conclusion-only check rollup should be terminal, got $rc" "$out"
   [[ "$(jq -r '.outcome' <<<"$out")" == 'terminal' ]] || fail "$conclusion-only rollup should emit terminal" "$out"
 done
 pass "skipped and neutral terminal checks do not look like an empty rollup"
+
+# --- a sparse non-empty rollup is provisional -------------------------------
+# Immediately after a push, GitHub can report a couple of terminal checks
+# before the rest of the required workflows materialize. A non-zero check count
+# must not be treated as proof that the rollup is complete.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 2 0 0 true aaaaaaaaaaaa
+snapshot "$d" 2 45 0 0 true aaaaaaaaaaaa
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "sparse rollup should settle to clean, got $rc" "$out"
+grep -q '45 passed' <<<"$out" || fail "must report the materialized full rollup, not the sparse one" "$out"
+grep -q '3 poll' <<<"$out" || fail "must confirm the expanded rollup before returning" "$out"
+pass "a sparse non-empty rollup stays provisional until the full set stabilizes"
+
+# The set of checks is logical state, not an API-order-sensitive sequence. A
+# reordered response must not reset the terminal confirmation streak.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 2 0 0 true aaaaaaaaaaaa \
+  '{"successful_checks":[{"name":"check-b","workflow":"ci","status":"completed","conclusion":"success"},{"name":"check-a","workflow":"ci","status":"completed","conclusion":"success"}]}'
+snapshot "$d" 2 2 0 0 true aaaaaaaaaaaa \
+  '{"successful_checks":[{"name":"check-a","workflow":"ci","status":"completed","conclusion":"success"},{"name":"check-b","workflow":"ci","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "reordered terminal checks should settle clean, got $rc" "$out"
+grep -q '2 poll' <<<"$out" || fail "reordered terminal checks should not reset the confirmation streak" "$out"
+pass "terminal rollup fingerprint ignores API ordering"
+
+# --- required contexts prevent an optional-only rollup from becoming clean ---
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 1 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "an optional-only rollup must hit the deadline, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'deadline' ]] || fail "optional-only rollup outcome missing" "$out"
+grep -q 'E2E Tests Passed' <<<"$(jq -r '.summary.pending_checks[].name' <<<"$out")" \
+  || fail "missing required context should remain pending" "$out"
+pass "an optional-only rollup does not become clean while required contexts are absent"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do
+  snapshot "$d" "$i" 1 0 0 true aaaaaaaaaaaa \
+    '{"required_status_checks_known":false}'
+done
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "an unavailable required-status policy should block, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-required-statuses' ]] \
+  || fail "an unavailable required-status policy should report its blocked outcome" "$out"
+pass "an unavailable required-status policy never becomes clean"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+terminal_required='{"check_count":1,"required_status_checks":["Skipped required"],"required_status_checks_known":true,"terminal_checks":[{"name":"Skipped required","workflow":"ci","status":"completed","conclusion":"skipped"}]}'
+snapshot "$d" 1 0 0 0 true aaaaaaaaaaaa "$terminal_required"
+snapshot "$d" 2 0 0 0 true aaaaaaaaaaaa "$terminal_required"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a skipped required context should be terminal, got $rc" "$out"
+grep -q '0 pending' <<<"$out" || fail "a skipped required context must not be synthesized as pending" "$out"
+pass "skipped required contexts remain terminal instead of pending"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 1 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"}]}'
+snapshot "$d" 2 2 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"},
+                         {"name":"E2E Tests Passed","workflow":"e2e","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a materialized required context should allow clean, got $rc" "$out"
+grep -q '3 poll' <<<"$out" || fail "required context should settle after it materializes" "$out"
+pass "a required context that materializes allows the terminal verdict"
 
 # --- a base that advanced leaves the merge result untested -----------------
 d="$(make_tmp_dir)"; setup_fake "$d"

@@ -45,6 +45,11 @@ concrete enough that the user can answer quickly.
 
 If no multi-question tool is available, ask one question at a time in chat. Do not send a long questionnaire.
 
+If a native single-question interaction resolves one material ambiguity, record
+that decision and continue when the remaining outcome, success conditions, and
+scope are already explicit. Require the full restatement confirmation below
+only when broad intent is still missing.
+
 ### 3. Probe Convention-Sounding Answers
 
 If the user says "modern", "scalable", "best practice", "dashboard", "robust", or "clean architecture" without concrete outcomes, ask:
