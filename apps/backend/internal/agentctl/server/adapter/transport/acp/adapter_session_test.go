@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -152,6 +154,103 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			}
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
+	}
+}
+
+func TestAdditionalDirectoriesExcludeCWDAndDuplicates(t *testing.T) {
+	got, err := additionalDirectoriesForSession(
+		"/workspace",
+		[]string{"/workspace", "/workspace/api", "/workspace/api", "/workspace/web"},
+	)
+	if err != nil {
+		t.Fatalf("additionalDirectoriesForSession: %v", err)
+	}
+	want := []string{"/workspace/api", "/workspace/web"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
+	}
+}
+
+func TestAdditionalDirectoriesRejectRelativeRoots(t *testing.T) {
+	if _, err := additionalDirectoriesForSession("/workspace", []string{"api", "/workspace/api"}); err == nil {
+		t.Fatal("additionalDirectoriesForSession accepted a relative root")
+	}
+}
+
+func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		return []string{"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web"}, nil
+	}); err != nil {
+		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	}
+	want := []string{"/tmp/test/api", "/tmp/test/web"}
+	if !slices.Equal(capture.newRequest.AdditionalDirectories, want) {
+		t.Fatalf("ACP additionalDirectories = %v, want %v", capture.newRequest.AdditionalDirectories, want)
+	}
+}
+
+func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		return []string{"/tmp/test/api"}, nil
+	}); err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want unsupported projection", err)
+	}
+	if capture.newRequest.Cwd != "" {
+		t.Fatalf("ACP NewSession was called despite unsupported additional directories: %+v", capture.newRequest)
+	}
+}
+
+// TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption
+// guards the fix for the TOCTOU window where a caller pre-fetched
+// canonical workspace roots well before the ACP request was actually built.
+// The resolver must be invoked by the adapter itself, immediately before
+// the roots are consumed, so a resolver failure (e.g. the roots changed
+// concurrently) fails the session instead of silently using a stale
+// snapshot, and the resolver must never be called eagerly by the caller.
+func TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	resolveErr := errors.New("workspace source roots changed")
+	var resolverCalled bool
+	resolveRoots := func() ([]string, error) {
+		resolverCalled = true
+		return nil, resolveErr
+	}
+
+	_, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, resolveRoots)
+	if err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") || !errors.Is(err, resolveErr) {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want wrapped git_metadata_projection_unsupported", err)
+	}
+	if !resolverCalled {
+		t.Fatal("resolver was never invoked; roots must be re-validated at consumption time")
+	}
+	if capture.newRequest.Cwd != "" {
+		t.Fatalf("ACP NewSession was called despite a failed roots resolution: %+v", capture.newRequest)
+	}
+}
+
+func TestResetSessionWithAdditionalDirectoriesResolvesRoots(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+	called := false
+	_, err := adapter.ResetSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		called = true
+		return []string{"/workspace/secondary"}, nil
+	})
+	if err != nil {
+		t.Fatalf("ResetSessionWithAdditionalDirectories: %v", err)
+	}
+	if !called {
+		t.Fatal("reset did not invoke the validated workspace-root resolver")
+	}
+	if !slices.Equal(capture.newRequest.AdditionalDirectories, []string{"/workspace/secondary"}) {
+		t.Fatalf("reset additionalDirectories = %v, want validated root", capture.newRequest.AdditionalDirectories)
 	}
 }
 

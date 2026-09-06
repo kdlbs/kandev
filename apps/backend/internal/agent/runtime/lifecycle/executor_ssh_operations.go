@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -638,12 +639,13 @@ func buildSSHCreateInstanceRequest(
 	agentctlBin string,
 ) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
+		ID:                   req.InstanceID,
+		WorkspacePath:        workspacePath,
+		WorkspaceSourceRoots: []string{workspacePath},
+		SessionID:            req.SessionID,
+		TaskID:               req.TaskID,
+		Protocol:             req.Protocol,
+		AgentType:            sshAgentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -853,6 +855,13 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	// than a GitHub broker lease. Preserve that credential-free routing shape
 	// for the remote agentctl process as well.
 	copyIndexedGitConfig(req.Env, env)
+	if policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyEnvironmentAgent); ok {
+		for _, key := range policyAgent.FilesystemPolicyEnvironmentKeys() {
+			if value := req.Env[key]; value != "" {
+				env[key] = value
+			}
+		}
+	}
 
 	for _, key := range req.ApprovedSecretEnvKeys {
 		if !posixSSHEnvIdentifier.MatchString(key) {

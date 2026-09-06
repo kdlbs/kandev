@@ -202,6 +202,9 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	if got.WorkspacePath != "/remote/task" {
 		t.Fatalf("WorkspacePath = %q", got.WorkspacePath)
 	}
+	if !equalStrings(got.WorkspaceSourceRoots, []string{"/remote/task"}) {
+		t.Fatalf("WorkspaceSourceRoots = %v, want the remote workspace only", got.WorkspaceSourceRoots)
+	}
 	if got.AgentType != "opencode" {
 		t.Fatalf("AgentType = %q", got.AgentType)
 	}

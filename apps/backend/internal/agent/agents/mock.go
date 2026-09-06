@@ -17,9 +17,10 @@ var mockLogoLight []byte
 var mockLogoDark []byte
 
 var (
-	_ Agent            = (*MockAgent)(nil)
-	_ PassthroughAgent = (*MockAgent)(nil)
-	_ InferenceAgent   = (*MockAgent)(nil)
+	_ Agent                 = (*MockAgent)(nil)
+	_ PassthroughAgent      = (*MockAgent)(nil)
+	_ InferenceAgent        = (*MockAgent)(nil)
+	_ FilesystemPolicyAgent = (*MockAgent)(nil)
 )
 
 const (
@@ -244,6 +245,14 @@ func (a *MockAgent) BillingType() usage.BillingType { return defaultBillingType(
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
+
+// ApplyFilesystemPolicy lets the E2E mock exercise Codex-compatible policy
+// rendering without requiring a Codex binary.
+func (a *MockAgent) ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	return applyCodexFilesystemPolicy(env, policy)
+}
+
+func (a *MockAgent) FilesystemPolicyEnvironmentKeys() []string { return []string{"CODEX_CONFIG"} }
 
 // InferenceConfig enables one-shot inference via ACP. The mock-agent binary
 // advertises its available models in the session/new response, so the host

@@ -29,7 +29,6 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
           description: "/e2e:simple-message",
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
-          repository_ids: [seedData.repositoryId],
           executor_profile_id: seedData.sshExecutorProfileId,
         },
       );

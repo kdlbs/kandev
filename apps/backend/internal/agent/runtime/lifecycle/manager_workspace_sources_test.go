@@ -6,14 +6,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -180,7 +184,13 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
-	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace", []string{"/attached"}); err == nil {
+	execution.RuntimeName = executor.NameLocal
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameLocal}})
+	oldProjection := newLinkedGitMetadataProjection(t)
+	newProjection := newLinkedGitMetadataProjection(t)
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	if err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newProjection}, []string{"/attached"}); err == nil {
 		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
 	}
 	if got := server.reboundPaths(); !sameStrings(got, []string{"/new-workspace", "/old-workspace"}) {
@@ -189,22 +199,140 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	if execution.WorkspacePath != "/old-workspace" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
 		t.Fatalf("execution after rollback = path %q roots %v, want old workspace and roots", execution.WorkspacePath, execution.WorkspaceSourceRoots)
 	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projections after rollback = %#v, want old projection", execution.GitMetadataProjections)
+	}
 	if loads := server.loads(); len(loads) != 1 || loads[0] != "acp-existing" {
 		t.Fatalf("rollback loaded ACP sessions = %v, want [acp-existing]", loads)
 	}
 }
 
+func TestRebindWorkspaceWithGitMetadataRejectsInvalidReplacementBeforeStopping(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore()}
+	oldProjection := &worktree.GitMetadataProjection{CheckoutPath: "/old-workspace", Hash: "old"}
+	execution := &AgentExecution{
+		ID:                     "execution",
+		SessionID:              "session",
+		Status:                 v1.AgentStatusReady,
+		ACPSessionID:           "acp-existing",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{oldProjection},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{{CheckoutPath: "/missing-checkout"}}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionInvalid) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionInvalid)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projections after rejected replacement = %#v, want old projection", execution.GitMetadataProjections)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataFailsClosedWithoutRefreshCapability(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore()}
+	execution := &AgentExecution{ID: "execution", SessionID: "session", Status: v1.AgentStatusReady, ACPSessionID: "acp", RuntimeName: executor.NameStandalone}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataRejectsRemoteChildBeforeStopping(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	oldProjection := newLinkedGitMetadataProjection(t)
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.RuntimeName = executor.NameSSH
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&SSHExecutor{})
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+	if got := server.reboundPaths(); len(got) != 0 {
+		t.Fatalf("remote child was rebound before policy refresh: %v", got)
+	}
+	if execution.Status != v1.AgentStatusReady || execution.WorkspacePath != "" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
+		t.Fatalf("execution changed after rejected remote rebind: status=%q path=%q roots=%v", execution.Status, execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projection changed after rejected remote rebind: %#v", execution.GitMetadataProjections)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataRejectsDockerBeforeStopping(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	oldProjection := newLinkedGitMetadataProjection(t)
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.RuntimeName = executor.NameDocker
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&MockExecutor{name: executor.NameDocker})
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+	if !strings.Contains(err.Error(), "atomically replace") {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want recovery guidance", err)
+	}
+	if got := server.reboundPaths(); len(got) != 0 {
+		t.Fatalf("Docker child was rebound before mount refresh: %v", got)
+	}
+	if execution.Status != v1.AgentStatusReady || execution.WorkspacePath != "" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
+		t.Fatalf("execution changed after rejected Docker rebind: status=%q path=%q roots=%v", execution.Status, execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projection changed after rejected Docker rebind: %#v", execution.GitMetadataProjections)
+	}
+}
+
 type workspaceRebindAgentctlServer struct {
 	*httptest.Server
-	mu              sync.Mutex
-	startCount      int
-	neverReady      bool
-	firstStatus     bool
-	statusCallCount int
-	paths           []string
-	loadedSessions  []string
-	actionLog       []string
-	connections     []*websocket.Conn
+	mu                sync.Mutex
+	startCount        int
+	stopCount         int
+	childRunning      bool
+	neverReady        bool
+	firstStatus       bool
+	statusCallCount   int
+	paths             []string
+	workspaceRoots    [][]string
+	configured        []map[string]string
+	attestations      int
+	attestationErr    bool
+	failAttestAt      int
+	failStartAt       int
+	failConfigureAt   int
+	failConfigure     bool
+	failMaterialize   bool
+	failMaterializeAt int
+	failRemove        bool
+	failLoadAt        int
+	materialized      map[string]bool
+	operations        []string
+	materializeCount  int
+	loadCount         int
+	loadedSessions    []string
+	actionLog         []string
+	connections       []*websocket.Conn
 }
 
 func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceRebindAgentctlServer {
@@ -213,7 +341,134 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("/api/v1/stop", workspaceRebindSuccess)
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+		server.mu.Lock()
+		server.stopCount++
+		server.childRunning = false
+		server.operations = append(server.operations, "stop")
+		server.mu.Unlock()
+		workspaceRebindSuccess(w, nil)
+	})
+	mux.HandleFunc("/api/v1/workspace/materialize-repository", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Destination string `json:"destination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.materializeCount++
+		if server.failMaterialize || server.failMaterializeAt == server.materializeCount {
+			server.mu.Unlock()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "materialization rejected"})
+			return
+		}
+		if server.materialized == nil {
+			server.materialized = make(map[string]bool)
+		}
+		server.materialized[request.Destination] = true
+		server.operations = append(server.operations, "materialize")
+		server.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"destination": "added-main", "git_metadata_attested": true})
+	})
+	mux.HandleFunc("/api/v1/workspace/materialize-repository/remove", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Destination string `json:"destination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		if server.failRemove {
+			server.mu.Unlock()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "removal rejected"})
+			return
+		}
+		delete(server.materialized, request.Destination)
+		server.operations = append(server.operations, "remove")
+		server.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]bool{"removed": true})
+	})
+	mux.HandleFunc("/api/v1/workspace/rescan", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.operations = append(server.operations, "rescan")
+		server.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/workspace/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.operations = append(server.operations, "reconcile")
+		server.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/workspace/attest-git-metadata", func(w http.ResponseWriter, _ *http.Request) {
+		server.mu.Lock()
+		server.attestations++
+		server.operations = append(server.operations, "attest")
+		failed := server.attestationErr || server.failAttestAt == server.attestations
+		roots := append([]string(nil), server.workspaceRoots[len(server.workspaceRoots)-1]...)
+		for _, root := range roots[1:] {
+			if !server.materialized[filepath.Base(root)] {
+				failed = true
+			}
+		}
+		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "attestation rejected"})
+			return
+		}
+		checkouts := make([]map[string]string, 0, len(roots))
+		for _, root := range roots {
+			checkouts = append(checkouts, map[string]string{"checkout_path": root, "git_dir": root + "/.git"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"attested": true, "checkouts": checkouts})
+	})
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.configured = append(server.configured, request.Env)
+		server.operations = append(server.operations, "configure")
+		failed := server.failConfigure || server.failConfigureAt == len(server.configured)
+		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "configuration rejected"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
 	mux.HandleFunc("/api/v1/workspace/rebind", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			WorkDir string `json:"work_dir"`
@@ -231,8 +486,18 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
 		server.mu.Lock()
 		server.startCount++
+		server.operations = append(server.operations, "start")
+		failed := server.failStartAt == server.startCount
 		server.firstStatus = true
+		if !failed {
+			server.childRunning = true
+		}
 		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "restart rejected"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
@@ -295,8 +560,10 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 			_ = request.ParsePayload(&load)
 			server.mu.Lock()
 			server.loadedSessions = append(server.loadedSessions, load.SessionID)
+			server.loadCount++
+			failed := server.failLoadAt == server.loadCount
 			server.mu.Unlock()
-			response, _ := ws.NewResponse(request.ID, request.Action, map[string]bool{"success": true})
+			response, _ := ws.NewResponse(request.ID, request.Action, map[string]bool{"success": !failed})
 			data, _ := json.Marshal(response)
 			if conn.WriteMessage(websocket.TextMessage, data) != nil {
 				return
@@ -333,6 +600,40 @@ func (s *workspaceRebindAgentctlServer) actions() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.actionLog...)
+}
+
+func (s *workspaceRebindAgentctlServer) configuredEnvs() []map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	configs := make([]map[string]string, len(s.configured))
+	for index, env := range s.configured {
+		configs[index] = cloneStringMap(env)
+	}
+	return configs
+}
+
+func (s *workspaceRebindAgentctlServer) attestationCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attestations
+}
+
+func (s *workspaceRebindAgentctlServer) hasMaterialized(destination string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.materialized[destination]
+}
+
+func (s *workspaceRebindAgentctlServer) operationLog() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.operations...)
+}
+
+func (s *workspaceRebindAgentctlServer) running() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.childRunning
 }
 
 func (s *workspaceRebindAgentctlServer) closeConnections() {

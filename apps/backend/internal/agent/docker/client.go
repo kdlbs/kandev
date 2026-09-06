@@ -61,6 +61,7 @@ type MountConfig struct {
 	Source   string // Host path
 	Target   string // Container path
 	ReadOnly bool
+	Tmpfs    bool // Mask a host subtree with an empty in-container filesystem.
 }
 
 // ContainerInfo holds information about a running container.
@@ -304,8 +305,12 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 func buildDockerMounts(configs []MountConfig) []mount.Mount {
 	mounts := make([]mount.Mount, 0, len(configs))
 	for _, m := range configs {
+		mountType := mount.TypeBind
+		if m.Tmpfs {
+			mountType = mount.TypeTmpfs
+		}
 		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+			Type:     mountType,
 			Source:   m.Source,
 			Target:   m.Target,
 			ReadOnly: m.ReadOnly,

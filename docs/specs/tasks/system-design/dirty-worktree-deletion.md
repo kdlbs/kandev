@@ -166,4 +166,3 @@ error. It does not emit repeated retry attempts.
 - [Fail-closed GC semantics](../../../decisions/0009-fail-closed-gc-semantics.md)
 - [Task-owned worktree lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 - [Confirmation Warning Hierarchy](../../ui/system-design/confirmation-warning-hierarchy.md)
-

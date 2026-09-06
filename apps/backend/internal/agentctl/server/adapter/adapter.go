@@ -60,6 +60,16 @@ type OneShotAdapter interface {
 	IsOneShot() bool
 }
 
+// AdditionalDirectoriesSessioner is implemented by ACP adapters that can
+// negotiate per-session filesystem roots with the connected provider.
+// Callers must pass a resolver backed only by server-owned, canonical roots;
+// the adapter invokes it immediately before the roots are consumed so
+// validation stays coupled to actual provider consumption instead of racing
+// a concurrent root change.
+type AdditionalDirectoriesSessioner interface {
+	NewSessionWithAdditionalDirectories(context.Context, []types.McpServer, types.WorkspaceSourceRootsResolver) (string, error)
+}
+
 // OneShotConfig holds command configuration for one-shot adapters that manage
 // their own subprocess lifecycle. The adapter spawns a new process per prompt.
 type OneShotConfig struct {
@@ -144,6 +154,12 @@ type ConfigOptionSettableAdapter interface {
 // restarting the agent subprocess. Only ACP adapters support this.
 type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
+}
+
+// AdditionalDirectoriesSessionResetter preserves lifecycle-owned workspace
+// roots when an ACP session is reset in place.
+type AdditionalDirectoriesSessionResetter interface {
+	ResetSessionWithAdditionalDirectories(context.Context, []types.McpServer, types.WorkspaceSourceRootsResolver) (string, error)
 }
 
 // AgentInfo contains information about the connected agent.

@@ -51,12 +51,26 @@ func (m *Manager) Start(ctx context.Context) error {
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			execution := &AgentExecution{
-				ID:                   ri.InstanceID,
-				TaskID:               ri.TaskID,
-				SessionID:            ri.SessionID,
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
+				ID:            ri.InstanceID,
+				TaskID:        ri.TaskID,
+				SessionID:     ri.SessionID,
+				ContainerID:   ri.ContainerID,
+				ContainerIP:   ri.ContainerIP,
+				WorkspacePath: ri.WorkspacePath,
+				// WorkspaceSourceRoots carries forward whatever roots the
+				// runtime backend already reconstructed for this instance.
+				// GitMetadataProjections is deliberately left nil here: no
+				// current runtime backend's RecoverInstances returns a
+				// non-empty result (Docker, SSH, Sprites, remote Docker, and
+				// Kubernetes all no-op; a restarted container is instead
+				// re-attached lazily through EnsureWorkspaceExecutionForSession,
+				// which derives a fresh, trust-validated projection through the
+				// normal resume path). A future backend that starts recovering
+				// live instances here must derive GitMetadataProjections the
+				// same way — from a separately trusted repository record, never
+				// from the recovered checkout's own .git pointer alone — before
+				// this execution is allowed to accept a workspace attach.
+				WorkspaceSourceRoots: append([]string(nil), ri.WorkspaceSourceRoots...),
 				RuntimeName:          ri.RuntimeName,
 				Status:               v1.AgentStatusRunning,
 				StartedAt:            time.Now(),
@@ -370,12 +384,26 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
 	m.releaseActivity(executionActivityKey(executionID))
-	if execution, ok := m.executionStore.Get(executionID); ok {
+	execution, ok := m.executionStore.Get(executionID)
+	if ok {
 		m.closeStreamCoalescer(execution)
 		m.cleanupPassthroughMCPConfig(execution)
 		m.setRuntimeInterest(execution.SessionID, false)
 	}
+	// Revoke public lookup authority before waiting for prompt lifecycle
+	// synchronization. Stop paths may already be waiting to publish an event
+	// behind this mutex; removing first prevents a new policy lookup from
+	// discovering the execution while revocation is pending.
 	m.executionStore.Remove(executionID)
+	if ok {
+		// The executor has already been stopped by every legitimate removal
+		// path. Drop the ephemeral metadata grant before losing lifecycle
+		// ownership so stale execution pointers cannot be reused as policy
+		// authority after task cleanup or a later attachment.
+		execution.promptLifecycleMu.Lock()
+		execution.GitMetadataProjections = nil
+		execution.promptLifecycleMu.Unlock()
+	}
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))
 }

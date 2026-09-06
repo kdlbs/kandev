@@ -26,6 +26,13 @@ func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
 	}
 }
 
+func TestOpenCodeACPDoesNotClaimFilesystemPolicyEnforcement(t *testing.T) {
+	var agent Agent = NewOpenCodeACP()
+	if _, ok := agent.(FilesystemPolicyAgent); ok {
+		t.Fatal("OpenCode must not claim filesystem-policy enforcement: unrestricted bash can bypass read/edit rules")
+	}
+}
+
 func TestOpenCodeACPDiscoveryRecognizesAuthenticationHelper(t *testing.T) {
 	binaryPath := writeOpenCodeTestBinary(t, "exit 7")
 

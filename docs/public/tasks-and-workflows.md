@@ -267,8 +267,17 @@ carry over. The intentional restart is not shown as a previous agent error.
 
 The host rebind stops open task terminals, dev servers, the task editor server, and other
 agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
-Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
-without restarting the agent or changing its CWD.
+Local Docker, Kubernetes, SSH, and Sprites clone the new repository independently in every live
+executor workspace. Kandev pauses the agent, verifies the exact task-owned checkout set, then
+restores the agent with the expanded workspace. If that verification or restoration fails, the
+attachment is rejected and the prior session is restored; if it cannot be restored safely, the
+session remains stopped and asks you to start a new one.
+
+For ACP agents that explicitly support extra workspace directories, Kandev includes only the task's
+canonical repository siblings when it creates the session. If repository siblings require additional
+directories and the ACP agent does not advertise that capability, session creation fails rather than
+silently changing the authorized scope. Clone-based Docker, Kubernetes, SSH, and Sprites launches validate the
+executor-side checkout and its Git metadata before a mutable session can be configured.
 
 Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, Kubernetes, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 

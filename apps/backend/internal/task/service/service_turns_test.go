@@ -968,7 +968,8 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 	now := time.Now().UTC()
 
 	if err := repo.CreateRepository(ctx, &models.Repository{
-		ID: "repo-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main",
+		ID: "repo-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api",
+		RemoteURL: "https://github.com/acme/api.git", DefaultBranch: "main",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -1000,6 +1001,9 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 	got := info.WorkspaceRepositories[0]
 	if got.WorktreeID != "worktree-recovery" || got.BranchSlug != "feature-recovery" || got.BranchIdentitySlug != "feature-recovery" {
 		t.Fatalf("recovery repository identity = %+v, want persisted worktree ID and branch slug", got)
+	}
+	if got.RepositoryURL != "https://github.com/acme/api.git" {
+		t.Fatalf("recovery repository URL = %q, want durable clone URL", got.RepositoryURL)
 	}
 }
 

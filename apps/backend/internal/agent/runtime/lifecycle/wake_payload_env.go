@@ -1,14 +1,13 @@
 package lifecycle
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode"
 
+	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
@@ -107,59 +106,14 @@ func ensureWakePayloadGitExclude(workspacePath string) error {
 
 func gitInfoDir(workspacePath string) (string, error) {
 	gitPath := filepath.Join(workspacePath, ".git")
-	if infoDir, err := gitDirInfo(gitPath); err != nil || infoDir != "" {
-		return infoDir, err
-	}
-	return gitWorktreeInfo(workspacePath, gitPath)
-}
-
-func gitDirInfo(gitPath string) (string, error) {
-	infoPath := filepath.Join(gitPath, "info")
-	st, err := os.Stat(infoPath)
-	if err == nil {
-		if st.IsDir() {
-			return infoPath, nil
-		}
+	if _, err := os.Lstat(gitPath); os.IsNotExist(err) {
 		return "", nil
+	} else if err != nil {
+		return "", err
 	}
-	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
-		if fi, statErr := os.Stat(gitPath); statErr == nil && fi.IsDir() {
-			return infoPath, nil
-		}
-		return "", nil
-	}
-	return "", err
-}
-
-func gitWorktreeInfo(workspacePath string, gitPath string) (string, error) {
-	data, err := os.ReadFile(gitPath)
-	if os.IsNotExist(err) {
-		return "", nil
-	}
+	projection, err := worktree.ResolveGitMetadata(workspacePath)
 	if err != nil {
 		return "", err
 	}
-	const prefix = "gitdir:"
-	line := strings.TrimSpace(string(data))
-	if !strings.HasPrefix(line, prefix) {
-		return "", nil
-	}
-	gitDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	if gitDir == "" {
-		return "", nil
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(workspacePath, gitDir)
-	}
-	infoDir := filepath.Join(filepath.Clean(gitDir), "info")
-	st, err := os.Stat(infoDir)
-	switch {
-	case os.IsNotExist(err):
-		return infoDir, nil
-	case err != nil:
-		return "", err
-	case !st.IsDir():
-		return "", fmt.Errorf("git info path is not a directory: %s", infoDir)
-	}
-	return infoDir, nil
+	return filepath.Join(projection.GitDir, "info"), nil
 }

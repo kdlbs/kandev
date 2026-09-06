@@ -1420,6 +1420,53 @@ func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t
 	}
 }
 
+// TestApplyResumeWorktreePathsCarriesWorktreeIDForDurableReuse guards against
+// a multi-repo resume silently recreating a checkout at a different path (or
+// failing to attach the existing one) after a repository rename or a
+// branch-layout slug change. The lifecycle reuse-by-WorktreeID path looks the
+// worktree up by its DB primary key and validates the persisted path
+// directly, so it must survive even when the freshly-derived
+// session+repository+branch-slug identity would no longer match the
+// originally persisted one.
+func TestApplyResumeWorktreePathsCarriesWorktreeIDForDurableReuse(t *testing.T) {
+	infos := []*repoInfo{
+		{RepositoryID: "repo-1", Position: 0},
+		{RepositoryID: "repo-2", Position: 1},
+	}
+	specs := buildRepoSpecs(infos)
+	env := &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-1", Position: 0, WorktreeID: "wt-1", WorktreePath: "/tasks/t/repo-1"},
+			{RepositoryID: "repo-2", Position: 1, WorktreeID: "wt-2", WorktreePath: "/tasks/t/repo-2"},
+		},
+	}
+
+	applyResumeWorktreePaths(specs, infos, env)
+
+	if specs[0].WorktreeID != "wt-1" || specs[0].WorktreePath != "/tasks/t/repo-1" {
+		t.Fatalf("specs[0] = %+v, want WorktreeID=wt-1 WorktreePath=/tasks/t/repo-1", specs[0])
+	}
+	if specs[1].WorktreeID != "wt-2" || specs[1].WorktreePath != "/tasks/t/repo-2" {
+		t.Fatalf("specs[1] = %+v, want WorktreeID=wt-2 WorktreePath=/tasks/t/repo-2", specs[1])
+	}
+}
+
+func TestApplyResumeWorktreePathsSkipsUnmatchedRepositories(t *testing.T) {
+	infos := []*repoInfo{{RepositoryID: "repo-1", Position: 0}}
+	specs := buildRepoSpecs(infos)
+	env := &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-other", Position: 0, WorktreeID: "wt-x", WorktreePath: "/tasks/t/other"},
+		},
+	}
+
+	applyResumeWorktreePaths(specs, infos, env)
+
+	if specs[0].WorktreeID != "" || specs[0].WorktreePath != "" {
+		t.Fatalf("specs[0] = %+v, want no worktree identity carried over for an unmatched repository", specs[0])
+	}
+}
+
 func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
 	for _, testCase := range []struct {
 		name     string

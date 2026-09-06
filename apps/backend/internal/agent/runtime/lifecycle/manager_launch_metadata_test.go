@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func validTestRemoteContribution(number int, sourcePath string) models.RemoteContribution {
@@ -134,7 +136,7 @@ func TestLaunchBuildExecutorRequestUsesAuthoritativeKubernetesProfileConfig(t *t
 	}
 
 	_, _, _, err := mgr.launchBuildExecutorRequest(
-		context.Background(), "instance-1", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+		context.Background(), "instance-1", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -185,7 +187,7 @@ func TestLaunchBuildExecutorRequestCanonicalizesLegacyKubernetesWorkspaceKeys(t 
 	}
 
 	_, _, _, err := mgr.launchBuildExecutorRequest(
-		context.Background(), "instance-legacy", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+		context.Background(), "instance-legacy", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -224,7 +226,7 @@ func TestLaunchBuildExecutorRequestUsesRecordedKubernetesSnapshotWhenProfileWasD
 	req.Metadata[MetadataKeyKubernetesWorkspaceMode] = "empty_dir"
 
 	_, _, _, err := mgr.launchBuildExecutorRequest(
-		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -257,7 +259,7 @@ func TestLaunchBuildExecutorRequestDoesNotBypassProfileForIncompleteKubernetesIn
 	}
 
 	_, _, _, err := mgr.launchBuildExecutorRequest(
-		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil, nil,
 	)
 
 	require.Error(t, err)
@@ -312,7 +314,7 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 
 	metadata := buildLaunchMetadata(req, "/repos/widget/.git", "wt-1", "kandev/feature")
 
-	require.Equal(t, "/repos/widget/.git", metadata[MetadataKeyMainRepoGitDir])
+	require.NotContains(t, metadata, MetadataKeyMainRepoGitDir)
 	require.Equal(t, "wt-1", metadata[MetadataKeyWorktreeID])
 	require.Equal(t, "kandev/feature", metadata[MetadataKeyWorktreeBranch])
 	require.Equal(t, "/repos/widget", metadata[MetadataKeyRepositoryPath])
@@ -322,11 +324,393 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 		"the single-repo base branch is recorded under the empty key for single-repo trackers")
 }
 
+func TestLaunchResumeWorktreeRebuildsGitMetadataProjection(t *testing.T) {
+	repositoryPath := filepath.Join(t.TempDir(), "source")
+	runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+	runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+	runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repositoryPath, "add", "tracked.txt")
+	runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	checkoutPath := filepath.Join(t.TempDir(), "task-checkout")
+	runContainerGit(t, repositoryPath, "worktree", "add", "-b", "task-branch", checkoutPath)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: checkoutPath},
+	}}
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: repositoryPath,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if execution == nil {
+		t.Fatal("Launch returned nil execution")
+	}
+	if !backend.attested {
+		t.Fatal("resumed worktree launch did not preflight Git metadata projection")
+	}
+	if backend.lastRequest == nil || len(backend.lastRequest.GitMetadataProjections) != 1 {
+		t.Fatalf("GitMetadataProjections = %#v, want one projection", backend.lastRequest)
+	}
+	projection := backend.lastRequest.GitMetadataProjections[0]
+	if projection.CheckoutPath != checkoutPath || projection.CommonDir != filepath.Join(repositoryPath, ".git") {
+		t.Fatalf("projection = %#v, want checkout %q bound to repository %q", projection, checkoutPath, repositoryPath)
+	}
+}
+
+func TestLaunchResumeMultiRepoWorktreeRebuildsGitMetadataProjections(t *testing.T) {
+	sourceA := filepath.Join(t.TempDir(), "source-a")
+	sourceB := filepath.Join(t.TempDir(), "source-b")
+	for _, repositoryPath := range []string{sourceA, sourceB} {
+		runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+		runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+		runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runContainerGit(t, repositoryPath, "add", "tracked.txt")
+		runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	}
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	checkoutA := filepath.Join(taskRoot, "frontend")
+	checkoutB := filepath.Join(taskRoot, "backend-feature-x")
+	runContainerGit(t, sourceA, "worktree", "add", "-b", "task-frontend", checkoutA)
+	runContainerGit(t, sourceB, "worktree", "add", "-b", "task-backend", checkoutB)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: taskRoot},
+	}}
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: sourceA,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "frontend", RepositoryPath: sourceA, RepoName: "frontend"},
+			{RepositoryID: "backend", RepositoryPath: sourceB, RepoName: "backend", BranchSlug: "feature-x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if !backend.attested {
+		t.Fatal("resumed multi-repo worktree launch did not preflight Git metadata projections")
+	}
+	if backend.lastRequest == nil || len(backend.lastRequest.GitMetadataProjections) != 2 {
+		t.Fatalf("GitMetadataProjections = %#v, want two projections", backend.lastRequest)
+	}
+	checkouts := map[string]bool{}
+	for _, projection := range backend.lastRequest.GitMetadataProjections {
+		checkouts[projection.CheckoutPath] = true
+	}
+	if !checkouts[checkoutA] || !checkouts[checkoutB] {
+		t.Fatalf("projection checkouts = %#v, want %q and %q", checkouts, checkoutA, checkoutB)
+	}
+	commonDirs := gitMetadataCommonDirsByCheckout(backend.lastRequest.GitMetadataProjections)
+	if commonDirs[checkoutA] != filepath.Join(sourceA, ".git") || commonDirs[checkoutB] != filepath.Join(sourceB, ".git") {
+		t.Fatalf("projection commonDirs = %#v, want %q bound to %q and %q bound to %q",
+			commonDirs, checkoutA, filepath.Join(sourceA, ".git"), checkoutB, filepath.Join(sourceB, ".git"))
+	}
+}
+
+func TestLaunchResumeMultiRepoWorktreeUsesDurableCheckoutPaths(t *testing.T) {
+	sourceA := filepath.Join(t.TempDir(), "source-a")
+	sourceB := filepath.Join(t.TempDir(), "source-b")
+	for _, repositoryPath := range []string{sourceA, sourceB} {
+		runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+		runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+		runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runContainerGit(t, repositoryPath, "add", "tracked.txt")
+		runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	}
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	checkoutA := filepath.Join(taskRoot, "frontend-original")
+	checkoutB := filepath.Join(taskRoot, "backend-feature-original")
+	runContainerGit(t, sourceA, "worktree", "add", "-b", "task-frontend", checkoutA)
+	runContainerGit(t, sourceB, "worktree", "add", "-b", "task-backend", checkoutB)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: taskRoot},
+	}}
+	repositories := []RepoLaunchSpec{
+		{RepositoryID: "frontend", RepositoryPath: sourceA, RepoName: "frontend-renamed", WorktreePath: checkoutA},
+		{RepositoryID: "backend", RepositoryPath: sourceB, RepoName: "backend", BranchSlug: "release-2026", WorktreePath: checkoutB},
+	}
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: sourceA,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+		Repositories:   repositories,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, backend.lastRequest)
+	require.ElementsMatch(t, []string{checkoutA, checkoutB}, gitMetadataCheckoutPaths(backend.lastRequest.GitMetadataProjections))
+	commonDirs := gitMetadataCommonDirsByCheckout(backend.lastRequest.GitMetadataProjections)
+	require.Equal(t, filepath.Join(sourceA, ".git"), commonDirs[checkoutA])
+	require.Equal(t, filepath.Join(sourceB, ".git"), commonDirs[checkoutB])
+}
+
+// TestLaunchResumeMultiRepoWorktreeRejectsForeignDurableCheckoutBeforeStart
+// pins the resume security boundary. A persisted path is the physical
+// checkout identity, but it must still be validated against its repository
+// before any runtime instance or execution record is created.
+func TestLaunchResumeMultiRepoWorktreeRejectsForeignDurableCheckoutBeforeStart(t *testing.T) {
+	sourceA := filepath.Join(t.TempDir(), "source-a")
+	sourceB := filepath.Join(t.TempDir(), "source-b")
+	for _, repositoryPath := range []string{sourceA, sourceB} {
+		runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+		runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+		runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runContainerGit(t, repositoryPath, "add", "tracked.txt")
+		runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	}
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	checkoutA := filepath.Join(taskRoot, "frontend-original")
+	runContainerGit(t, sourceA, "worktree", "add", "-b", "task-frontend", checkoutA)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: taskRoot},
+	}}
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: sourceA,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "frontend", RepositoryPath: sourceA, RepoName: "frontend-renamed", WorktreePath: checkoutA},
+			// sourceA is not a checkout for sourceB. Resume must reject this
+			// persisted foreign path rather than granting its Git metadata.
+			{RepositoryID: "backend", RepositoryPath: sourceB, RepoName: "backend", WorktreePath: sourceA},
+		},
+	})
+	require.EqualError(t, err, gitMetadataProjectionInvalid)
+	require.False(t, backend.attested, "invalid Git metadata must fail before runtime preflight")
+	require.Zero(t, backend.createCount.Load(), "invalid Git metadata must not create a runtime instance")
+	_, tracked := mgr.executionStore.GetBySessionID("session-resume")
+	require.False(t, tracked, "failed resume must not retain a partial execution")
+}
+
+// TestLaunchResumeMultiRepoWorktreeRejectsDurableCheckoutEqualToRepository
+// pins a distinct resume security boundary from the "foreign checkout" test
+// above: a persisted WorktreePath that equals its own RepositoryPath would
+// otherwise bypass the linked-worktree containment check entirely (the
+// checkout would trivially "belong" to the repository, since it IS the
+// repository), granting the source checkout's Git metadata and ACP root
+// instead of a task-owned linked worktree.
+func TestLaunchResumeMultiRepoWorktreeRejectsDurableCheckoutEqualToRepository(t *testing.T) {
+	sourceA := filepath.Join(t.TempDir(), "source-a")
+	sourceB := filepath.Join(t.TempDir(), "source-b")
+	for _, repositoryPath := range []string{sourceA, sourceB} {
+		runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+		runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+		runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runContainerGit(t, repositoryPath, "add", "tracked.txt")
+		runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	}
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	checkoutA := filepath.Join(taskRoot, "frontend-original")
+	runContainerGit(t, sourceA, "worktree", "add", "-b", "task-frontend", checkoutA)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: taskRoot},
+	}}
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: sourceA,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "frontend", RepositoryPath: sourceA, RepoName: "frontend-renamed", WorktreePath: checkoutA},
+			// sourceB's persisted WorktreePath equals its own RepositoryPath:
+			// resume must reject the source checkout itself rather than
+			// granting its Git metadata as if it were a task worktree.
+			{RepositoryID: "backend", RepositoryPath: sourceB, RepoName: "backend", WorktreePath: sourceB},
+		},
+	})
+	require.EqualError(t, err, gitMetadataProjectionInvalid)
+	require.False(t, backend.attested, "invalid Git metadata must fail before runtime preflight")
+	require.Zero(t, backend.createCount.Load(), "invalid Git metadata must not create a runtime instance")
+	_, tracked := mgr.executionStore.GetBySessionID("session-resume")
+	require.False(t, tracked, "failed resume must not retain a partial execution")
+}
+
+func TestContainedResumedWorktreePathRejectsRepositoryEqualityAndTraversal(t *testing.T) {
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	repositoryPath := filepath.Join(t.TempDir(), "source-repo")
+
+	if _, err := containedResumedWorktreePath(taskRoot, repositoryPath, repositoryPath); err == nil {
+		t.Fatal("containedResumedWorktreePath accepted worktreePath == repositoryPath")
+	}
+	if _, err := containedResumedWorktreePath(taskRoot, taskRoot, ""); err == nil {
+		t.Fatal("containedResumedWorktreePath accepted worktreePath == taskRoot itself")
+	}
+	if _, err := containedResumedWorktreePath(taskRoot, filepath.Join(taskRoot, "..", "escaped"), ""); err == nil {
+		t.Fatal("containedResumedWorktreePath accepted a path that escapes taskRoot via traversal")
+	}
+	if _, err := containedResumedWorktreePath(taskRoot, filepath.Dir(taskRoot), ""); err == nil {
+		t.Fatal("containedResumedWorktreePath accepted a path outside taskRoot")
+	}
+
+	valid, err := containedResumedWorktreePath(taskRoot, filepath.Join(taskRoot, "frontend"), repositoryPath)
+	if err != nil {
+		t.Fatalf("containedResumedWorktreePath rejected a valid checkout below taskRoot: %v", err)
+	}
+	if valid != filepath.Join(taskRoot, "frontend") {
+		t.Fatalf("containedResumedWorktreePath = %q, want cleaned checkout path", valid)
+	}
+}
+
+func gitMetadataCheckoutPaths(projections []*worktree.GitMetadataProjection) []string {
+	paths := make([]string, 0, len(projections))
+	for _, projection := range projections {
+		paths = append(paths, projection.CheckoutPath)
+	}
+	return paths
+}
+
+// gitMetadataCommonDirsByCheckout maps each projection's CheckoutPath to its
+// CommonDir, so multi-repository tests can assert that per-repository
+// projection derivation binds every checkout to its own repository's Git
+// directory rather than merely proving the checkout set is complete.
+func gitMetadataCommonDirsByCheckout(projections []*worktree.GitMetadataProjection) map[string]string {
+	commonDirs := make(map[string]string, len(projections))
+	for _, projection := range projections {
+		commonDirs[projection.CheckoutPath] = projection.CommonDir
+	}
+	return commonDirs
+}
+
+type gitMetadataResumeCreateInstanceExecutor struct {
+	createInstanceExecutor
+	attested bool
+}
+
+func (e *gitMetadataResumeCreateInstanceExecutor) PrepareGitMetadataProjection(_ context.Context, _ *ExecutorCreateRequest) error {
+	e.attested = true
+	return nil
+}
+
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
 	metadata := buildLaunchMetadata(&LaunchRequest{}, "", "", "")
 
 	for _, key := range []string{
-		MetadataKeyMainRepoGitDir, MetadataKeyWorktreeID, MetadataKeyWorktreeBranch,
+		MetadataKeyWorktreeID, MetadataKeyWorktreeBranch,
 		MetadataKeyRepositoryPath, MetadataKeySetupScript, MetadataKeyBaseBranch, MetadataKeyBaseBranches,
 	} {
 		require.NotContains(t, metadata, key, "%s must be absent when the request carries no value", key)

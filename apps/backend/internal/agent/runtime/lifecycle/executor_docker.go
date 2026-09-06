@@ -212,6 +212,20 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	return r.buildCreatedInstance(req, result, containerIP), nil
 }
 
+// PrepareGitMetadataProjection proves this executor can compile the exact
+// layered mount plan before a container or child process is created. The
+// container builder compiles the same plan again immediately before launch;
+// that final compilation closes the normal resolve-to-mount freshness window.
+func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	if requiresCloneGitMetadataPolicy(req) {
+		return validateRemoteGitMetadataRequest(req)
+	}
+	if _, err := gitMetadataMounts(req.GitMetadataProjections); err != nil {
+		return err
+	}
+	return prepareGitMetadataFilesystemPolicy(req)
+}
+
 // reportCreateInstanceProgress wires the "Waiting for Docker container" step
 // into the caller's OnProgress callback. The returned closure must run after
 // CreateInstance finishes (deferred) so it sees the final err state.
@@ -232,7 +246,7 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
+	if shouldSkipDockerReconnect(req) {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
@@ -243,6 +257,14 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
 	return nil, false
+}
+
+// shouldSkipDockerReconnect only answers whether the request identifies an
+// existing container. Clone-based Git metadata attestation happens after a
+// reconnect, against the checkout visible inside that container, so it must
+// not force a fresh container and lose the task environment.
+func shouldSkipDockerReconnect(req *ExecutorCreateRequest) bool {
+	return req == nil || (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "")
 }
 
 // seedSessionDir copies the agent's auth files and selected configuration
@@ -277,6 +299,19 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	if err != nil {
 		return ContainerConfig{}, err
 	}
+	requiresClonePolicy := requiresCloneGitMetadataPolicy(req)
+	if requiresClonePolicy {
+		prepareScript = cloneGitMetadataPrepareScript(prepareScript)
+	}
+	// A clone-in-container checkout is created fresh at /workspace inside the
+	// container; there is no host checkout to project. Omitting the
+	// projections here (rather than relying solely on the mutable-clone
+	// policy env var) keeps buildContainerConfig from ever bind-mounting host
+	// Git paths into a container whose checkout is not the host's.
+	gitMetadataProjections := req.GitMetadataProjections
+	if requiresClonePolicy {
+		gitMetadataProjections = nil
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
@@ -286,6 +321,9 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		SessionID:                      req.SessionID,
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
+		GitMetadataProjections:         gitMetadataProjections,
+		RequiresCloneGitMetadataPolicy: requiresClonePolicy,
+		WorkspaceSourceRoots:           []string{dockerWorkspacePath},
 		Credentials:                    req.Env,
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
@@ -304,6 +342,14 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	}, nil
 }
 
+// cloneGitMetadataPrepareScript makes the container bootstrap prove the
+// checkout produced by its own prepare command is the canonical regular clone
+// before agentctl can accept a mutable agent session. It intentionally embeds
+// only the in-container /workspace path.
+func cloneGitMetadataPrepareScript(prepareScript string) string {
+	return prepareScript + "\n" + remoteRegularGitMetadataProbeScript(dockerWorkspacePath)
+}
+
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
 	metadata := map[string]interface{}{
 		MetadataKeyIsRemote: true,
@@ -314,17 +360,18 @@ func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result
 		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 	}
 	return &ExecutorInstance{
-		InstanceID:     req.InstanceID,
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		RuntimeName:    r.Name(),
-		Client:         result.Client,
-		ContainerID:    result.ContainerID,
-		ContainerIP:    containerIP,
-		WorkspacePath:  dockerWorkspacePath,
-		Metadata:       metadata,
-		AuthToken:      result.AuthToken,
-		BootstrapNonce: result.BootstrapNonce,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               result.Client,
+		ContainerID:          result.ContainerID,
+		ContainerIP:          containerIP,
+		WorkspacePath:        dockerWorkspacePath,
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
+		Metadata:             metadata,
+		AuthToken:            result.AuthToken,
+		BootstrapNonce:       result.BootstrapNonce,
 	}
 }
 
@@ -363,14 +410,15 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		refreshedAuthToken = conn.authToken
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		ContainerID:   info.ID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               client,
+		ContainerID:          info.ID,
+		ContainerIP:          containerIP,
+		WorkspacePath:        dockerWorkspacePath,
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
 		Metadata: map[string]interface{}{
 			MetadataKeyIsRemote:      true,
 			MetadataKeyContainerID:   info.ID,
@@ -581,8 +629,12 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	return &agentctl.CreateInstanceRequest{
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		// Reconnect may need to create a new agentctl instance in an existing
+		// container. Preserve the canonical in-container root so clone Git
+		// metadata attestation has the same server-owned scope as initial create.
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
+		AgentType:            agentType,
+		Env:                  cloneStringMap(req.Env),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -25,6 +27,30 @@ var (
 // The caller must only invoke this after the complete attachment batch is
 // ready; this operation publishes no materialization event itself.
 func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, workspacePath string, sourceRoots ...[]string) error {
+	return m.RebindWorkspaceWithGitMetadata(ctx, sessionID, workspacePath, nil, sourceRoots...)
+}
+
+// GitMetadataProjectionsForSession returns a snapshot of the active ephemeral
+// Git policy. Workspace attachment snapshots this before replacing a complete
+// projection set so a later materialization failure can restore the exact old
+// authority instead of retaining grants for an attached repository. The read
+// is taken under promptLifecycleMu, the same lock a concurrent rebind holds
+// while writing execution.GitMetadataProjections, so a snapshot is never torn
+// or observed mid-swap.
+func (m *Manager) GitMetadataProjectionsForSession(sessionID string) ([]*worktree.GitMetadataProjection, bool) {
+	execution, ok := m.executionStore.GetBySessionID(sessionID)
+	if !ok {
+		return nil, false
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	return append([]*worktree.GitMetadataProjection{}, execution.GitMetadataProjections...), true
+}
+
+// RebindWorkspaceWithGitMetadata atomically swaps the workspace roots and the
+// already-validated task Git policy. Callers pass nil to retain the current
+// policy (the compatibility behavior of RebindWorkspaceForSession).
+func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID, workspacePath string, projections []*worktree.GitMetadataProjection, sourceRoots ...[]string) error {
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
 		// There is no child to adopt. The persisted environment root is enough
@@ -34,6 +60,10 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
+	policyReq, err := m.prepareGitMetadataRebind(ctx, execution, workspacePath, projections)
+	if err != nil {
+		return err
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if execution.IsPassthrough || client == nil || execution.ACPSessionID == "" {
@@ -46,6 +76,8 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	}
 	oldPath, acpID := execution.WorkspacePath, execution.ACPSessionID
 	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
+	oldProjections := append([]*worktree.GitMetadataProjection(nil), execution.GitMetadataProjections...)
+	oldRuntimeEnv := execution.RuntimeEnvironment()
 	newRoots := optionalWorkspaceSourceRoots(oldRoots, sourceRoots)
 	startNewSession := m.startsNewSessionOnWorkspaceRebind(execution)
 	execution.Status = v1.AgentStatusStarting
@@ -54,7 +86,7 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	// leave a child running in the old CWD. If stop cannot be proven, do not
 	// attempt adoption or start a duplicate process.
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	err := client.Stop(ctx)
+	err = client.Stop(ctx)
 	releaseClient()
 	if err != nil {
 		execution.Status = v1.AgentStatusReady
@@ -65,27 +97,93 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	err = client.RebindWorkspace(ctx, workspacePath, newRoots)
 	releaseClient()
 	if err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("rebind agentctl workspace: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("rebind agentctl workspace: %w", err))
 	}
 	execution.WorkspacePath = workspacePath
+	if err := m.installGitMetadataRebindPolicy(ctx, execution, projections, policyReq); err != nil {
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("refresh agent filesystem policy: %w", err))
+	}
 	client, releaseClient = execution.AcquireAgentCtlClient()
 	_, err = client.Start(ctx)
 	releaseClient()
 	if err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restart agent after workspace rebind: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("restart agent after workspace rebind: %w", err))
 	}
 	if err := m.restoreReboundACPSession(ctx, execution, acpID, startNewSession); err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restore ACP session after workspace rebind: %w", err))
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("restore ACP session after workspace rebind: %w", err))
 	}
 	execution.Status = v1.AgentStatusReady
 	return nil
 }
 
-func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentExecution, oldPath string, oldRoots []string, acpID string, cause error) error {
+func (m *Manager) prepareGitMetadataRebind(ctx context.Context, execution *AgentExecution, workspacePath string, projections []*worktree.GitMetadataProjection) (*ExecutorCreateRequest, error) {
+	if projections == nil {
+		return nil, nil
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return nil, err
+	}
+	// An empty (non-nil) projections slice is a real replacement: every
+	// repository was removed from the task's authorized set. It must still
+	// preflight and render the (empty-grant) policy so the running agent's
+	// old writable-path grants are actually revoked, not just the durable
+	// bookkeeping list. Only a nil slice means "no policy change requested".
+	return m.preflightGitMetadataRebind(ctx, execution, workspacePath, projections)
+}
+
+func (m *Manager) installGitMetadataRebindPolicy(ctx context.Context, execution *AgentExecution, projections []*worktree.GitMetadataProjection, policyReq *ExecutorCreateRequest) error {
+	if projections != nil {
+		execution.GitMetadataProjections = append([]*worktree.GitMetadataProjection(nil), projections...)
+	}
+	if policyReq == nil {
+		return nil
+	}
+	execution.setRuntimeEnvironment(policyReq.Env)
+	if execution.RuntimeName != executor.NameStandalone {
+		return nil
+	}
+	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	defer releaseClient()
+	return client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, policyReq.Env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+}
+
+func (m *Manager) preflightGitMetadataRebind(ctx context.Context, execution *AgentExecution, workspacePath string, projections []*worktree.GitMetadataProjection) (*ExecutorCreateRequest, error) {
+	if m.executorRegistry == nil || execution.RuntimeName == "" {
+		return nil, fmt.Errorf("%s: active runtime cannot refresh task Git metadata permissions; start a new session", gitMetadataProjectionUnsupported)
+	}
+	runtime, err := m.executorRegistry.GetBackend(execution.RuntimeName)
+	if err != nil {
+		return nil, fmt.Errorf("%s: active runtime cannot refresh task Git metadata permissions; start a new session", gitMetadataProjectionUnsupported)
+	}
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          workspacePath,
+		GitMetadataProjections: projections,
+		Env:                    execution.RuntimeEnvironment(),
+	}
+	if runtime.Name() == executor.NameStandalone {
+		agentConfig, err := m.getAgentConfigForExecution(execution)
+		if err != nil {
+			return nil, fmt.Errorf("%s: active agent cannot refresh task Git metadata permissions; start a new session", gitMetadataProjectionUnsupported)
+		}
+		req.AgentConfig = agentConfig
+	}
+	if err := preflightGitMetadataProjectionRebind(ctx, runtime, req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentExecution, oldPath string, oldRoots []string, oldProjections []*worktree.GitMetadataProjection, oldRuntimeEnv map[string]string, acpID string, cause error) error {
 	rollbackCtx := context.WithoutCancel(ctx)
 	// Restore the authoritative in-memory policy first, even if an I/O failure
 	// prevents the best-effort child rollback below.
 	execution.WorkspaceSourceRoots = append([]string(nil), oldRoots...)
+	execution.GitMetadataProjections = append([]*worktree.GitMetadataProjection(nil), oldProjections...)
+	execution.setRuntimeEnvironment(oldRuntimeEnv)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
@@ -107,6 +205,19 @@ func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentE
 		return fmt.Errorf("%w; rollback rebind failed: %v", cause, err)
 	}
 	execution.WorkspacePath = oldPath
+	if execution.RuntimeName == executor.NameStandalone {
+		approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(rollbackCtx, execution)
+		configClient, releaseConfigClient := execution.AcquireAgentCtlClient()
+		if configClient == nil {
+			return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
+		}
+		err := configClient.ConfigureAgent(rollbackCtx, execution.AgentCommand, execution.AgentArgs, oldRuntimeEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+		releaseConfigClient()
+		if err != nil {
+			m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback filesystem policy failed: %v", cause, err))
+			return fmt.Errorf("%w; rollback filesystem policy failed: %v", cause, err)
+		}
+	}
 	client, releaseClient = execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)

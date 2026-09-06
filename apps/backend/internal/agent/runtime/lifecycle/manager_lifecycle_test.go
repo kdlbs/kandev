@@ -7,12 +7,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -142,6 +144,55 @@ func TestManager_RemoveExecution(t *testing.T) {
 
 	// Remove non-existent should not panic
 	mgr.RemoveExecution("non-existent")
+}
+
+func TestManagerRemoveExecutionSerializesGitMetadataRevocation(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:                     "execution-with-git-policy",
+		SessionID:              "session-with-git-policy",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{Version: 1}},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	execution.promptLifecycleMu.Lock()
+	removed := make(chan struct{})
+	go func() {
+		mgr.RemoveExecution(execution.ID)
+		close(removed)
+	}()
+
+	deadline := time.After(time.Second)
+	for {
+		if _, exists := mgr.executionStore.Get(execution.ID); !exists {
+			break
+		}
+		select {
+		case <-deadline:
+			execution.promptLifecycleMu.Unlock()
+			t.Fatal("RemoveExecution did not revoke execution lookup authority")
+		default:
+			runtime.Gosched()
+		}
+	}
+	select {
+	case <-removed:
+		execution.promptLifecycleMu.Unlock()
+		t.Fatal("RemoveExecution completed while Git metadata policy lock was held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	execution.promptLifecycleMu.Unlock()
+
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("RemoveExecution did not complete after Git metadata policy lock was released")
+	}
+	if execution.GitMetadataProjections != nil {
+		t.Fatalf("Git metadata projections = %#v, want revoked", execution.GitMetadataProjections)
+	}
 }
 
 func TestManager_CleanupStaleExecution_StopsRuntimeInstance(t *testing.T) {
@@ -333,6 +384,27 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 	}
 	if mock.stopReason != StopReasonBackendShutdown {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
+	}
+}
+
+func TestRemoveExecutionRevokesGitMetadataProjection(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestRegistryLogger()}
+	execution := &AgentExecution{
+		ID:                     "exec-1",
+		SessionID:              "session-1",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{CheckoutPath: "/task-checkout"}},
+	}
+	execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{"default_permissions":"kandev_task_git_metadata"}`})
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.RemoveExecution(execution.ID)
+	if execution.GitMetadataProjections != nil {
+		t.Fatalf("GitMetadataProjections after removal = %#v, want revoked", execution.GitMetadataProjections)
+	}
+	if runtimeEnv := execution.RuntimeEnvironment(); runtimeEnv != nil {
+		t.Fatalf("runtime environment after removal = %#v, want revoked", runtimeEnv)
 	}
 }
 func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {

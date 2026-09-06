@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // RepositoryPreparationError identifies the repository whose preparation
@@ -78,6 +79,10 @@ type RepoPrepareSpec struct {
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
 	WorktreeID         string
+	// WorktreePath is the durable resumed checkout path persisted on the task
+	// environment repository row. See worktree.CreateRequest.WorktreePath for
+	// how it is consulted as a last-resort reuse signal.
+	WorktreePath string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
@@ -131,7 +136,11 @@ type EnvPrepareRequest struct {
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
-	WorktreeBranch          string
+	// WorktreePath is the durable resumed checkout path persisted on the task
+	// environment repository row. See worktree.CreateRequest.WorktreePath for
+	// how it is consulted as a last-resort reuse signal.
+	WorktreePath   string
+	WorktreeBranch string
 	// WorkspaceReuseRequired applies attach-only semantics to every repository
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
@@ -235,7 +244,10 @@ type RepoWorktreeResult struct {
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
 	BaseBranch                string `json:"base_branch,omitempty"`
 	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
-	ErrorMessage              string `json:"error_message,omitempty"`
+	// GitMetadataProjection is computed from the materialized checkout, never
+	// from the source repository. It is runtime-only authorization data.
+	GitMetadataProjection *worktree.GitMetadataProjection `json:"-"`
+	ErrorMessage          string                          `json:"error_message,omitempty"`
 }
 
 // EnvPrepareResult contains the result of environment preparation.
@@ -248,12 +260,13 @@ type EnvPrepareResult struct {
 
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
-	WorktreeID                string `json:"worktree_id,omitempty"`
-	WorktreeBranch            string `json:"worktree_branch,omitempty"`
-	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
-	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
-	BaseBranch                string `json:"base_branch,omitempty"`
-	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
+	WorktreeID                string                          `json:"worktree_id,omitempty"`
+	WorktreeBranch            string                          `json:"worktree_branch,omitempty"`
+	MainRepoGitDir            string                          `json:"main_repo_git_dir,omitempty"`
+	RequestedBaseBranch       string                          `json:"requested_base_branch,omitempty"`
+	BaseBranch                string                          `json:"base_branch,omitempty"`
+	BaseBranchFallbackWarning string                          `json:"base_branch_fallback_warning,omitempty"`
+	GitMetadataProjection     *worktree.GitMetadataProjection `json:"-"`
 
 	// Worktrees is the per-repository outcome list when the preparer ran in
 	// multi-repo mode. Empty for single-repo or repo-less results.

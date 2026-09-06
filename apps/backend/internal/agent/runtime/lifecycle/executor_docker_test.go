@@ -20,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func newTestDockerLogger() *logger.Logger {
@@ -93,6 +94,151 @@ func TestDockerExecutor_Name(t *testing.T) {
 
 	if exec.Name() != executor.NameDocker {
 		t.Errorf("expected name %q, got %q", executor.NameDocker, exec.Name())
+	}
+}
+
+func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
+		AgentConfig:            agents.NewClaudeACP(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible-policy rejection", err)
+	}
+}
+
+func TestDockerExecutorRejectsLinkedWorktreeProjectionWithoutExactMountMediation(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	req := &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewCodexACP(),
+		Env: map[string]string{
+			"CODEX_HOME":   t.TempDir(),
+			"CODEX_CONFIG": `{}`,
+		},
+	}
+
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	if err := exec.PrepareGitMetadataProjection(context.Background(), req); err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want fail-closed exact-mediation rejection", err)
+	}
+	if req.Env["CODEX_CONFIG"] != `{}` {
+		t.Fatalf("failed Docker preflight mutated CODEX_CONFIG = %q", req.Env["CODEX_CONFIG"])
+	}
+}
+
+func TestDockerHostProjectionPreflightReturnsStableUnsupportedCode(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)},
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_HOME": t.TempDir(), "CODEX_CONFIG": `{}`},
+	}
+	err := preflightGitMetadataProjection(context.Background(), NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger()), req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("preflight error = %v, want stable unsupported code and recovery guidance", err)
+	}
+}
+
+func TestDockerExecutorHostProjectionRejectsBeforeInnerPolicyNegotiation(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)},
+		AgentConfig:            agents.NewClaudeACP(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want exact-mediation rejection", err)
+	}
+}
+
+func TestDockerExecutorAllowsReconnectWhenClonePolicyRequiresAttestation(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		PreviousExecutionID:    "previous",
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
+	}
+	if shouldSkipDockerReconnect(req) {
+		t.Fatal("clone metadata attestation must not disable reuse of an existing Docker container")
+	}
+}
+
+func TestDockerExecutorCloneLaunchWiringUsesPathFreeRequirement(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	req := &ExecutorCreateRequest{
+		InstanceID:             "instance-1",
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Metadata:               map[string]interface{}{},
+	}
+
+	config, err := exec.buildContainerLaunchConfig(req)
+	if err != nil {
+		t.Fatalf("buildContainerLaunchConfig: %v", err)
+	}
+	if len(config.GitMetadataProjections) != 0 {
+		t.Fatalf("normal Docker clone wiring synthesized host projections: %#v", config.GitMetadataProjections)
+	}
+	if !config.RequiresCloneGitMetadataPolicy {
+		t.Fatal("normal Docker clone wiring omitted the mutable-clone requirement")
+	}
+	if !strings.Contains(config.PrepareScript, "rev-parse --absolute-git-dir") {
+		t.Fatalf("normal Docker clone prepare script lacks in-container checkout attestation: %s", config.PrepareScript)
+	}
+}
+
+// TestPrepareRemoteRegularGitMetadataPolicyRendersOnlyInContainerPaths
+// exercises the actual CODEX_CONFIG-rendering code (buildContainerLaunchConfig
+// itself never transforms CODEX_CONFIG, so asserting against its untouched
+// pass-through value would be vacuous). It proves the rendered filesystem
+// policy grants exactly the in-container GitDir attested by the remote
+// resolver and never a host-looking path.
+func TestPrepareRemoteRegularGitMetadataPolicyRendersOnlyInContainerPaths(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		AgentConfig: agents.NewCodexACP(),
+		Env:         map[string]string{},
+	}
+	metadata := remoteRegularGitMetadata{CheckoutPath: dockerWorkspacePath, GitDir: dockerWorkspacePath + "/.git"}
+
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
+		t.Fatalf("prepareRemoteRegularGitMetadataPolicy: %v", err)
+	}
+
+	rendered := req.Env["CODEX_CONFIG"]
+	if !strings.Contains(rendered, metadata.GitDir) {
+		t.Fatalf("rendered CODEX_CONFIG missing the in-container GitDir grant %q: %s", metadata.GitDir, rendered)
+	}
+	if strings.Contains(rendered, "/host/") {
+		t.Fatalf("rendered CODEX_CONFIG leaked a host path: %s", rendered)
+	}
+}
+
+// TestDockerExecutorCloneLaunchDiscardsLeakedHostGitMetadataProjections
+// guards against a checkout created fresh inside the container being handed
+// host GitMetadataProjections it cannot correspond to. A caller populating
+// req.GitMetadataProjections despite the mutable-clone policy being active
+// (e.g. a stale value carried from a prior worktree-based launch) must not
+// have those host paths propagate into ContainerConfig, since
+// buildContainerConfig would otherwise bind-mount them into the container.
+func TestDockerExecutorCloneLaunchDiscardsLeakedHostGitMetadataProjections(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	req := &ExecutorCreateRequest{
+		InstanceID:             "instance-1",
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Metadata:               map[string]interface{}{},
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{CheckoutPath: "/host/repo"}},
+	}
+
+	config, err := exec.buildContainerLaunchConfig(req)
+	if err != nil {
+		t.Fatalf("buildContainerLaunchConfig: %v", err)
+	}
+	if len(config.GitMetadataProjections) != 0 {
+		t.Fatalf("mutable-clone wiring must discard leaked host projections: %#v", config.GitMetadataProjections)
+	}
+	if !config.RequiresCloneGitMetadataPolicy {
+		t.Fatal("mutable-clone wiring omitted the mutable-clone requirement")
 	}
 }
 
@@ -677,6 +823,18 @@ func TestReconnectInstanceID(t *testing.T) {
 			t.Fatalf("reconnectInstanceID = %q, want exec-old", got)
 		}
 	})
+}
+
+func TestBuildReconnectCreateInstanceRequestPreservesCloneWorkspaceRoot(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "exec-new",
+		Env:        map[string]string{"CODEX_CONFIG": `{}`},
+	}
+
+	created := buildReconnectCreateInstanceRequest(req, "exec-new")
+	if len(created.WorkspaceSourceRoots) != 1 || created.WorkspaceSourceRoots[0] != dockerWorkspacePath {
+		t.Fatalf("WorkspaceSourceRoots = %#v, want [%q]", created.WorkspaceSourceRoots, dockerWorkspacePath)
+	}
 }
 
 func TestShouldStartExistingDockerContainer(t *testing.T) {
