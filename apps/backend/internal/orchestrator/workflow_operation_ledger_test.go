@@ -30,6 +30,29 @@ func TestOperationLedgerZeroValueReportsNothingApplied(t *testing.T) {
 	}
 }
 
+// AC-S7: operation ids are compared by exact byte equality. The ledger must
+// not trim, case-fold, normalize, or truncate a key, and a key containing a
+// character other producers rely on (":") must round-trip unchanged.
+func TestOperationLedgerKeysComparedByExactByteEquality(t *testing.T) {
+	var ledger operationLedger
+	ledger.markApplied("Op-1")
+
+	for _, id := range []string{"op-1", " Op-1 ", "Op-1x", "Op-1:"} {
+		if ledger.isApplied(id) {
+			t.Errorf("expected %q not to be reported applied by a mark of %q", id, "Op-1")
+		}
+	}
+	if !ledger.isApplied("Op-1") {
+		t.Fatal("expected exact match to be reported applied")
+	}
+
+	const withColon = "parent-op:switch_workflow:on_enter"
+	ledger.markApplied(withColon)
+	if !ledger.isApplied(withColon) {
+		t.Fatal("expected a key containing ':' to round-trip unchanged")
+	}
+}
+
 // AC-L6/AC-S6: concurrent access needs no external locking, and two
 // goroutines checking the same unmarked id may both observe "not applied"
 // and proceed — the ledger is a memo, not a mutex. Run with -race.

@@ -549,4 +549,18 @@ func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 			t.Error("expected marked operation to return true")
 		}
 	})
+
+	t.Run("marking empty operation ID is a no-op", func(t *testing.T) {
+		if err := store.MarkOperationApplied(ctx, ""); err != nil {
+			t.Fatalf("MarkOperationApplied failed: %v", err)
+		}
+
+		applied, err := store.IsOperationApplied(ctx, "")
+		if err != nil {
+			t.Fatalf("IsOperationApplied failed: %v", err)
+		}
+		if applied {
+			t.Error("expected empty operation ID to never be stored")
+		}
+	})
 }
