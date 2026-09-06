@@ -3,6 +3,7 @@ import type { DockviewApi } from "dockview-react";
 import type { TaskSession } from "@/lib/types/http";
 import {
   ensureSessionTabPrecedesNonSessionTabs,
+  hideSessionPanel,
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
@@ -42,6 +43,7 @@ const CENTER_POSITION = "center";
 const SIBLING_PANEL = "session:sibling";
 const AUTO_TASK_ID = "task-A";
 const PENDING_EFFECT_SESSION_ID = "session-pending";
+const AUTO_ACTIVE_SESSION_ID = "session-active";
 
 /**
  * Builds a fake DockviewApi where `panel.api.close()` mutates the underlying
@@ -86,6 +88,9 @@ function makeAutoSessionRefs(
 ) {
   return {
     sessionTabCreatedRef: { current: new Set<string>() },
+    hiddenSessionIdsRef: { current: new Set<string>() },
+    hiddenSessionApiRef: { current: null },
+    hiddenSessionEnvIdRef: { current: null as string | null },
     prevTaskIdRef: { current: prevTaskId as string | null },
     prevSessionIdRef: { current: prevSessionId },
   };
@@ -542,6 +547,114 @@ describe("resolveSessionTabSyncTarget", () => {
     });
 
     expect(target).toBeNull();
+  });
+});
+
+describe("runAutoSessionTabEffect sibling visibility", () => {
+  it("automatically creates a sibling panel for a newly added backend session", () => {
+    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
+    const newSessionId = "session-new";
+    const { api } = makeReorderingAutoSessionApi();
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(
+        activeSessionId,
+        makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId]) as never,
+        refs as never,
+      );
+      expect(api.getPanel(`session:${newSessionId}`)).toBeNull();
+
+      runAutoSessionTabEffect(
+        activeSessionId,
+        makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, newSessionId]) as never,
+        refs as never,
+      );
+    });
+
+    expect(api.getPanel(`session:${newSessionId}`)).not.toBeNull();
+  });
+
+  it("recreates a sibling after a non-hide panel removal", () => {
+    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
+    const closedSessionId = "session-closed";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, closedSessionId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+      const siblingPanel = api.getPanel(`session:${closedSessionId}`);
+      expect(siblingPanel).not.toBeNull();
+      if (siblingPanel) api.removePanel(siblingPanel);
+
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${closedSessionId}`)).not.toBeNull();
+  });
+
+  it("does not recreate an explicitly hidden sibling panel", () => {
+    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
+    const hiddenSessionId = "session-hidden";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+      const siblingPanel = api.getPanel(`session:${hiddenSessionId}`);
+      expect(siblingPanel).not.toBeNull();
+      if (siblingPanel) api.removePanel(siblingPanel);
+      refs.hiddenSessionIdsRef.current.add(hiddenSessionId);
+
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${hiddenSessionId}`)).toBeNull();
+  });
+
+  it("does not carry hidden sibling state into a new Dockview API after reload", () => {
+    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
+    const hiddenSessionId = "session-hidden";
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
+    const firstLoad = makeReorderingAutoSessionApi();
+
+    withDockviewState(
+      { api: firstLoad.api, currentLayoutEnvId: "env-A", preMaximizeLayout: null },
+      () => {
+        runAutoSessionTabEffect(activeSessionId, appStore as never, makeAutoSessionRefs() as never);
+        hideSessionPanel(firstLoad.api, hiddenSessionId);
+      },
+    );
+
+    const afterReload = makeReorderingAutoSessionApi();
+    withDockviewState(
+      { api: afterReload.api, currentLayoutEnvId: "env-A", preMaximizeLayout: null },
+      () => {
+        runAutoSessionTabEffect(activeSessionId, appStore as never, makeAutoSessionRefs() as never);
+      },
+    );
+
+    expect(afterReload.api.getPanel(`session:${hiddenSessionId}`)).not.toBeNull();
+  });
+
+  it("reopens an explicitly hidden session when it becomes effective", () => {
+    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
+    const hiddenSessionId = "session-hidden";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
+    const refs = makeAutoSessionRefs();
+    refs.hiddenSessionIdsRef.current.add(hiddenSessionId);
+    // The reopen menu clears the hide intent before selecting the session.
+    refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(hiddenSessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${hiddenSessionId}`)).not.toBeNull();
+    expect(refs.hiddenSessionIdsRef.current.has(hiddenSessionId)).toBe(false);
   });
 });
 

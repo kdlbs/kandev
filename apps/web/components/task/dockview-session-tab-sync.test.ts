@@ -52,10 +52,10 @@ function makeSessionTabSyncHarness(args: {
   activeTaskId: string;
   activeSessionId: string;
   otherSessionId: string;
+  otherSessionTaskId?: string;
   includeOtherEnv?: boolean;
   includeOtherInTaskList?: boolean;
   otherEnvironmentId?: string;
-  otherSessionTaskId?: string;
   restoredSessionId?: string;
   restoredSessionIds?: string[];
   restoredPanelIds?: string[];
@@ -189,6 +189,16 @@ describe("setupSessionTabSync automatic activation", () => {
     expect(harness.setActiveSession).not.toHaveBeenCalled();
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
   });
+});
+
+it("pins Dockview's visible successor after the active session panel closes", () => {
+  const harness = makeDefaultSessionTabSyncHarness();
+
+  startSessionTabSync(harness);
+  harness.api.panels.splice(0, 1);
+  harness.fireActivePanelChange(OTHER_SESSION_PANEL_ID);
+
+  expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
 });
 
 describe("setupSessionTabSync restored selection", () => {
@@ -329,6 +339,55 @@ describe("setupSessionTabSync explicit activation", () => {
 
     startSessionTabSync(harness);
     harness.fireActivePanelChange(null);
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
+    expect(harness.otherPanelSetActive).not.toHaveBeenCalled();
+  });
+
+  it("activates a remaining session panel when the closed panel's successor is non-session", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    // Simulate: active panel (s-active) was closed, removed from panels array
+    harness.api.panels.splice(0, 1);
+    // The new active panel is a non-session panel (e.g., files, pr-detail)
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
+  it("skips a stale remaining panel and activates the next valid successor", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    harness.api.panels.splice(0, 1);
+    harness.api.panels.unshift({ id: "session:stale", api: { setActive: vi.fn() } });
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
+  it("does not pin a previous task's remaining session after a non-session successor", () => {
+    const harness = makeSessionTabSyncHarness({
+      activeTaskId: TASK_ID,
+      activeSessionId: ACTIVE_SESSION_ID,
+      otherSessionId: OTHER_SESSION_ID,
+      otherSessionTaskId: "task-B",
+    });
+
+    startSessionTabSync(harness);
+    harness.api.panels.splice(0, 1);
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+  });
+  it("does not activate a stale session when panel is non-session but active session panel still exists", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    // Active panel still exists, a non-session panel was activated
     harness.fireActivePanelChange("files");
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();

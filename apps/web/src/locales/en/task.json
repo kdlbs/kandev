@@ -608,6 +608,7 @@
   "groupWorkflowStepDescription": "Separate tasks by workflow step.",
   "handOffToTarget": "Hand off to <1>{{label}}</1>",
   "handoff": "Handoff",
+  "hide": "Hide",
   "hardReset": "Hard Reset",
   "helpsPreserveCommittedWorkUncommittedChanges": "Helps preserve committed work. Uncommitted changes cannot be pushed.",
   "hiddenMessagesInPreview_one": "… {{count}} more message hidden in this preview (still included in the share) …",

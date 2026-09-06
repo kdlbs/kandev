@@ -150,6 +150,7 @@ type InFlightMessageRequest = {
   readiness: Promise<void>;
   promise: Promise<MessageListResponse>;
   cachedAtRequest: Message[];
+  settled: boolean;
 };
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -161,6 +162,16 @@ const EMPTY_META = {
   oldestCursor: null,
 };
 const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
+const readinessGenerationIds = new WeakMap<Promise<void>, number>();
+let readinessGenerationCounter = 0;
+
+function readinessGenerationId(readiness: Promise<void>): number {
+  const existing = readinessGenerationIds.get(readiness);
+  if (existing !== undefined) return existing;
+  readinessGenerationCounter += 1;
+  readinessGenerationIds.set(readiness, readinessGenerationCounter);
+  return readinessGenerationCounter;
+}
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */
 function logFetchSummary(
@@ -188,14 +199,19 @@ function logFetchSummary(
   }
 }
 
-function requestSessionMessages(
+// Test seam: subscription generations must not share an in-flight snapshot.
+export function requestSessionMessages(
   client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   sessionId: string,
   readiness: Promise<void>,
   cachedAtRequest: Message[],
 ): InFlightMessageRequest {
-  const existing = inFlightMessageRequests.get(sessionId);
-  if (existing?.readiness === readiness) return existing;
+  const requestKey = `${sessionId}:${readinessGenerationId(readiness)}`;
+  const existing = inFlightMessageRequests.get(requestKey);
+  // The subscription and initial hydration effects share the readiness promise
+  // for one acknowledgement, so share its request instead of issuing a
+  // duplicate message.list call. A new subscription creates a new key.
+  if (existing && !existing.settled) return existing;
 
   const requestParams = {
     session_id: sessionId,
@@ -203,24 +219,17 @@ function requestSessionMessages(
     sort: "desc" as const,
   };
   const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
-  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest] };
-  inFlightMessageRequests.set(sessionId, entry);
-  void promise.then(
-    () => {
-      window.setTimeout(() => {
-        if (inFlightMessageRequests.get(sessionId) === entry) {
-          inFlightMessageRequests.delete(sessionId);
-        }
-      }, 0);
-    },
-    () => {
-      window.setTimeout(() => {
-        if (inFlightMessageRequests.get(sessionId) === entry) {
-          inFlightMessageRequests.delete(sessionId);
-        }
-      }, 0);
-    },
-  );
+  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest], settled: false };
+  inFlightMessageRequests.set(requestKey, entry);
+  const markSettled = () => {
+    entry.settled = true;
+    window.setTimeout(() => {
+      if (inFlightMessageRequests.get(requestKey) === entry) {
+        inFlightMessageRequests.delete(requestKey);
+      }
+    }, 0);
+  };
+  void promise.then(markSettled, markSettled);
   return entry;
 }
 

@@ -100,6 +100,7 @@ import {
   nextFetchSeq,
   commitFetchSeq,
   useSessionMessages,
+  requestSessionMessages,
 } from "./use-session-messages";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -389,6 +390,8 @@ describe("session subscription hydration ordering", () => {
   it("does not request messages before subscription acknowledgement", async () => {
     const readiness = deferred<void>();
     const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    // The client shares the same readiness promise for the subscription and
+    // the initial hydration effect within one request generation.
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
     mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
       ready: readiness.promise,
@@ -540,6 +543,19 @@ describe("turn loading for sessions without hydrated turns", () => {
 });
 
 describe("deduplicated message request baselines", () => {
+  it("does not share a snapshot across subscription generations", () => {
+    const firstReadiness = Promise.resolve();
+    const secondReadiness = Promise.resolve();
+    mockWebSocketClient.request
+      .mockReturnValueOnce(Promise.resolve({ messages: [], has_more: false }))
+      .mockReturnValueOnce(Promise.resolve({ messages: [], has_more: false }));
+
+    requestSessionMessages(mockWebSocketClient as never, "sess-1", firstReadiness, []);
+    requestSessionMessages(mockWebSocketClient as never, "sess-1", secondReadiness, []);
+
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the first caller's cache baseline for a concurrent fetch", async () => {
     const readiness = deferred<void>();
     const response = deferred<{ messages: Message[]; has_more: boolean }>();

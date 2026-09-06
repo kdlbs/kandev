@@ -589,6 +589,7 @@
   "groupWorkflowStepDescription": "Separa as tarefas por passo do fluxo de trabalho.",
   "handOffToTarget": "Transferir para <1>{{label}}</1>",
   "handoff": "Transferir",
+  "hide": "Ocultar",
   "hardReset": "Reposição forçada",
   "helpsPreserveCommittedWorkUncommittedChanges": "Ajuda a preservar o trabalho com commit. As alterações sem commit não podem ser enviadas.",
   "hiddenMessagesInPreview_one": "… mais {{count}} mensagem oculta nesta pré-visualização (continua incluída na partilha) …",

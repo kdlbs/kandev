@@ -5,13 +5,13 @@ import { SessionTabCloseAction } from "./session-tab-close-action";
 afterEach(() => cleanup());
 
 describe("SessionTabCloseAction", () => {
-  it("renders an operable X and dispatches close when idle", () => {
+  it("renders an operable non-destructive close action", () => {
     const onClose = vi.fn();
-    render(<SessionTabCloseAction sessionId="s1" isDeleting={false} onClose={onClose} />);
+    render(<SessionTabCloseAction sessionId="s1" onClose={onClose} />);
 
-    const button = screen.getByRole("button", { name: "Delete session" });
+    const button = screen.getByRole("button", { name: "Close" });
     expect((button as HTMLButtonElement).disabled).toBe(false);
-    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect(button.hasAttribute("aria-busy")).toBe(false);
     expect(screen.queryByRole("status")).toBeNull();
 
     fireEvent.click(button);
@@ -19,23 +19,30 @@ describe("SessionTabCloseAction", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("renders a disabled spinner and blocks close while deleting", () => {
+  it("keeps pointer interaction on the close action out of the tab trigger", () => {
     const onClose = vi.fn();
-    render(<SessionTabCloseAction sessionId="s1" isDeleting onClose={onClose} />);
+    const onPointerDown = vi.fn();
+    render(
+      <div onPointerDown={onPointerDown}>
+        <SessionTabCloseAction sessionId="s1" onClose={onClose} />
+      </div>,
+    );
 
-    const button = screen.getByRole("button", { name: "Delete session" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    const spinner = screen.getByRole("status");
-    expect(spinner.classList.contains("animate-spin")).toBe(true);
-    expect(spinner.classList.contains("rounded-full")).toBe(true);
-    expect(spinner.classList.contains("border-2")).toBe(true);
-    expect(spinner.classList.contains("border-t-muted-foreground")).toBe(true);
-    expect(spinner.classList.contains("spinner-grid")).toBe(false);
-    expect(spinner.querySelectorAll(".spinner-grid-cube")).toHaveLength(0);
+    const button = screen.getByRole("button", { name: "Close" });
+    fireEvent.pointerDown(button);
+    expect(onPointerDown).not.toHaveBeenCalled();
 
     fireEvent.click(button);
 
-    expect(onClose).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose destructive deletion or busy state", () => {
+    render(<SessionTabCloseAction sessionId="s1" onClose={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "Close" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.hasAttribute("aria-busy")).toBe(false);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
