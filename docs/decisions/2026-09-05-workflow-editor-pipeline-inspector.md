@@ -1,6 +1,6 @@
 # ADR-2026-09-05-workflow-editor-pipeline-inspector: Use a constrained pipeline and focused workflow inspector
 
-**Status:** accepted
+**Status:** superseded by 2026-09-06-inline-workflow-step-tabs
 **Date:** 2026-09-05
 **Area:** frontend, workflow
 

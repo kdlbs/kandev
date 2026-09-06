@@ -1,7 +1,7 @@
 ---
 id: 06-build-desktop-workflow-inspector
 title: Build the desktop workflow inspector
-status: done
+status: superseded
 wave: 5
 depends_on:
   - 05-build-workflow-editor-view-model
@@ -95,4 +95,5 @@ git diff --check
 Implemented the dedicated persisted and client-only workflow routes, compact
 ordered pipeline, desktop Agent/Automation/Policies inspector, route-local
 manual-save draft, read-only state, and first-save identity replacement.
-Desktop editor E2E coverage passes.
+Desktop editor E2E coverage passes. The dedicated layout is superseded by Task
+12, which keeps the tabs inside the existing inline selected-step editor.

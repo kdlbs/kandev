@@ -1,7 +1,7 @@
 ---
 id: 10-prove-and-document-experience
 title: Prove the workflow experience
-status: done
+status: superseded
 wave: 8
 depends_on:
   - 08-build-mobile-workflow-editing
@@ -113,9 +113,8 @@ git diff --check
 
 ## Results
 
-Implemented focused desktop and mobile Playwright coverage, localized all new
+Implemented first-pass desktop and mobile editor coverage, localized the new
 editor and chat copy, and updated workflow task, import/export, and sync
-documentation with executor-permission and persisted-output warnings. The
-focused E2E suites, i18n gates, specification lint, and public-doc validator
-pass; broad backend verification retains only the documented host-home config
-discovery failures.
+documentation. The planned runtime profile-switch and script-failure E2E files
+were not added. Task 13 supersedes this work order with the revised inline UX
+and the missing runtime evidence.

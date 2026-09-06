@@ -1,6 +1,6 @@
 ---
 created: 2026-09-05
-status: implemented
+status: building
 requirements:
   - REQ-TASKS-WORKFLOW-STEP-SCRIPT-001
   - REQ-TASKS-WORKFLOW-STEP-SCRIPT-002
@@ -15,18 +15,16 @@ system_design:
 legacy_specs: []
 ---
 
-# Implementation Plan: Workflow Step Scripts and Focused Editor
+# Implementation Plan: Workflow Step Scripts and Inline Step Tabs
 
 ## Overview
 
 Add `run_script` actions to step entry, agent completion, and step exit. Execute
 them in the trigger-owning agent session, stream durable command output into
-chat, and apply explicit timeout and failure policies. In the same package,
-replace the dense inline workflow form with a dedicated constrained pipeline,
-focused step inspector, lifecycle action recipes, and native mobile navigation.
-The backend contract lands before orchestration, and the shared editor view
-model lands before either viewport composition so each layer builds on a tested
-source of truth.
+chat, and apply explicit timeout and failure policies. Improve the existing
+workflow card by placing compact Agent, Automation, and Policies tabs inside its
+inline selected-step panel. The current step strip, page-level workflow editing,
+manual save, and mobile information hierarchy remain intact.
 
 ## Scope
 
@@ -38,11 +36,10 @@ source of truth.
   and exit, including profile reuse, parking, and replacement.
 - Durable at-most-once run state, agentctl workspace execution, output
   streaming, failure policy, recovery, logs, and metrics.
-- A dedicated workflow editor route with compact pipeline summaries, a desktop
-  Agent/Automation/Policies inspector, focused action editors, and actionable
-  configuration checks.
-- A mobile vertical journey with full-height step/action editors, a temporary
-  action-choice drawer, explicit move controls, safe areas, and touch parity.
+- Compact Agent/Automation/Policies tabs inside the existing inline selected-step
+  editor, focused action editors, and actionable configuration checks.
+- The existing mobile workflow card with a bounded horizontal step strip,
+  touch-safe tabs, explicit move controls, and no document-level overflow.
 - Existing manual-save, read-only, import/export, sync, inheritance, and
   transition semantics.
 - Script execution rendering in normal agent chat, E2E coverage, localization,
@@ -54,6 +51,8 @@ source of truth.
   environment values, shell selection, or a separate script path field.
 - A freeform canvas, arbitrary graph edges or node coordinates, zoom controls,
   or new workflow topology.
+- Dedicated workflow-editor routes, a second workflow layout, desktop side
+  inspectors, or mobile journey/step/action routes.
 - New workflow-level inheritance/default rules for existing step policies.
 - Live Test action execution from settings.
 - Persisting unsaved drafts across reloads or devices.
@@ -81,15 +80,13 @@ source of truth.
    `apps/web/lib/workflows`. Reuse `workflow-dirty-state.ts` and immutable step
    mutations to derive compact summaries, lifecycle groups, transition edges,
    selection repair, and resolvable diagnostics without changing the wire shape.
-6. Add the dedicated route in the SPA settings route table and
-   `apps/web/src/settings-routes.workspace-data.tsx`. Refactor `WorkflowCard`,
-   `WorkflowPipelineEditor`, and `StepConfigPanel` into a
-   route-level draft shell, desktop pipeline/inspector, lifecycle action
-   editors, and mobile journey/step/action compositions. Add a sibling `new`
-   route for client-only creation and replace its URL after first Save.
-7. Register the route-level contributor with `SettingsSaveProvider`. Keep
-   client-only identity remapping in `useWorkflowDraftContributor`, existing
-   immediate destructive confirmations, and dirty navigation ownership.
+6. Retain `WorkspaceWorkflowsClient`, `WorkflowCard`,
+   `WorkflowPipelineEditor`, and the inline selected-step panel. Integrate the
+   shared action catalog and view model there, then add a compact segmented tab
+   control without adding workflow-editor routes or route selection state.
+7. Keep each workflow card's existing `SettingsSaveProvider` contributor,
+   client-only identity remapping, destructive confirmations, and dirty
+   navigation ownership. Multiple dirty workflows continue to save together.
 8. Extend `ScriptExecutionMessage`, `message-renderer.tsx`, and
    `processed-message-filtering.ts` for workflow metadata and in-place updates.
    Add localized workflow/task catalog entries and targeted Playwright coverage.
@@ -122,20 +119,20 @@ source of truth.
   authorization tests, orchestrator metric/log
   tests, and `validate-public-docs` cover trust and bounded observability.
 - `AC-TASKS-WORKFLOW-STEP-SCRIPT-008.1` through `.10`:
-  `workflow-editor-view-model.test.ts`, desktop/mobile editor
-  component tests, and settings save contributor tests cover route selection,
-  summaries, issue targets, dirty navigation, and responsive composition.
+  `workflow-editor-view-model.test.ts`, workflow-card and inline step-panel
+  component tests, and settings save contributor tests cover selection repair,
+  compact tabs, issue targets, multiple dirty workflows, and responsive
+  composition.
 
 ## E2E tests
 
-- `workflow-editor.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-008.1` through
-  `.6`, `.9`): desktop
-  authors a script through the lifecycle recipe, changes steps without
-  losing the draft, saves once, and observes streaming and terminal chat state.
-- `workflow-editor.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-008.4`, `.5`):
-  configuration checks
-  navigate directly to an invalid action field;
-  transitions changed in the recipe update the pipeline immediately.
+- `workflow-settings.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-008.1` through
+  `.6`, `.9`): desktop authors a script through compact tabs in the existing
+  inline step editor, changes steps without losing the draft, saves once, and
+  retains all workflow-level fields.
+- `workflow-settings.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-008.4`, `.5`):
+  configuration checks select the correct inline step, tab, and invalid action;
+  transitions changed in the recipe update the existing step strip immediately.
 - `workflow-step-script-profile-switch.spec.ts`
   (`AC-TASKS-WORKFLOW-STEP-SCRIPT-002.2` through `.4`): completion/exit output
   remains in the source
@@ -147,13 +144,13 @@ source of truth.
   `AC-TASKS-WORKFLOW-STEP-SCRIPT-005.2`, `.3`): covers non-zero exit, timeout,
   block, continue, reload,
   duplicate delivery, and interrupted recovery.
-- `mobile-workflow-editor.spec.ts` in the `mobile-chrome` project
+- `mobile-workflow-cycle-guardrails.spec.ts` and a focused inline-authoring case
+  in the `mobile-chrome` project
   (`AC-TASKS-WORKFLOW-STEP-SCRIPT-006.4`,
-  `AC-TASKS-WORKFLOW-STEP-SCRIPT-008.7`, `.8`): navigates journey to step to action and back,
-  authors/reorders scripts,
-  saves, inspects output, meets 44-pixel targets, respects safe areas, and has no
-  document-level horizontal overflow.
-- `workflow-editor.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-006.3`,
+  `AC-TASKS-WORKFLOW-STEP-SCRIPT-008.7`, `.8`): selects a step and tab in the
+  existing workflow card, authors and reorders scripts, saves, inspects output,
+  meets 44-pixel targets, and has no document-level horizontal overflow.
+- `workflow-settings.spec.ts` (`AC-TASKS-WORKFLOW-STEP-SCRIPT-006.3`,
   `AC-TASKS-WORKFLOW-STEP-SCRIPT-008.9`): synchronized workflows
   retain complete inspection while all
   mutation affordances remain disabled with a reason.
@@ -165,16 +162,18 @@ source of truth.
 - [x] [Task 03: Add workspace process execution](task-03-add-workspace-process-execution.md)
 - [x] [Task 04: Integrate workflow trigger scripts](task-04-integrate-workflow-triggers.md)
 - [x] [Task 05: Build the workflow editor view model](task-05-build-workflow-editor-view-model.md)
-- [x] [Task 06: Build the desktop workflow inspector](task-06-build-desktop-workflow-inspector.md)
+- [x] [Task 06: Build the desktop workflow inspector (superseded)](task-06-build-desktop-workflow-inspector.md)
 - [x] [Task 07: Build lifecycle action recipes](task-07-build-lifecycle-action-recipes.md)
-- [x] [Task 08: Build mobile workflow editing](task-08-build-mobile-workflow-editing.md)
+- [x] [Task 08: Build mobile workflow editing (superseded)](task-08-build-mobile-workflow-editing.md)
 - [x] [Task 09: Render workflow scripts in chat](task-09-render-workflow-scripts-in-chat.md)
-- [x] [Task 10: Prove the workflow experience](task-10-prove-and-document-experience.md)
+- [x] [Task 10: Prove the workflow experience (superseded)](task-10-prove-and-document-experience.md)
+- [ ] [Task 11: Harden script occurrence and lock ownership](task-11-harden-script-occurrence-and-locks.md)
+- [ ] [Task 12: Restore inline workflow editing with compact tabs](task-12-restore-inline-workflow-tabs.md)
+- [ ] [Task 13: Prove the revised inline experience](task-13-prove-revised-inline-experience.md)
 
-Tasks 02 and 03 are parallel-safe after Task 01. Tasks 08 and 09 are
-parallel-safe after their dependencies because they own separate mobile editor
-and chat transcript surfaces. All other work is sequential at its dependency
-boundary.
+Tasks 01 through 10 record the first implementation pass. The review and design
+revision add Tasks 11 through 13. Tasks 11 and 12 can proceed independently;
+Task 13 follows both and owns final integration evidence.
 
 ## Verification results
 
@@ -182,15 +181,16 @@ boundary.
   model, step mutations, workflow draft creation, focused editor, chat
   rendering, and processed-message filtering.
 - Frontend typecheck, lint, i18n check, and new-code i18n ratchet pass.
-- Desktop focused editor E2E passes the persisted draft flow and the
-  client-only new-workflow flow. Mobile `mobile-chrome` editor E2E passes the
-  journey, action drawer, reorder, save, touch-target, and overflow checks.
+- The first-pass dedicated editor E2E passes its persisted and client-only draft
+  flows, but that layout is superseded and its route-specific tests must be
+  replaced by inline workflow-card coverage.
 - Affected backend package tests pass, including workflow script persistence,
   process lifecycle, orchestration, and engine packages. The broad backend
   suite has seven host-home config discovery failures because
   `/root/.kandev/config.yaml` is selected by those tests.
-- Specification lint and public documentation validation pass. Workflow docs
-  cover executor permissions, persisted chat output, import/export, and sync.
+- Specification lint and public documentation validation passed for the first
+  pass. The profile-switch and script failure E2E files named by the original
+  plan were not implemented and remain required by Task 13.
 
 ## Risks
 
@@ -200,9 +200,14 @@ boundary.
   duplicate non-idempotent command.
 - Refactoring every existing action into one catalog can accidentally change
   serialization or ordering; characterization tests must precede the UI move.
-- Dedicated route navigation can discard drafts if the save contributor is
-  scoped below the route shell.
+- Reintegrating tabs can duplicate legacy transition controls unless the inline
+  panel has one clear owner for each setting.
 - An action identity derived from array position changes during reordering;
   selection must be repaired deterministically without changing persisted data.
 - Desktop and mobile can drift if they duplicate mutations instead of sharing
   the catalog and view model.
+- Fallback lifecycle identities must distinguish repeated transitions through
+  the same source, destination, and session without weakening duplicate-event
+  suppression.
+- Per-run coordination locks must be released only after the last waiter leaves;
+  deleting a keyed mutex immediately after one unlock would create a race.

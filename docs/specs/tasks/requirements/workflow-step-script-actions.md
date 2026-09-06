@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-09-05
-updated: 2026-09-05
+updated: 2026-09-06
 owners:
   - Kandev
 ---
@@ -17,9 +17,9 @@ must not consume an LLM turn. Its command, live output, final status, and exit
 code must remain visible in the bound agent session's chat history.
 
 This capability adds `run_script` to step entry, turn completion, and step exit.
-It also replaces the dense inline workflow form with a focused pipeline editor
-that can absorb script and future action types without exposing every step
-option at once. It does not replace repository setup and cleanup scripts.
+It also improves the existing inline workflow step editor with compact tabs and
+focused action editing, without introducing a second workflow-editing layout.
+It does not replace repository setup and cleanup scripts.
 
 ## Requirements
 
@@ -221,43 +221,47 @@ evidence to diagnose their lifecycle.
   starts and terminal outcomes labeled by trigger and outcome. Labels shall not
   contain task, command, workflow, or other unbounded values.
 
-### REQ-TASKS-WORKFLOW-STEP-SCRIPT-008: Focused workflow editor
+### REQ-TASKS-WORKFLOW-STEP-SCRIPT-008: Focused inline step editor
 
-**Intent:** Make workflows understandable as an ordered journey while keeping
-advanced step configuration available without presenting every option at once.
+**Intent:** Reduce the density of the existing workflow editor while preserving
+its familiar workflow card, step strip, and inline editing model.
 
 #### Acceptance criteria
 
-- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.1:** Opening a workflow from workspace
-  settings shall navigate to a dedicated editor that presents the workflow as
-  a constrained ordered pipeline derived from persisted step order and
-  transitions. It shall not require arbitrary node positioning, zooming, or a
-  freeform graph canvas.
-- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.2:** A compact step summary shall show its
-  name and color, effective agent profile, configured action count, primary
-  destination, dirty state, and configuration issues without displaying the
-  complete step form.
-- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.3:** On desktop, selecting a step shall
-  open a persistent inspector with **Agent**, **Automation**, and **Policies**
-  tabs. Selecting an action shall replace the automation list with one focused
-  action editor and an explicit way back.
-- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.4:** The Automation tab shall group
-  compact, ordered action summaries under **When task enters**, **When agent
-  finishes**, and **When task leaves**. Its add-action palette shall show only
-  action types supported by the selected trigger, and transition actions shall
-  update the pipeline summary.
+- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.1:** Workflows shall remain editable in
+  the existing workspace Workflows settings list. Editing an existing or new
+  workflow shall not navigate to a dedicated workflow-editor route or replace
+  the current workflow card layout.
+- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.2:** Each workflow card shall retain its
+  workflow-level fields, compact ordered step strip, and one inline panel for
+  the selected step. Selecting another step shall replace the panel contents
+  without expanding every step or introducing a freeform graph canvas. The
+  selected-step heading shall retain editable step name and color controls.
+- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.3:** The selected-step panel shall contain
+  compact **Agent**, **Automation**, and **Policies** tabs near its header.
+  Desktop tabs shall use a small segmented-control treatment rather than three
+  large full-width buttons. Selecting an action shall replace the Automation
+  tab's action list with one focused editor and an explicit way back.
+- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.4:** The Automation tab shall preserve
+  every existing event editor, including task entry, turn start, turn complete,
+  child-task completion, and task exit, as compact ordered action groups. Its
+  add-action palette shall show only action types supported by the selected
+  trigger, and transition actions shall update the step strip summary. The
+  `run_script` action shall remain limited to entry, turn completion, and exit.
 - **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.5:** Workflow-level configuration checks
-  shall identify invalid or incomplete steps. Selecting an issue shall focus
-  the exact step, tab, action, or field that can resolve it.
+  shall identify invalid or incomplete steps. Selecting an issue shall select
+  the exact step and open the tab, action, or field that can resolve it within
+  the same workflow card.
 - **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.6:** The redesign shall preserve the
-  settings manual-save contract. Pipeline, tab, step, and action navigation
-  shall retain route-local drafts; the shared Save changes surface shall save
-  them; and leaving with dirty changes shall use the existing save, discard,
-  or continue-editing confirmation.
-- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.7:** On phone viewports, the editor shall
-  present a vertical step journey. Selecting a step or action shall navigate to
-  a dedicated full-height editor, while the add-action choice may use a
-  temporary bottom drawer before navigating to the new action editor.
+  settings manual-save contract. Workflow, tab, step, and action selection
+  shall retain the existing page-local drafts; the shared Save changes surface
+  shall save every dirty workflow on the page; and leaving with dirty changes
+  shall use the existing save, discard, or continue-editing confirmation.
+- **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.7:** On phone viewports, the workflow card,
+  compact step strip, and inline selected-step panel shall retain the same
+  information hierarchy. The step strip may scroll inside its own horizontal
+  region, while tab content stacks below it without a dedicated journey,
+  full-height step route, or nested editor navigation.
 - **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.8:** Mobile shall provide the same
   authoring capabilities as desktop, use explicit move up/down actions where
   drag is not appropriate, keep interactive targets at least 44 by 44 CSS
@@ -265,12 +269,15 @@ advanced step configuration available without presenting every option at once.
   expose no hover-only operation, and avoid document-level horizontal
   overflow.
 - **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.9:** Read-only synchronized workflows
-  shall keep the same navigation and inspection experience while mutation
+  shall keep the same inline selection and inspection experience while mutation
   affordances are disabled with a visible reason.
 - **AC-TASKS-WORKFLOW-STEP-SCRIPT-008.10:** The editor redesign shall preserve
   existing workflow persistence, import/export, sync, inheritance, transition,
-  and execution semantics. All new user-facing text shall be localized in the
-  supported catalogs.
+  and execution semantics. Existing fields such as workflow default agent
+  profile, workflow description, step color, auto-archive timing, WIP/pull, and
+  child-task completion transitions shall remain editable on supported
+  viewports. All new user-facing text shall be localized in the supported
+  catalogs.
 
 ## Scenarios
 
@@ -289,19 +296,19 @@ advanced step configuration available without presenting every option at once.
 - **GIVEN** the backend restarts after process admission, **WHEN** the trigger
   is replayed, **THEN** Kandev reconciles or interrupts the existing run and
   never starts the command again.
-- **GIVEN** a workflow with several steps and actions, **WHEN** an author opens
-  it on desktop, **THEN** the pipeline remains visible while the selected
-  step's focused inspector changes between Agent, Automation, and Policies.
+- **GIVEN** a workflow with several steps and actions, **WHEN** an author edits
+  it on desktop, **THEN** its existing compact step strip remains visible while
+  the inline selected-step panel changes between Agent, Automation, and
+  Policies.
 - **GIVEN** an invalid action in a non-selected step, **WHEN** an author selects
   its configuration issue, **THEN** the editor selects that step and opens the
   action field that caused the issue.
 - **GIVEN** a dirty script action, **WHEN** an author selects another step and
-  returns, **THEN** the unsaved command remains in the route-local draft and no
-  persistence request occurs until Save changes is selected.
-- **GIVEN** the same workflow on a phone, **WHEN** an author opens a step and
-  edits an action, **THEN** the experience uses dedicated vertical screens and
-  browser Back returns through action, step, and journey without losing the
-  draft.
+  returns, **THEN** the unsaved command remains in the page-local workflow draft
+  and no persistence request occurs until Save changes is selected.
+- **GIVEN** the same workflow on a phone, **WHEN** an author selects a step and
+  edits an action, **THEN** the edit stays inside that workflow card, the tabs
+  remain touch-safe, and the page does not gain horizontal overflow.
 
 ## Out of scope
 
@@ -318,6 +325,8 @@ advanced step configuration available without presenting every option at once.
   stderr.
 - A freeform workflow canvas, arbitrary node coordinates, zoom controls, or
   user-authored graph branches beyond the existing transition model.
+- Dedicated existing-workflow or new-workflow editor routes, route-encoded step
+  selection, desktop side inspectors, and mobile journey/step/action screens.
 - New workflow-level defaults or inheritance rules for existing per-step
   booleans and policies. The editor may explain current inheritance but shall
   not change its persisted semantics.
