@@ -142,23 +142,26 @@ func (s *Service) drainHistoryQueue() {
 }
 
 // EnqueueStepTransition records transition history outside the caller's
-// event-reader path. The queue is bounded. A full queue, or an enqueue after
-// Close has begun, is logged as a dropped best-effort telemetry row while the
-// workflow mutation itself succeeds.
-func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) {
+// event-reader path. The queue is bounded. It returns false when a full queue,
+// an empty session ID, or shutdown prevents enqueueing, so callers carrying
+// signal data can use a bounded synchronous fallback instead of silently
+// losing that payload.
+func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) bool {
 	if sessionID == "" {
-		return
+		return false
 	}
 	s.historyMu.RLock()
 	defer s.historyMu.RUnlock()
 	if s.historyClosed {
 		s.logger.Warn("dropped step transition enqueued after shutdown", zap.String("session_id", sessionID))
-		return
+		return false
 	}
 	select {
 	case s.historyQueue <- historyWrite{sessionID: sessionID, fromStepID: fromStepID, toStepID: toStepID, trigger: trigger, actorID: actorID, metadata: metadata}:
+		return true
 	default:
 		s.logger.Warn("step transition history queue is full", zap.String("session_id", sessionID))
+		return false
 	}
 }
 

@@ -2493,6 +2493,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// shared stepHandoffOnce is needed here.
 	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
 	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
+	composedLaunchPrompt := appendStepHandoffToPrompt(promptForEmptinessCheck, handoffText)
 
 	// effectivePrompt is already fully composed for this step entry (handoff
 	// included): if promptTask's own internal ErrExecutionNotFound recovery
@@ -2500,6 +2501,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// the destination step's own template and discarding the handoff.
 	_, err = s.promptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false, promptTaskOptions{
 		promptAlreadyComposed: true,
+		fallbackLaunchPrompt:  composedLaunchPrompt,
 		fallbackRetryPrompt:   effectivePrompt,
 	})
 	if err != nil {
@@ -4213,7 +4215,11 @@ type promptTaskOptions struct {
 	// (e.g. appending a claimed step handoff) is not silently recomposed from
 	// the destination step's own template.
 	promptAlreadyComposed bool
-	fallbackRetryPrompt   string
+	// fallbackLaunchPrompt is the fully composed prompt for fresh-launch
+	// recovery. The normal dispatch still receives the raw prompt so it can
+	// apply session transforms exactly once.
+	fallbackLaunchPrompt string
+	fallbackRetryPrompt  string
 }
 
 type promptDispatchOutcome struct {
@@ -4463,6 +4469,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	)
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
 	if err != nil {
+		// Missing-execution recovery reacquires the cancel guard while it resets
+		// the session. Release dispatch admission before entering that path.
+		if releaseDispatchGuard != nil {
+			releaseDispatchGuard()
+		}
 		return s.finishPromptDispatchFailure(
 			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 			rollback, options, err, foregroundDispatch, dispatchAccepted, publicationErr,
@@ -4497,7 +4508,7 @@ func (s *Service) finishPromptDispatchFailure(
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
 		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
-		options.promptAlreadyComposed, options.fallbackRetryPrompt,
+		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -4973,6 +4984,7 @@ func (s *Service) handlePromptDispatchFailure(
 	dispatchAccepted bool,
 	promptErr error,
 	promptAlreadyComposed bool,
+	fallbackLaunchPrompt string,
 	fallbackRetryPrompt string,
 ) (*PromptResult, error) {
 	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
@@ -4980,8 +4992,12 @@ func (s *Service) handlePromptDispatchFailure(
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
+		fallbackPrompt := prompt
+		if fallbackLaunchPrompt != "" {
+			fallbackPrompt = fallbackLaunchPrompt
+		}
 		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
-			ctx, taskID, sessionID, prompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, nil, attachments, nil,
+			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, nil, attachments, nil,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {

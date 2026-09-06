@@ -247,6 +247,65 @@ func TestApplyEngineTransition_WritesHandoffCarryToken(t *testing.T) {
 	}
 }
 
+// TestApplyEngineTransition_QueuedTransitionWritesHandoffCarryTokenAtAdmission
+// covers the engine funnel's queue boundary: the carry token must be part of
+// the same admission write as the queued destination, so promotion cannot
+// start before the token exists.
+func TestApplyEngineTransition_QueuedTransitionWritesHandoffCarryTokenAtAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "occupant-engine",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Occupant",
+		State:          "TODO",
+		Priority:       "medium",
+	}); err != nil {
+		t.Fatalf("create occupant: %v", err)
+	}
+
+	steps := newMockStepGetter()
+	steps.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Source", Position: 0}
+	steps.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Name: "Limited", Position: 1, WIPLimit: 1}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+	svc.SetWorkflowStepGetter(steps)
+	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:  "step1",
+		Source:  models.StepCompletionSourceAgent,
+		Summary: "engine queued work",
+		Handoff: "carry before promotion",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	result := engine.HandleResult{Transitioned: true, FromStepID: "step1", ToStepID: "step2"}
+	if !svc.applyEngineTransition(ctx, "t1", session, result, engine.TriggerOnTurnComplete, "desc", true) {
+		t.Fatal("expected queued transition to apply")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("load queued task: %v", err)
+	}
+	if task.WIPAdmitted || task.QueuedForStepID != "step2" {
+		t.Fatalf("expected task queued for step2, got admitted=%t queue=%q", task.WIPAdmitted, task.QueuedForStepID)
+	}
+	token, present := carryToken(t, repo, "t1")
+	if !present || token.Handoff != signal.Handoff || token.StepID != "step2" {
+		t.Fatalf("queued engine token = present=%v token=%+v, want step2 handoff", present, token)
+	}
+}
+
 // TestApplyEngineTransition_OnTurnStartDoesNotTouchToken covers AC-001.2a on
 // the engine funnel: a non-consuming trigger must not touch the token.
 func TestApplyEngineTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {

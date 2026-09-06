@@ -180,11 +180,13 @@ reviewer approves. Copy the compound condition; do not paraphrase it.
   `ListHistoryBySession` is `ORDER BY created_at` with no tiebreak column; the
   requirement names that as an exclusion rather than changing it.
 - **Recording is asynchronous in production.** `recordAutoStepTransition` prefers
-  `asyncStepHistoryRecorder.EnqueueStepTransition`; only test doubles take the
-  synchronous `CreateStepTransition` branch. The metadata map is built from the
-  signal's fields before the enqueue, so values are captured at enqueue time even
-  though the row lands later. Hence AC-002.3 says *capture* before the clear, not
-  *write* before it.
+  `asyncStepHistoryRecorder.EnqueueStepTransition`; when the bounded worker is
+  full or closed, it falls back to a bounded synchronous `CreateStepTransition`
+  write. The metadata map is built from the signal's fields before enqueue, so
+  values are captured at enqueue time even though the normal row lands later.
+  Database failure or a shutdown deadline can still drop telemetry; neither
+  rolls back an already-committed task mutation. Hence AC-002.3 says *capture*
+  before the clear, not *write* before it.
 - **`tasks.metadata`** is an existing JSON bag with concurrent-key-safe patch
   helpers on the SQLite repository: `SetTaskMetadataKey` (a plain overwrite, no
   CAS, which is what makes AC-005.4's last-write-wins the primitive's actual
@@ -252,13 +254,13 @@ dual-dialect body — it already carries the Postgres `jsonb_extract_path_text` 
 form beside the SQLite `json_extract` / `json_remove` form — rather than adding a
 SQLite-only method to a file whose every neighbour handles both.
 
-The new method ships with the matching interface assertion added where
-`RemoveTaskMetadataKey` is already declared: the narrow interface in
-`internal/orchestrator/event_handlers_workflow.go` and the repository interface
-in `internal/orchestrator/service.go`. AC-005.3's degrade-to-today branch mirrors
-the existing `asyncStepHistoryRecorder` and `stepCompletionSignalClaimer`
-optional-interface assertions: a repository that lacks the method takes today's
-behavior rather than erroring.
+The new method ships behind a narrow optional interface in
+`internal/orchestrator/event_handlers_workflow.go`; it is deliberately not part
+of the broad `sessionExecutorStore` contract in `internal/orchestrator/service.go`.
+AC-005.3's degrade-to-today branch mirrors the existing
+`asyncStepHistoryRecorder` and `stepCompletionSignalClaimer` optional-interface
+assertions: a repository that lacks the method takes today's behavior rather than
+erroring.
 
 ### Handoff carriage (REQ-001)
 

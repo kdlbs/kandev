@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -381,6 +382,7 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
 		ID: stepID, WorkflowID: "wf1", Name: "Next",
 		Prompt: "Recomposed step instructions.",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterEnablePlanMode}}},
 	}
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, Title: "Test Task", State: v1.TaskStateInProgress}
@@ -424,6 +426,8 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 	freshPrompt := <-launchPrompts
 	require.Contains(t, freshPrompt, handoff,
 		"the already-composed prompt (with the claimed handoff) must survive the fresh-launch fallback")
+	require.Contains(t, freshPrompt, sysprompt.PlanMode(),
+		"the fresh-launch fallback must retain the destination step's plan-mode instructions")
 	require.NotEqual(t, "Recomposed step instructions.", strings.TrimSpace(freshPrompt),
 		"promptAlreadyComposed must skip StartCreatedSession's own step-template recomposition")
 }
@@ -561,6 +565,34 @@ func TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBefore
 		"entity-reference expansion must land before the handoff, which must land last; prompt = %q", prompt)
 }
 
+func TestAutoStartStepPrompt_MergesQueuedStepHandoff(t *testing.T) {
+	ctx := context.Background()
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	const queuedHandoff = "handoff already claimed by the queued entry"
+
+	_, err := fixture.svc.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		fixture.sessionID,
+		fixture.taskID,
+		"queued workflow message",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		map[string]interface{}{messagequeue.MetadataStepHandoff: queuedHandoff},
+	)
+	require.NoError(t, err)
+
+	err = fixture.svc.autoStartStepPrompt(
+		ctx, fixture.taskID, fixture.session, fixture.step,
+		"start the next step", false, true, newStepHandoffOnce(),
+	)
+	require.NoError(t, err)
+	require.Len(t, fixture.agent.capturedPrompts, 1)
+	require.Contains(t, fixture.agent.capturedPrompts[0], queuedHandoff,
+		"a queued entry's previously claimed handoff must survive auto-start merging")
+}
+
 // failOnceHandoffClaimRepo wraps a real repo's TakeTaskMetadataKeyIfDestinationStep
 // so its first invocation fails, standing in for a transient claim error. Per
 // AC-005.2, a failed claim must not spend the step entry's one-claim budget, so
@@ -578,7 +610,11 @@ func (r *failOnceHandoffClaimRepo) TakeTaskMetadataKeyIfDestinationStep(
 		r.failed = true
 		return nil, false, errors.New("simulated transient claim failure")
 	}
-	return r.sessionExecutorStore.TakeTaskMetadataKeyIfDestinationStep(ctx, taskID, key, expectedStepID, expectedStamp)
+	taker, ok := r.sessionExecutorStore.(taskMetadataCarryTaker)
+	if !ok {
+		return nil, false, errors.New("handoff claim capability is unavailable")
+	}
+	return taker.TakeTaskMetadataKeyIfDestinationStep(ctx, taskID, key, expectedStepID, expectedStamp)
 }
 
 // TestClaimStepHandoffCarryText_FailedClaimDoesNotSpendBudget covers AC-005.2:
