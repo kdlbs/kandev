@@ -90,23 +90,25 @@ const demoReady = shouldInstallBrowserDemo({
   ? import("@/lib/browser-demo/install").then(({ installBrowserDemo }) => installBrowserDemo())
   : Promise.resolve();
 
-void demoReady.then(() => loadBootPayload()).then(async (payload) => {
-  // The Go shell already rewrote <title>; this is the /api/v1/app-state boot
-  // path, which never renders through it.
-  applyTitlePrefix(payload.runtime?.titlePrefix, document);
+void demoReady
+  .then(() => loadBootPayload())
+  .then(async (payload) => {
+    // The Go shell already rewrote <title>; this is the /api/v1/app-state boot
+    // path, which never renders through it.
+    applyTitlePrefix(payload.runtime?.titlePrefix, document);
 
-  // Only `en` ships in the entry chunk, so a non-English boot has to fetch its
-  // catalogs. Awaited HERE, in the promise the mount already waited on, rather
-  // than after mounting: with `returnNull: false` a missing key renders as the
-  // key itself, so rendering first would paint a frame of raw `common:save`
-  // strings. Resolves immediately for `en` — the common case is unchanged.
-  await preloadLocale(resolveInitialLocale(payload));
+    // Only `en` ships in the entry chunk, so a non-English boot has to fetch its
+    // catalogs. Awaited HERE, in the promise the mount already waited on, rather
+    // than after mounting: with `returnNull: false` a missing key renders as the
+    // key itself, so rendering first would paint a frame of raw `common:save`
+    // strings. Resolves immediately for `en` — the common case is unchanged.
+    await preloadLocale(resolveInitialLocale(payload));
 
-  createRoot(root).render(
-    <StrictMode>
-      <RootErrorBoundary>
-        <App payload={payload} />
-      </RootErrorBoundary>
-    </StrictMode>,
-  );
-});
+    createRoot(root).render(
+      <StrictMode>
+        <RootErrorBoundary>
+          <App payload={payload} />
+        </RootErrorBoundary>
+      </StrictMode>,
+    );
+  });
