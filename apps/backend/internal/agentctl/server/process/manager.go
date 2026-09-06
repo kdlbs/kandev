@@ -1947,6 +1947,14 @@ func (m *Manager) agentPID() int {
 	return m.cmd.Process.Pid
 }
 
+// AgentPID returns the running agent subprocess's PID, or 0 if no process is
+// running. Exposed for the background-workload liveness probe (spec
+// docs/specs/disambiguate-waiting/spec.md), which walks this PID's
+// transitive descendant set.
+func (m *Manager) AgentPID() int {
+	return m.agentPID()
+}
+
 func (m *Manager) agentProtocol() string {
 	if m.cfg == nil {
 		return ""

@@ -3458,6 +3458,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.deleteSessionAndPublishError(ctx, taskID, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
+	// The row is gone, so retire the detached-launch attestation and parked
+	// projection before any later session event can reuse this ID.
+	s.clearParkedProjectionOnSessionDeleted(ctx, taskID, sessionID)
 
 	// Drop the in-memory git snapshot throttle entries for an environment only
 	// after its session has been removed. The cache is environment-scoped, so a

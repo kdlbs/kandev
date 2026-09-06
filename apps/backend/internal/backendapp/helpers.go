@@ -741,6 +741,11 @@ func registerRoutes(p routeParams) {
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -1260,6 +1265,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1542,6 +1548,8 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}

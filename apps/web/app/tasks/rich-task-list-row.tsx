@@ -43,6 +43,10 @@ function PrimaryTaskLine({
         foregroundActivity: task.foreground_activity,
         hasPendingPermission: pendingInput.permission,
         interrupted: task.interrupted,
+        // task.parked_on_background_work — snake_case, per this file's Task type
+        // (lib/types/http.ts), not the camelCase store shape kanban-card-content.tsx
+        // reads. Wrong casing here silently unparks the row (round-5 F19).
+        parkedOnBackgroundWork: task.parked_on_background_work,
       })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}

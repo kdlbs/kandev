@@ -29,13 +29,8 @@ import {
   resolveTaskRowPresentation,
   type ResolvedTaskRowPresentation,
 } from "./task-row-presentation";
-import { TaskItemTrailing } from "./task-item-trailing";
+import { TaskItemTrailing, type DiffStats } from "./task-item-trailing";
 import { TaskStateIcon } from "./task-state-icon";
-
-type DiffStats = {
-  additions: number;
-  deletions: number;
-};
 
 type TaskItemProps = {
   title: string;
@@ -50,6 +45,14 @@ type TaskItemProps = {
    * single session's substate.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input (permission/clarification) and by an active
+   * foregroundActivity.
+   */
+  parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
@@ -329,6 +332,7 @@ export const TaskItem = memo(function TaskItem({
   state,
   sessionState,
   foregroundActivity,
+  parkedOnBackgroundWork,
   isArchived,
   isSelected = false,
   isMultiSelected = false,
@@ -405,6 +409,7 @@ export const TaskItem = memo(function TaskItem({
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
+        parkedOnBackgroundWork={parkedOnBackgroundWork}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         interrupted={interrupted}

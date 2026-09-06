@@ -124,11 +124,7 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(
-  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
-    active_subagent_count?: number;
-  },
-) {
+function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
   return {
     id: "m",
     type: "notification" as const,
@@ -1491,6 +1487,80 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
 
     expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBeNull();
     expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+});
+
+// task-05's publishParkedTransition shares this wire event but omits
+// `foreground_activity` entirely (unlike the ADR-0049 flip, which always
+// sends it, explicit null included). A naive `payload.foreground_activity
+// ?? null` default would clobber a live busy signal on every parked-only
+// event.
+describe("session.activity_changed handler — parked-only payload shape", () => {
+  it("does not clobber a live foreground_activity on a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING", foreground_activity: "generating" },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 3,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      foreground_activity: "generating",
+      parked_on_background_work: true,
+      revision: 3,
+      parked_epoch: 100,
+    });
+  });
+
+  it("applies parked_on_background_work/revision/parked_epoch from a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 1,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: true,
+      revision: 1,
+      parked_epoch: 100,
+      foreground_activity: undefined,
+    });
   });
 });
 

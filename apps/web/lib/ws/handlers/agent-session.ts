@@ -11,13 +11,17 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueueStatusChangedPayload } from "@/lib/types/backend";
+import type {
+  QueueStatusChangedPayload,
+  TaskSessionActivityChangedPayload,
+} from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { applyForegroundActivity, applyCancellationPending } from "./session-activity";
 
 const debug = createDebugLogger("session:state");
 
@@ -582,83 +586,6 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
-/** Apply a fine-grained busy-substate flip (ADR-0049). Annotates the
- *  existing session row so the composer gate and status indicator update; does
- *  nothing until the row exists (state_changed seeds it first). */
-function applyForegroundActivity(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-): void {
-  if (!payload?.task_id || !payload?.session_id) return;
-  const taskId = toTaskId(payload.task_id);
-  const sessionId = toSessionId(payload.session_id);
-  const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing) return;
-  // Detached work can outlive the foreground turn, whose coarse state is then
-  // WAITING_FOR_INPUT. Terminal/parked sessions reject delayed activity frames;
-  // their execution teardown owns the final clear.
-  if (existing.state !== "RUNNING" && existing.state !== "WAITING_FOR_INPUT") return;
-  if (existing.task_id && existing.task_id !== taskId) return;
-  store.getState().upsertTaskSessionFromEvent(taskId, {
-    id: sessionId,
-    task_id: taskId,
-    state: existing.state,
-    cancellation_pending: existing.cancellation_pending,
-    cancellation_revision: existing.cancellation_revision,
-    started_at: existing.started_at ?? "",
-    updated_at: existing.updated_at ?? "",
-    foreground_activity: payload.foreground_activity ?? null,
-    active_subagent_count: pickActiveSubagentCount(payload, existing),
-    supports_steering: pickSupportsSteering(payload, existing),
-  });
-}
-
-/** Apply the backend-owned cancellation projection to the addressed session. */
-function applyCancellationPending(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-): void {
-  if (
-    !payload?.session_id ||
-    typeof payload.cancellation_pending !== "boolean" ||
-    typeof payload.cancellation_revision !== "number"
-  )
-    return;
-  const sessionId = toSessionId(payload.session_id);
-  const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing) return;
-  store.getState().upsertTaskSessionFromEvent(existing.task_id, {
-    id: sessionId,
-    task_id: existing.task_id,
-    state: existing.state,
-    started_at: existing.started_at ?? "",
-    updated_at: existing.updated_at ?? "",
-    cancellation_pending: payload.cancellation_pending,
-    cancellation_revision: payload.cancellation_revision,
-  });
-}
-
-/** Prefers the event's active-subagent count, falling back to the existing session value. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
-  return payload.active_subagent_count !== undefined
-    ? payload.active_subagent_count
-    : (existing.active_subagent_count ?? 0);
-}
-
-/** Prefers the event's steering-support flag, falling back to the existing session value. */
-function pickSupportsSteering(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-  existing: TaskSession,
-): boolean | undefined {
-  return payload.supports_steering !== undefined
-    ? payload.supports_steering
-    : existing.supports_steering;
-}
-
 /**
  * Applies a workspace-sources adoption event: updates the session's
  * workspace path and records the server-issued adoption boundary (WS envelope
@@ -693,8 +620,7 @@ function handleWorkspaceSourcesUpdated(
 
 function handleForegroundActivityMessage(
   store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
 ): void {
   applyForegroundActivity(store, payload);
 }

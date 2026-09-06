@@ -805,6 +805,13 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
 		"startWhenUnblocked": task.StartWhenUnblocked,
+		// Parked-on-background-work projection, stamped by
+		// EnrichTaskParkedProjection before this mapper runs — omitting it here
+		// leaves a task that is already parked at page-load time with no
+		// affordance until the next live task.updated WS event.
+		"parkedOnBackgroundWork": task.ParkedOnBackgroundWork,
+		"parkedRevision":         task.ParkedRevision,
+		"parkedEpoch":            task.ParkedEpoch,
 	}
 }
 

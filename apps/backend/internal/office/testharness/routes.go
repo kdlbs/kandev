@@ -29,8 +29,11 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -47,6 +50,10 @@ const errInvalidJSONPrefix = "invalid JSON: "
 // inline the literal; new code uses errJSON so the heavily-repeated key isn't
 // duplicated again.
 const respKeyError = "error"
+
+// messageCreatedAtKey is the WS event payload key for a seeded message's
+// creation timestamp (see publishMessageAddedFallback).
+const messageCreatedAtKey = "created_at"
 
 // errJSON writes a `{"error": msg}` body with the given status code.
 func errJSON(c *gin.Context, code int, msg string) {
@@ -89,6 +96,8 @@ func RegisterRoutes(
 	agentSvc *agents.AgentService,
 	eventBus bus.EventBus,
 	log *logger.Logger,
+	orchestratorSvc *orchestrator.Service,
+	taskSvc *taskservice.Service,
 ) {
 	g := router.Group("/api/v1/_test")
 	g.GET("/health", func(c *gin.Context) {
@@ -96,11 +105,17 @@ func RegisterRoutes(
 	})
 	g.POST("/tasks", seedTaskHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
-	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
+	g.POST("/messages", seedMessageHandler(repo, taskSvc, eventBus, log))
 	g.POST("/workflows", seedWorkflowHandler(repo, log))
 	g.PUT("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
 	g.DELETE("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
 	g.GET("/repositories/:id/git-push-record", gitPushRecordHandler(repo))
+	if orchestratorSvc != nil {
+		probe := NewScriptedBackgroundProbe()
+		orchestratorSvc.SetBackgroundProbe(probe)
+		g.POST("/background-probe", scriptBackgroundProbeHandler(probe))
+		g.GET("/background-probe/:session_id/calls", backgroundProbeCallCountHandler(probe))
+	}
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -510,7 +525,11 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 // turn rather than one per message — task_session_messages.turn_id requires
 // an existing task_session_turns row.
 func seedToolCalls(ctx context.Context, repo *sqliterepo.Repository, sessionID, taskID string, count int) error {
-	turnID, err := ensureSeededTurn(ctx, repo, sessionID, taskID)
+	// taskSvc is nil here — seedTaskSessionHandler has no service handle, and
+	// synthetic tool_call messages aren't subject to D1's turn-scoped
+	// clarification/permission detection (see ensureSeededTurn), so skipping
+	// the turn.started publish is safe for this caller.
+	turnID, err := ensureSeededTurn(ctx, repo, nil, nil, sessionID, taskID)
 	if err != nil {
 		return err
 	}
@@ -536,7 +555,16 @@ func seedToolCalls(ctx context.Context, repo *sqliterepo.Repository, sessionID, 
 // ensureSeededTurn returns the ID of an active turn for the session,
 // creating one if none exists. Reusing the active turn keeps all seeded
 // messages on the same turn so the chat embed renders them together.
-func ensureSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionID, taskID string) (string, error) {
+// taskSvc may be nil (some callers have no service handle); when non-nil, a
+// newly created turn is published as turn.started — see
+// publishSeededTurnStarted for why this matters.
+func ensureSeededTurn(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	sessionID, taskID string,
+) (string, error) {
 	if existing, err := repo.GetActiveTurnBySessionID(ctx, sessionID); err == nil && existing != nil {
 		return existing.ID, nil
 	}
@@ -551,15 +579,39 @@ func ensureSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionI
 	if err := repo.CreateTurn(ctx, turn); err != nil {
 		return "", err
 	}
+	publishSeededTurnStarted(ctx, taskSvc, log, turn)
 	return turn.ID, nil
+}
+
+// publishSeededTurnStarted routes a directly-inserted turn through the
+// production turn.started event so the frontend's turns.bySession (and
+// therefore D1's turn-scoped clarification/permission detection, AC-34/AC-51)
+// learns about it the same way a real agent-dispatched turn would. A seeded
+// message attached to a turn the frontend never observed via turn.started is
+// silently excluded from that scope even though it exists in
+// messages.bySession.
+func publishSeededTurnStarted(ctx context.Context, taskSvc *taskservice.Service, log *logger.Logger, turn *models.Turn) {
+	if taskSvc == nil {
+		return
+	}
+	if err := taskSvc.PublishTurnStarted(ctx, turn); err != nil {
+		log.Warn("test harness: publish turn started failed", zap.Error(err))
+	}
 }
 
 // createSeededTurn always creates a fresh turn rather than reusing the
 // session's active one, so a spec can hold a real open turn on the session
 // while seeding a second, independently-timed turn alongside it (see
 // seedMessageRequest.NewTurn). startedAt/completedAt default to "now" and
-// "open" respectively when nil.
-func createSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionID, taskID string, startedAt, completedAt *time.Time) (string, error) {
+// "open" respectively when nil. taskSvc may be nil; see ensureSeededTurn.
+func createSeededTurn(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	sessionID, taskID string,
+	startedAt, completedAt *time.Time,
+) (string, error) {
 	now := time.Now().UTC()
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
@@ -579,6 +631,7 @@ func createSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionI
 	if err := repo.CreateTurn(ctx, turn); err != nil {
 		return "", err
 	}
+	publishSeededTurnStarted(ctx, taskSvc, log, turn)
 	return turn.ID, nil
 }
 
@@ -601,9 +654,6 @@ func publishSessionStateChanged(ctx context.Context, eventBus bus.EventBus, sess
 		log.Warn("test harness: publish state changed failed", zap.Error(err))
 	}
 }
-
-// messageCreatedAtKey is the JSON key for seeded message timestamps.
-const messageCreatedAtKey = "created_at"
 
 type seedMessageRequest struct {
 	SessionID string                 `json:"session_id"`
@@ -634,12 +684,59 @@ type seedMessageRequest struct {
 	TurnCompletedAt *time.Time `json:"turn_completed_at,omitempty"`
 }
 
+// resolveSeededMessageTurn creates or reuses the turn a seeded message
+// attaches to (per seedMessageRequest.NewTurn) and applies optional
+// turn_metadata. On failure it writes the HTTP error response itself and
+// returns ok=false, so the caller only needs to check ok before continuing.
+func resolveSeededMessageTurn(
+	c *gin.Context,
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	req *seedMessageRequest,
+	session *models.TaskSession,
+) (turnID string, ok bool) {
+	ctx := c.Request.Context()
+	var err error
+	if req.NewTurn {
+		turnID, err = createSeededTurn(ctx, repo, taskSvc, log, session.ID, session.TaskID, req.TurnStartedAt, req.TurnCompletedAt)
+	} else {
+		turnID, err = ensureSeededTurn(ctx, repo, taskSvc, log, session.ID, session.TaskID)
+	}
+	if err != nil {
+		log.Error("test harness: ensure turn failed", zap.Error(err))
+		errJSON(c, http.StatusInternalServerError, err.Error())
+		return "", false
+	}
+	if req.TurnMetadata == nil {
+		return turnID, true
+	}
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		log.Error("test harness: get turn failed", zap.Error(err))
+		errJSON(c, http.StatusInternalServerError, err.Error())
+		return "", false
+	}
+	turn.Metadata = req.TurnMetadata
+	if err := repo.UpdateTurn(ctx, turn); err != nil {
+		log.Error("test harness: update turn metadata failed", zap.Error(err))
+		errJSON(c, http.StatusInternalServerError, err.Error())
+		return "", false
+	}
+	return turnID, true
+}
+
 // seedMessageHandler inserts a synthetic message, ensuring an active turn
 // exists for the session and applying optional turn_metadata to it so e2e
 // specs can exercise the message metadata dialog end to end. author_type
 // defaults to agent; user seeds are read back through GetMessageWithPromptIndex
 // so the WS event carries the same prompt_index the HTTP list path reports.
-func seedMessageHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, log *logger.Logger) gin.HandlerFunc {
+func seedMessageHandler(
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	eventBus bus.EventBus,
+	log *logger.Logger,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req seedMessageRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -661,31 +758,9 @@ func seedMessageHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, log 
 			return
 		}
 
-		var turnID string
-		if req.NewTurn {
-			turnID, err = createSeededTurn(ctx, repo, session.ID, session.TaskID, req.TurnStartedAt, req.TurnCompletedAt)
-		} else {
-			turnID, err = ensureSeededTurn(ctx, repo, session.ID, session.TaskID)
-		}
-		if err != nil {
-			log.Error("test harness: ensure turn failed", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		turnID, ok := resolveSeededMessageTurn(c, repo, taskSvc, log, &req, session)
+		if !ok {
 			return
-		}
-
-		if req.TurnMetadata != nil {
-			turn, err := repo.GetTurn(ctx, turnID)
-			if err != nil {
-				log.Error("test harness: get turn failed", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			turn.Metadata = req.TurnMetadata
-			if err := repo.UpdateTurn(ctx, turn); err != nil {
-				log.Error("test harness: update turn metadata failed", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
 		}
 
 		meta := req.Metadata
@@ -732,13 +807,32 @@ func seedMessageHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, log 
 			}
 		}
 
-		publishMessageAdded(ctx, eventBus, msg, log)
+		// Prefer routing through the task service's own publish path (rather
+		// than a hand-rolled bus.Publish) so a seeded clarification/permission
+		// message gets the same session-scoped pending_action projection a
+		// real agent turn triggers (AC-34/AC-51) — the mobile session
+		// switcher's live icon reads that projection, not the raw message.
+		// Callers with no service handle (older/lighter-weight route tests)
+		// still get the plain message.added event via the fallback so their
+		// coverage of the raw event payload (prompt_index, created_at
+		// precision) keeps working.
+		if taskSvc != nil {
+			if err := taskSvc.PublishMessageEvent(ctx, events.MessageAdded, msg); err != nil {
+				log.Warn("test harness: publish message added failed", zap.Error(err))
+			}
+		} else {
+			publishMessageAddedFallback(ctx, eventBus, msg, log)
+		}
 		c.JSON(http.StatusOK, gin.H{"message_id": msg.ID})
 	}
 }
 
-// publishMessageAdded emits a message-added bus event for a seeded message so connected clients receive it without a refresh.
-func publishMessageAdded(ctx context.Context, eventBus bus.EventBus, msg *models.Message, log *logger.Logger) {
+// publishMessageAddedFallback publishes a plain message.added event directly,
+// for seedMessageHandler callers with no *taskservice.Service handle. It
+// carries the raw message fields (prompt_index, RFC3339Nano created_at) but
+// none of the session-scoped pending_action projection taskSvc.PublishMessageEvent
+// computes — callers exercising AC-34/AC-51 must supply a real taskSvc instead.
+func publishMessageAddedFallback(ctx context.Context, eventBus bus.EventBus, msg *models.Message, log *logger.Logger) {
 	if eventBus == nil {
 		return
 	}
@@ -818,3 +912,62 @@ func setDesiredSkillsHandler(repo settingsstore.Repository, log *logger.Logger) 
 }
 
 func errBadField(msg string) error { return &validationError{msg: msg} }
+
+// probeResultLiterals maps the three wire literals (spec
+// docs/specs/disambiguate-waiting/spec.md, AC-45) to their typed value. Kept
+// local to the handler rather than exported — the ScriptedBackgroundProbe
+// type itself is literal-agnostic.
+var probeResultLiterals = map[string]executor.ProbeResult{
+	"live":    executor.ProbeResultLive,
+	"settled": executor.ProbeResultSettled,
+	"unknown": executor.ProbeResultUnknown,
+}
+
+type scriptBackgroundProbeRequest struct {
+	SessionID string   `json:"session_id"`
+	Results   []string `json:"results"`
+}
+
+// scriptBackgroundProbeHandler lets the Playwright suite script a session's
+// BackgroundProbe answer sequence (AC-73/AC-62/AC-68/AC-51) without a real
+// process tree. Registered only when orchestratorSvc is non-nil, which
+// RegisterRoutes only does behind the KANDEV_E2E_MOCK gate.
+func scriptBackgroundProbeHandler(probe *ScriptedBackgroundProbe) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req scriptBackgroundProbeRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
+			return
+		}
+		if req.SessionID == "" {
+			errJSON(c, http.StatusBadRequest, "session_id is required")
+			return
+		}
+		results := make([]executor.ProbeResult, 0, len(req.Results))
+		for _, raw := range req.Results {
+			result, ok := probeResultLiterals[raw]
+			if !ok {
+				errJSON(c, http.StatusBadRequest, "results must each be one of live, settled, unknown; got "+raw)
+				return
+			}
+			results = append(results, result)
+		}
+		probe.Script(req.SessionID, results)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+// backgroundProbeCallCountHandler reads back how many times the scripted
+// probe has been called for a session (AC-73) — lets the Playwright suite
+// assert a minimum sample count was actually reached instead of only
+// checking the affordance's current visibility.
+func backgroundProbeCallCountHandler(probe *ScriptedBackgroundProbe) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionID := c.Param("session_id")
+		if sessionID == "" {
+			errJSON(c, http.StatusBadRequest, "session_id is required")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"calls": probe.CallCount(sessionID)})
+	}
+}

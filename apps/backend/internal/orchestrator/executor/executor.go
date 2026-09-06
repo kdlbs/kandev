@@ -190,6 +190,18 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
+// ProbeResult re-exports client.ProbeResult so callers above this package
+// (e.g. internal/orchestrator) can reference it without a direct import of
+// internal/agent/runtime/agentctl, which is restricted to this package and
+// internal/agent/runtime/ (see ARCH-RUNTIME-IMPORT).
+type ProbeResult = client.ProbeResult
+
+const (
+	ProbeResultLive    = client.ProbeResultLive
+	ProbeResultSettled = client.ProbeResultSettled
+	ProbeResultUnknown = client.ProbeResultUnknown
+)
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -223,6 +235,11 @@ type AgentManagerClient interface {
 	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
 	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
 	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+
+	// ProbeBackgroundWorkloads samples a session's agent process for
+	// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+	// No timeout is applied here — the caller wraps ctx with the probe budget.
+	ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -1214,4 +1231,10 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (e *Executor) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return e.agentManager.ProbeBackgroundWorkloads(ctx, sessionID)
 }

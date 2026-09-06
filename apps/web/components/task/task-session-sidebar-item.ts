@@ -142,6 +142,7 @@ export function buildSidebarItem(
     priority: task.priority,
     state: task.state as TaskState | undefined,
     interrupted: task.interrupted,
+    parkedOnBackgroundWork: task.parkedOnBackgroundWork,
     ...status,
     description: task.description,
     workflowId: task._workflowId,

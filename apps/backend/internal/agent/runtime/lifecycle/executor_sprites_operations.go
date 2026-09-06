@@ -38,7 +38,7 @@ func spriteProjectSkillDir(metadata map[string]interface{}) string {
 		return ""
 	}
 	if strings.TrimSpace(manifest.ProjectSkillDir) == "" {
-		return ".agents/skills"
+		return skill.DefaultProjectSkillDir
 	}
 	return manifest.ProjectSkillDir
 }
@@ -130,7 +130,7 @@ func (r *SpritesExecutor) uploadSkillFiles(
 
 	projectSkillDir := manifest.ProjectSkillDir
 	if projectSkillDir == "" {
-		projectSkillDir = ".agents/skills"
+		projectSkillDir = skill.DefaultProjectSkillDir
 	}
 
 	// Wipe any kandev-* skills from a previous session and append the

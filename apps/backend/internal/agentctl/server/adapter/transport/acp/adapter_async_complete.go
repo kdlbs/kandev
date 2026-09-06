@@ -149,9 +149,31 @@ func (a *Adapter) emitCurrentAsyncTurnComplete(sessionID string, seq uint64, pro
 
 func (a *Adapter) beginPromptTurn(sessionID string) {
 	a.asyncTurnMu.Lock()
-	defer a.asyncTurnMu.Unlock()
 	a.asyncTurnEpochs[sessionID]++
 	a.cancelAsyncTurnCompleteLocked(sessionID)
+	a.turnStartedAt[sessionID] = time.Now()
+	a.asyncTurnMu.Unlock()
+
+	// D3: this is the single turn boundary for the whole feature, fired on
+	// both a human prompt and a synthetic ScheduleWakeup self-resume — the
+	// caller never distinguishes them here. The backend clears its
+	// background-launch attestation on this event.
+	a.sendUpdate(AgentEvent{
+		Type:      streams.EventTypeTurnStarted,
+		SessionID: sessionID,
+	})
+}
+
+// RecordedTurnStart returns the time agentctl last dispatched session/prompt
+// for sessionID, and whether one has been recorded at all. The
+// background-workload liveness probe compares descendant process start times
+// against this value; both are read on this host in this process's clock, so
+// no timestamp needs to cross the process boundary.
+func (a *Adapter) RecordedTurnStart(sessionID string) (time.Time, bool) {
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	t, ok := a.turnStartedAt[sessionID]
+	return t, ok
 }
 
 func (a *Adapter) cancelAsyncTurnComplete(sessionID string) {
@@ -182,5 +204,8 @@ func (a *Adapter) cancelAllAsyncTurnCompletes() {
 	}
 	for sessionID := range a.asyncTurnEpochs {
 		delete(a.asyncTurnEpochs, sessionID)
+	}
+	for sessionID := range a.turnStartedAt {
+		delete(a.turnStartedAt, sessionID)
 	}
 }
