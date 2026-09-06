@@ -213,6 +213,11 @@ duplicated here; this section covers the RPC list (added to `service Host` above
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
 
+API v1 DTO fields are additive-only. `Task.labels` field 23, shipped in v0.93.0,
+remains generated and readable as a deprecated compatibility field. New plugins
+store provider-specific annotations in plugin-owned task state and render them
+through plugin UI slots; CreateTask and UpdateTask do not expose label writes.
+
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
 
@@ -245,8 +250,10 @@ created task's metadata — a plugin cannot set it itself. `CreateTask` resolves
 sane placement defaults when the plugin omits them: an empty `workspace_id`
 resolves to the single workspace (ambiguous otherwise → `InvalidArgument`), an
 empty `workflow_id` to that workspace's first workflow. `UpdateTask` accepts a
-conservative field mask — `title`, `description`, `state`, `workflow_step_id`
-(each optional/leave-unset). `start_agent` best-effort auto-launches an agent
+conservative field mask — `title`, `description`, `state`, and `priority` (each
+optional/leave-unset). `workflow_step_id` remains present for
+wire compatibility but is rejected; plugins use `MoveTask` for transitions.
+`start_agent` best-effort auto-launches an agent
 through the orchestrator; a launch failure does not fail the create.
 
 Write validation/error contract (so plugin authors can predict outcomes):
