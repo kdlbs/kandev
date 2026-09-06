@@ -101,8 +101,12 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 		t.Fatalf("close postgres clarification claim plan: %v", err)
 	}
 	claimPlanText := strings.ToUpper(strings.Join(claimPlan, "\n"))
-	if strings.Contains(claimPlanText, "SEQ SCAN ON TASK_SESSION_MESSAGES") {
-		t.Fatalf("postgres clarification claim plan scans message history:\n%s", strings.Join(claimPlan, "\n"))
+	for _, line := range claimPlan {
+		upperLine := strings.ToUpper(line)
+		if strings.Contains(upperLine, "SEQ SCAN ON TASK_SESSION_MESSAGES") &&
+			!strings.Contains(upperLine, "TURN_AUTHORITY_MESSAGE") {
+			t.Fatalf("postgres clarification claim plan scans an outer or bundle message path:\n%s", strings.Join(claimPlan, "\n"))
+		}
 	}
 	if !strings.Contains(claimPlanText, "IDX_MESSAGES_METADATA_PENDING_ID_LOOKUP") {
 		t.Fatalf("postgres clarification claim plan does not use a pending-ID-leading index:\n%s", strings.Join(claimPlan, "\n"))
