@@ -1060,6 +1060,10 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	}
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	officeAgentProfileID := data.AgentProfileID
+	if officeAgentProfileID == "" {
+		officeAgentProfileID = session.AgentProfileID
+	}
 	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
 	if officeErr == nil && !isOfficeTask {
 		_, err := s.StartCreatedSession(
@@ -1070,7 +1074,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	}
 	_, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           "",
 		Prompt:               prompt.text,
 		StartAgent:           true,
