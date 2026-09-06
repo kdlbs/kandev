@@ -128,10 +128,6 @@ function useEditDialogDependencies(
   });
 }
 
-function isFreshBranchAvailable(fs: DialogFormState, isLocalExecutor: boolean): boolean {
-  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
-}
-
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;

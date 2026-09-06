@@ -214,22 +214,6 @@ function DisabledPillTooltip({
   );
 }
 
-function renderDisabledPillTooltip(
-  tooltipOpenState: boolean,
-  onOpenChange: (open: boolean) => void,
-  triggerButton: React.ReactNode,
-  disabledReason: string,
-): React.ReactElement {
-  return (
-    <DisabledPillTooltip
-      open={tooltipOpenState}
-      onOpenChange={onOpenChange}
-      triggerButton={triggerButton}
-      disabledReason={disabledReason}
-    />
-  );
-}
-
 function PillPopoverContent({
   filter,
   searchPlaceholder,
@@ -625,11 +609,13 @@ export function Pill({
   });
   // Disabled buttons swallow events, so the wrapper owns tooltip focus.
   if (disabled && disabledReason && !open) {
-    return renderDisabledPillTooltip(
-      tooltipOpenState,
-      handleTooltipOpenChange,
-      triggerButton,
-      disabledReason,
+    return (
+      <DisabledPillTooltip
+        open={tooltipOpenState}
+        onOpenChange={handleTooltipOpenChange}
+        triggerButton={triggerButton}
+        disabledReason={disabledReason}
+      />
     );
   }
 
