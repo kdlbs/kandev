@@ -854,6 +854,9 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 
 //nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
 func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string) (string, error) {
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return "", err
+	}
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
@@ -992,7 +995,6 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	return sessionID, nil
 }
-
 func (e *Executor) createPreparedSession(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -1108,6 +1110,16 @@ func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 	return groupID
 }
 
+// admitWorktreeRecovery keeps session persistence and agent launch behind the
+// same task-scoped recovery decision. The admission implementation owns
+// coalescing, so repeated starts observe its stable actionable result.
+func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) error {
+	if e.worktreeRecoveryAdmission == nil {
+		return nil
+	}
+	return e.worktreeRecoveryAdmission(ctx, taskID)
+}
+
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
 func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
@@ -1168,6 +1180,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
+	}
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(executorID) == "" {
 		// PrepareSession already persisted the selected executor. Launch calls
