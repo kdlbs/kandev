@@ -34,7 +34,9 @@ type RuntimeOptions = {
 };
 
 const NOW = "2026-07-18T12:00:00.000Z";
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const WORKFLOW_NOT_FOUND = "Workflow not found";
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const WORKFLOW_READ_ONLY =
   "workflow is managed by GitHub sync and is read-only; edit its definition in the synced repository";
 

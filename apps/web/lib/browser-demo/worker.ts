@@ -93,10 +93,12 @@ const DEMO_LINEAR_CONFIG: LinearConfig = {
   createdAt: DEMO_TIMESTAMP,
   updatedAt: DEMO_TIMESTAMP,
 };
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const DEMO_LINEAR_TEAMS: LinearTeam[] = [
   { id: "demo-linear-team-eng", key: "ENG", name: "Engineering" },
   { id: "demo-linear-team-plat", key: "PLAT", name: "Platform" },
 ];
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const DEMO_SENTRY_INSTANCES: SentryConfig[] = [
   {
     id: "demo-sentry-production",
@@ -129,6 +131,7 @@ const DEMO_SLACK_CONFIG = {
   createdAt: DEMO_TIMESTAMP,
   updatedAt: DEMO_TIMESTAMP,
 };
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const DEMO_UTILITY_AGENTS: UtilityAgent[] = [
   {
     id: DEMO_SLACK_UTILITY_AGENT_ID,
@@ -143,6 +146,7 @@ const DEMO_UTILITY_AGENTS: UtilityAgent[] = [
     updated_at: DEMO_TIMESTAMP,
   },
 ];
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const DEMO_REPOSITORY_SCRIPTS = [
   {
     id: "demo-script-test",
@@ -407,6 +411,7 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
   return json({ error: "This action is disabled in the browser demo", demo_mode: true }, 501);
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function createTask(input: Record<string, unknown>): DemoHttpResponse {
   const task = createTaskFromInput(state, input);
   state.tasks.push(task);
@@ -445,6 +450,7 @@ function removeTask(task: Task): DemoHttpResponse {
   return empty();
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export function handleSocketRequest(socketId: string, raw: string) {
   let request: { id?: string; action?: string; payload?: Record<string, unknown> };
   try {
@@ -724,6 +730,7 @@ function createDemoPlans(): Record<string, TaskPlan> {
   return { [demoUpgradePlan.task_id]: { ...demoUpgradePlan } };
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function handlePlanRequest(
   socketId: string,
   id: string,
@@ -793,6 +800,7 @@ function handlePlanRequest(
   respond(socketId, id, { message: `Unsupported plan action: ${action}` }, true);
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function demoPlanRevision(plan: TaskPlan, includeContent: boolean): TaskPlanRevision {
   return {
     id: `${plan.id}-revision-1`,
@@ -1096,6 +1104,7 @@ function finishAgentRun(task: Task, session: TaskSession) {
 
 // The detailed tool metadata is intentionally colocated so the streamed turn stays coherent.
 // eslint-disable-next-line max-lines-per-function
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function makeAgentRunMessages(task: Task, sessionId: string): Message[] {
   const turnId = `${sessionId}-implementation`;
   const worktree = `/demo/worktrees/${task.id}`;
@@ -1331,6 +1340,7 @@ function isTerminalSocket(url: string) {
   }
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function terminalWelcome(url: string) {
   const isAgent = url.includes("/terminal/session/");
   const heading = isAgent ? "Mock agent terminal" : "Acme Platform workspace";
@@ -1361,6 +1371,7 @@ function handleTerminalInput(socketId: string, data: string | ArrayBuffer) {
   terminalInputBySocket.set(socketId, current);
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function terminalCommandResult(command: string) {
   const normalized = command.trim();
   if (!normalized) return "";

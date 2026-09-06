@@ -47,6 +47,7 @@ const STORAGE_CAPABILITIES: StorageCapabilities = {
   host_global_docker_cleanup_allowed: false,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 const INITIAL_QUARANTINE: StorageQuarantineEntry[] = [
   {
     id: "demo-quarantine-checkout",
@@ -242,6 +243,7 @@ function routeSystemJob({ path, method }: DemoSystemRouteContext, state: DemoSys
   return found ? ok(found) : error("System job not found", 404);
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function acceptJob(
   state: DemoSystemState,
   kind: string,
@@ -404,6 +406,7 @@ function storageOverview(
   };
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 function makeInitialStorageRun(settings: StorageMaintenanceSettings): StorageMaintenanceRun {
   return {
     id: "demo-storage-run-1",

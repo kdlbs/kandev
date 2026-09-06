@@ -54,6 +54,7 @@ const WORKFLOW_ID = DEMO_IDS.workflow as never;
 const REPOSITORY_ID = DEMO_IDS.repository as never;
 const API_REPOSITORY_ID = DEMO_IDS.apiRepository as never;
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoGitHubPR: GitHubPR = {
   number: 142,
   title: "Add privileged action audit trail",
@@ -78,6 +79,7 @@ export const demoGitHubPR: GitHubPR = {
   closed_at: null,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoPRFeedback: PRFeedback = {
   pr: demoGitHubPR,
   reviews: [
@@ -135,6 +137,7 @@ export const demoPRFeedback: PRFeedback = {
   has_issues: true,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoWorkflow: Workflow = {
   id: WORKFLOW_ID,
   workspace_id: WORKSPACE_ID,
@@ -146,6 +149,7 @@ export const demoWorkflow: Workflow = {
   updated_at: NOW,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoSupportWorkflow: Workflow = {
   ...demoWorkflow,
   id: DEMO_IDS.supportWorkflow as never,
@@ -220,6 +224,7 @@ export const demoExecutors: Executor[] = [
   },
 ];
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoRepository: Repository = {
   id: REPOSITORY_ID,
   workspace_id: WORKSPACE_ID,
@@ -241,6 +246,7 @@ export const demoRepository: Repository = {
   updated_at: NOW,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoApiRepository: Repository = {
   ...demoRepository,
   id: API_REPOSITORY_ID,
@@ -253,6 +259,7 @@ export const demoApiRepository: Repository = {
   copy_files: ".env",
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoAccessibleRepositories = [
   {
     full_name: "kandev-demo/acme-web",
@@ -287,6 +294,7 @@ export const demoRepositoryBranches: Record<string, { name: string }[]> = {
   ],
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const demoUpgradePlan: TaskPlan = {
   id: "demo-plan-react",
   task_id: "demo-task-react",
@@ -308,6 +316,7 @@ export const demoUpgradePlan: TaskPlan = {
   updated_at: NOW,
 };
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export function createDemoState(): DemoState {
   const tasks = [
     makeTask(
@@ -1266,6 +1275,7 @@ export function createDemoState(): DemoState {
   };
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export function createBootPayload(state: DemoState): BootPayload {
   const workflows = state.workflowRuntime?.workflows ?? demoWorkflows;
   const workflowSteps = state.workflowRuntime?.steps ?? [...demoSteps, ...demoSupportSteps];
@@ -1479,6 +1489,7 @@ export function createWorkflowSnapshot(tasks: Task[], workflow: Workflow, steps:
   };
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export function createTaskFromInput(state: DemoState, input: Record<string, unknown>): Task {
   const id = `demo-task-created-${state.nextTask++}`;
   const repositories =

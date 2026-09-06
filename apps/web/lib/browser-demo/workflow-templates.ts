@@ -25,6 +25,7 @@ function templateStep(input: TemplateStepInput): StepDefinition {
   };
 }
 
+// i18n-exempt: browser demo fixture data is intentionally literal demo content
 export const DEMO_WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: "simple",
