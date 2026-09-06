@@ -208,9 +208,10 @@ func finishDynamicRouteAction(
 // the launch attempt), so the write here is gated on a fresh reload rather
 // than on any state captured before launchSuccessor ran: a stale pre-launch
 // snapshot would never match the launcher's own mutation and this recovery
-// write would be silently dropped. A reloaded state of CANCELLED means a
-// concurrent cancellation has already terminated the session, and that must
-// win over resurrecting it into WAITING_FOR_INPUT.
+// write would be silently dropped. A reloaded state that is already terminal
+// (CANCELLED, COMPLETED, or FAILED) means a concurrent handler has already
+// settled the session, and that must win over resurrecting it into
+// WAITING_FOR_INPUT.
 func recoverDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
@@ -229,7 +230,7 @@ func recoverDynamicRouteAction(
 	if session.RouteGeneration != expectedGeneration {
 		return routeActionResult(ctx, repo, session), nil
 	}
-	if session.State == models.TaskSessionStateCancelled {
+	if isTerminalRouteActionSessionState(session.State) {
 		return routeActionResult(ctx, repo, session), nil
 	}
 	reloadedState := session.State
@@ -246,6 +247,16 @@ func recoverDynamicRouteAction(
 		return reloadRouteActionResult(ctx, repo, sessionID)
 	}
 	return routeActionResult(ctx, repo, session), nil
+}
+
+// isTerminalRouteActionSessionState reports whether a reloaded session state
+// means a concurrent handler has already settled the session, mirroring
+// orchestrator's unexported isTerminalSessionState (not reachable from this
+// package).
+func isTerminalRouteActionSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCancelled ||
+		state == models.TaskSessionStateCompleted ||
+		state == models.TaskSessionStateFailed
 }
 
 // reloadRouteActionResult reloads the session that a guarded write refused to

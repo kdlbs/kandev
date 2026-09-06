@@ -87,6 +87,38 @@ func TestRecoverDynamicRouteActionDoesNotResurrectCancelledSession(t *testing.T)
 		"a concurrently cancelled session must not be resurrected by a superseded route-action recovery write")
 }
 
+// TestRecoverDynamicRouteActionDoesNotResurrectOtherTerminalStates extends the
+// CANCELLED case above to COMPLETED and FAILED: any terminal state a
+// concurrent handler already committed while the successor launch was in
+// flight must win over recoverDynamicRouteAction's WAITING_FOR_INPUT write,
+// not just CANCELLED.
+func TestRecoverDynamicRouteActionDoesNotResurrectOtherTerminalStates(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			repo := newDynamicRoutingCancelRaceRepo(t)
+			seedDynamicRoutingCancelRaceSession(t, repo, "session-1", models.TaskSessionStateRunning)
+
+			settled, err := repo.GetTaskSession(ctx, "session-1")
+			require.NoError(t, err)
+			settled.State = state
+			require.NoError(t, repo.UpdateTaskSession(ctx, settled))
+
+			result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
+			require.NoError(t, err)
+			require.Equal(t, "session-1", result.SessionID)
+
+			persisted, err := repo.GetTaskSession(ctx, "session-1")
+			require.NoError(t, err)
+			require.Equal(t, state, persisted.State,
+				"a concurrently settled terminal session must not be resurrected by a superseded route-action recovery write")
+		})
+	}
+}
+
 // TestRecoverDynamicRouteActionWritesWhenStateUnchanged is the control case:
 // with no concurrent state change, the recovery write must still apply.
 func TestRecoverDynamicRouteActionWritesWhenStateUnchanged(t *testing.T) {
