@@ -23,7 +23,7 @@ installVitePreloadRecovery();
 installBfcacheRestoreReload();
 markRenderingEngine(document.documentElement);
 setBackendReloadDiagnosticReporter((source) => {
-  scheduleFrontendErrorReport({ source: "toast-provider", title: source });
+  scheduleFrontendErrorReport({ source: "backend-reload", title: source });
 });
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);

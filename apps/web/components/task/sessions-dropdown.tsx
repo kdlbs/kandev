@@ -280,7 +280,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
             variant="ghost"
             size="sm"
             data-testid="sessions-dropdown-trigger"
-            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+            className="h-7 cursor-pointer gap-1.5 px-2 hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">

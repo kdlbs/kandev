@@ -113,6 +113,19 @@ func TestWorkspaceScopingListAndGet(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopingDiscoveryRejectsForeignWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	svc.discoveryConfig = RepositoryDiscoveryConfig{Roots: []string{t.TempDir()}, MaxDepth: 2}
+
+	if _, err := svc.GetLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("get foreign discovery snapshot: %v", err)
+	}
+	if _, err := svc.RefreshLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("refresh foreign discovery snapshot: %v", err)
+	}
+}
+
 func TestWorkspaceScopingMutations(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)

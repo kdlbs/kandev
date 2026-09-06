@@ -396,6 +396,18 @@ export type TaskStatusSummaryUpdatedPayload = {
   status_summary: TaskStatusSummary;
 };
 
+export type CanvasLifecyclePayload = {
+  type?: string;
+  canvas_id: string;
+  plugin_instance_id?: string;
+  workspace_id?: string;
+  task_id?: string;
+  scope_kind?: string;
+  status?: string;
+  active_release_id?: string;
+  active_release_status?: string;
+};
+
 export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
@@ -467,6 +479,17 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
     "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
+
+    "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
+    "canvas.release.permission_required": BackendMessage<
+      "canvas.release.permission_required",
+      CanvasLifecyclePayload
+    >;
+    "canvas.promoted": BackendMessage<"canvas.promoted", CanvasLifecyclePayload>;
+    "canvas.archived": BackendMessage<"canvas.archived", CanvasLifecyclePayload>;
+    "canvas.restored": BackendMessage<"canvas.restored", CanvasLifecyclePayload>;
+    "canvas.removed": BackendMessage<"canvas.removed", CanvasLifecyclePayload>;
 
     "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 

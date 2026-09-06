@@ -124,7 +124,7 @@ Except for a missing configuration, a completed force-sync request returns HTTP 
 
 Deleting a config releases every previously managed entity to unmanaged ownership (edits made to them afterward are no longer reverted by a future run) before removing the configuration row. If release fails partway, the configuration is retained and the failure names the entity it stopped at; retrying the delete resumes from there rather than repeating work already done.
 
-> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's stored credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+> **Network security:** With authentication disabled, the HTTP API is open and can read or change sync configuration with the backend's stored credentials. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing it.
 
 ## Troubleshooting
 

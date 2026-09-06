@@ -29,7 +29,7 @@ Open `http://localhost:38429` and follow logs with:
 docker logs -f kandev
 ```
 
-Kandev currently has no built-in multi-user web login or API authorization boundary. `auth.jwtSecret` does not add one. Docker's unqualified `-p 38429:38429` publishes on every host interface, so do not use that form on an untrusted network. Use loopback, a private network/VPN, or an authenticated reverse proxy with TLS.
+Kandev ships with its experimental [Authentication & Users](authentication.md) feature disabled, so the default container has no multi-user web login or API authorization boundary. Setting `auth.jwtSecret` does not enable it. Docker's unqualified `-p 38429:38429` publishes on every host interface, so do not use that form on an untrusted network. Use loopback, a private network/VPN, or an authenticated reverse proxy with TLS.
 
 ## Published images
 

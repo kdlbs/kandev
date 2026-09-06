@@ -367,6 +367,7 @@ func isPublicPath(method, path string) bool {
 func isDeferredPath(c *gin.Context, path string) bool {
 	switch {
 	case path == "/ws",
+		strings.HasPrefix(path, "/api/v1/plugins/web-apps/runtime/"),
 		strings.HasPrefix(path, "/terminal/"),
 		strings.HasPrefix(path, "/lsp/"),
 		strings.HasPrefix(path, "/vscode/"),

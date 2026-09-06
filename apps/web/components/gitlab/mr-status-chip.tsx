@@ -7,6 +7,7 @@ import {
   useGitLabAvailable,
   useTaskMRs,
   useUnlinkTaskMR,
+  useWorkspaceMRs,
 } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskMRAutomationOptions } from "@/hooks/domains/gitlab/use-task-mr-automation";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -33,6 +34,11 @@ const EMPTY_TASK_REPOSITORIES: Array<{ repository_id: string }> = [];
  */
 export function MRStatusChip({ taskId }: { taskId: string | null }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  // Task routes can mount the chip without the task-list shell, which is the
+  // usual owner of the workspace MR hydration. Keep the task surface
+  // self-sufficient so links created immediately before navigation are not
+  // invisible until a full page remount.
+  useWorkspaceMRs(workspaceId);
   const mrs = useTaskMRs(taskId);
   const openMRs = Array.isArray(mrs) ? mrs.filter((mr) => mr.state === "open") : [];
   if (!taskId || !workspaceId || openMRs.length === 0) return null;

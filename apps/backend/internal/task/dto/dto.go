@@ -630,9 +630,26 @@ type LocalRepositoryDTO struct {
 }
 
 type RepositoryDiscoveryResponse struct {
-	Roots        []string             `json:"roots"`
-	Repositories []LocalRepositoryDTO `json:"repositories"`
-	Total        int                  `json:"total"`
+	Roots                    []string                  `json:"roots"`
+	Repositories             []LocalRepositoryDTO      `json:"repositories"`
+	Total                    int                       `json:"total"`
+	DesktopRuntime           bool                      `json:"desktop_runtime"`
+	RootStates               []DesktopDiscoveryRootDTO `json:"root_states"`
+	ScanTime                 *time.Time                `json:"scan_time,omitempty"`
+	Refreshing               bool                      `json:"refreshing"`
+	Cached                   bool                      `json:"cached"`
+	HomeConfirmationRequired bool                      `json:"home_confirmation_required"`
+	FailedRoots              []string                  `json:"failed_roots,omitempty"`
+}
+
+type DesktopDiscoveryRootDTO struct {
+	ID              string     `json:"id"`
+	Path            string     `json:"path"`
+	DisplayPath     string     `json:"display_path"`
+	State           string     `json:"state"`
+	LastScanAt      *time.Time `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time `json:"last_failure_at,omitempty"`
+	LastFailureCode string     `json:"last_failure_code,omitempty"`
 }
 
 type RepositoryPathValidationResponse struct {
@@ -846,6 +863,18 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 		Path:          repo.Path,
 		Name:          repo.Name,
 		DefaultBranch: repo.DefaultBranch,
+	}
+}
+
+func FromDesktopDiscoveryRoot(root models.DesktopDiscoveryRoot) DesktopDiscoveryRootDTO {
+	return DesktopDiscoveryRootDTO{
+		ID:              root.ID,
+		Path:            root.Path,
+		DisplayPath:     root.DisplayPath,
+		State:           string(root.State),
+		LastScanAt:      root.LastScanAt,
+		LastFailureAt:   root.LastFailureAt,
+		LastFailureCode: root.LastFailureCode,
 	}
 }
 

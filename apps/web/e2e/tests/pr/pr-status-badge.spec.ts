@@ -709,19 +709,70 @@ test.describe("PR status badge", () => {
     await taskRow.hover();
     await expect(taskActions).toBeVisible();
     await expect(menuSlot).toHaveCSS("width", "24px");
-    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
-    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
-    await icon.hover();
-    await icon.focus();
+    // Escape leaves the icon focused and the controlled tooltip dismissed. Move
+    // focus through the row so the updated icon receives a real focus event.
+    // This avoids relying on a synthetic hover after the association rerender.
+    await taskRow.focus();
+    await testPage.keyboard.press("Tab");
+    await expect(icon).toBeFocused();
 
     const multiSummary = visibleTaskPRSummary(testPage);
-    await expect(multiSummary).toBeVisible();
+    // The second association updates the icon while the disclosure is closed.
+    // Wait for the keyboard-reopened tooltip before querying its refreshed rows.
+    await expect(multiSummary).toBeVisible({ timeout: 15_000 });
     const entries = multiSummary.getByTestId("pr-task-status-entry");
-    await expect(entries).toHaveCount(2);
+    await expect(entries).toHaveCount(2, { timeout: 15_000 });
     await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");
-    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967");
+    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967", {
+      timeout: 15_000,
+    });
     await expect(entries.nth(1).getByTestId("pr-task-status-title")).toHaveText(
       "Resolve the failing API checks",
+      { timeout: 15_000 },
     );
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  test("keeps a draft PR icon muted when CI fails", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
+
+    const taskTitle = "Draft PR with failing CI";
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      taskTitle,
+    );
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2968,
+      pr_url: "https://github.com/testorg/testrepo/pull/2968",
+      pr_title: taskTitle,
+      head_branch: "feat/draft-with-failing-ci",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+
+    const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveClass(/text-muted-foreground/);
+    await expect(icon).not.toHaveClass(/text-red-500/);
   });
 });

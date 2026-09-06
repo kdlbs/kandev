@@ -742,10 +742,27 @@ export type LocalRepository = {
   default_branch?: string;
 };
 
+export type DesktopDiscoveryRoot = {
+  id: string;
+  path: string;
+  display_path: string;
+  state: "connected" | "reconnect_required" | string;
+  last_scan_at?: string;
+  last_failure_at?: string;
+  last_failure_code?: string;
+};
+
 export type RepositoryDiscoveryResponse = {
   roots: string[];
   repositories: LocalRepository[];
   total: number;
+  desktop_runtime?: boolean;
+  root_states?: DesktopDiscoveryRoot[];
+  scan_time?: string;
+  refreshing?: boolean;
+  cached?: boolean;
+  home_confirmation_required?: boolean;
+  failed_roots?: string[];
 };
 
 export type RepositoryPathValidationResponse = {

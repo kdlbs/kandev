@@ -21,18 +21,19 @@ import (
 )
 
 const (
-	ciAutomationOrigin           = "ci_automation"
-	ciAutomationCheckSuccess     = "success"
-	ciAutomationCheckFailure     = "failure"
-	ciAutomationCheckError       = "error"
-	ciAutomationCheckCompleted   = "completed"
-	ciAutomationCheckPending     = "pending"
-	ciAutomationChangesRequested = "changes_requested"
-	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
-	ciAutomationFixBlockWindow   = time.Hour
-	ciAutomationMaxFixRounds     = github.TaskCIAutoFixMaxRounds
-	ciAutomationKindAutoFix      = "ci_auto_fix"
-	ciAutomationStateEventSource = "ci_automation_state"
+	ciAutomationOrigin              = "ci_automation"
+	ciAutomationCheckSuccess        = "success"
+	ciAutomationCheckFailure        = "failure"
+	ciAutomationCheckError          = "error"
+	ciAutomationCheckCompleted      = "completed"
+	ciAutomationCheckPending        = "pending"
+	ciAutomationChangesRequested    = "changes_requested"
+	ciAutomationMergeableStateDirty = "dirty"
+	ciAutomationPRFeedbackToken     = "{{pr.feedback}}"
+	ciAutomationFixBlockWindow      = time.Hour
+	ciAutomationMaxFixRounds        = github.TaskCIAutoFixMaxRounds
+	ciAutomationKindAutoFix         = "ci_auto_fix"
+	ciAutomationStateEventSource    = "ci_automation_state"
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
@@ -40,6 +41,7 @@ var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " "
 type ciAutomationCheckpoint struct {
 	FailedChecks  []ciAutomationCheckSnapshot            `json:"failed_checks"`
 	Comments      []ciAutomationCommentSnapshot          `json:"comments"`
+	Conflict      *ciAutomationConflictSnapshot          `json:"conflict,omitempty"`
 	QueueRemovals []ciAutomationQueueRemovalSnapshotData `json:"queue_removals,omitempty"`
 }
 
@@ -55,6 +57,13 @@ type ciAutomationCommentSnapshot struct {
 	Body string `json:"body,omitempty"`
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
+}
+
+type ciAutomationConflictSnapshot struct {
+	MergeableState string `json:"mergeable_state"`
+	HeadSHA        string `json:"head_sha,omitempty"`
+	HeadBranch     string `json:"head_branch,omitempty"`
+	BaseBranch     string `json:"base_branch,omitempty"`
 }
 
 const (
@@ -300,8 +309,8 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
 	previous := decodeCIAutomationCheckpoint(state)
-	delta := ciAutomationBuildDelta(feedback, previous)
-	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	delta := ciAutomationBuildDeltaForPR(pr, feedback, previous)
+	checkpoint := ciAutomationCurrentCheckpointForPR(pr, feedback, previous)
 	queueRemoval, queueRecovery := ciAutomationNewQueueRemoval(pr, state)
 	if queueRecovery {
 		delta.QueueRemovals = append(delta.QueueRemovals, *queueRemoval)
@@ -382,7 +391,7 @@ func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *githu
 	if state != nil && state.LastFixSignature == signature && ciAutomationDuplicateFixAttemptBlocksMerge(state) {
 		return true
 	}
-	if state != nil && len(previous.FailedChecks)+len(previous.Comments) > 0 {
+	if state != nil && !ciAutomationCheckpointEmpty(previous) {
 		if err := s.githubService.RefreshTaskCIFixCheckpoint(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, signature, checkpointJSON); err != nil {
 			s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
@@ -718,6 +727,15 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 	return delta
 }
 
+func ciAutomationBuildDeltaForPR(pr *github.TaskPR, feedback *github.PRFeedback, previous ciAutomationCheckpoint) ciAutomationCheckpoint {
+	delta := ciAutomationBuildDelta(feedback, previous)
+	currentConflict := ciAutomationCurrentConflictSnapshot(pr, previous.Conflict)
+	if !ciAutomationConflictSnapshotEqual(currentConflict, previous.Conflict) && currentConflict != nil {
+		delta.Conflict = currentConflict
+	}
+	return delta
+}
+
 func ciAutomationCheckConclusionNeedsFix(conclusion string) bool {
 	return conclusion == ciAutomationCheckFailure ||
 		conclusion == "timed_out" ||
@@ -783,8 +801,41 @@ func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationChec
 	return ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
 }
 
+func ciAutomationCurrentCheckpointForPR(pr *github.TaskPR, feedback *github.PRFeedback, previous ciAutomationCheckpoint) ciAutomationCheckpoint {
+	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	checkpoint.Conflict = ciAutomationCurrentConflictSnapshot(pr, previous.Conflict)
+	return checkpoint
+}
+
 func ciAutomationCheckpointEmpty(checkpoint ciAutomationCheckpoint) bool {
-	return len(checkpoint.FailedChecks) == 0 && len(checkpoint.Comments) == 0 && len(checkpoint.QueueRemovals) == 0
+	return len(checkpoint.FailedChecks) == 0 && len(checkpoint.Comments) == 0 && checkpoint.Conflict == nil && len(checkpoint.QueueRemovals) == 0
+}
+
+func ciAutomationCurrentConflictSnapshot(pr *github.TaskPR, previous *ciAutomationConflictSnapshot) *ciAutomationConflictSnapshot {
+	if pr == nil {
+		return previous
+	}
+	mergeableState := strings.ToLower(strings.TrimSpace(pr.MergeableState))
+	switch mergeableState {
+	case ciAutomationMergeableStateDirty:
+		return &ciAutomationConflictSnapshot{
+			MergeableState: mergeableState,
+			HeadSHA:        strings.TrimSpace(pr.HeadSHA),
+			HeadBranch:     strings.TrimSpace(pr.HeadBranch),
+			BaseBranch:     strings.TrimSpace(pr.BaseBranch),
+		}
+	case "", ciAutomationQueueRemovalCauseUnknown:
+		return previous
+	default:
+		return nil
+	}
+}
+
+func ciAutomationConflictSnapshotEqual(left, right *ciAutomationConflictSnapshot) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func ciAutomationNewQueueRemoval(pr *github.TaskPR, state *github.TaskCIPRAutomationState) (*ciAutomationQueueRemovalSnapshotData, bool) {
@@ -803,11 +854,12 @@ func ciAutomationQueueRemovalBelongsToCurrentHead(pr *github.TaskPR, state *gith
 		return false
 	}
 	attemptHead := strings.TrimSpace(state.LastQueueAttemptHeadSHA)
-	// A removal-only observation may establish a current-head baseline, but it
-	// does not prove that Kandev ever queued this head. Require the merge
-	// signature written by an actual merge attempt or active-entry adoption so
-	// an old removal cannot spend a repair round after automation is enabled.
-	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) && strings.TrimSpace(state.LastMergeSignature) != ""
+	// A removal-only observation can establish a passive same-head baseline,
+	// but it does not prove which pull-request head produced the removal. Auto-
+	// fix therefore requires the merge signature written by an attempted or
+	// adopted queue entry in addition to the matching durable head.
+	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) &&
+		strings.TrimSpace(state.LastMergeSignature) != ""
 }
 
 func ciAutomationHasActiveMergeQueueEntry(pr *github.TaskPR) bool {
@@ -882,7 +934,7 @@ func ciAutomationQueueRemovalConflictEvidence(pr *github.TaskPR) bool {
 	}
 	mergeable := strings.ToLower(strings.TrimSpace(pr.MergeableState))
 	queueState := strings.ToLower(strings.TrimSpace(pr.MergeQueueState))
-	return mergeable == "dirty" || strings.Contains(mergeable, "conflict") ||
+	return mergeable == ciAutomationMergeableStateDirty || strings.Contains(mergeable, "conflict") ||
 		queueState == "unmergeable" || strings.Contains(queueState, "unmergeable")
 }
 
@@ -939,6 +991,17 @@ func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint)
 		for _, comment := range delta.Comments {
 			b.WriteString(fmt.Sprintf("\n- %s:%d %s", ciAutomationSanitizeSnapshotField(comment.Path), comment.Line, ciAutomationSanitizeSnapshotField(strings.TrimSpace(comment.Body))))
 		}
+	}
+	if delta.Conflict != nil {
+		b.WriteString("\n\nMerge conflict:")
+		b.WriteString("\n- mergeability: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.MergeableState))
+		b.WriteString("; head branch: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.HeadBranch))
+		b.WriteString("; base branch: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.BaseBranch))
+		b.WriteString("; head commit: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.HeadSHA))
 	}
 	if len(delta.QueueRemovals) > 0 {
 		b.WriteString("\n\nMerge queue removal recovery:")

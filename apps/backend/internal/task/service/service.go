@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -24,6 +26,16 @@ import (
 type WorktreeCleanup interface {
 	// OnTaskDeleted is called when a task is deleted to clean up its worktree.
 	OnTaskDeleted(ctx context.Context, taskID string) error
+}
+
+// CanvasCleanup removes plugin-backed canvas authority owned by a task or
+// workspace. It is optional so focused task-service users do not need the
+// canvas subsystem. Both cleanup methods run before their owning task or
+// workspace delete commits, so release-artifact cleanup ownership is recorded
+// before any canvas authority can become orphaned.
+type CanvasCleanup interface {
+	CleanupTaskCanvases(ctx context.Context, taskID string) error
+	CleanupWorkspaceCanvases(ctx context.Context, workspaceID string) error
 }
 
 // WorkspaceSecretDeleter removes secrets owned by a workspace. It is optional
@@ -314,6 +326,7 @@ type Repos struct {
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
+	DiscoveryRoots    repository.DesktopDiscoveryRootRepository
 	RepositorySets    repository.RepositorySetRepository
 	BranchPolicies    repository.RepositoryBranchPolicyRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
@@ -345,6 +358,7 @@ type Service struct {
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
+	desktopRootStore                repository.DesktopDiscoveryRootRepository
 	repositorySets                  repository.RepositorySetRepository
 	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
@@ -365,7 +379,14 @@ type Service struct {
 	eventBus                        bus.EventBus
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
+	discoveryCacheMu                sync.Mutex
+	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryFlights                map[string]*discoveryFlight
+	discoveryNow                    func() time.Time
+	discoveryScanRoot               func(context.Context, string, int) ([]LocalRepository, error)
+	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
+	canvasCleanup                   CanvasCleanup
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
@@ -517,6 +538,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
+		desktopRootStore:      repos.DiscoveryRoots,
 		repositorySets:        repos.RepositorySets,
 		branchPolicies:        repos.BranchPolicies,
 		repositoryCleanup:     repos.RepositoryCleanup,
@@ -532,6 +554,11 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
+		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryFlights:      make(map[string]*discoveryFlight),
+		discoveryNow:          time.Now,
+		discoveryScanRoot:     scanRootForRepos,
+		filesystemWarnings:    fsdiagnostics.NewWarningLimiter(0),
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
@@ -545,6 +572,11 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 // SetWorktreeCleanup sets the worktree cleanup handler for task deletion.
 func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 	s.worktreeCleanup = cleanup
+}
+
+// SetCanvasCleanup wires lifecycle cleanup for plugin-backed canvases.
+func (s *Service) SetCanvasCleanup(cleanup CanvasCleanup) {
+	s.canvasCleanup = cleanup
 }
 
 func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {

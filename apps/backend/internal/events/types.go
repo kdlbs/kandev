@@ -19,6 +19,19 @@ const (
 	TaskDependencyFailed = "task.dependency_failed"
 )
 
+// Event types for plugin-backed canvas lifecycle changes. Payloads contain
+// only canvas identity, scope, status, and release metadata. They never carry
+// source files, application state, or runtime capabilities.
+const (
+	CanvasCreated                   = "canvas.created"
+	CanvasReleaseActivated          = "canvas.release.activated"
+	CanvasReleasePermissionRequired = "canvas.release.permission_required"
+	CanvasPromoted                  = "canvas.promoted"
+	CanvasArchived                  = "canvas.archived"
+	CanvasRestored                  = "canvas.restored"
+	CanvasRemoved                   = "canvas.removed"
+)
+
 // Event types for office task tree controls.
 const (
 	OfficeTaskTreeHoldCreated  = "task.tree_hold_created"
@@ -327,7 +340,7 @@ const (
 
 // Event types for GitLab integration
 const (
-	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback
 	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch

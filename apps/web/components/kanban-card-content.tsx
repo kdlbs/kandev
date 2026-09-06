@@ -40,6 +40,7 @@ import {
 } from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
+import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
 const kanbanStatusDebug = createDebugLogger("kanban:task-status");
@@ -145,14 +146,15 @@ function KanbanCardRelationship({ task }: { task: Task }) {
 
 function KanbanCardBadges({ task }: { task: Task }) {
   const { t } = useTranslation();
-  const showRow = hasCardBadges(task);
+  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
+  const showRow = hasCardBadges(task, showHumanAssignee);
 
   if (!showRow) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
       {task.blocked && <BlockedBadge task={task} />}
-      {task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
+      {showHumanAssignee && task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
@@ -230,13 +232,13 @@ function BlockedBadge({ task }: { task: Task }) {
   );
 }
 
-function hasCardBadges(task: Task): boolean {
+function hasCardBadges(task: Task, showHumanAssignee: boolean): boolean {
   return Boolean(
     (task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
-    task.assigneeUserId ||
+    (showHumanAssignee && task.assigneeUserId) ||
     task.blocked,
   );
 }
