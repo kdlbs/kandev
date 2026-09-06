@@ -136,10 +136,10 @@ at your cursor; Kandev's own composer still owns the draft and the send.
 
 The plugin offers three engines, chosen per user under **Settings > Plugins > Voice Mode**:
 
-| Engine | Where recognition happens | Requirements and data flow |
-| --- | --- | --- |
-| **Browser speech** | The browser's own recognizer | No audio reaches your Kandev server. Chromium only, and the browser vendor's own handling applies. |
-| **In-browser Whisper** | On the device | Downloads and caches an ONNX model from Hugging Face (about 40 MB, 75 MB or 240 MB), then runs locally in a worker. No audio leaves the device. |
+| Engine                   | Where recognition happens              | Requirements and data flow                                                                                                                      |
+| ------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Browser speech**       | The browser's own recognizer           | No audio reaches your Kandev server. Chromium only, and the browser vendor's own handling applies.                                              |
+| **In-browser Whisper**   | On the device                          | Downloads and caches an ONNX model from Hugging Face (about 40 MB, 75 MB or 240 MB), then runs locally in a worker. No audio leaves the device. |
 | **Server transcription** | Your Kandev server, relaying to OpenAI | Requires an operator to save an OpenAI key in the plugin's settings. The key stays on the server; the request requires a signed-in Kandev user. |
 
 `Automatic` picks the first engine the browser can run, in that order. Engine choice is capability
@@ -166,6 +166,16 @@ re-picks their engine and language: preferences are not carried over.
 For an idle, non-archived repository-backed task, **Files → Workspace actions → Add Repositories to workspace** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+
+### Preview an HTML file
+
+Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. Kandev publishes the current editor buffer to an ephemeral static server, so the preview includes unsaved changes while the source file stays dirty and unchanged on disk. On desktop, the preview replaces the editor body. On mobile, it replaces the source in the focused full-height viewer. Select **Show code** to return to the same source buffer. Select **Refresh HTML preview** to publish the latest buffer again, or use the Browser button to open the published page in a separate **Browser** panel.
+
+The preview uses the native browser engine. HTML, CSS, JavaScript, inline event handlers, browser APIs, forms, popups, and normal browser navigation behave as they do in a regular page. A visible warning identifies the preview as trusted workspace code. Preview only HTML you trust because this feature does not claim to isolate hostile content from the browser or task environment.
+
+Relative and root-relative URLs resolve from the selected task repository or workspace root. Static files use their normal browser content types, and the current entry document is held in memory. The static server does not persist the overlay, run a build, provide HMR, or proxy an application backend. It bounds one entry document to 5 MiB and keeps at most 32 recently published overlays per agentctl instance.
+
+Closing the preview, file tab, focused viewer, or optional Browser panel removes that view but does not stop the shared static server. One bounded server is reused for the agentctl session and stops when that task runtime is torn down. If the page needs a build pipeline, HMR, backend routes, or project services, start a development server and open it in the **Browser** panel instead. If the task session stops, publish the file again or select **Retry** after the session becomes available. Preview URLs and in-editor preview state are not restored as durable file state.
 
 Open the context menu on any file or folder in the Files tree: right-click on desktop or long-press on touch to see **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees (a multi-worktree task or any task that has had sources attached), Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
 

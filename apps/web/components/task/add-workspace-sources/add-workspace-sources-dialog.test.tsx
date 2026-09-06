@@ -67,6 +67,11 @@ function openRepositoryMenu() {
   return trigger;
 }
 
+async function selectRepositoryMenuItem(label: string) {
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: label })).toBeNull());
+}
+
 function Harness(props: { makeTurnActive?: boolean; executorType?: string | null }) {
   const makeTurnActive = props.makeTurnActive ?? false;
   const executorType = Object.hasOwn(props, "executorType") ? props.executorType : "worktree";
@@ -194,7 +199,7 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
     openRepositoryMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
 
     expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
@@ -336,12 +341,12 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     await waitFor(() => expect(discoverRepositoriesAction).toHaveBeenCalledWith("workspace-1"));
     openRepositoryMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
 
     expect(await screen.findByText("discovered-project")).toBeTruthy();
-    expect(screen.getByText("on disk")).toBeTruthy();
-    expect(screen.getByTestId("create-local-repository-button")).toBeTruthy();
+    expect(await screen.findByText("on disk")).toBeTruthy();
+    expect(await screen.findByTestId("create-local-repository-button")).toBeTruthy();
     fireEvent.click(screen.getByTestId("repo-refresh-button"));
     await waitFor(() => expect(refreshRepositories).toHaveBeenCalledOnce());
   });

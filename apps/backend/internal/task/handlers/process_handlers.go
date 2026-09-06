@@ -68,6 +68,7 @@ func RegisterProcessRoutes(
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
+	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
 	return handlers
 }
 

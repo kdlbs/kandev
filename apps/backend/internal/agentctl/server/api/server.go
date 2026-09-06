@@ -141,6 +141,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/html-previews", s.handleWorkspacePreviewPublish)
 		api.POST("/workspace/file/create", s.handleFileCreate)
 		api.POST("/workspace/file/upload", s.handleFileUpload)
 		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)

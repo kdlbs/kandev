@@ -34,6 +34,7 @@ export default mergeConfig(
         happyDOM: {
           settings: {
             navigation: {
+              disableMainFrameNavigation: true,
               disableChildFrameNavigation: true,
             },
           },
