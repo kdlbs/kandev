@@ -345,6 +345,38 @@ func TestPostgresListStaleOrphanMarkers_FindsMarkerNamingUnarchivedParent(t *tes
 	}
 }
 
+// Mirrors TestListStaleOrphanMarkers_LeavesMarkerNamingUnarchivedTaskInDifferentWorkspace:
+// RVW-F2's fix scoped this join by workspace_id on both dialect branches, but
+// only the SQLite branch had a regression test proving a same-ID task in a
+// different workspace can't satisfy the join. Without this, a caller could
+// name any task ID in another workspace and read its archived-state back off
+// their own task's derived workspace_orphaned boolean.
+func TestPostgresListStaleOrphanMarkers_LeavesMarkerNamingUnarchivedTaskInDifferentWorkspace(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "pg-ws-stale-crossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-stale-crossws-child", WorkspaceID: "pg-ws-stale-crossws-child", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedRepairTask(t, repo, "pg-stale-crossws-child", "", "pg-ws-stale-crossws-child", map[string]interface{}{
+		"workspace": map[string]interface{}{"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": "pg-stale-crossws-other-ws-task"},
+	}, false, "")
+
+	seedWorkspace(t, repo, "pg-ws-stale-crossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-stale-crossws-other", WorkspaceID: "pg-ws-stale-crossws-other", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedRepairTask(t, repo, "pg-stale-crossws-other-ws-task", "", "pg-ws-stale-crossws-other", nil, false, "")
+
+	markers, err := repo.ListStaleOrphanMarkers(ctx)
+	if err != nil {
+		t.Fatalf("ListStaleOrphanMarkers: %v", err)
+	}
+	if len(markers) != 0 {
+		t.Fatalf("markers = %+v, want none (named task exists only in a different workspace)", markers)
+	}
+}
+
 // Postgres' tasks.metadata column can still hold non-JSON text (it is typed
 // TEXT, cast to jsonb on read), but CountMalformedTaskMetadata deliberately
 // short-circuits to 0 there rather than probing with json_valid (SQLite-only
