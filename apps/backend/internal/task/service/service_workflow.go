@@ -1565,6 +1565,19 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 		return nil, err
 	}
 
+	// Hold the target step's arrival-position lock across the whole dispatch
+	// loop below, not just within each individual MoveTask call's own
+	// transaction: a per-call-only lock leaves a window between two of this
+	// batch's own calls where an unrelated arrival (another create, move, WIP
+	// promotion, or automatic transition) into targetStepID can land in the
+	// middle of the batch's sequence, breaking the batch-scoped
+	// consecutiveness REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires.
+	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
+		var unlock func()
+		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, targetStepID)
+		defer unlock()
+	}
+
 	movedCount := 0
 	for _, task := range orderedTasks {
 		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
@@ -1574,9 +1587,20 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 		movedCount++
+		if s.bulkMoveAfterTaskForTest != nil {
+			s.bulkMoveAfterTaskForTest()
+		}
 	}
 
 	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
+}
+
+// stepArrivalBatchLocker is the narrow capability BulkMoveSelectedTasks needs
+// from the task repository to hold one target step's arrival-position
+// serialization across its whole sequential dispatch loop, following the
+// same runtime-asserted narrow-interface pattern as reorderRepository.
+type stepArrivalBatchLocker interface {
+	LockStepArrivalsForBatch(ctx context.Context, stepID string) (context.Context, func())
 }
 
 // orderTasksForBulkMove re-derives the AC.29 submission order from each

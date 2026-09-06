@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -216,6 +217,14 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	if err := r.prepareTaskForCreate(task); err != nil {
 		return err
 	}
+
+	// The actual placement (target or feeder) is decided inside tx by
+	// applyAdmissionPlacement below, so both candidates' arrival locks must
+	// be held before tx opens — see withStepArrivalLocks.
+	var unlock func()
+	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID, feederStepID)
+	defer unlock()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -304,6 +313,16 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		return err
 	}
 
+	// task.WorkflowStepID (not targetStepID) is the row's actual destination
+	// — see the assignArrivalPosition call below — and is already final at
+	// this point, so the arrival lock can be taken before tx opens.
+	isArrival := task.WorkflowStepID != "" && !isHiddenArrival(task)
+	if isArrival {
+		var unlock func()
+		ctx, unlock = r.withStepArrivalLocks(ctx, task.WorkflowStepID)
+		defer unlock()
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -330,7 +349,7 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 	// — targetStepID is "" whenever this runs through the bare CreateTask
 	// path (no WIP check requested), which is the common case since most
 	// steps carry no WIP limit.
-	if task.WorkflowStepID != "" && !isHiddenArrival(task) {
+	if isArrival {
 		if err := r.assignArrivalPosition(ctx, tx, task, task.WorkflowStepID); err != nil {
 			return err
 		}
@@ -486,6 +505,95 @@ func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, re
 	return err
 }
 
+// stepArrivalLockHeldKey marks, in a context, that the caller already holds
+// stepArrivalMutex(stepID) for the rest of this call chain — see
+// withStepArrivalLocks.
+type stepArrivalLockHeldKey struct{ stepID string }
+
+func contextWithStepArrivalLockHeld(ctx context.Context, stepID string) context.Context {
+	return context.WithValue(ctx, stepArrivalLockHeldKey{stepID}, true)
+}
+
+func stepArrivalLockAlreadyHeld(ctx context.Context, stepID string) bool {
+	held, _ := ctx.Value(stepArrivalLockHeldKey{stepID}).(bool)
+	return held
+}
+
+// stepArrivalMutex returns the process-wide mutex serializing
+// assignArrivalPosition calls for stepID, creating one on first use.
+func (r *Repository) stepArrivalMutex(stepID string) *sync.Mutex {
+	mu, _ := r.stepArrivalLocks.LoadOrStore(stepID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// withStepArrivalLocks acquires stepArrivalMutex for every distinct,
+// non-empty step in stepIDs (sorted first, so any two callers locking the
+// same set always agree on acquisition order) and returns a context carrying
+// that fact plus an unlock func releasing them in reverse. A step already
+// marked held by an ancestor call (see the returned context of a previous
+// call) is skipped, since Go's sync.Mutex is not reentrant.
+//
+// Every caller MUST acquire this lock before opening the database
+// transaction that will call assignArrivalPosition for the same step(s) —
+// never after. assignArrivalPosition itself no longer locks: it runs inside
+// an already-open tx, and this process's SQLite pool holds only one
+// connection, so a mutex taken there would already be holding that
+// connection while it waits — a caller that (like a bulk move) takes the
+// mutex first and only then opens its transaction can never get the
+// connection back to finish, deadlocking against the one holding it.
+// Locking before BeginTx keeps acquisition order identical (mutex, then
+// connection) for every path.
+//
+// This also lets a caller that assigns several tasks' arrival positions
+// across several sequential transactions — a bulk move — hold a step's
+// arrival serialization across the whole sequence instead of only within
+// each individual call's own transaction. A per-call-only lock leaves a
+// window between transactions where an unrelated arrival (another create,
+// move, WIP promotion, or automatic transition) into the same step can land
+// in the middle of the batch's own sequence, breaking the batch-scoped
+// consecutiveness REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires (see
+// AC .29). The caller must call the returned unlock func exactly once, after
+// its whole sequence completes.
+func (r *Repository) withStepArrivalLocks(ctx context.Context, stepIDs ...string) (context.Context, func()) {
+	ids := dedupeSortedStepIDs(stepIDs)
+	unlocks := make([]func(), 0, len(ids))
+	for _, id := range ids {
+		if stepArrivalLockAlreadyHeld(ctx, id) {
+			continue
+		}
+		mu := r.stepArrivalMutex(id)
+		mu.Lock()
+		ctx = contextWithStepArrivalLockHeld(ctx, id)
+		unlocks = append(unlocks, mu.Unlock)
+	}
+	return ctx, func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
+		}
+	}
+}
+
+func dedupeSortedStepIDs(stepIDs []string) []string {
+	seen := make(map[string]bool, len(stepIDs))
+	ids := make([]string, 0, len(stepIDs))
+	for _, id := range stepIDs {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// LockStepArrivalsForBatch acquires the target step's arrival lock for a
+// caller outside this package (BulkMoveSelectedTasks) — see
+// withStepArrivalLocks.
+func (r *Repository) LockStepArrivalsForBatch(ctx context.Context, stepID string) (context.Context, func()) {
+	return r.withStepArrivalLocks(ctx, stepID)
+}
+
 // assignArrivalPosition locks stepID for the rest of tx (see
 // lockWorkflowStepForWrite) and sets task.Position to one greater than the
 // highest position held by any non-hidden task already in stepID, or 0 when
@@ -495,7 +603,8 @@ func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, re
 // renumbering — see the design's worked displacement example. Ignores
 // whatever position the caller had already set: every arrival path
 // (creation, manual move, bulk move, WIP promotion, automatic workflow
-// transition) computes it here instead.
+// transition) computes it here instead. Callers must already hold stepID's
+// arrival lock (withStepArrivalLocks) before opening tx.
 func (r *Repository) assignArrivalPosition(ctx context.Context, tx *sql.Tx, task *models.Task, stepID string) error {
 	if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
 		return err
@@ -1067,6 +1176,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
 	}
+
+	var unlock func()
+	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
+	defer unlock()
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1982,6 +2095,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		metadata = []byte("{}")
 	}
 
+	var unlock func()
+	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
+	defer unlock()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -2074,6 +2191,10 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if err != nil {
 		metadata = []byte("{}")
 	}
+
+	var unlock func()
+	ctx, unlock = r.withStepArrivalLocks(ctx, destinationStepID)
+	defer unlock()
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

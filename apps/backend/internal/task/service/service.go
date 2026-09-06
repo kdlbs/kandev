@@ -478,13 +478,19 @@ type Service struct {
 	taskPublicationMu sync.Mutex
 	taskPublications  map[string]*taskPublicationQueue
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
-	cleanupDoneForTest  chan struct{}
-	cleanupWorkerMu     sync.Mutex
-	cleanupWorkerCancel context.CancelFunc
-	cleanupWorkerWG     sync.WaitGroup
-	cleanupWorkerWake   chan struct{}
-	cleanupRunsMu       sync.Mutex
-	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	cleanupDoneForTest chan struct{}
+	// bulkMoveAfterTaskForTest is a test-only hook invoked synchronously after
+	// each task's MoveTask call inside BulkMoveSelectedTasks's dispatch loop,
+	// while the target step's arrival lock is still held. Lets a test prove
+	// the lock spans the whole loop by blocking a concurrent arrival attempt
+	// from inside this hook. Nil in production.
+	bulkMoveAfterTaskForTest func()
+	cleanupWorkerMu          sync.Mutex
+	cleanupWorkerCancel      context.CancelFunc
+	cleanupWorkerWG          sync.WaitGroup
+	cleanupWorkerWake        chan struct{}
+	cleanupRunsMu            sync.Mutex
+	cleanupRuns              map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by

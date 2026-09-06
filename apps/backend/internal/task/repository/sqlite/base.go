@@ -26,6 +26,14 @@ type Repository struct {
 	queuePurgePrepare       func(context.Context, string)
 	queuePurgeNotify        func(context.Context, string)
 	queueSessionPurgeNotify func(context.Context, string, string)
+	// stepArrivalLocks holds one *sync.Mutex per workflow step, serializing
+	// this process's own arrival-position writes (assignArrivalPosition)
+	// against each other for the same step. lockWorkflowStepForWrite alone
+	// only serializes within a single transaction; a caller assigning
+	// positions to several tasks across several sequential transactions (a
+	// bulk move) needs this held across the whole sequence — see
+	// LockStepArrivalsForBatch.
+	stepArrivalLocks sync.Map
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
