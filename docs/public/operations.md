@@ -88,6 +88,25 @@ curl -fsS http://127.0.0.1:38429/api/v1/system/health
 
 This diagnostic checks the Git executable, GitHub authentication/rate limits, agent discovery, and Linux inotify pressure. It returns a JSON `healthy` field and issue list, but normally uses HTTP 200 even when `healthy` is false; do not substitute it for `/health` in a status-only probe.
 
+Required local persistence has a separate authenticated diagnostic endpoint:
+
+```bash
+curl -fsS http://127.0.0.1:38429/api/v1/system/diagnostics/persistence
+```
+
+It reports the database driver, aggregate state, and one sanitized row for
+each required store. The rows include stable store IDs, state, last check
+time, and a safe error description. They never include credentials, DSNs,
+SQL, database paths, or row data.
+
+After startup, a failed required-store probe makes `/ready` return HTTP 503
+with `reason: "persistence"` and the affected `store_ids`. Stateful API and
+WebSocket requests return HTTP 503 with the stable code
+`persistence_unavailable` and an action to check the database and persistence
+diagnostics. A later successful probe restores readiness and stateful traffic
+without a process restart. `/health` remains a pure liveness check and stays
+HTTP 200 while the process is alive.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:

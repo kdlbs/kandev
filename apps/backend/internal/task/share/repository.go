@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Backend identifiers persisted in task_shares.backend.
@@ -39,7 +40,7 @@ type Share struct {
 // IsRevoked returns true when the share has been revoked.
 func (s *Share) IsRevoked() bool { return s.RevokedAt != nil }
 
-// Repository persists Share rows in SQLite.
+// Repository persists Share rows in the configured SQL database.
 type Repository struct {
 	writer *sqlx.DB
 	reader *sqlx.DB
@@ -58,21 +59,23 @@ func NewRepository(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, er
 
 func (r *Repository) initSchema() error {
 	mig := db.NewMigrateLogger(r.writer, r.log)
-	mig.Apply("table.task_shares", `CREATE TABLE IF NOT EXISTS task_shares (
-		id                  TEXT PRIMARY KEY,
-		task_session_id     TEXT NOT NULL,
-		backend             TEXT NOT NULL,
-		external_id         TEXT NOT NULL,
-		external_url        TEXT NOT NULL,
-		snapshot_size_bytes INTEGER NOT NULL,
-		created_at          DATETIME NOT NULL,
-		revoked_at          DATETIME NULL,
-		view_count          INTEGER NOT NULL DEFAULT 0
-	)`)
+	mig.Apply("table.task_shares", dialect.MustRenderSchema(r.writer.DriverName(), shareTableSchema))
 	mig.Apply("index.task_shares_session",
 		`CREATE INDEX IF NOT EXISTS idx_task_shares_session ON task_shares(task_session_id)`)
 	return nil
 }
+
+const shareTableSchema = `CREATE TABLE IF NOT EXISTS task_shares (
+	id                  TEXT PRIMARY KEY,
+	task_session_id     TEXT NOT NULL,
+	backend             TEXT NOT NULL,
+	external_id         TEXT NOT NULL,
+	external_url        TEXT NOT NULL,
+	snapshot_size_bytes INTEGER NOT NULL,
+	created_at          {{timestamp}} NOT NULL,
+	revoked_at          {{timestamp}} NULL,
+	view_count          INTEGER NOT NULL DEFAULT 0
+)`
 
 // Create inserts a new share row. ID, Backend, ExternalID, ExternalURL, and
 // TaskSessionID must be set by the caller. CreatedAt defaults to time.Now()
@@ -81,9 +84,9 @@ func (r *Repository) Create(ctx context.Context, s *Share) error {
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.writer.ExecContext(ctx, `INSERT INTO task_shares
+	_, err := r.writer.ExecContext(ctx, r.writer.Rebind(`INSERT INTO task_shares
 		(id, task_session_id, backend, external_id, external_url, snapshot_size_bytes, created_at, view_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		s.ID, s.TaskSessionID, s.Backend, s.ExternalID, s.ExternalURL,
 		s.SnapshotSizeBytes, s.CreatedAt, s.ViewCount,
 	)
@@ -95,22 +98,22 @@ func (r *Repository) Create(ctx context.Context, s *Share) error {
 
 // GetByID returns the share with the given ID, or ErrNotFound.
 func (r *Repository) GetByID(ctx context.Context, id string) (*Share, error) {
-	row := r.reader.QueryRowxContext(ctx, `SELECT
+	row := r.reader.QueryRowxContext(ctx, r.reader.Rebind(`SELECT
 		id, task_session_id, backend, external_id, external_url,
 		snapshot_size_bytes, created_at, revoked_at, view_count
-		FROM task_shares WHERE id = ?`, id)
+		FROM task_shares WHERE id = ?`), id)
 	return scanShareRow(row)
 }
 
 // ListByTaskSession returns every share row for a session ordered by creation
 // time (newest first), including revoked rows.
 func (r *Repository) ListByTaskSession(ctx context.Context, sessionID string) ([]*Share, error) {
-	rows, err := r.reader.QueryxContext(ctx, `SELECT
+	rows, err := r.reader.QueryxContext(ctx, r.reader.Rebind(`SELECT
 		id, task_session_id, backend, external_id, external_url,
 		snapshot_size_bytes, created_at, revoked_at, view_count
 		FROM task_shares
 		WHERE task_session_id = ?
-		ORDER BY created_at DESC`, sessionID)
+		ORDER BY created_at DESC`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list task_shares: %w", err)
 	}
@@ -129,8 +132,8 @@ func (r *Repository) ListByTaskSession(ctx context.Context, sessionID string) ([
 // MarkRevoked sets revoked_at on the share row. If the row is already revoked,
 // the existing revoked_at is preserved.
 func (r *Repository) MarkRevoked(ctx context.Context, id string, at time.Time) error {
-	res, err := r.writer.ExecContext(ctx,
-		`UPDATE task_shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+	res, err := r.writer.ExecContext(ctx, r.writer.Rebind(
+		`UPDATE task_shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`),
 		at.UTC(), id,
 	)
 	if err != nil {

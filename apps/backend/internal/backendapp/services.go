@@ -38,6 +38,8 @@ import (
 	"github.com/kandev/kandev/internal/linear"
 	"github.com/kandev/kandev/internal/mcp/canvasskill"
 	"github.com/kandev/kandev/internal/mentions"
+	officeconfigsync "github.com/kandev/kandev/internal/office/configsync"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -68,6 +70,10 @@ const (
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
+	if repos == nil || repos.RequiredStores == nil {
+		return nil, nil, errors.New("required-store tracker is unavailable")
+	}
+	storeTracker := repos.RequiredStores
 	if cfg.Features.Canvases {
 		if err := canvasskill.EnsureMaterialized(cfg.ResolvedHomeDir()); err != nil {
 			return nil, nil, fmt.Errorf("materialize canvas authoring skill: %w", err)
@@ -84,9 +90,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
-	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
+	managedRuntimeSettings := repos.SystemSettings
+	if managedRuntimeSettings == nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
 	}
 	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
@@ -176,8 +182,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// company name to borrow, and an operator renames it in one click.
 	const defaultOrgName = "Default organization"
 	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
-	if orgErr != nil {
-		return nil, nil, fmt.Errorf("initialize organizations: %w", orgErr)
+	if recordErr := recordRequiredStore(storeTracker, "organizations", orgErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize organizations: %w", recordErr)
 	}
 	// The tenancy migration runs once at boot: it creates the default
 	// organization and puts every pre-tenancy user and workspace into it.
@@ -188,8 +194,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// organization ids: placing a workspace before it knows its organization
 	// would put it under the wrong root.
 	unitSvc, unitErr := buildOrgUnitService(dbPool, repos.Task, repos.UserAccounts, log)
-	if unitErr != nil {
-		return nil, nil, fmt.Errorf("initialize organization units: %w", unitErr)
+	if recordErr := recordRequiredStore(storeTracker, "organization-units", unitErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize organization units: %w", recordErr)
 	}
 	taskSvc.SetUnitPlacer(unitSvc)
 	taskSvc.SetUnitReach(unitSvc)
@@ -240,7 +246,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileMatcher(repos, log),
 	)
 
-	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
+	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize github: %w", recordErr)
+	}
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetComparisonTargetObserver(taskSvc)
@@ -250,21 +259,42 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
 	}
-	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc, gitlabCleanup, gitlabErr := initGitLabServiceRequiredWithSettings(repos.SystemSettings, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "gitlab", gitlabErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize gitlab: %w", recordErr)
+	}
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
-	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
+	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize azure devops: %w", recordErr)
+	}
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
 		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
-	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
-	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
-	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
-	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
+	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "jira", jiraErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize jira: %w", recordErr)
+	}
+	linearSvc, _, linearErr := initLinearServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "linear", linearErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize linear: %w", recordErr)
+	}
+	sentrySvc, _, sentryErr := initSentryServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "sentry", sentryErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize sentry: %w", recordErr)
+	}
+	workflowSyncSvc, _, workflowSyncErr := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
+	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
+	}
+	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
+	}
 	if pluginsSvc != nil {
 		// The ldflags-injected build version, so Install can enforce a
 		// package's manifest.min_kandev_version. This is the only production
@@ -280,7 +310,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
-	canvasSvc, err := initCanvasService(cfg.Features.Canvases, dbPool, eventBus, pluginsSvc, taskSvc, log)
+	canvasRepo, canvasErr := canvasservice.NewRepository(dbPool)
+	if recordErr := recordRequiredStore(storeTracker, "canvas", canvasErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize canvas: %w", recordErr)
+	}
+	canvasSvc, err := initCanvasServiceWithRepository(cfg.Features.Canvases, canvasRepo, eventBus, pluginsSvc, taskSvc, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize canvas service: %w", err)
 	}
@@ -291,7 +325,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
 	}
-	shareHTTP := initShareHandlers(dbPool, repos.Task, taskSvc, githubSvc, log, version)
+	shareHTTP, _, shareErr := initShareHandlersRequired(dbPool, repos.Task, taskSvc, githubSvc, log, version)
+	if recordErr := recordRequiredStore(storeTracker, "task-share", shareErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize task share: %w", recordErr)
+	}
+	_, officeConfigErr := officeconfigsync.NewStore(dbPool.Writer(), dbPool.Reader())
+	if recordErr := recordRequiredStore(storeTracker, "office-config-sync", officeConfigErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize office config sync: %w", recordErr)
+	}
 
 	// Plumb code-host branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from their owning provider rather than relying
@@ -314,8 +355,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Initialize Automation service
 	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
-	if automationErr != nil {
-		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
+	if recordErr := recordRequiredStore(storeTracker, "automation", automationErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize automation: %w", recordErr)
 	}
 	if automationComponents != nil {
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
@@ -398,12 +439,32 @@ func initCanvasService(enabled bool, dbPool *db.Pool, eventBus bus.EventBus, plu
 		}
 		return nil, nil
 	}
-	if taskSvc == nil {
-		return nil, errors.New("canvas: task service is required")
-	}
 	canvasRepo, err := canvasservice.NewRepository(dbPool)
 	if err != nil {
 		return nil, fmt.Errorf("canvas repository: %w", err)
+	}
+	return initCanvasServiceWithRepository(enabled, canvasRepo, eventBus, pluginsSvc, taskSvc, log)
+}
+
+func initCanvasServiceWithRepository(
+	enabled bool,
+	canvasRepo *canvasservice.Repository,
+	eventBus bus.EventBus,
+	pluginsSvc *plugins.Service,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+) (*canvasservice.Service, error) {
+	if !enabled || pluginsSvc == nil {
+		if enabled && pluginsSvc == nil {
+			return nil, errors.New("canvas: plugin service is required")
+		}
+		return nil, nil
+	}
+	if taskSvc == nil {
+		return nil, errors.New("canvas: task service is required")
+	}
+	if canvasRepo == nil {
+		return nil, errors.New("canvas: repository is required")
 	}
 	canvasSvc := canvasservice.NewService(canvasRepo, pluginsSvc.Instances())
 	canvasSvc.SetInstanceStateCleanup(func(ctx context.Context, instanceID string) error {
@@ -933,10 +994,24 @@ func initGitHubService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *github.Service {
-	adapter := &githubSecretAdapter{store: secretsStore}
-	svc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
+	svc, _, err := initGitHubServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+func initGitHubServiceRequired(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*github.Service, func() error, error) {
+	adapter := &githubSecretAdapter{store: secretsStore}
+	svc, cleanup, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("github store: %w", err)
 	}
 	if svc != nil {
 		// GitHub takes both a SecretProvider (read-only) and a SecretManager
@@ -951,7 +1026,7 @@ func initGitHubService(
 			log.Warn("one or more GitHub App registrations failed to initialize", zap.Error(authErr))
 		}
 	}
-	return svc
+	return svc, cleanup, nil
 }
 
 // gitlabSecretAdapter adapts secrets.SecretStore to the GitLab integration's
@@ -1006,10 +1081,9 @@ type gitlabHostStore struct {
 	settings *systemsettings.Store
 }
 
-func newGitLabHostStore(dbPool *db.Pool) (gitlab.HostStore, error) {
-	settingsStore, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, err
+func newGitLabHostStore(settingsStore *systemsettings.Store) (gitlab.HostStore, error) {
+	if settingsStore == nil {
+		return nil, errors.New("system settings store is required")
 	}
 	return &gitlabHostStore{settings: settingsStore}, nil
 }
@@ -1026,44 +1100,94 @@ func (s *gitlabHostStore) SetHost(ctx context.Context, host string) error {
 	return s.settings.Save(ctx, gitlabHostSettingKey, []byte(host))
 }
 
-// initGitLabService wires up the GitLab integration. Failures are non-fatal:
-// the rest of the backend still boots without GitLab configured.
-func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*gitlab.Service, func() error) {
-	adapter := &gitlabSecretAdapter{store: secretsStore}
-	hostStore, hostStoreErr := newGitLabHostStore(dbPool)
-	if hostStoreErr != nil {
-		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(hostStoreErr))
+// initGitLabService keeps the package-level test seam that owns its settings
+// store. Production startup uses initGitLabServiceWithSettings so the
+// required store is initialized exactly once during repository bootstrap.
+func initGitLabService(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error) {
+	settingsStore, err := systemsettings.NewStore(dbPool)
+	if err != nil {
+		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(err))
 		return nil, nil
+	}
+	return initGitLabServiceWithSettings(settingsStore, dbPool, eventBus, secretsStore, log)
+}
+
+// initGitLabServiceWithSettings is the compatibility seam used by tests and
+// callers that already have a settings store. Required production startup
+// uses initGitLabServiceRequiredWithSettings so local schema errors reach the
+// bootstrap tracker.
+func initGitLabServiceWithSettings(
+	settingsStore *systemsettings.Store,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error) {
+	svc, cleanup, err := initGitLabServiceRequiredWithSettings(settingsStore, dbPool, eventBus, secretsStore, log)
+	if err != nil {
+		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+		return nil, nil
+	}
+	return svc, cleanup
+}
+
+func initGitLabServiceRequiredWithSettings(
+	settingsStore *systemsettings.Store,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error, error) {
+	if settingsStore == nil {
+		return nil, nil, errors.New("GitLab host store requires system settings")
+	}
+	adapter := &gitlabSecretAdapter{store: secretsStore}
+	hostStore, err := newGitLabHostStore(settingsStore)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitlab host store: %w", err)
+	}
+	store, err := gitlab.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitlab store: %w", err)
 	}
 	svc, cleanup, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
 	if err != nil {
-		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+		return nil, nil, fmt.Errorf("gitlab service: %w", err)
 	}
 	if svc != nil {
 		svc.SetSecretManager(adapter)
 		svc.SetWorkspaceSecretStore(secretadapter.New(secretsStore))
 		svc.SetEventBus(eventBus)
-		if store, storeErr := gitlab.NewStore(dbPool.Writer(), dbPool.Reader()); storeErr == nil {
-			svc.SetStore(store)
-			if migrationErr := gitlab.MigrateLegacyConnection(
-				context.Background(), store, secretadapter.New(secretsStore), adapter, adapter, hostStore, log,
-			); migrationErr != nil {
-				log.Warn("GitLab legacy connection migration failed (non-fatal)", zap.Error(migrationErr))
-			}
-		} else {
-			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
+		svc.SetStore(store)
+		if migrationErr := gitlab.MigrateLegacyConnection(
+			context.Background(), store, secretadapter.New(secretsStore), adapter, adapter, hostStore, log,
+		); migrationErr != nil {
+			log.Warn("GitLab legacy connection migration failed (non-fatal)", zap.Error(migrationErr))
 		}
 	}
-	return svc, cleanup
+	return svc, cleanup, nil
 }
 
 // initJiraService wires up the Jira integration. Failures are non-fatal.
 func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *jira.Service {
-	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initJiraServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+func initJiraServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*jira.Service, func() error, error) {
+	svc, cleanup, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jira store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initAzureDevOpsService wires the workspace-scoped Azure integration.
@@ -1074,14 +1198,27 @@ func initAzureDevOpsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *azuredevops.Service {
-	svc, _, err := azuredevops.Provide(
-		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
-	)
+	svc, _, err := initAzureDevOpsServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
 	return svc
+}
+
+func initAzureDevOpsServiceRequired(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*azuredevops.Service, func() error, error) {
+	svc, cleanup, err := azuredevops.Provide(
+		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("azure-devops store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initWorkflowSyncService wires the workflow-sync service. Either integration
@@ -1094,8 +1231,19 @@ func initWorkflowSyncService(
 ) *workflowsync.Service {
 	if githubSvc == nil && gitlabSvc == nil {
 		log.Warn("workflow sync disabled: no GitHub or GitLab service available")
+	}
+	svc, _, err := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
+	if err != nil {
+		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	return svc
+}
+
+func initWorkflowSyncServiceRequired(
+	dbPool *db.Pool, githubSvc *github.Service, gitlabSvc *gitlab.Service,
+	workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger,
+) (*workflowsync.Service, func() error, error) {
 	workflowSvc.SetSyncWorkflowOps(taskSvc)
 	var githubClients workflowsync.GitHubClientProvider
 	if githubSvc != nil {
@@ -1105,31 +1253,46 @@ func initWorkflowSyncService(
 	if gitlabSvc != nil {
 		gitlabClients = gitlabSvc
 	}
-	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
+	svc, cleanup, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
 	if err != nil {
-		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
-		return nil
+		return nil, nil, fmt.Errorf("workflow-sync store: %w", err)
 	}
 	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-	return svc
+	return svc, cleanup, nil
 }
 
 // initLinearService wires up the Linear integration. Failures are non-fatal.
 func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
-	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initLinearServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
 }
 
+func initLinearServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*linear.Service, func() error, error) {
+	svc, cleanup, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("linear store: %w", err)
+	}
+	return svc, cleanup, nil
+}
+
 // initSentryService wires up the Sentry integration. Failures are non-fatal.
 func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *sentry.Service {
-	svc, _, err := sentry.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initSentryServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Sentry service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+func initSentryServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*sentry.Service, func() error, error) {
+	svc, cleanup, err := sentry.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sentry store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initShareHandlers wires up the public-share-links HTTP surface. Failures
@@ -1143,15 +1306,30 @@ func initShareHandlers(
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
-	h, _, err := share.Provide(
-		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
-		share.Config{KandevVersion: version},
-	)
+	h, _, err := initShareHandlersRequired(dbPool, taskRepo, authorizer, githubSvc, log, version)
 	if err != nil {
 		log.Warn("Share handlers initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
 	return h
+}
+
+func initShareHandlersRequired(
+	dbPool *db.Pool,
+	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
+	githubSvc *github.Service,
+	log *logger.Logger,
+	version string,
+) (*share.HTTPHandlers, func() error, error) {
+	h, cleanup, err := share.Provide(
+		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
+		share.Config{KandevVersion: version},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("task-share store: %w", err)
+	}
+	return h, cleanup, nil
 }
 
 // portsBackendDefault is the default backend HTTP port. We don't import
@@ -1176,12 +1354,39 @@ func initPluginsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *plugins.Service {
-	svc, _, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
-	if err != nil {
-		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
+	svc, _, storeErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
+	if err := storeErrors.CombinedError(); err != nil && log != nil {
+		log.Warn("Plugin SQL store initialization failed", zap.Error(err))
 		return nil
 	}
 	return svc
+}
+
+func initPluginsServiceRequired(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*plugins.Service, func() error, plugins.StoreInitErrors) {
+	return plugins.ProvideWithStoreErrors(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
+}
+
+func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {
+	var failures []error
+	for _, id := range []string{
+		"plugin-instances",
+		"plugin-marketplace",
+		"plugin-settings",
+		"plugin-state",
+		"plugin-instance-state",
+		"plugin-user-state",
+	} {
+		if err := recordRequiredStore(tracker, id, initErrors[id]); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 type pluginsHostUtilityAdapter struct {

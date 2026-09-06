@@ -281,16 +281,16 @@ Prefer stable error codes for new output so the frontend translates it. See `doc
 
 **Table-rebuild migrations:** When a legacy or constraint migration recreates a table, mirror every new column in the replacement `CREATE TABLE` and `INSERT ... SELECT` copy list; add a replay regression test proving values, including timestamps, survive. **Destructive cutover migrations:** Build a legacy schema with `NewWithDB` on a fresh database, replace final-shaped tables with legacy-shaped ones, inject a test-only failpoint after each cutover step, and assert byte-equivalent rollback; run the same matrix with `KANDEV_TEST_POSTGRES_DSN`, looking up PostgreSQL constraint names dynamically because they truncate at 63 bytes.
 
+Every built-in SQL schema owner needs a descriptor in `internal/persistence/requiredstores` and a fixed adapter in `internal/persistence/storeconformance`.
+Bootstrap records each constructor through the tracker; missing required schema fails before readiness. Provider credentials and remote probes remain independently degradable.
+For persistence changes, run `go run ./cmd/sqlguard ./internal` and `go test -race ./internal/persistence/storeconformance -count=1`; set `KANDEV_TEST_POSTGRES_DSN` for PostgreSQL coverage and update the explicit-tag upgrade fixture and manifest when schema history changes.
+
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
 - Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30 · Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
 
-When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
-
-```bash
-golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
-```
+When a PR fixup touches backend code, run `golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m` from `apps/backend` with the PR base SHA before pushing; CI enforces changed-file complexity thresholds.
 ## Further scoped notes
 - `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/`. The root `make dev` prebuilds only the copied launcher; the backend dev target builds the native agentctl and a linux/amd64 helper when the host is not Linux/amd64 (`docs/plans/go-dev-launcher/`).
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
