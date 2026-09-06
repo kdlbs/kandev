@@ -72,6 +72,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
+  delete state.gitCheckoutGeneration.byEnvironmentId[envKey];
   delete state.userShells.byEnvironmentId[envKey];
   delete state.userShells.dismissedByEnvironmentId[envKey];
   delete state.userShells.loading[envKey];
@@ -101,6 +102,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
+  gitCheckoutGeneration: { byEnvironmentId: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
@@ -236,6 +238,13 @@ function buildSessionCommitActions(set: ImmerSet) {
         const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
         draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
       }),
+    bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const byRepository = (draft.gitCheckoutGeneration.byEnvironmentId[envKey] ??= {});
+        const scope = repositoryName ?? "";
+        byRepository[scope] = (byRepository[scope] ?? 0) + 1;
+      }),
   };
 }
 
@@ -325,6 +334,7 @@ export function migrateEnvKeyedData(
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
+  migrate(draft.gitCheckoutGeneration.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);

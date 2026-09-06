@@ -36,6 +36,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     queue: { bySessionId: {}, metaBySessionId: {} },
     setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
+    bumpSessionGitCheckoutGeneration: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
     reconcileWorkspaceSourcesAdopted: vi.fn(),
@@ -479,12 +480,14 @@ describe("session.workspace_sources.updated handler", () => {
   it("adopts the workspace root and bumps the Files refresh key", () => {
     const setTaskSession = vi.fn();
     const bumpWorkspaceFilesRefresh = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "IDLE", worktree_path: "/old" } },
       },
       setTaskSession,
       bumpWorkspaceFilesRefresh,
+      bumpSessionGitCheckoutGeneration,
     });
 
     const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
@@ -500,6 +503,7 @@ describe("session.workspace_sources.updated handler", () => {
       expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
     // The server-issued envelope timestamp is forwarded as the adoption
     // boundary so the client clock can never retire legitimate turns.
     expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(
@@ -1244,6 +1248,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
   it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     const setTaskSession = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: {
@@ -1262,6 +1267,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
       setSessionAgentctlStatus: vi.fn(),
       setTaskSession,
+      bumpSessionGitCheckoutGeneration,
       upsertTaskSessionFromEvent,
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
@@ -1304,6 +1310,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         workspace_path: TASK_ROOT,
       }),
     );
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
   });
 
   it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {
