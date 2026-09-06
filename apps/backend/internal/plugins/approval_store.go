@@ -66,10 +66,19 @@ type CapabilityApprovalEvent struct {
 }
 
 type approvalLedgerFile struct {
-	Approvals   map[string]CapabilityApproval `json:"approvals"`
-	Events      []CapabilityApprovalEvent     `json:"events"`
-	Tombstones  map[string]time.Time          `json:"tombstones"`
-	Idempotency map[string]CapabilityApproval `json:"idempotency,omitempty"`
+	Approvals         map[string]CapabilityApproval       `json:"approvals"`
+	Events            []CapabilityApprovalEvent           `json:"events"`
+	Tombstones        map[string]time.Time                `json:"tombstones"`
+	Idempotency       map[string]CapabilityApproval       `json:"idempotency,omitempty"`
+	IdempotencyInputs map[string]approvalIdempotencyInput `json:"idempotency_inputs,omitempty"`
+}
+
+type approvalIdempotencyInput struct {
+	Revision       uint64   `json:"revision"`
+	ManifestDigest string   `json:"manifest_digest,omitempty"`
+	CapabilityIDs  []string `json:"capability_ids,omitempty"`
+	Actor          string   `json:"actor"`
+	Reason         string   `json:"reason"`
 }
 
 var (
@@ -96,9 +105,10 @@ func (l *approvalLedger) load() (*approvalLedgerFile, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &approvalLedgerFile{
-				Approvals:   map[string]CapabilityApproval{},
-				Tombstones:  map[string]time.Time{},
-				Idempotency: map[string]CapabilityApproval{},
+				Approvals:         map[string]CapabilityApproval{},
+				Tombstones:        map[string]time.Time{},
+				Idempotency:       map[string]CapabilityApproval{},
+				IdempotencyInputs: map[string]approvalIdempotencyInput{},
 			}, nil
 		}
 		return nil, err
@@ -115,6 +125,9 @@ func (l *approvalLedger) load() (*approvalLedgerFile, error) {
 	}
 	if file.Idempotency == nil {
 		file.Idempotency = map[string]CapabilityApproval{}
+	}
+	if file.IdempotencyInputs == nil {
+		file.IdempotencyInputs = map[string]approvalIdempotencyInput{}
 	}
 	return &file, nil
 }
@@ -178,7 +191,7 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	if _, tombstoned := file.Tombstones[installationID]; tombstoned {
 		return CapabilityApproval{}, ErrApprovalInstallationTombstoned
 	}
-	if replayed, found, err := approvalGrantReplay(file, installationID, workspaceID, revision, manifestDigest, capabilityIDs, auditID); found || err != nil {
+	if replayed, found, err := approvalGrantReplay(file, installationID, workspaceID, revision, manifestDigest, capabilityIDs, actor, reason, auditID); found || err != nil {
 		return replayed, err
 	}
 	if !approvalRevisionFollows(current.Revision, revision) {
@@ -201,6 +214,9 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	}
 	file.Approvals[key] = approval
 	file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approval
+	file.IdempotencyInputs[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approvalIdempotencyInput{
+		Revision: revision, ManifestDigest: manifestDigest, CapabilityIDs: append([]string{}, capabilityIDs...), Actor: actor, Reason: reason,
+	}
 	file.Events = append(file.Events, CapabilityApprovalEvent{
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
 		BeforeRevision: current.Revision, AfterRevision: revision,
@@ -210,12 +226,14 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	return approval, l.save(file)
 }
 
-func approvalGrantReplay(file *approvalLedgerFile, installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, auditID string) (CapabilityApproval, bool, error) {
-	replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)]
+func approvalGrantReplay(file *approvalLedgerFile, installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string) (CapabilityApproval, bool, error) {
+	key := approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)
+	replayed, ok := file.Idempotency[key]
 	if !ok {
 		return CapabilityApproval{}, false, nil
 	}
-	if replayed.Revision == revision && replayed.ManifestDigest == manifestDigest && equalStrings(replayed.CapabilityIDs, capabilityIDs) {
+	input, inputOK := file.IdempotencyInputs[key]
+	if inputOK && input.Revision == revision && input.ManifestDigest == manifestDigest && equalStrings(input.CapabilityIDs, capabilityIDs) && input.Actor == actor && input.Reason == reason {
 		return replayed, true, nil
 	}
 	return CapabilityApproval{}, true, ErrApprovalIdempotencyConflict
@@ -247,14 +265,21 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 	if !ok {
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
 	}
+	effectiveExpectedRevision := expectedRevision
+	if allowCurrent {
+		effectiveExpectedRevision = current.Revision
+	}
 	if auditID != "" {
-		if replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)]; ok {
-			return replayed, nil
+		idempotencyKey := approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)
+		if replayed, ok := file.Idempotency[idempotencyKey]; ok {
+			input, inputOK := file.IdempotencyInputs[idempotencyKey]
+			if inputOK && input.Revision == effectiveExpectedRevision && input.Actor == actor && input.Reason == reason {
+				return replayed, nil
+			}
+			return CapabilityApproval{}, ErrApprovalIdempotencyConflict
 		}
 	}
-	if allowCurrent {
-		expectedRevision = current.Revision
-	}
+	expectedRevision = effectiveExpectedRevision
 	if current.Revision != expectedRevision {
 		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
@@ -265,7 +290,9 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 	next.UpdatedAt = at
 	file.Approvals[key] = next
 	if auditID != "" {
-		file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)] = next
+		idempotencyKey := approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)
+		file.Idempotency[idempotencyKey] = next
+		file.IdempotencyInputs[idempotencyKey] = approvalIdempotencyInput{Revision: expectedRevision, Actor: actor, Reason: reason}
 	}
 	file.Events = append(file.Events, CapabilityApprovalEvent{
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,

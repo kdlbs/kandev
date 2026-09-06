@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -240,6 +241,61 @@ func TestApprovalGrantRetryIsIdempotent(t *testing.T) {
 	}
 	if len(file.Events) != 1 {
 		t.Fatalf("event count = %d, want one idempotent event", len(file.Events))
+	}
+}
+
+func TestApprovalGrantRetryRejectsChangedAuditPayload(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at); err != nil {
+		t.Fatalf("first grant: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		actor  string
+		reason string
+	}{
+		{name: "actor", actor: "other-human", reason: "grant"},
+		{name: "reason", actor: "human", reason: "different reason"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, tc.actor, tc.reason, "audit-1", at.Add(time.Second)); !errors.Is(err, ErrApprovalIdempotencyConflict) {
+				t.Fatalf("changed grant payload error = %v, want idempotency conflict", err)
+			}
+		})
+	}
+}
+
+func TestApprovalRevokeRetryRejectsChangedAuditPayload(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "grant-1", at); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if _, err := ledger.revokeIfRevision("inst-1", "ws-1", 1, "human", "revoke", "revoke-1", at.Add(time.Second), false); err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		expectedRevision uint64
+		actor            string
+		reason           string
+	}{
+		{name: "revision", expectedRevision: 99, actor: "human", reason: "revoke"},
+		{name: "actor", expectedRevision: 1, actor: "other-human", reason: "revoke"},
+		{name: "reason", expectedRevision: 1, actor: "human", reason: "different reason"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ledger.revokeIfRevision("inst-1", "ws-1", tc.expectedRevision, tc.actor, tc.reason, "revoke-1", at.Add(2*time.Second), false); !errors.Is(err, ErrApprovalIdempotencyConflict) {
+				t.Fatalf("changed revoke payload error = %v, want idempotency conflict", err)
+			}
+		})
 	}
 }
 
