@@ -175,10 +175,7 @@ function useKanbanCardMoveMenuActions({
     });
   };
   const moveToStepFromDropdown = (stepId: string) => {
-    if (onMove) {
-      onMove(task, stepId);
-      return;
-    }
+    if (onMove) return onMove(task, stepId);
     if (moveTargets.currentWorkflowId) {
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
@@ -417,9 +414,7 @@ function KanbanCardDialogs({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          onDelete?.(task, { cascade, discardWorktreeChanges })
-        }
+        onConfirm={(opts) => onDelete?.(task, opts)}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}
