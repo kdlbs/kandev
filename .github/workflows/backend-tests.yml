@@ -363,11 +363,13 @@ jobs:
         if: always()
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
-          report_summary="$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
+          report_summary="$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md"
           : > "$report_summary"
           GITHUB_STEP_SUMMARY="$report_summary" \
-          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${{ matrix.shard }}.json" \
+          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${BACKEND_TEST_SHARD}.json" \
           INPUT_MODULEDIRECTORY="$GITHUB_WORKSPACE/apps/backend" \
           INPUT_OMIT="successful" \
             node ".github/vendor/go-test-action/dist/index.js"
@@ -376,12 +378,14 @@ jobs:
         if: always()
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
           python3 .github/scripts/bounded-step-summary.py \
-            --input "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md" \
+            --input "$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md" \
             --output "$GITHUB_STEP_SUMMARY" \
-            --diagnostics-label "backend-test-results-${{ matrix.shard }}" \
-            --diagnostics-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+            --diagnostics-label "backend-test-results-${BACKEND_TEST_SHARD}" \
+            --diagnostics-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
