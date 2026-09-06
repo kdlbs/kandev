@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,12 +10,15 @@ import (
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/runtime"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 )
 
 // marketplaceURLEnv overrides the built-in official marketplace source URL at
@@ -66,15 +70,59 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 		return nil, nil, fmt.Errorf("plugins: init user state store: %w", err)
 	}
 
+	instanceStore, err := instances.NewStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugins: init web-app instance store: %w", err)
+	}
+	instanceState, err := state.NewInstanceStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugins: init web-app instance state: %w", err)
+	}
+	artifactStore, err := webapp.NewArtifactStore(filepath.Join(cfg.ResolvedHomeDir(), pluginsSubdir, "webapps"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugins: init web-app artifact store: %w", err)
+	}
+	if cfg.Features.Canvases {
+		if _, err := instanceStore.ReconcileArtifacts(context.Background(), func(path, digest string, bytes int64) (instances.ArtifactCheck, error) {
+			artifact, err := artifactStore.Reconcile(webapp.Artifact{Digest: digest, RelativePath: path, Bytes: bytes})
+			if err != nil {
+				return instances.ArtifactCheck{}, err
+			}
+			return instances.ArtifactCheck{Available: artifact.Available, Reason: artifact.Reason}, nil
+		}); err != nil {
+			return nil, nil, fmt.Errorf("plugins: reconcile web-app artifacts: %w", err)
+		}
+	}
+
 	registry := NewRegistry()
 	if err := registry.Load(pluginStore); err != nil {
 		return nil, nil, fmt.Errorf("plugins: load registry: %w", err)
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)
+	if cfg.Features.Canvases {
+		svc.subscribeWebAppEvents()
+	}
 	svc.warnLoadedWebhookAccessIssues()
 	svc.SetState(stateStore)
 	svc.SetUserState(userStateStore)
+	if cfg.Features.Canvases {
+		svc.SetWebAppStorage(instanceStore, artifactStore)
+		svc.SetInstanceState(instanceState)
+		backendPort := cfg.Server.Port
+		if backendPort == 0 {
+			backendPort = ports.Backend
+		}
+		webPort := cfg.Launcher.WebPort
+		if webPort == 0 {
+			webPort = backendPort
+		}
+		frameAncestors, frameErr := webapp.FrameAncestorsForConfig(backendPort, webPort, fmt.Sprintf("http://localhost:%d", webPort))
+		if frameErr != nil {
+			return nil, nil, fmt.Errorf("plugins: configure web-app frame origins: %w", frameErr)
+		}
+		svc.SetWebRuntime(webapp.NewRuntime(webapp.NewTokenManager(nil), artifactStore, svc.validateWebAppBinding, frameAncestors))
+	}
 	svc.SetSecrets(secrets)
 	svc.SetPluginsDir(dir)
 
@@ -95,8 +143,14 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 
 	rt := runtime.NewManager(dir, svc.handleStatusChange, log)
 	svc.SetRuntime(rt)
+	stopArtifactCleanup := func() {}
+	if cfg.Features.Canvases {
+		stopArtifactCleanup = svc.StartWebAppArtifactCleanupWorker(context.Background())
+	}
 
 	cleanup := func() error {
+		stopArtifactCleanup()
+		svc.closeWebAppEvents()
 		rt.StopAll()
 		return nil
 	}
