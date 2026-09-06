@@ -313,7 +313,11 @@ func routeActionResult(
 	}
 	if repo != nil {
 		if state, err := repo.LoadRouteState(ctx, session.ID); err == nil && state != nil {
+			result.LogicalProfileID = state.LogicalProfileID
+			result.ExecutionProfileID = state.ExecutionProfileID
+			result.RouteGeneration = state.Generation
 			result.ProfileVersion = state.ProfileVersion
+			result.State = state.Status
 			var policyState dynamicruntime.PolicyState
 			if jsonErr := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); jsonErr == nil {
 				result.ErrorCode = string(policyState.FailureCode)

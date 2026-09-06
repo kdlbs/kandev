@@ -77,7 +77,7 @@ func TestRecoverDynamicRouteActionDoesNotResurrectCancelledSession(t *testing.T)
 	cancelled.State = models.TaskSessionStateCancelled
 	require.NoError(t, repo.UpdateTaskSession(ctx, cancelled))
 
-	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
+	result, err := recoverDynamicRouteAction(ctx, repo, nil, "session-1", 0, errors.New("launch failed"))
 	require.NoError(t, err)
 	require.Equal(t, "session-1", result.SessionID)
 
@@ -107,7 +107,7 @@ func TestRecoverDynamicRouteActionDoesNotResurrectOtherTerminalStates(t *testing
 			settled.State = state
 			require.NoError(t, repo.UpdateTaskSession(ctx, settled))
 
-			result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
+			result, err := recoverDynamicRouteAction(ctx, repo, nil, "session-1", 0, errors.New("launch failed"))
 			require.NoError(t, err)
 			require.Equal(t, "session-1", result.SessionID)
 
@@ -126,7 +126,7 @@ func TestRecoverDynamicRouteActionWritesWhenStateUnchanged(t *testing.T) {
 	repo := newDynamicRoutingCancelRaceRepo(t)
 	seedDynamicRoutingCancelRaceSession(t, repo, "session-1", models.TaskSessionStateRunning)
 
-	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
+	result, err := recoverDynamicRouteAction(ctx, repo, nil, "session-1", 0, errors.New("launch failed"))
 	require.NoError(t, err)
 	require.Equal(t, "session-1", result.SessionID)
 
@@ -160,7 +160,7 @@ func TestFinishDynamicRouteActionRecoversAfterLauncherMutatesState(t *testing.T)
 		return launchErr
 	}
 
-	result, err := finishDynamicRouteAction(ctx, repo, "session-1", launcher)
+	result, err := finishDynamicRouteAction(ctx, repo, nil, "session-1", 0, launcher)
 	require.NoError(t, err)
 	require.Equal(t, "session-1", result.SessionID)
 	require.Equal(t, "action_required", result.State)

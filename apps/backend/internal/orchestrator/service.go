@@ -607,6 +607,12 @@ type Service struct {
 	// seam.
 	routeActionHandler func(context.Context, RouteActionRequest) (*RouteActionResult, error)
 
+	// routeActionLocks serializes manual route actions for one session from the
+	// active-turn check through handler completion. It is separate from
+	// cancelInFlight because route handlers can reach the lifecycle lock.
+	routeActionLocksMu sync.Mutex
+	routeActionLocks   map[string]*routeActionOperationLock
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -1254,6 +1260,8 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	releaseRouteAction := s.acquireRouteActionOperationLock(request.SessionID)
+	defer releaseRouteAction()
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
@@ -1268,29 +1276,21 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 // the guard across it would invert the global lock order documented on
 // acquireSessionLifecycleLock.
 //
-// Releasing the guard before dispatch leaves a window where a turn could
-// start, or a cancellation could land, between this read and
-// routeActionHandler's launch. Closing either would mean holding the guard
-// across the dispatch again, reintroducing the deadlock this function exists
-// to remove, so both windows stay open — but they are not equally covered.
-// route-action-vs-route-action is already serialized by the generation CAS
-// in ResolveRouteAction (e.g. ErrStaleGeneration). route-action-vs-cancellation
-// is covered end to end: every full-session-row write in dynamic_routing.go
-// is conditioned via UpdateTaskSessionIfCurrentState on a state confirmed no
-// earlier than the write itself, and relaunchDynamicTaskAfterFailure's own
-// CREATED reset (dynamic_launch.go) reloads the session immediately before
-// writing, refuses a reloaded terminal state, and CASes on that reload — so a
-// cancellation landing anywhere in the window, including during the
-// predecessor's StopExecution, is detected and wins instead of being
-// overwritten by a stale snapshot. route-action-vs-turn-admission is NOT
-// covered: a turn admitted in this window takes the same cancel-in-flight
-// guard (task_operations.go's claimLifecyclePromptDispatch,
-// queued_dispatch.go's claimQueuedDispatchForExecution) and can start
-// successfully after this check passes, but relaunchDynamicTaskAfterFailure's
-// destructive reset (StopExecution + session state reset to CREATED) has no
-// way to see that admission — RUNNING is a state the CAS accepts — so it can
-// stop and reset a turn that was legitimately admitted after this function
-// returned nil. Tracked as a follow-up rather than closed here.
+// route-action-vs-route-action is serialized locally by the per-session
+// operation lock held by ApplyRouteAction. ResolveRouteAction's generation CAS
+// remains the cross-process fence (for example, ErrStaleGeneration).
+// route-action-vs-cancellation is protected for projection writes: every
+// full-session-row write in dynamic_routing.go is conditioned via
+// UpdateTaskSessionIfCurrentState on a state confirmed no earlier than the
+// write itself, and relaunchDynamicTaskAfterFailure's CREATED reset reloads
+// the session immediately before writing, refuses a reloaded terminal state,
+// and CASes on that reload. Launch admission after that reset still needs the
+// lifecycle cancellation fence described in the dynamic launch follow-up.
+// route-action-vs-turn-admission is protected at the final RUNNING/turn claim:
+// both direct and lifecycle prompt admission check the operation marker while
+// holding cancelInFlight, so a new turn cannot be admitted after a route action
+// claims the session. Pre-admission process resume can still race that handler
+// and remains a separate lifecycle handoff concern.
 func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
 	if s.turnService == nil {
 		return nil
