@@ -45,6 +45,24 @@ describe("parseConfigSchema", () => {
     expect(byName.verbose.type).toBe("boolean");
   });
 
+  it("preserves finite numeric bounds for numeric controls", () => {
+    const fields = parseConfigSchema({
+      properties: {
+        interval: { type: "integer", minimum: 1, maximum: 300 },
+        ratio: { type: "number", minimum: -1.5, maximum: 2.5 },
+        text: { type: "string", minimum: 1, maximum: 2 },
+        malformed: { type: "integer", minimum: "1", maximum: Number.NaN },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({ name: "interval", minimum: 1, maximum: 300 }),
+      expect.objectContaining({ name: "ratio", minimum: -1.5, maximum: 2.5 }),
+      expect.objectContaining({ name: "text", minimum: undefined, maximum: undefined }),
+      expect.objectContaining({ name: "malformed", minimum: undefined, maximum: undefined }),
+    ]);
+  });
+
   it("returns [] for missing or unusable schemas", () => {
     expect(parseConfigSchema(undefined)).toEqual([]);
     expect(parseConfigSchema({})).toEqual([]);

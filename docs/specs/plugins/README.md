@@ -39,6 +39,7 @@ plugin security boundaries.
 - [Plugin Shortcut Settings](requirements/plugin-shortcut-settings.md)
 - [Plugin System](requirements/plugins.md)
 - [Plugin Repository Task Creation](requirements/repository-provider-task-creation.md)
+- [Task Manager Host Monitor](requirements/task-manager-host-monitor.md)
 - [Voice Plugin Host Prerequisites](requirements/voice-extraction-host.md)
 - [Voice Mode Leaves Core](requirements/voice-extraction.md)
 
@@ -57,6 +58,7 @@ plugin security boundaries.
 - [Plugin System System Design Part 3](system-design/plugins-03.md)
 - [Plugin System System Design Part 4](system-design/plugins-04.md)
 - [Plugin Repository Task Creation](system-design/repository-provider-task-creation.md)
+- [Task Manager Host Monitor](system-design/task-manager-host-monitor.md)
 
 ## Migration record
 
