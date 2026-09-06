@@ -21,6 +21,7 @@ import {
 } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
@@ -106,6 +107,7 @@ export interface Task {
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
+  statusSummary?: TaskStatusSummary | null;
 }
 
 export type RepositoryChip = {

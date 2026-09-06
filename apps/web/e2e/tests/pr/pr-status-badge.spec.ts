@@ -366,6 +366,89 @@ test.describe("PR status badge", () => {
     await expectTopbarReadyState(testPage, session, "false");
   });
 
+  test("keeps pending CI yellow on Kanban reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, inboxStep } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      "Pending CI Reload Task",
+    );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 105,
+      pr_url: "https://github.com/testorg/testrepo/pull/105",
+      pr_title: "Pending CI with blocked mergeability",
+      head_branch: "fix/pending-ci-reload",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "pending",
+      mergeable_state: "blocked",
+      checks_total: 2,
+      checks_passing: 1,
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "pending",
+      mergeable_state: "blocked",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardInColumn(task.title, inboxStep.id);
+    await expect(card).toBeVisible();
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toHaveClass(/text-yellow-500/);
+
+    let releaseWorkspacePRs = () => undefined;
+    const workspacePRsHeld = new Promise<void>((resolve) => {
+      releaseWorkspacePRs = resolve;
+    });
+    let markWorkspacePRsRequested = () => undefined;
+    const workspacePRsRequested = new Promise<void>((resolve) => {
+      markWorkspacePRsRequested = resolve;
+    });
+    let markWorkspacePRsSettled = () => undefined;
+    const workspacePRsSettled = new Promise<void>((resolve) => {
+      markWorkspacePRsSettled = resolve;
+    });
+    await testPage.route("**/api/v1/github/task-prs?workspace_id=*", async (route) => {
+      markWorkspacePRsRequested();
+      const response = await route.fetch();
+      await workspacePRsHeld;
+      await route.fulfill({ response });
+      markWorkspacePRsSettled();
+    });
+
+    try {
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await workspacePRsRequested;
+      await expect(card).toBeVisible();
+      await expect(icon).toHaveClass(/text-yellow-500/);
+      await prCapture.screenshot("desktop-kanban-pending-ci-reloaded", {
+        caption: "Desktop Kanban card keeps pending CI yellow after reload",
+      });
+    } finally {
+      releaseWorkspacePRs();
+    }
+
+    await workspacePRsSettled;
+    await expect(icon).toHaveClass(/text-yellow-500/);
+  });
+
   /**
    * When reviewers approved, CI passes, and GitHub's mergeable_state is clean,
    * the badge must show the ready-to-merge state so the user knows the PR

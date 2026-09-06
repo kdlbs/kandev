@@ -32,6 +32,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import {
   getTaskStateIcon,
   shouldShowTaskRunningSpinner,
@@ -91,7 +92,7 @@ export function KanbanCardBody({
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <CardTitle task={task} enableTitleHover={enableTitleHover} />
             <KanbanCardPriorityIndicator priority={task.priority} />
-            <PRTaskIcon taskId={task.id} />
+            <PRTaskIcon taskId={task.id} prInfo={taskPRInfoFromSummary(task.statusSummary)} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />

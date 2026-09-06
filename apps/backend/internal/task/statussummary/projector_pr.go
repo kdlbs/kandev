@@ -146,7 +146,7 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
-	if mergeable == prStateBlocked || mergeable == prStateDirty {
+	if mergeable == prStateDirty {
 		return prStateBlocked
 	}
 	if pullRequestHasFailure(pr, review, checks) {
@@ -157,6 +157,9 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	}
 	if pullRequestAwaitsReview(pr, review) {
 		return prStateAwaiting
+	}
+	if mergeable == prStateBlocked {
+		return prStateBlocked
 	}
 	if review == prStateApproved && (checks == "" || checks == prStateSuccess) {
 		return prStateReady
