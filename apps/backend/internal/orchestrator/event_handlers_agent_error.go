@@ -94,6 +94,10 @@ func (s *Service) lockAgentErrorOperation(operationID string) func() {
 	s.agentErrorOperationLocksMu.Unlock()
 
 	entry.mu.Lock()
+	// Order is deliberately reversed from acquisition (map lock released
+	// before entry.mu.Lock() above): no goroutine ever holds
+	// agentErrorOperationLocksMu while blocked on entry.mu, so the map lock
+	// taken here to decrement refs cannot deadlock against it.
 	return func() {
 		s.agentErrorOperationLocksMu.Lock()
 		entry.refs--
