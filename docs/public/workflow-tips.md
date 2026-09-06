@@ -22,9 +22,9 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 
 ## One-time move options
 
-The workflow stepper and next-step controls keep a fast **Move here** path for ordinary transitions. Choose **Move with options** when one hand-off needs a different agent profile, model, fresh context, or extra instructions. These values are consumed by that transition only; the destination step's saved prompt, profile, model, and reset policy remain unchanged for later entries.
+The workflow stepper and next-step controls keep a fast **Move here** path for ordinary transitions. Choose **Move with options** when one hand-off needs fresh context, extra one-time instructions, or should skip the destination step's saved prompt. These options are consumed by that transition only; the destination step's saved prompt and reset policy remain unchanged for later entries.
 
-Instructions are appended after the normal destination prompt. A move from an active agent is deferred until the current turn settles, so the selected profile, model, reset, and instructions stay together. On touch devices, the options form opens in a bottom Drawer. Pull-request draft/readiness remains a PR automation concern rather than a generic workflow move option.
+Instructions are appended after the normal destination prompt, or replace it when you skip the step prompt. A move from an active agent is deferred until the current turn settles, so the reset, skip-prompt, and instructions stay together. On touch devices, the options form opens in a bottom Drawer. Pull-request draft/readiness remains a PR automation concern rather than a generic workflow move option.
 
 ## Built-in Kanban templates
 
