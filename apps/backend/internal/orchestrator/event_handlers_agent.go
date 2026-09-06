@@ -2384,6 +2384,7 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 		return
 	}
 
@@ -2413,13 +2414,19 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	// clobbering the state to CANCELLED would mark the row terminal and
 	// break the next office run (EnsureSessionForAgent then tries to
 	// INSERT a new row and the partial unique index rejects it).
-	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil &&
-		(session.State == models.TaskSessionStateWaitingForInput ||
-			session.State == models.TaskSessionStateIdle) {
-		s.logger.Info("skipping CANCELLED transition; session was stopped on purpose",
-			zap.String("session_id", data.SessionID),
-			zap.String("state", string(session.State)))
-		return
+	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil {
+		if session.State == models.TaskSessionStateCancelled {
+			s.logger.Info("closing turn for explicitly cancelled session",
+				zap.String("session_id", data.SessionID))
+			s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
+			return
+		}
+		if session.State == models.TaskSessionStateWaitingForInput || session.State == models.TaskSessionStateIdle {
+			s.logger.Info("skipping CANCELLED transition; session was stopped on purpose",
+				zap.String("session_id", data.SessionID),
+				zap.String("state", string(session.State)))
+			return
+		}
 	}
 
 	// Complete the current turn if there is one. Deliberate stops return above,

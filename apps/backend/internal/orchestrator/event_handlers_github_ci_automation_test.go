@@ -2265,13 +2265,17 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	now := time.Now().UTC()
 	pr := &github.TaskPR{
-		TaskID:       "task-1",
-		RepositoryID: "repo-1",
-		Owner:        "acme",
-		Repo:         "widget",
-		PRNumber:     42,
-		State:        "open",
-		LastSyncedAt: &now,
+		TaskID:                      "task-1",
+		RepositoryID:                "repo-1",
+		Owner:                       "acme",
+		Repo:                        "widget",
+		PRNumber:                    42,
+		State:                       "open",
+		HeadSHA:                     "head-a",
+		MergeQueueLastRemovalID:     "removal-cap",
+		MergeQueueLastRemovalReason: "CHECKS_FAILED",
+		MergeQueueLastRemovedAt:     &now,
+		LastSyncedAt:                &now,
 	}
 	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
 	if err != nil {
@@ -2295,13 +2299,15 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) 
 			},
 		},
 		ciPRState: &github.TaskCIPRAutomationState{
-			TaskID:                "task-1",
-			RepositoryID:          "repo-1",
-			PRNumber:              42,
-			LastFixSignature:      previousSignature,
-			LastFixCheckpointJSON: previousJSON,
-			LastFixEnqueuedAt:     &now,
-			AutoFixRoundCount:     ciAutomationMaxFixRounds,
+			TaskID:                  "task-1",
+			RepositoryID:            "repo-1",
+			PRNumber:                42,
+			LastFixSignature:        previousSignature,
+			LastFixCheckpointJSON:   previousJSON,
+			LastFixEnqueuedAt:       &now,
+			AutoFixRoundCount:       ciAutomationMaxFixRounds,
+			LastQueueAttemptHeadSHA: "head-a",
+			LastMergeSignature:      "merge-cap",
 		},
 	}
 	svc.SetGitHubService(ghSvc)

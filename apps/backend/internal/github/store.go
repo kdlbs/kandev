@@ -2723,8 +2723,8 @@ func resetTaskCIAutoFixStateForTask(
 		    auto_fix_attempt_started_at = NULL,
 		    auto_fix_attempt_outcome_at = NULL,
 		    auto_fix_attempt_progress_deadline = NULL,
-		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
-		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
+		    last_error = NULL,
+		    last_error_kind = '',
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ?`), now, taskID)
@@ -2962,8 +2962,8 @@ func resetTaskCIAutoFixState(
 		    auto_fix_attempt_started_at = NULL,
 		    auto_fix_attempt_outcome_at = NULL,
 		    auto_fix_attempt_progress_deadline = NULL,
-		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
-		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
+		    last_error = NULL,
+		    last_error_kind = '',
 		    auto_fix_exhausted_at = NULL,
 			updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
@@ -3373,10 +3373,20 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 				last_fix_signature = excluded.last_fix_signature,
 				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 				last_fix_enqueued_at = NULL,
-				last_error = NULL,
-				last_error_kind = '',
+				last_error = CASE
+					WHEN auto_fix_attempt_state = ?
+					 AND auto_fix_attempt_outcome = ?
+					 AND last_fix_signature = ? THEN last_error
+					ELSE NULL END,
+				last_error_kind = CASE
+					WHEN auto_fix_attempt_state = ?
+					 AND auto_fix_attempt_outcome = ?
+					 AND last_fix_signature = ? THEN last_error_kind
+					ELSE '' END,
 				updated_at = excluded.updated_at`),
-			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
+			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now,
+			string(TaskCIAutoFixAttemptAcknowledged), string(TaskCIAutoFixOutcomeBlocked), signature,
+			string(TaskCIAutoFixAttemptAcknowledged), string(TaskCIAutoFixOutcomeBlocked), signature)
 		return err
 	})
 }

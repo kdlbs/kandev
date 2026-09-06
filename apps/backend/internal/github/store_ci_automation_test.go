@@ -1151,6 +1151,113 @@ func TestStoreTaskCIPRState_RefreshCheckpointPreservesSessionPinning(t *testing.
 	}
 }
 
+func TestStoreTaskCIPRState_RefreshCheckpointPreservesUnchangedBlockedError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	oldEnqueuedAt := time.Now().UTC().Add(-2 * time.Hour)
+	const (
+		taskID       = "task-blocked-refresh"
+		repositoryID = "repo-blocked-refresh"
+		signature    = "blocked-feedback-v1"
+	)
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: 42,
+		Signature: signature, CheckpointJSON: `{"failed_checks":[{"name":"unit"}]}`,
+		SessionID: "session-blocked-refresh", TurnID: "turn-blocked-refresh",
+		State: TaskCIAutoFixAttemptRunning, EnqueuedAt: oldEnqueuedAt, IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record blocked attempt: %v", err)
+	}
+	const blockedReason = "the provider rejected the requested change"
+	if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+		TaskID: taskID, SessionID: "session-blocked-refresh", TurnID: "turn-blocked-refresh",
+		Outcome: TaskCIAutoFixOutcomeBlocked, Summary: blockedReason,
+	}); err != nil {
+		t.Fatalf("record blocked outcome: %v", err)
+	}
+	if err := store.RefreshTaskCIFixCheckpoint(
+		ctx, taskID, repositoryID, 42, signature, `{"failed_checks":[{"name":"unit"}]}`,
+	); err != nil {
+		t.Fatalf("refresh unchanged blocked checkpoint: %v", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, taskID, repositoryID, 42)
+	if err != nil {
+		t.Fatalf("get blocked state: %v", err)
+	}
+	if state.LastError == nil || *state.LastError != blockedReason {
+		t.Fatalf("unchanged blocked error = %v, want %q", state.LastError, blockedReason)
+	}
+	if state.LastErrorKind != TaskCIErrorKindAutoFix {
+		t.Fatalf("unchanged blocked error kind = %q, want %q", state.LastErrorKind, TaskCIErrorKindAutoFix)
+	}
+}
+
+func TestStoreTaskCIPRState_ExplicitAutoFixResetClearsBlockedError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reset func(context.Context, *Store, string, string, int) error
+	}{
+		{
+			name: "task options",
+			reset: func(ctx context.Context, store *Store, taskID, repositoryID string, prNumber int) error {
+				enabled := true
+				_, err := store.UpdateTaskCIOptions(ctx, taskID, TaskCIOptionsPatch{AutoFixEnabled: &enabled})
+				return err
+			},
+		},
+		{
+			name: "PR options",
+			reset: func(ctx context.Context, store *Store, taskID, repositoryID string, prNumber int) error {
+				enabled := true
+				_, err := store.UpdateTaskPRAutomationOptions(
+					ctx, taskID, repositoryID, prNumber,
+					TaskPRAutomationOptionsPatch{AutoFixEnabled: &enabled}, false,
+				)
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ctx := context.Background()
+			const (
+				taskID       = "task-explicit-reset"
+				repositoryID = "repo-explicit-reset"
+				prNumber     = 42
+			)
+			if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+				TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+				Signature: "blocked-feedback", SessionID: "session-explicit-reset",
+				TurnID: "turn-explicit-reset", State: TaskCIAutoFixAttemptRunning,
+				IncrementRound: true,
+			}); err != nil {
+				t.Fatalf("record blocked attempt: %v", err)
+			}
+			if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+				TaskID: taskID, SessionID: "session-explicit-reset", TurnID: "turn-explicit-reset",
+				Outcome: TaskCIAutoFixOutcomeBlocked, Summary: "blocked before reset",
+			}); err != nil {
+				t.Fatalf("record blocked outcome: %v", err)
+			}
+			if err := tc.reset(ctx, store, taskID, repositoryID, prNumber); err != nil {
+				t.Fatalf("reset auto-fix state: %v", err)
+			}
+
+			state, err := store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+			if err != nil {
+				t.Fatalf("get reset state: %v", err)
+			}
+			if state.LastError != nil || state.LastErrorKind != "" {
+				t.Fatalf("reset retained blocked error: error=%v kind=%q", state.LastError, state.LastErrorKind)
+			}
+			if state.AutoFixRoundCount != 0 || state.AutoFixAttemptState != TaskCIAutoFixAttemptAcknowledged {
+				t.Fatalf("reset state = %+v, want acknowledged zero-round state", state)
+			}
+		})
+	}
+}
+
 // seedLegacyTaskCIOptions inserts a pre-migration github_task_ci_options row
 // directly, bypassing UpdateTaskCIOptions (which no longer writes the five
 // legacy boolean columns), to simulate a database from before per-PR scoping.

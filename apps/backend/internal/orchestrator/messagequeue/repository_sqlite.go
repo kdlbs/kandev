@@ -910,6 +910,37 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	return out, rows.Err()
 }
 
+// ListDurableLifecycleEntries returns durable lifecycle rows in stable FIFO
+// order across sessions. Startup recovery uses this view to remove queue rows
+// left by a crash between queue admission and attempt persistence.
+func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		ORDER BY session_id ASC, position ASC
+	`))
+	if err != nil {
+		return nil, fmt.Errorf("list durable lifecycle queued: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []QueuedMessage
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		if msg.IsDurableLifecycle() {
+			out = append(out, *msg)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list durable lifecycle queued rows: %w", err)
+	}
+	return out, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string) (int, error) {
 	var n int

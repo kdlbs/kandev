@@ -396,7 +396,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 			return recordAttempt(github.TaskCIAutoFixAttemptRunning, "", turnID, true)
 		},
 		OnQueued: func(queueEntryID string, replaced bool) error {
-			return recordAttempt(github.TaskCIAutoFixAttemptQueued, queueEntryID, "", queueRecovery || !replaced)
+			return recordAttempt(github.TaskCIAutoFixAttemptQueued, queueEntryID, "", !replaced)
 		},
 		OnAccepted: func(turnID, queueEntryID string) {
 			s.bindCIAutoFixAttemptTurnWithRecovery(ctx, github.TaskCIAutoFixAttemptBinding{
@@ -507,7 +507,7 @@ func (s *Service) handleTaskPRCIAutoFixLegacyAttempt(
 		CheckpointJSON:      checkpointJSON,
 		SessionID:           session.ID,
 		EnqueuedAt:          time.Now().UTC(),
-		IncrementRound:      queueRecovery || result.consumesRound(),
+		IncrementRound:      result.consumesRound(),
 		QueueRemovalEventID: queueRemovalEventID,
 		QueueRemovalCause:   queueRemovalCause,
 	}); err != nil {

@@ -31,6 +31,10 @@ type githubCIAutoFixAttemptStartupService interface {
 	ReconcileTaskCIAutoFixProviderProgress(context.Context, github.TaskCIAutoFixProviderProgress) error
 }
 
+type githubCIAutoFixAttemptStateReader interface {
+	GetTaskCIPRState(context.Context, string, string, int) (*github.TaskCIPRAutomationState, error)
+}
+
 const (
 	ciAutoFixAttemptBindAttempts   = 3
 	ciAutoFixAttemptBindRetryDelay = 50 * time.Millisecond
@@ -49,6 +53,11 @@ func (s *Service) reconcileCIAutoFixAttemptsOnStartup(ctx context.Context) {
 	if s == nil || s.turnService == nil || s.githubService == nil {
 		return
 	}
+	if stateReader, ok := s.githubService.(githubCIAutoFixAttemptStateReader); ok {
+		if err := s.reconcileOrphanedCIAutoFixQueueEntries(ctx, stateReader); err != nil {
+			s.logger.Warn("CI auto-fix queue startup recovery was incomplete", zap.Error(err))
+		}
+	}
 	service, ok := s.githubService.(githubCIAutoFixAttemptStartupService)
 	if !ok {
 		return
@@ -60,6 +69,59 @@ func (s *Service) reconcileCIAutoFixAttemptsOnStartup(ctx context.Context) {
 	if reconciled > 0 {
 		s.logger.Info("reconciled stale CI auto-fix attempts on startup", zap.Int("count", reconciled))
 	}
+}
+
+// reconcileOrphanedCIAutoFixQueueEntries removes executable CI auto-fix rows
+// that survived queue admission without a matching attempt reservation. The
+// queue and GitHub state use separate transactions, so a crash can leave that
+// narrow gap even though the normal callback rollback path is correct.
+func (s *Service) reconcileOrphanedCIAutoFixQueueEntries(
+	ctx context.Context, states githubCIAutoFixAttemptStateReader,
+) error {
+	if s == nil || s.messageQueue == nil || states == nil {
+		return nil
+	}
+	entries, err := s.messageQueue.ListDurableLifecycleEntries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !isCIAutoFixMetadata(entry.Metadata) {
+			continue
+		}
+		binding, ok := ciAutoFixAttemptBindingFromMetadata(
+			entry.Metadata, entry.TaskID, entry.SessionID, entry.ID, "",
+		)
+		if ok {
+			state, stateErr := states.GetTaskCIPRState(
+				ctx, binding.TaskID, binding.RepositoryID, binding.PRNumber,
+			)
+			if stateErr != nil {
+				return stateErr
+			}
+			if ciAutoFixQueueReservationMatches(entry, binding, state) {
+				continue
+			}
+		}
+		if ackErr := s.messageQueue.AcknowledgeQueued(
+			context.WithoutCancel(ctx), entry.SessionID, entry.ID,
+		); ackErr != nil {
+			return fmt.Errorf("remove orphaned CI auto-fix queue entry %q: %w", entry.ID, ackErr)
+		}
+	}
+	return nil
+}
+
+func ciAutoFixQueueReservationMatches(
+	entry messagequeue.QueuedMessage,
+	binding github.TaskCIAutoFixAttemptBinding,
+	state *github.TaskCIPRAutomationState,
+) bool {
+	return state != nil &&
+		state.AutoFixAttemptState == github.TaskCIAutoFixAttemptQueued &&
+		state.AutoFixAttemptQueueEntryID == entry.ID &&
+		state.AutoFixAttemptSessionID == binding.SessionID &&
+		state.AutoFixAttemptSignature == binding.Signature
 }
 
 func reconcileCIAutoFixAttemptStates(

@@ -74,6 +74,13 @@ func (s *Service) LifecycleGeneration(ctx context.Context, taskID string) (int64
 	return s.repo.LifecycleGeneration(ctx, taskID)
 }
 
+// ListDurableLifecycleEntries returns lifecycle rows that remain persisted
+// until executor acceptance. Startup recovery uses it to reconcile queue rows
+// with their owning automation reservations.
+func (s *Service) ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error) {
+	return s.repo.ListDurableLifecycleEntries(ctx)
+}
+
 // SetMaxPerSession applies a new admission cap without pruning existing rows.
 // Non-positive values disable the cap.
 func (s *Service) SetMaxPerSession(maxPerSession int) {
