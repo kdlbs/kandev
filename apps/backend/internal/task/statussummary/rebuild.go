@@ -140,8 +140,9 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.Details = truncateString(copy.Details, MaxActiveErrorDetailsBytes)
 	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
-	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+	copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}

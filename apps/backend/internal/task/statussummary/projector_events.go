@@ -332,7 +332,7 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	}
 	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
-		copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
 		if copy.SessionID != "" {
 			state.errors[copy.SessionID] = &copy
 		} else {

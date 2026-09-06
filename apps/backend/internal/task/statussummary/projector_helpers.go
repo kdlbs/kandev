@@ -170,18 +170,21 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 		occurredAt = now.UTC()
 	}
 	preview := truncateString(message, MaxActiveErrorPreviewBytes)
+	details := truncateString(stringField(data, "details"), MaxActiveErrorDetailsBytes)
 	stamp := stringField(data, "stamp")
 	if stamp == "" {
 		stamp = occurredAt.UTC().Format(time.RFC3339Nano) + ":" + preview
 	}
+	category := truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes)
 	return &ActiveErrorSummary{
 		SessionID:        truncateString(sessionID, maxSessionIDBytes),
 		TaskRepositoryID: truncateString(stringField(data, "task_repository_id"), maxTaskRepositoryIDBytes),
 		Stamp:            truncateString(stamp, maxActiveErrorStampBytes),
 		OccurredAt:       occurredAt.UTC(),
 		Preview:          preview,
-		Category:         truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes),
-		RecoveryActions:  normalizeRecoveryActions(recoveryActionsValue(data["recovery_actions"])),
+		Details:          details,
+		Category:         category,
+		RecoveryActions:  normalizeRecoveryActionsForCategory(category, recoveryActionsValue(data["recovery_actions"])),
 	}, true
 }
 
@@ -191,12 +194,16 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 	}
 	return a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
 		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
-		a.Preview == b.Preview && a.Category == b.Category &&
+		a.Preview == b.Preview && a.Details == b.Details && a.Category == b.Category &&
 		slices.Equal(a.RecoveryActions, b.RecoveryActions)
 }
 
 func normalizeRecoveryActions(actions []string) []string {
 	return models.NormalizeRecoveryActions(actions)
+}
+
+func normalizeRecoveryActionsForCategory(category string, actions []string) []string {
+	return models.NormalizeRecoveryActionsForCategory(category, actions)
 }
 
 func recoveryActionsValue(value interface{}) []string {

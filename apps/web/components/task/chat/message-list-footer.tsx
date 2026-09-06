@@ -3,6 +3,7 @@
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { filterLaunchErrorMessages } from "./message-list-shared";
 
 type MessageListFooterProps = {
   sessionState?: TaskSessionState;
@@ -10,6 +11,12 @@ type MessageListFooterProps = {
   messages: Message[];
   isWorking?: boolean;
   footerActionMessages?: Message[];
+  /** The task-owned launch card is rendering the current failure. */
+  launchErrorOwned?: boolean;
+  /** Stamp used to keep historical launch-only footer rows visible. */
+  launchErrorStamp?: string;
+  /** Timestamp used to identify unstamped synthetic rows from the active failure. */
+  launchErrorOccurredAt?: string;
 };
 
 function isMissingBranchFailure(message: Message): boolean {
@@ -45,18 +52,25 @@ export function MessageListFooter({
   messages,
   isWorking,
   footerActionMessages = [],
+  launchErrorOwned = false,
+  launchErrorStamp,
+  launchErrorOccurredAt,
 }: MessageListFooterProps) {
   const currentActionableFailure = findCurrentActionableFailure(messages, footerActionMessages);
   const recoveryOwnsFailure =
+    !launchErrorOwned &&
     sessionState === "FAILED" &&
     currentActionableFailure !== undefined &&
     isMissingBranchFailure(currentActionableFailure);
-  const visibleFooterActionMessages = footerActionMessages.filter(
-    (message) => !isMissingBranchFailure(message) || message.id === currentActionableFailure?.id,
-  );
+  const visibleFooterActionMessages = launchErrorOwned
+    ? filterLaunchErrorMessages(footerActionMessages, true, launchErrorStamp, launchErrorOccurredAt)
+    : footerActionMessages.filter(
+        (message) =>
+          !isMissingBranchFailure(message) || message.id === currentActionableFailure?.id,
+      );
   return (
     <>
-      {!recoveryOwnsFailure && (
+      {!recoveryOwnsFailure && !(launchErrorOwned && sessionState === "FAILED") && (
         <AgentStatus
           sessionState={sessionState}
           sessionId={sessionId}

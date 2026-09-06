@@ -64,7 +64,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   await testPage.mouse.move(
     feederBox!.x + feederBox!.width / 2,
     feederBox!.y + feederBox!.height / 2,
-    { steps: 12 },
+    { steps: 1 },
   );
   await testPage.mouse.up();
 

@@ -171,7 +171,7 @@ func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
 	if got.ActiveError.Category != "pr_already_closed" {
 		t.Fatalf("active error category = %q", got.ActiveError.Category)
 	}
-	wantActions := []string{"mark_review_done", "retry_default"}
+	wantActions := []string{"mark_review_done"}
 	if !reflect.DeepEqual(got.ActiveError.RecoveryActions, wantActions) {
 		t.Fatalf("active error actions = %#v, want %#v", got.ActiveError.RecoveryActions, wantActions)
 	}

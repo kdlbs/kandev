@@ -18,7 +18,8 @@ test.describe("PR watcher missing branch", () => {
 
     const prBranch = "feature/already-merged-and-deleted";
 
-    // Mock an open PR whose head branch was deleted on the remote.
+    // Mock an open PR whose head branch was deleted on the remote. The PR
+    // head cannot be materialized, so this is a workspace-preparation failure.
     await apiClient.mockGitHubAddPRs([
       {
         number: 999,
@@ -82,7 +83,7 @@ test.describe("PR watcher missing branch", () => {
         },
         { timeout: 60_000, message: "waiting for the durable PR launch-error projection" },
       )
-      .toBe("base_branch_missing");
+      .toBe("workspace_checkout_failed");
 
     // --- Navigate to the task session view ---
     await testPage.goto(`/t/${task.id}`);
@@ -95,7 +96,7 @@ test.describe("PR watcher missing branch", () => {
     const chat = session.activeChat();
     const recovery = chat.getByTestId("task-launch-error-entry");
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
-    await expect(recovery).toContainText("The selected base branch is not available.");
+    await expect(recovery).toContainText("The workspace could not be prepared for this launch.");
     await expect(recovery).not.toContainText(prBranch);
     await expect(recovery.getByTestId("task-launch-archive-button")).toHaveCount(0);
     await expect(recovery.getByTestId("task-launch-delete-button")).toHaveCount(0);

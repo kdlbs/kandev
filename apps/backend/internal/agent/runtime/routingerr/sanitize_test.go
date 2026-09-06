@@ -69,6 +69,30 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustNotHave: []string{"/home/bob/"},
 			mustHave:    []string{"/home/<redacted>/"},
 		},
+		{
+			name:        "temporary workspace path",
+			in:          "file at /tmp/kandev/task/repo/main.go failed",
+			mustNotHave: []string{"/tmp/kandev/task/repo/main.go"},
+			mustHave:    []string{"[path-redacted]"},
+		},
+		{
+			name:        "workspace root path",
+			in:          "checkout failed in /workspace/kandev/repo/main.go",
+			mustNotHave: []string{"/workspace/kandev/repo/main.go"},
+			mustHave:    []string{"[path-redacted]"},
+		},
+		{
+			name:        "path redaction does not consume a following endpoint",
+			in:          "cannot read /workspace/.env while connecting to https://endpoint.example.test",
+			mustNotHave: []string{"/workspace/.env"},
+			mustHave:    []string{"https://endpoint.example.test"},
+		},
+		{
+			name:        "windows workspace path",
+			in:          `checkout failed in C:\Users\alice\workspace\repo\main.go`,
+			mustNotHave: []string{`C:\Users\alice\workspace\repo\main.go`},
+			mustHave:    []string{"[path-redacted]"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,6 +120,7 @@ func TestSanitize_Idempotent(t *testing.T) {
 		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
 		"password: hunter2 token: foobar secret=abc",
 		"/Users/me/projects/x /home/me/x",
+		"/tmp/kandev/repo/main.go C:\\workspace\\repo\\main.go",
 	}
 	for _, in := range inputs {
 		first := Sanitize(in)

@@ -21,6 +21,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -96,6 +97,8 @@ type ChatInputContainerProps = {
   isCompleted?: boolean;
   sessionErrorMessage?: string;
   needsRecovery?: boolean;
+  /** The task-owned launch card renders the failed-start recovery. */
+  launchErrorOwned?: boolean;
   executorUnavailable?: boolean;
   executorUnavailableReason?: string;
   contextItems?: ContextItem[];
@@ -287,6 +290,13 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
+function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+  return useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   // eslint-disable-next-line complexity -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
@@ -322,10 +332,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useSessionRecoveryActions({
-      taskId: taskId ?? "",
-      sessionId: sessionId ?? "",
-    });
+    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -335,7 +342,23 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    if (p.isFailed || p.isCompleted || executorUnavailable) {
+    if (
+      shouldHideChatInputForLaunchError({
+        isFailed: p.isFailed,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
+      return null;
+    }
+
+    if (
+      shouldRenderStoppedSessionBanner({
+        isFailed: p.isFailed,
+        isCompleted: p.isCompleted,
+        executorUnavailable,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
       return (
         <SessionStoppedBanner
           mode={p.isCompleted ? "completed" : "recoverable"}
