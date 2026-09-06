@@ -40,7 +40,7 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
-import type { SystemMetricsSnapshot } from "./system";
+import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type {
   ExecutorPayload,
@@ -445,6 +445,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
+    "system.storage.analysis.updated": BackendMessage<
+      "system.storage.analysis.updated",
+      StorageAnalysisUpdatedPayload
+    >;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
     [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: BackendMessage<
       typeof SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
