@@ -46,7 +46,7 @@ func (r *SSHExecutor) materializeSSHRemoteContribution(
 
 	shell := sshShellForRemote(req.Metadata, platform)
 	inner := sshRemoteContributionScript(taskDir, targetURL, binding)
-	wrapped := WrapLoginShell(shell, "set -ae; . /dev/stdin; set +a\n"+inner)
+	wrapped := WrapLoginShell(shell, "set -ae; "+sshStdinEnvImport+"; set +a\n"+inner)
 	_, _, runErr := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if runErr != nil {
 		// Git may include a credentialed helper URL in stderr. Keep the error
