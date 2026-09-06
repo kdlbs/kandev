@@ -1,5 +1,4 @@
 # ADR-2026-09-04-generation-fenced-task-environment-ownership: Fence Task Environment Ownership by Generation
-
 **Status:** accepted
 **Date:** 2026-09-04
 **Area:** backend
@@ -68,4 +67,3 @@ membership attachment sequences.
    PostgreSQL multi-connection execution are durable concurrency boundaries.
 5. **Keep attachment in each API handler.** Rejected because WebSocket, plugin,
    workflow, and future internal task creation can bypass handler-owned logic.
-

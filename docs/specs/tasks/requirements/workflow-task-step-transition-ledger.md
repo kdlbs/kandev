@@ -80,6 +80,10 @@ be measured before Slice 2 is built** (see *Gate between slices*).
 
 - Every committed change to a task's workflow step produces exactly one ledger
   row, written in the same database transaction as the change.
+- Terminal and automated races are generation-bound: a losing stale operation
+  produces no transition row, while a retry whose target is already current is
+  a no-op. The winning row carries its routing-operation correlation when one
+  exists. See [Atomic Terminal Routing](atomic-terminal-routing.md).
 - A row that is not committed with its transition does not exist: a rolled-back
   or WIP-rejected move leaves no row.
 - A move that does not change the step (position-only reorder, re-issued move to

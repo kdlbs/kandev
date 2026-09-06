@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/workflow/routing"
 )
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
@@ -27,7 +28,7 @@ type stepTransitionTx interface {
 func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, taskID string) (workflowID, stepID string, found bool, err error) {
 	query := `SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += postgresForUpdateClause
 	}
 	var wf, step sql.NullString
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&wf, &step)
@@ -80,6 +81,15 @@ type stepTransitionInput struct {
 // with no row). Never log-and-continue on this error.
 func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (id int64, err error) {
 	if in.fromWorkflowStepID == in.toWorkflowStepID {
+		if operation, ok := routing.FromContext(ctx); ok {
+			operation.TaskID = in.taskID
+			operation.ObservedStepID = in.fromWorkflowStepID
+			operation.TargetStepID = in.toWorkflowStepID
+			operation.Outcome = routing.OutcomeAlreadySatisfied
+			if err := r.recordWorkflowRouteOperationTx(ctx, tx, operation); err != nil {
+				return 0, err
+			}
+		}
 		return 0, nil
 	}
 	if in.fromWorkflowStepID == "" && in.toWorkflowStepID == "" {
@@ -136,6 +146,21 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// ("is the writer alive"), not a commit-confirmed row-for-row audit
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
+	if operation, ok := routing.FromContext(ctx); ok {
+		operation.TaskID = in.taskID
+		operation.ObservedStepID = in.fromWorkflowStepID
+		operation.TargetStepID = in.toWorkflowStepID
+		operation.Outcome = routing.OutcomeCommitted
+		operation.TransitionID = id
+		operation.EffectID = operation.ID + ":destination-entry"
+		if err := r.recordWorkflowRouteOperationTx(ctx, tx, operation); err != nil {
+			return 0, err
+		}
+		if result, ok := routing.ResultHolderFromContext(ctx); ok {
+			result.TransitionID = id
+			result.EffectID = operation.EffectID
+		}
+	}
 	return id, nil
 }
 

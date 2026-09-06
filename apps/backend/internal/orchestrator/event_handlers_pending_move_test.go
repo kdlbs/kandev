@@ -11,7 +11,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
-	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -82,7 +81,7 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 	sc.assertOneTransitionToInProgress(t, *stepHistory)
 }
 
-func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
+func TestPendingMove_StaleSourceCannotReopenCompletedTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps[stepReviewedID].Name = "Done"
 
@@ -100,41 +99,153 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load review session: %v", err)
 	}
+	rowsBefore := stepTransitionRowsForTaskOrchestrator(t, sc.repo, "task-1")
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	task, err = sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
 		t.Fatalf("load moved task: %v", err)
 	}
-	if task.WorkflowStepID != stepInProgressID {
-		t.Fatalf("workflow_step_id = %q, want %q", task.WorkflowStepID, stepInProgressID)
+	if task.WorkflowStepID != stepReviewedID {
+		t.Fatalf("workflow_step_id = %q, want terminal %q", task.WorkflowStepID, stepReviewedID)
 	}
-	if task.State != v1.TaskStateTODO {
-		t.Fatalf("state = %q, want TODO after pending move out of terminal step", task.State)
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("state = %q, want COMPLETED after stale pending move", task.State)
+	}
+	rows := stepTransitionRowsForTaskOrchestrator(t, sc.repo, "task-1")
+	if len(rows) != len(rowsBefore) {
+		t.Fatalf("stale move wrote %d transition rows, want 0", len(rows)-len(rowsBefore))
+	}
+}
+
+// TestApplyPendingMove_DuplicateDeliveryDoesNotRepeatRouteEffect proves that
+// the two overlapping routing invariants this task and upstream PR #3147 each
+// added survive together: (a) a redelivered pending move whose source
+// generation already advanced is recognized as "already satisfied" rather
+// than replayed (upstream's stale/duplicate pending-move handling), and (b)
+// the on_exit/on_enter route effect for the winning transition is claimed
+// exactly once (this task's non-reclaimable route-effect design) — so a
+// duplicate delivery can neither reopen the transition nor double-run its
+// side effects.
+func TestApplyPendingMove_DuplicateDeliveryDoesNotRepeatRouteEffect(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "dup-move-task", "dup-move-session", "source-step")
+	if err := baseRepo.SetSessionMetadataKey(ctx, "dup-move-session", "plan_mode", true); err != nil {
+		t.Fatalf("seed plan_mode: %v", err)
+	}
+	countingRepo := &countingLifecycleRepository{Repository: baseRepo}
+
+	steps := newMockStepGetter()
+	steps.steps["source-step"] = &wfmodels.WorkflowStep{
+		ID: "source-step", WorkflowID: "wf1", Name: "Source",
+		Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{
+			Type: wfmodels.OnExitDisablePlanMode,
+		}}},
+	}
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+		}}},
 	}
 
-	// This is the real production applyPendingMove path (spec.md:518-519):
-	// unlike TestApplyTransitionPreservesOuterCallerTrigger, which presets
-	// mcp_deferred_move on ctx and so never reaches this call site at all,
-	// this drives the actual deferred-move flow end to end and must prove
-	// the ledger row it writes carries the trigger the scenario claims.
-	rows := stepTransitionRowsForTaskOrchestrator(t, sc.repo, "task-1")
-	if len(rows) == 0 {
-		t.Fatalf("expected at least one ledger row for task-1")
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["dup-move-task"] = &v1.Task{
+		ID: "dup-move-task", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
 	}
-	last := rows[len(rows)-1]
-	if last.trigger != string(steptelemetry.TriggerMCPDeferredMove) {
-		t.Fatalf("trigger = %q, want %q", last.trigger, steptelemetry.TriggerMCPDeferredMove)
+	svc := createTestService(baseRepo, steps, taskRepo)
+	svc.repo = countingRepo
+	svc.SetWorkflowStepGetter(steps)
+
+	session, err := baseRepo.GetTaskSession(ctx, "dup-move-session")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
 	}
-	if last.actorKind != string(steptelemetry.ActorSystem) {
-		t.Fatalf("actor_kind = %q, want %q when sender session is absent", last.actorKind, steptelemetry.ActorSystem)
+	rowsBefore := stepTransitionRowsForTaskOrchestrator(t, baseRepo, "dup-move-task")
+
+	move := &messagequeue.PendingMove{
+		TaskID:                 "dup-move-task",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         "destination-step",
+		ExpectedWorkflowStepID: "source-step",
 	}
-	if last.actorID != nil || last.sessionID != nil {
-		t.Fatalf("actor/session IDs = %v/%v, want NULL/NULL when sender session is absent", last.actorID, last.sessionID)
+
+	// First delivery: applies the transition and runs on_exit/on_enter
+	// asynchronously.
+	if !svc.applyPendingMove(ctx, "dup-move-task", "dup-move-session", session, move) {
+		t.Fatal("first pending move delivery was not accepted")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for countingRepo.destinationEntryCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := countingRepo.destinationEntryCount(); got != 1 {
+		t.Fatalf("destinationEntryCount = %d after first delivery, want 1", got)
+	}
+	if got := countingRepo.disableCount(); got != 1 {
+		t.Fatalf("disableCount = %d after first delivery, want 1", got)
+	}
+
+	// Second, duplicate delivery of the SAME move (e.g. a redelivered
+	// message-queue event or a retried turn-end apply). The task's source
+	// generation has already advanced past move.ExpectedWorkflowStepID, so
+	// this must resolve as "already satisfied" rather than replaying the
+	// transition or its route effect.
+	if !svc.applyPendingMove(ctx, "dup-move-task", "dup-move-session", session, move) {
+		t.Fatal("duplicate pending move delivery must resolve as idempotent success")
+	}
+
+	// Give any (incorrect) second async apply time to run before asserting.
+	time.Sleep(200 * time.Millisecond)
+
+	if got := countingRepo.destinationEntryCount(); got != 1 {
+		t.Fatalf("destinationEntryCount = %d after duplicate delivery, want 1 (route effect must not repeat)", got)
+	}
+	if got := countingRepo.disableCount(); got != 1 {
+		t.Fatalf("disableCount = %d after duplicate delivery, want 1 (on_exit must not repeat)", got)
+	}
+
+	task, err := baseRepo.GetTask(ctx, "dup-move-task")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.WorkflowStepID != "destination-step" {
+		t.Fatalf("workflow_step_id = %q, want %q", task.WorkflowStepID, "destination-step")
+	}
+	rows := stepTransitionRowsForTaskOrchestrator(t, baseRepo, "dup-move-task")
+	if len(rows)-len(rowsBefore) != 1 {
+		t.Fatalf("duplicate delivery wrote %d transition rows, want 1", len(rows)-len(rowsBefore))
+	}
+}
+
+func TestPendingMove_LegacyRowWithoutSourceGenerationFailsClosed(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+
+	cleanup := sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		ID: "legacy-row", MoveID: "legacy-move", TaskID: "task-1",
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	})
+	if cleanup {
+		t.Fatal("legacy row without an expected source generation must remain available for exact cancellation or expiry")
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("workflow_step_id = %q, want unchanged %q", task.WorkflowStepID, stepInReviewID)
 	}
 }
 
@@ -146,10 +257,11 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 	}
 	queuedAt := time.Date(2026, 8, 17, 2, 23, 48, 0, time.UTC)
 	firstMove := &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-		QueuedAt:       queuedAt,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		QueuedAt:               queuedAt,
 	}
 
 	// Consume the deferred move once, as handleAgentReady does at turn end.
@@ -172,10 +284,11 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 		t.Fatalf("return task to review: %v", err)
 	}
 	staleRestoredMove := &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-		QueuedAt:       queuedAt,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		QueuedAt:               queuedAt,
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, staleRestoredMove)
 
@@ -205,10 +318,11 @@ func TestPendingMove_EqualTargetRecordsAppliedMoveID(t *testing.T) {
 
 	const moveID = "move-equal-target"
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		MoveID:         moveID,
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		MoveID:                 moveID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInProgressID,
 	})
 
 	updated, err := sc.repo.GetTask(sc.ctx, "task-1")
@@ -258,10 +372,11 @@ func TestPendingMove_DuplicateRemovesOnlyMatchingHandoffPrompt(t *testing.T) {
 	}
 
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		MoveID:         moveID,
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		MoveID:                 moveID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
@@ -284,9 +399,10 @@ func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {
 		t.Fatalf("load review session: %v", err)
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: "foreign-step",
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         "foreign-step",
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
@@ -413,9 +529,10 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
 	svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	return &pendingMoveScenario{

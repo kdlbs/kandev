@@ -39,6 +39,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflow/signalmetrics"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -224,8 +225,13 @@ type TaskTitleBranchRenamer interface {
 // message would survive a failed move and be delivered on the next agent turn.
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
+	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove) error
+	DeletePendingMoveIfMatch(ctx context.Context, expected messagequeue.PendingMoveRecord, handoffEntryID string) (bool, error)
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
+}
+
+type exactQueuedEntryTaker interface {
+	TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, bool, error)
 }
 
 // messageMetadataQueuer is an optional extension implemented by the
@@ -2302,7 +2308,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	launchStepID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	launchStepID, turnID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
@@ -2311,16 +2317,28 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
+		operation := routing.Operation{
+			ID: workflowRouteOperationID("step-complete", msg.ID), TaskID: req.TaskID,
+			WorkspaceID: task.WorkspaceID, Producer: routing.ProducerStepComplete,
+			ExpectedStepID: launchStepID, ObservedStepID: task.WorkflowStepID,
+			SessionID: req.SessionID, TurnID: turnID,
+			ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+			Outcome: routing.OutcomeStaleSource,
+		}
+		if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record stale signal", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
 	}
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:     launchStepID,
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    strings.TrimSpace(req.Handoff),
-		Blockers:   strings.TrimSpace(req.Blockers),
-		SignaledAt: time.Now().UTC(),
+		OperationID: workflowRouteOperationID("step-complete", msg.ID),
+		StepID:      launchStepID,
+		Source:      models.StepCompletionSourceAgent,
+		Summary:     strings.TrimSpace(req.Summary),
+		Handoff:     strings.TrimSpace(req.Handoff),
+		Blockers:    strings.TrimSpace(req.Blockers),
+		SignaledAt:  time.Now().UTC(),
 	}
 	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
@@ -2331,7 +2349,41 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID)
+		if loadErr != nil {
+			h.logger.Error("failed to classify rejected step-completion claim",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.Error(loadErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to classify completion signal", nil)
+		}
+		if observed.WorkflowStepID != launchStepID {
+			operation := routing.Operation{
+				ID: signal.OperationID, TaskID: req.TaskID, WorkspaceID: observed.WorkspaceID,
+				Producer:       routing.ProducerStepComplete,
+				ExpectedStepID: launchStepID, ObservedStepID: observed.WorkflowStepID,
+				SessionID: req.SessionID, TurnID: turnID,
+				ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+				Outcome: routing.OutcomeStaleSource,
+			}
+			if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to record stale signal", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"workflow step changed before signal was recorded", nil)
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
+	}
+	if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: signal.OperationID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerStepComplete, ExpectedStepID: launchStepID,
+		ObservedStepID: task.WorkflowStepID, SessionID: req.SessionID, TurnID: turnID,
+		ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+		Outcome: routing.OutcomePending,
+	}); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record completion operation", nil)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2358,26 +2410,26 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	})
 }
 
-func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
+func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, string, error) {
 	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
 	if !ok {
-		return fallback, nil
+		return fallback, "", nil
 	}
 	turns, err := reader.ListTurnsBySession(ctx, sessionID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(turns) == 0 {
-		return fallback, nil
+		return fallback, "", nil
 	}
 	latest := turns[len(turns)-1]
 	if latest == nil {
-		return "", errors.New("latest turn is missing")
+		return "", "", errors.New("latest turn is missing")
 	}
 	if stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]); stepID != "" {
-		return stepID, nil
+		return stepID, latest.ID, nil
 	}
-	return "", errors.New("latest turn has no workflow-step stamp")
+	return "", "", errors.New("latest turn has no workflow-step stamp")
 }
 
 func (h *Handlers) claimStepCompletionSignal(

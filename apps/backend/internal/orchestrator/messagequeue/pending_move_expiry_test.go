@@ -214,7 +214,7 @@ func TestRepository_DeletePendingMoveIfMatchPreservesReplacement(t *testing.T) {
 			}
 
 			moveB := &PendingMove{
-				MoveID: "move-b", TaskID: "task-b", WorkflowID: "wf-b",
+				ID: records[0].Move.ID, MoveID: "move-b", TaskID: "task-b", WorkflowID: "wf-b",
 				WorkflowStepID: "step-b", QueuedAt: queuedAtA.Add(time.Hour),
 			}
 			if err := repo.SetPendingMove(ctx, "sess", moveB); err != nil {

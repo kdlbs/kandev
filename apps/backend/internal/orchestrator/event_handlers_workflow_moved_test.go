@@ -1002,7 +1002,7 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processStepExitAndEnter(ctx, "t1", session, "step1", "step2", "test task")
+		_ = svc.processStepExitAndEnter(ctx, "t1", session, "step1", "step2", "test task", 0)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
@@ -1026,7 +1026,7 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		// Should not panic
-		svc.processStepExitAndEnter(ctx, "t1", session, "nonexistent", "step2", "test task")
+		_ = svc.processStepExitAndEnter(ctx, "t1", session, "nonexistent", "step2", "test task", 0)
 	})
 
 	t.Run("handles missing to-step", func(t *testing.T) {
@@ -1043,6 +1043,6 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		// Should not panic
-		svc.processStepExitAndEnter(ctx, "t1", session, "step1", "nonexistent", "test task")
+		_ = svc.processStepExitAndEnter(ctx, "t1", session, "step1", "nonexistent", "test task", 0)
 	})
 }

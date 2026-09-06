@@ -384,6 +384,32 @@ type recordingMessageQueuer struct {
 	calls []messagequeue.QueuedMessage
 }
 
+type exactRollbackMessageQueuer struct {
+	recordingMessageQueuer
+	entries []messagequeue.QueuedMessage
+}
+
+func (r *exactRollbackMessageQueuer) QueueMessageWithMetadata(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
+	entry := messagequeue.QueuedMessage{
+		ID: "move-entry", SessionID: sessionID, TaskID: taskID, Content: content,
+		Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadata, QueuedBy: userID,
+	}
+	r.entries = append(r.entries, entry)
+	return &entry, nil
+}
+
+func (r *exactRollbackMessageQueuer) TakeQueuedEntry(_ context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, bool, error) {
+	for i := range r.entries {
+		if r.entries[i].SessionID != sessionID || r.entries[i].ID != entryID {
+			continue
+		}
+		entry := r.entries[i]
+		r.entries = append(r.entries[:i], r.entries[i+1:]...)
+		return &entry, true, nil
+	}
+	return nil, false, nil
+}
+
 func (r *recordingMessageQueuer) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
 	return r.QueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil)
 }
@@ -408,14 +434,28 @@ type pendingMoveRecordingQueuer struct {
 	pendingMoves     []messagequeue.PendingMove
 }
 
-func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) error {
 	r.pendingSessionID = sessionID
 	if move != nil {
 		r.pendingMoves = append(r.pendingMoves, *move)
 	}
+	return nil
 }
 
-func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) DeletePendingMoveIfMatch(_ context.Context, expected messagequeue.PendingMoveRecord, _ string) (bool, error) {
+	if len(r.pendingMoves) == 0 || r.pendingSessionID != expected.SessionID || r.pendingMoves[len(r.pendingMoves)-1].ID != expected.Move.ID {
+		return false, nil
+	}
+	r.pendingMoves = r.pendingMoves[:len(r.pendingMoves)-1]
+	return true, nil
+}
+
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) error {
+	return nil
+}
+
+func (r *recordingMessageQueuer) DeletePendingMoveIfMatch(_ context.Context, _ messagequeue.PendingMoveRecord, _ string) (bool, error) {
+	return false, nil
 }
 
 // TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
@@ -473,6 +513,22 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, messagequeue.QueuedByMoveTask, got.QueuedBy)
 	assert.False(t, got.PlanMode)
 	assert.Equal(t, "", got.Model)
+}
+
+func TestRollbackQueuedMovePrompt_RemovesOnlyNewEntryAfterMoveFailure(t *testing.T) {
+	queue := &exactRollbackMessageQueuer{entries: []messagequeue.QueuedMessage{
+		{ID: "old-head", SessionID: "session-1", TaskID: "task-1", Content: "older prompt"},
+		{ID: "old-tail", SessionID: "session-1", TaskID: "task-1", Content: "another prompt"},
+	}}
+	h := &Handlers{messageQueue: queue, logger: testLogger(t).WithFields()}
+
+	entry, err := h.queueMoveTaskPromptEntry(context.Background(), "task-1", "session-1", "new hand-off")
+	require.NoError(t, err)
+	h.rollbackQueuedMovePrompt(context.Background(), "task-1", "session-1", entry.ID)
+
+	require.Len(t, queue.entries, 2, "rollback must not remove an unrelated FIFO head")
+	assert.Equal(t, "old-head", queue.entries[0].ID)
+	assert.Equal(t, "old-tail", queue.entries[1].ID)
 }
 
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {

@@ -769,6 +769,11 @@ type httpCreateTaskRequest struct {
 	DefaultChildOrdering  string `json:"default_child_ordering,omitempty"`
 }
 
+func hasClientControlledConfigMode(metadata map[string]interface{}) bool {
+	_, found := metadata["config_mode"]
+	return found
+}
+
 type createTaskResponse struct {
 	dto.TaskDTO
 	TaskSessionID    string `json:"session_id,omitempty"`
@@ -886,6 +891,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 	if body.WorkspaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		return
+	}
+	if hasClientControlledConfigMode(body.Metadata) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "config_mode is reserved for configuration chat"})
 		return
 	}
 	if (body.StartAgent || body.PrepareSession) && body.AgentProfileID == "" {
@@ -1602,6 +1611,10 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	var body httpUpdateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if hasClientControlledConfigMode(body.Metadata) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "config_mode is reserved for configuration chat"})
 		return
 	}
 

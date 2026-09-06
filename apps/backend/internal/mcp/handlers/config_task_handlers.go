@@ -17,6 +17,7 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -43,6 +44,11 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
+	if replay, handled, err := h.replayMoveTaskOperation(
+		ctx, msg, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
+	); handled {
+		return replay, err
+	}
 
 	// Prompt is OPTIONAL — config-mode/admin moves don't always have an agent
 	// to hand off to. When supplied, it activates the deferred-move path that
@@ -66,12 +72,109 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	// self-moves (e.g. Work → Done); include it for cross-agent hand-offs.
 	if session != nil &&
 		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
+		terminal, err := h.taskSvc.IsTerminalWorkflowStep(ctx, req.WorkflowStepID)
+		if err != nil {
+			if errors.Is(err, service.ErrWorkflowStepNotFound) {
+				return h.deferMoveTask(ctx, msg, req, session)
+			}
+			h.logger.Error("move_task: failed to classify target workflow step",
+				zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to classify target workflow step", nil)
+		}
+		if terminal {
+			return h.applyMoveTaskImmediate(ctx, msg, req, session, true)
+		}
 		return h.deferMoveTask(ctx, msg, req, session)
 	}
 
 	// Idle path — apply immediately. If a prompt was supplied, queue it on the
 	// session so the receiving agent's next turn picks it up; if not, just move.
-	return h.applyMoveTaskImmediate(ctx, msg, req, session)
+	return h.applyMoveTaskImmediate(ctx, msg, req, session, false)
+}
+
+func (h *Handlers) replayMoveTaskOperation(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID, workflowID, targetStepID string,
+	position int,
+) (*ws.Message, bool, error) {
+	operationID := workflowRouteOperationID("mcp-move", msg.ID)
+	operation, found, err := h.taskSvc.GetWorkflowRouteOperation(ctx, operationID)
+	if err != nil {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to read route operation", nil)
+		return response, true, responseErr
+	}
+	if !found {
+		return nil, false, nil
+	}
+	if operation.TaskID != taskID || operation.TargetStepID != targetStepID {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"route operation identity already belongs to a different request", nil)
+		return response, true, responseErr
+	}
+	switch operation.Outcome {
+	case routing.OutcomeCommitted, routing.OutcomeAlreadySatisfied:
+		task, loadErr := h.taskSvc.GetTask(ctx, taskID)
+		if loadErr != nil {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to read routed task", nil)
+			return response, true, responseErr
+		}
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+		return response, true, responseErr
+	case routing.OutcomePending:
+		workflowID, targetStepID, position, err = h.replayPendingMoveRequest(
+			ctx, operationID, taskID, workflowID, targetStepID, position,
+		)
+		if err != nil {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to read pending route", nil)
+			return response, true, responseErr
+		}
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action,
+			h.synthesizeMovedTaskDTO(ctx, taskID, workflowID, targetStepID, position))
+		return response, true, responseErr
+	case routing.OutcomeStaleSource:
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"workflow step changed before route commit", nil)
+		return response, true, responseErr
+	default:
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"route operation did not commit", nil)
+		return response, true, responseErr
+	}
+}
+
+type pendingMoveLister interface {
+	ListPendingMoves(context.Context) ([]messagequeue.PendingMoveRecord, error)
+}
+
+func (h *Handlers) replayPendingMoveRequest(
+	ctx context.Context,
+	operationID, taskID, workflowID, targetStepID string,
+	position int,
+) (string, string, int, error) {
+	lister, ok := h.messageQueue.(pendingMoveLister)
+	if !ok {
+		return workflowID, targetStepID, position, nil
+	}
+	records, err := lister.ListPendingMoves(ctx)
+	if err != nil {
+		return "", "", 0, err
+	}
+	for _, record := range records {
+		move := record.Move
+		if move.MoveID != operationID {
+			continue
+		}
+		if move.TaskID != taskID || move.WorkflowStepID != targetStepID {
+			return "", "", 0, routing.ErrOperationIdentityConflict
+		}
+		return move.WorkflowID, move.WorkflowStepID, move.Position, nil
+	}
+	return workflowID, targetStepID, position, nil
 }
 
 // deferMoveTask records a PendingMove for the agent's turn-end handler to
@@ -156,25 +259,62 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 
-	moveID := uuid.NewString()
+	moveID := workflowRouteOperationID("mcp-move", msg.ID)
+	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to load task generation", nil)
+	}
+	turnID, producer, cause, causeID := h.workflowRouteCause(ctx, req.SenderSessionID, routing.ProducerDeferredMove)
+	pending := &messagequeue.PendingMove{
+		ID:                     uuid.NewString(),
+		MoveID:                 moveID,
+		TaskID:                 req.TaskID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         req.WorkflowStepID,
+		Position:               req.Position,
+		ExpectedWorkflowStepID: task.WorkflowStepID,
+		Actor:                  string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID:        req.SenderSessionID,
+		InitiatingTurnID:       turnID,
+	}
+	if err := h.messageQueue.SetPendingMove(ctx, session.ID, pending); err != nil {
+		_ = h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
+			ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
+			Producer: producer, ExpectedStepID: task.WorkflowStepID,
+			ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID,
+			SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent),
+			ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause,
+			ExternalCauseID: causeID, Outcome: routing.OutcomeConflict,
+		})
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"another deferred move is already pending for this session", nil)
+	}
+	if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID,
+		Producer: producer, ExpectedStepID: task.WorkflowStepID,
+		ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID,
+		SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent),
+		ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause,
+		ExternalCauseID: causeID, Outcome: routing.OutcomePending,
+	}); err != nil {
+		_, _ = h.messageQueue.DeletePendingMoveIfMatch(ctx,
+			messagequeue.PendingMoveRecord{SessionID: session.ID, Move: *pending}, "")
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to persist deferred route identity", nil)
+	}
 	if req.Prompt != "" {
 		wrapped := "You were moved to this step with the following message: " + req.Prompt
 		if err := h.queueMoveTaskPromptWithMoveID(ctx, req.TaskID, session.ID, wrapped, moveID); err != nil {
+			_, cleanupErr := h.messageQueue.DeletePendingMoveIfMatch(ctx,
+				messagequeue.PendingMoveRecord{SessionID: session.ID, Move: *pending}, "")
 			h.logger.Error("move_task: failed to queue hand-off prompt",
-				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID),
+				zap.Error(err), zap.Error(cleanupErr))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to queue move_task hand-off prompt", nil)
 		}
 	}
-	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		MoveID:          moveID,
-		TaskID:          req.TaskID,
-		WorkflowID:      req.WorkflowID,
-		WorkflowStepID:  req.WorkflowStepID,
-		Position:        req.Position,
-		Actor:           string(wfmodels.StepTransitionActorAgent),
-		SenderSessionID: req.SenderSessionID,
-	})
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
 }
@@ -195,17 +335,25 @@ func (h *Handlers) applyMoveTaskImmediate(
 		SenderSessionID string `json:"sender_session_id"`
 	},
 	session *models.TaskSession,
+	allowActivePrimarySession bool,
 ) (*ws.Message, error) {
 	queuedSessionID := ""
+	queuedEntryID := ""
 	if req.Prompt != "" && session != nil {
 		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+		queued, err := h.queueMoveTaskPromptEntry(ctx, req.TaskID, session.ID, wrapped)
+		if err != nil {
 			h.logger.Error("move_task: failed to queue hand-off prompt for idle session",
 				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to queue move_task hand-off prompt", nil)
 		}
+		if queued == nil || queued.ID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"queue returned no hand-off prompt identity", nil)
+		}
 		queuedSessionID = session.ID
+		queuedEntryID = queued.ID
 	}
 
 	// Attribution uses the CALLING session (req.SenderSessionID, injected
@@ -222,22 +370,110 @@ func (h *Handlers) applyMoveTaskImmediate(
 		attribution.SessionID = req.SenderSessionID
 	}
 	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	current, currentErr := h.taskSvc.GetTask(ctx, req.TaskID)
+	if currentErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load route generation", nil)
+	}
+	turnID, producer, cause, causeID := h.workflowRouteCause(ctx, req.SenderSessionID, routing.ProducerManualMove)
+	routeOperation := routing.Operation{
+		ID: workflowRouteOperationID("mcp-move", msg.ID), TaskID: req.TaskID,
+		WorkspaceID: current.WorkspaceID, Producer: producer,
+		ExpectedStepID: current.WorkflowStepID, ObservedStepID: current.WorkflowStepID,
+		TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, TurnID: turnID,
+		ActorKind: string(attribution.ActorKind), ActorID: attribution.ActorID,
+		ExternalCause: cause, ExternalCauseID: causeID,
+	}
+	moveCtx = routing.WithOperation(moveCtx, routeOperation)
 	result, err := h.taskSvc.MoveTaskWithOptions(moveCtx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
-		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent})
+		service.MoveTaskOptions{
+			AllowActivePrimarySession: allowActivePrimarySession,
+			ExpectedWorkflowStepID:    current.WorkflowStepID,
+			StepHistoryActor:          wfmodels.StepTransitionActorAgent,
+		})
 	if err != nil {
+		if errors.Is(err, service.ErrWorkflowStepChanged) {
+			if observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID); loadErr == nil && observed != nil {
+				routeOperation.ObservedStepID = observed.WorkflowStepID
+			}
+			routeOperation.Outcome = routing.OutcomeStaleSource
+			if recordErr := h.taskSvc.RecordWorkflowRouteOperation(ctx, routeOperation); recordErr != nil {
+				h.logger.Warn("move_task: failed to record stale route operation",
+					zap.String("task_id", req.TaskID), zap.String("operation_id", routeOperation.ID), zap.Error(recordErr))
+			}
+		}
 		// Roll back the queued prompt — without this, the next turn would
 		// deliver a "You were moved to this step…" message for a transition
 		// that didn't actually happen.
-		if queuedSessionID != "" && h.messageQueue != nil {
-			if _, ok := h.messageQueue.TakeQueued(ctx, queuedSessionID); ok {
-				h.logger.Warn("move_task: dropped queued hand-off prompt after MoveTask failure",
-					zap.String("task_id", req.TaskID), zap.String("session_id", queuedSessionID))
-			}
+		if queuedSessionID != "" && queuedEntryID != "" && h.messageQueue != nil {
+			h.rollbackQueuedMovePrompt(ctx, req.TaskID, queuedSessionID, queuedEntryID)
 		}
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
+}
+
+func (h *Handlers) rollbackQueuedMovePrompt(ctx context.Context, taskID, sessionID, entryID string) {
+	taker, ok := h.messageQueue.(exactQueuedEntryTaker)
+	if !ok {
+		h.logger.Error("move_task: queue does not support exact hand-off rollback",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("entry_id", entryID))
+		return
+	}
+	_, removed, err := taker.TakeQueuedEntry(ctx, sessionID, entryID)
+	if err != nil {
+		h.logger.Error("move_task: failed to roll back queued hand-off prompt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String("entry_id", entryID), zap.Error(err))
+	} else if removed {
+		h.logger.Warn("move_task: dropped queued hand-off prompt after MoveTask failure",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+	}
+}
+
+func workflowRouteOperationID(prefix, requestID string) string {
+	if requestID == "" {
+		return prefix + ":" + uuid.NewString()
+	}
+	return prefix + ":" + requestID
+}
+
+type workflowRouteCauseReader interface {
+	ListTurnsBySession(context.Context, string) ([]*models.Turn, error)
+	ListMessagesByTurnID(context.Context, string) ([]*models.Message, error)
+}
+
+func (h *Handlers) workflowRouteCause(
+	ctx context.Context,
+	sessionID string,
+	fallback routing.Producer,
+) (turnID string, producer routing.Producer, cause, causeID string) {
+	producer = fallback
+	reader, ok := h.sessionRepo.(workflowRouteCauseReader)
+	if !ok || sessionID == "" {
+		return "", producer, "", ""
+	}
+	turns, err := reader.ListTurnsBySession(ctx, sessionID)
+	if err != nil || len(turns) == 0 || turns[len(turns)-1] == nil {
+		return "", producer, "", ""
+	}
+	turnID = turns[len(turns)-1].ID
+	messages, err := reader.ListMessagesByTurnID(ctx, turnID)
+	if err != nil {
+		return turnID, producer, "", ""
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		metadata := messages[index].Metadata
+		if models.StringFromAny(metadata["origin"]) != "github_pr_automation" ||
+			models.StringFromAny(metadata["automation_kind"]) != "merged" {
+			continue
+		}
+		producer = routing.ProducerMergedPR
+		cause = "github_pr_merged"
+		causeID = models.StringFromAny(metadata["repository_id"]) + ":" + fmt.Sprint(metadata["pr_number"])
+		return turnID, producer, cause, causeID
+	}
+	return turnID, producer, "", ""
 }
 
 func classifyMoveTaskError(err error) string {
@@ -247,6 +483,7 @@ func classifyMoveTaskError(err error) string {
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "wip limit exceeded"),
+		strings.Contains(msg, routing.ErrOperationIdentityConflict.Error()),
 		strings.Contains(msg, "active session"),
 		strings.Contains(msg, "archived tasks cannot be moved"),
 		strings.Contains(msg, "different workspace"),
@@ -325,7 +562,13 @@ func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.Ta
 // or proceed (idle path), since a queue failure makes the deferred contract
 // impossible to honor.
 func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) error {
-	return h.queueMoveTaskPromptWithMoveID(ctx, taskID, sessionID, prompt, "")
+	_, err := h.queueMoveTaskPromptEntry(ctx, taskID, sessionID, prompt)
+	return err
+}
+
+func (h *Handlers) queueMoveTaskPromptEntry(ctx context.Context, taskID, sessionID, prompt string) (*messagequeue.QueuedMessage, error) {
+	return h.queueMoveTaskPromptWithMetadata(ctx, taskID, sessionID, prompt,
+		map[string]interface{}{messagequeue.MetadataMovePromptID: uuid.NewString()})
 }
 
 func (h *Handlers) queueMoveTaskPromptWithMoveID(ctx context.Context, taskID, sessionID, prompt, moveID string) error {
@@ -339,16 +582,29 @@ func (h *Handlers) queueMoveTaskPromptWithMoveID(ctx context.Context, taskID, se
 	if moveID != "" {
 		metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID}
 	}
+	_, err := h.queueMoveTaskPromptWithMetadata(ctx, taskID, sessionID, prompt, metadata)
+	return err
+}
+
+func (h *Handlers) queueMoveTaskPromptWithMetadata(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
+	if h.messageQueue == nil {
+		return nil, fmt.Errorf("message queue is unavailable")
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("task has no primary session")
+	}
 	if queueWithMetadata, ok := h.messageQueue.(messageMetadataQueuer); ok {
-		if _, err := queueWithMetadata.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata); err != nil {
-			return fmt.Errorf("queue message: %w", err)
+		queued, err := queueWithMetadata.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata)
+		if err != nil {
+			return nil, fmt.Errorf("queue message: %w", err)
 		}
-		return nil
+		return queued, nil
 	}
-	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil); err != nil {
-		return fmt.Errorf("queue message: %w", err)
+	queued, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil)
+	if err != nil {
+		return nil, fmt.Errorf("queue message: %w", err)
 	}
-	return nil
+	return queued, nil
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
