@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -39,6 +40,13 @@ type WorkspaceProcessRunner interface {
 	Stop(ctx context.Context, executionID, processID string) error
 }
 
+// WorkspaceProcessRequestLookup is an optional recovery capability. It finds
+// an admitted process when a crash happened after agentctl accepted a stable
+// request but before the process ID reached the durable run row.
+type WorkspaceProcessRequestLookup interface {
+	GetByRequestID(ctx context.Context, executionID, requestID string, includeOutput bool) (*WorkspaceProcessInfo, error)
+}
+
 type workspaceProcessBackend interface {
 	StartWorkspaceProcess(context.Context, lifecycle.WorkspaceProcessRequest) (*WorkspaceProcessInfo, error)
 	GetWorkspaceProcess(context.Context, string, string, bool) (*WorkspaceProcessInfo, error)
@@ -69,4 +77,14 @@ func (f *workspaceProcessFacade) Get(ctx context.Context, executionID, processID
 
 func (f *workspaceProcessFacade) Stop(ctx context.Context, executionID, processID string) error {
 	return f.backend.StopWorkspaceProcess(ctx, executionID, processID)
+}
+
+func (f *workspaceProcessFacade) GetByRequestID(ctx context.Context, executionID, requestID string, includeOutput bool) (*WorkspaceProcessInfo, error) {
+	backend, ok := f.backend.(interface {
+		GetWorkspaceProcessByRequestID(context.Context, string, string, bool) (*WorkspaceProcessInfo, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("workspace process request lookup is unavailable")
+	}
+	return backend.GetWorkspaceProcessByRequestID(ctx, executionID, requestID, includeOutput)
 }

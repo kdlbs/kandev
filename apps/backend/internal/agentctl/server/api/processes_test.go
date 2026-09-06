@@ -221,6 +221,39 @@ func TestHandleGetProcess_OmitsOutputByDefault(t *testing.T) {
 	}
 }
 
+func TestHandleGetProcessByRequestIDFindsAdmittedProcess(t *testing.T) {
+	srv := newTestServer(t)
+	rec := processRequest(t, srv, http.MethodPost, "/api/v1/processes/start", process.StartProcessRequest{
+		RequestID: "workflow-script-recovery",
+		SessionID: "session-recovery",
+		Kind:      types.ProcessKindCustom,
+		Command:   "sleep 120",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("start status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var started startProcessResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if started.Process == nil {
+		t.Fatalf("start response carries no process: %s", rec.Body.String())
+	}
+	stopProcessOnCleanup(t, srv, started.Process.ID)
+
+	lookup := processRequest(t, srv, http.MethodGet, "/api/v1/processes/request/workflow-script-recovery", nil)
+	if lookup.Code != http.StatusOK {
+		t.Fatalf("lookup status = %d (body %s)", lookup.Code, lookup.Body.String())
+	}
+	var got process.ProcessInfo
+	if err := json.Unmarshal(lookup.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode lookup response: %v", err)
+	}
+	if got.ID != started.Process.ID || got.SessionID != "session-recovery" {
+		t.Fatalf("lookup = %+v, started = %+v", got, started.Process)
+	}
+}
+
 // TestProcessLifecycle_ExitedProcessIsRetired pins the reaping contract that
 // makes the two tests above use a blocking command: once a process exits, the
 // runner removes it, so REST has no "exited" state to report — the process

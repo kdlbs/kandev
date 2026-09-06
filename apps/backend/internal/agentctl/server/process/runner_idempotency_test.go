@@ -36,6 +36,28 @@ func TestProcessRunnerStableRequestIdentityReusesAndRejectsConflicts(t *testing.
 	}
 }
 
+func TestProcessRunnerGetByRequestIDFindsAdmittedProcess(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 2*1024*1024)
+	command, env := fixtureShellExec("sleep 30")
+	request := StartProcessRequest{
+		RequestID: "workflow-run-recovery", SessionID: "session-recovery", Kind: types.ProcessKindCustom,
+		Command: command, Env: env,
+	}
+	started, err := runner.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = runner.Stop(context.Background(), StopProcessRequest{ProcessID: started.ID}) }()
+
+	got, ok := runner.GetByRequestID(request.RequestID, true)
+	if !ok {
+		t.Fatal("GetByRequestID did not find admitted process")
+	}
+	if got.ID != started.ID || got.SessionID != request.SessionID {
+		t.Fatalf("lookup = %+v, started = %+v", got, started)
+	}
+}
+
 func TestProcessRunnerTimeoutReturnsTypedTerminalResultAndRetainsOutput(t *testing.T) {
 	runner := NewProcessRunner(nil, newTestLogger(t), 2*1024*1024)
 	command, env := fixtureShellExec("echo-then-sleep timeout 30")

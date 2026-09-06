@@ -334,6 +334,32 @@ func TestGetProcess_PutsIDInPathAndRequestsOutputOnDemand(t *testing.T) {
 	}
 }
 
+func TestGetProcessByRequestID_PutsEscapedRequestIDInPath(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
+		"id":"proc-recovered","session_id":"sess-2","kind":"script","command":"go test",
+		"working_dir":"/w","status":"running"
+	}`))
+
+	info, err := newHTTPOnlyClient(srv.URL).GetProcessByRequestID(
+		context.Background(), "workflow/run 1", true,
+	)
+	if err != nil {
+		t.Fatalf("GetProcessByRequestID: %v", err)
+	}
+	if got.Method != http.MethodGet {
+		t.Errorf("method = %q, want GET", got.Method)
+	}
+	if got.Path != "/api/v1/processes/request/workflow/run 1" {
+		t.Errorf("decoded path = %q, want request identity as the final route value", got.Path)
+	}
+	if got.RawQuery != "include_output=true" {
+		t.Errorf("raw query = %q, want include_output=true", got.RawQuery)
+	}
+	if info.ID != "proc-recovered" || info.SessionID != "sess-2" {
+		t.Fatalf("process = %+v", info)
+	}
+}
+
 func TestGetProcess_FailureModes(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
 import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
+import Link from "@/components/routing/app-link";
 import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialog-model";
 import { WorkflowEditorPage } from "@/components/settings/workflow-editor/workflow-editor-page";
 import {
@@ -62,6 +64,7 @@ export function WorkspaceWorkflowEditorRoute({
 }): ReactNode {
   const [state, setState] = useState<WorkspaceWorkflowEditorRouteState | null>(null);
   const isNewWorkflow = workflowId === "new";
+  const { t } = useTranslation();
   const searchParams = useSearchParams();
   const templateId = isNewWorkflow ? searchParams.get("template") : null;
   const initialName = isNewWorkflow ? (searchParams.get("name") ?? "") : "";
@@ -80,6 +83,19 @@ export function WorkspaceWorkflowEditorRoute({
   }, [initialName, templateId, workflowId, workspaceId]);
 
   if (!state?.workspace) return null;
+  if (!isNewWorkflow && state.workflow === null) {
+    return (
+      <div className="space-y-3 p-6" data-testid="workflow-editor-not-found">
+        <h2 className="text-lg font-semibold">{t("workflows:workflowNotFound")}</h2>
+        <p className="text-sm text-muted-foreground">
+          {t("workflows:workflowNotFoundDescription")}
+        </p>
+        <Link href={`/settings/workspaces/${workspaceId}/workflows`}>
+          {t("workflows:backToWorkflows")}
+        </Link>
+      </div>
+    );
+  }
   const workflow =
     state.workflow ?? createNewWorkflow(state.workspace, state.workflowTemplate, state.initialName);
   const definitions = state.workflowTemplate?.default_steps?.length

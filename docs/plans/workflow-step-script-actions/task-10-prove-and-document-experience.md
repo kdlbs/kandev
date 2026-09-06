@@ -66,14 +66,14 @@ publish the user-facing documentation.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/workflow/workflow-editor.spec.ts tests/workflow/workflow-step-scripts.spec.ts tests/workflow/workflow-step-script-profile-switch.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome --no-build tests/workflow/mobile-workflow-editor.spec.ts
-cd apps/backend && go test ./internal/workflow/models ./internal/workflow/engine ./internal/workflow/service ./internal/workflow/handlers ./internal/agentctl/server/process ./internal/agent/runtime/lifecycle
-cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite ./internal/orchestrator
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet
-cd apps && pnpm --filter @kandev/web lint
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/workflow/workflow-editor.spec.ts tests/workflow/workflow-step-scripts.spec.ts tests/workflow/workflow-step-script-profile-switch.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome --no-build tests/workflow/mobile-workflow-editor.spec.ts)
+(cd apps/backend && go test ./internal/workflow/models ./internal/workflow/engine ./internal/workflow/service ./internal/workflow/handlers ./internal/agentctl/server/process ./internal/agent/runtime/lifecycle)
+(cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite ./internal/orchestrator)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)
+(cd apps && pnpm --filter @kandev/web lint)
 node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs
 python3 scripts/lint-spec-files.py --all
 git diff --check

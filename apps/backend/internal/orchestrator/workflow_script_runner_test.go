@@ -230,6 +230,20 @@ func (f *workflowScriptProcessFake) Stop(_ context.Context, _ string, _ string) 
 	return nil
 }
 
+type workflowScriptProcessRecoveryFake struct {
+	*workflowScriptProcessFake
+	requestProcess *runtimeagentctl.ProcessInfo
+	requestGets    int
+}
+
+func (f *workflowScriptProcessRecoveryFake) GetByRequestID(_ context.Context, _ string, requestID string, _ bool) (*runtimeagentctl.ProcessInfo, error) {
+	f.requestGets++
+	if requestID == "" || f.requestProcess == nil {
+		return nil, errors.New("process request not found")
+	}
+	return cloneWorkflowScriptProcess(f.requestProcess), nil
+}
+
 func TestWorkflowScriptRunnerExecutesOnceAndProjectsTerminalOutput(t *testing.T) {
 	runs := &workflowScriptRunStoreFake{}
 	messages := &workflowScriptMessageFake{}
@@ -388,10 +402,7 @@ func TestWorkflowScriptRunnerReconcileProjectsInterruptedAdmission(t *testing.T)
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	run, err := runs.GetWorkflowScriptRun(context.Background(), "run-1")
-	if err != nil {
-		t.Fatalf("load interrupted run: %v", err)
-	}
+	run := waitForWorkflowScriptRun(t, runs, "run-1", taskmodels.WorkflowScriptRunInterrupted)
 	if run.Status != taskmodels.WorkflowScriptRunInterrupted {
 		t.Fatalf("run status = %s, want interrupted", run.Status)
 	}
@@ -405,6 +416,104 @@ func TestWorkflowScriptRunnerReconcileProjectsInterruptedAdmission(t *testing.T)
 	if metadata["error"] != "workflow service restarted during process admission" {
 		t.Fatalf("message error = %#v, want restart reason", metadata["error"])
 	}
+}
+
+func TestWorkflowScriptRunnerReconcileStartingRunAttachesByRequestID(t *testing.T) {
+	runs := &workflowScriptRunStoreFake{
+		runs: map[string]*taskmodels.WorkflowScriptRun{
+			"on_enter/entry-1/step-1/0": {
+				ID: "run-1", OccurrenceKey: "on_enter/entry-1/step-1/0", ProcessRequestID: "request-1",
+				TaskID: "task-1", WorkflowID: "workflow-1", WorkflowStepID: "step-1",
+				WorkflowStepName: "Build", Trigger: taskmodels.WorkflowScriptRunTriggerOnEnter,
+				ActionPosition: 0, SessionID: "session-destination", ExecutionID: "execution-destination",
+				MessageID: "message-1", Status: taskmodels.WorkflowScriptRunStarting,
+				Command: "./verify.sh", TimeoutSeconds: 600,
+				FailurePolicy: string(taskmodels.WorkflowScriptFailurePolicyBlock),
+			},
+		},
+	}
+	messages := &workflowScriptMessageFake{
+		content:  map[string]string{"message-1": ""},
+		metadata: map[string]map[string]interface{}{"message-1": {"status": "starting"}},
+	}
+	processes := &workflowScriptProcessRecoveryFake{
+		workflowScriptProcessFake: &workflowScriptProcessFake{},
+		requestProcess: &runtimeagentctl.ProcessInfo{
+			ID: "process-recovered", SessionID: "session-destination", Status: "exited", ExitCode: ptr(0),
+			Output: []runtimeagentctl.ProcessOutputChunk{{Stream: "stdout", Data: "recovered\n"}},
+		},
+	}
+	runner := newWorkflowScriptRunner(runs, processes, messages, testLogger())
+
+	if err := runner.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	run := waitForWorkflowScriptRun(t, runs, "run-1", taskmodels.WorkflowScriptRunSucceeded)
+	if run.ProcessID != "process-recovered" || run.Output != "recovered\n" {
+		t.Fatalf("recovered run = %+v", run)
+	}
+	if len(processes.starts) != 0 {
+		t.Fatalf("recovery started replacement processes: %d", len(processes.starts))
+	}
+	if processes.requestGets != 1 {
+		t.Fatalf("request lookups = %d, want 1", processes.requestGets)
+	}
+}
+
+func TestWorkflowScriptRunnerRunLockRemainsExclusiveAcrossConcurrentCalls(t *testing.T) {
+	runner := newWorkflowScriptRunner(nil, nil, nil, testLogger())
+	run := &taskmodels.WorkflowScriptRun{ID: "run-lock"}
+	const callers = 64
+	var mu sync.Mutex
+	active, maximum := 0, 0
+	start := make(chan struct{})
+	done := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			<-start
+			done <- runner.withRunLock(context.Background(), run, func() error {
+				mu.Lock()
+				active++
+				if active > maximum {
+					maximum = active
+				}
+				mu.Unlock()
+				time.Sleep(time.Millisecond)
+				mu.Lock()
+				active--
+				mu.Unlock()
+				return nil
+			})
+		}()
+	}
+	close(start)
+	for i := 0; i < callers; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("withRunLock: %v", err)
+		}
+	}
+	if maximum != 1 {
+		t.Fatalf("maximum concurrent run callbacks = %d, want 1", maximum)
+	}
+}
+
+func waitForWorkflowScriptRun(t *testing.T, runs *workflowScriptRunStoreFake, id string, status taskmodels.WorkflowScriptRunStatus) *taskmodels.WorkflowScriptRun {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		run, err := runs.GetWorkflowScriptRun(context.Background(), id)
+		if err == nil && run.Status == status {
+			return run
+		}
+		time.Sleep(time.Millisecond)
+	}
+	run, err := runs.GetWorkflowScriptRun(context.Background(), id)
+	if err != nil {
+		t.Fatalf("load workflow script run: %v", err)
+	}
+	t.Fatalf("workflow script run status = %s, want %s", run.Status, status)
+	return nil
 }
 
 func cloneWorkflowScriptRun(run *taskmodels.WorkflowScriptRun) *taskmodels.WorkflowScriptRun {

@@ -99,6 +99,17 @@ func TestStartupMigrationCostsPopulated(t *testing.T) {
 		_ = seedDB.Close()
 		t.Fatalf("snapshot populated fixture: %v", err)
 	}
+	// The turn-id migration rebuilds the message table with a non-null
+	// updated_at column. Measure the historical backfill while the synthetic
+	// legacy fixture still has the nullable shape that migration handles.
+	updatedAtStarted := time.Now()
+	if err := dbpkg.NewRequiredMigrateLogger(seedDB, nil).Apply(
+		"evidence.task_session_messages.updated_at.backfill",
+		`UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`,
+	); err != nil {
+		t.Fatalf("measure updated_at backfill: %v", err)
+	}
+	updatedAtDuration := time.Since(updatedAtStarted)
 	if err := seedDB.Close(); err != nil {
 		t.Fatalf("close seeded database: %v", err)
 	}
@@ -112,22 +123,8 @@ func TestStartupMigrationCostsPopulated(t *testing.T) {
 	}
 	replayDuration := time.Since(replayStarted)
 
-	// Measure the two recurring data migrations separately on the same
-	// populated database. Reset statements are excluded from the timings.
-	if _, err := replayDB.Exec(`UPDATE task_session_messages SET updated_at = NULL`); err != nil {
-		_ = replayDB.Close()
-		t.Fatalf("reset updated_at fixture: %v", err)
-	}
-	updatedAtStarted := time.Now()
-	if err := dbpkg.NewRequiredMigrateLogger(replayDB, nil).Apply(
-		"evidence.task_session_messages.updated_at.backfill",
-		`UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`,
-	); err != nil {
-		_ = replayDB.Close()
-		t.Fatalf("measure updated_at backfill: %v", err)
-	}
-	updatedAtDuration := time.Since(updatedAtStarted)
-
+	// Measure the prompt-sequence backfill separately on the same populated
+	// database. Reset statements are excluded from the timing.
 	if _, err := replayDB.Exec(`UPDATE task_session_messages SET prompt_seq = 0`); err != nil {
 		_ = replayDB.Close()
 		t.Fatalf("reset prompt sequence fixture: %v", err)

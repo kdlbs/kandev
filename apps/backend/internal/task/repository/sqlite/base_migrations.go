@@ -448,6 +448,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateGitSnapshotContentDigest(); err != nil {
 		return err
 	}
+	if err := r.migrateTaskSessionMessagesTurnNullable(); err != nil {
+		return err
+	}
 
 	// Workflow step display snapshot on plan revisions, same pattern as
 	// author_name: the step a task was on when the revision was written.
