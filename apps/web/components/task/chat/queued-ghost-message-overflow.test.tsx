@@ -5,6 +5,7 @@ import { QueuedGhostMessage } from "./queued-ghost-message";
 
 const PREVIEW_TEST_ID = "queue-entry-text";
 const EXPAND_TEST_ID = "queue-entry-expand";
+const REMOVE_TEST_ID = "queue-entry-remove";
 
 type Geometry = { scrollHeight: number; clientHeight: number };
 type ResizeListener = EventListenerOrEventListenerObject;
@@ -21,7 +22,13 @@ let originalWindowAddEventListener: typeof window.addEventListener;
 let originalDocumentFonts: PropertyDescriptor | undefined;
 
 class FontFaceSetStub extends EventTarget {
-  readonly ready: Promise<FontFaceSet> = Promise.resolve(this as unknown as FontFaceSet);
+  status: FontFaceSetLoadStatus = "loading";
+  readyReads = 0;
+
+  get ready(): Promise<FontFaceSet> {
+    this.readyReads += 1;
+    return Promise.resolve(this as unknown as FontFaceSet);
+  }
 }
 
 class VisualViewportStub {
@@ -276,6 +283,21 @@ describe("queued message rendered overflow measurement semantics", () => {
     expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute("data-expanded")).toBe("false");
     expect(screen.queryByTestId(EXPAND_TEST_ID)).toBeNull();
   });
+
+  it("moves focus to remove when resize hides the focused disclosure", () => {
+    geometry = () => ({ scrollHeight: 80, clientHeight: 44 });
+    renderMessage("x".repeat(120));
+    const disclosure = screen.getByTestId(EXPAND_TEST_ID);
+    const remove = screen.getByTestId(REMOVE_TEST_ID);
+    disclosure.focus();
+    expect(document.activeElement).toBe(disclosure);
+
+    geometry = () => ({ scrollHeight: 44, clientHeight: 44 });
+    emitWindowResize();
+
+    expect(screen.queryByTestId(EXPAND_TEST_ID)).toBeNull();
+    expect(document.activeElement).toBe(remove);
+  });
 });
 
 describe("queued message rendered overflow signals and fallbacks", () => {
@@ -312,9 +334,10 @@ describe("queued message rendered overflow signals and fallbacks", () => {
   });
 
   it("remeasures when web fonts settle", () => {
+    const fonts = new FontFaceSetStub();
     Object.defineProperty(document, "fonts", {
       configurable: true,
-      value: new FontFaceSetStub(),
+      value: fonts,
     });
     geometry = () => ({ scrollHeight: 44, clientHeight: 44 });
     renderMessage("x".repeat(120));
@@ -324,6 +347,19 @@ describe("queued message rendered overflow signals and fallbacks", () => {
     act(() => document.fonts.dispatchEvent(new Event("loadingdone")));
 
     expect(screen.getByTestId(EXPAND_TEST_ID)).toBeTruthy();
+  });
+
+  it("does not read the settled font promise", () => {
+    const fonts = new FontFaceSetStub();
+    fonts.status = "loaded";
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: fonts,
+    });
+
+    renderMessage("x".repeat(120));
+
+    expect(fonts.readyReads).toBe(0);
   });
 
   it("uses initial and viewport signals when ResizeObserver is unavailable or non-callable", () => {

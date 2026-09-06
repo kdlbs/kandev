@@ -84,7 +84,9 @@ export function useQueuedMessageOverflow(
 
     preview.addEventListener("load", handleAsyncContent, true);
     fonts?.addEventListener("loadingdone", handleAsyncContent);
-    void fonts?.ready.then(handleAsyncContent);
+    if (fonts && fonts.status !== "loaded") {
+      void fonts.ready.then(handleAsyncContent);
+    }
 
     measure();
     window.addEventListener("resize", handleWindowResize);
