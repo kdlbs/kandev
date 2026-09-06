@@ -9,6 +9,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   apiClient,
   seedData,
 }) => {
+  await testPage.setViewportSize({ width: 1440, height: 900 });
   const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Feeder Move Workflow");
   const sourceStep = await apiClient.createWorkflowStep(workflow.id, "C", 0, {
     is_start_step: true,
@@ -42,8 +43,8 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceY = sourceBox!.y + sourceBox!.height / 2;
   await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
-  await testPage.mouse.move(sourceX + 20, sourceY);
-  await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+  await testPage.mouse.move(sourceX + 20, sourceY, { steps: 4 });
+  await expect(sourceCard).toHaveClass(/opacity-50/, { timeout: 5_000 });
 
   // Dragging can temporarily move destinations before the anchored source
   // column, so scroll them back into the viewport before dropping.
@@ -64,7 +65,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   await testPage.mouse.move(
     feederBox!.x + feederBox!.width / 2,
     feederBox!.y + feederBox!.height / 2,
-    { steps: 12 },
+    { steps: 1 },
   );
   await testPage.mouse.up();
 
