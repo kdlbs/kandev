@@ -189,6 +189,14 @@ func TestExecuteStepTransition_QueuedTransitionStillWritesHandoffCarryToken(t *t
 	if calls[0].metadata["signal_handoff"] != "watch out for X" {
 		t.Errorf("metadata[signal_handoff] = %v, want 'watch out for X'", calls[0].metadata["signal_handoff"])
 	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		t.Fatal("the consumed signal bag must be cleared even when the transition's dispatch is deferred by the queue")
+	}
 }
 
 // TestApplyEngineTransition_WritesHandoffCarryToken covers AC-001.2 on the

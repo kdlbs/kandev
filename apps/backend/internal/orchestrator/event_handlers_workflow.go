@@ -482,6 +482,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 
 	if queued {
+		if triggerOnEnter {
+			s.clearPendingStepSignalByID(ctx, sessionID)
+		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
