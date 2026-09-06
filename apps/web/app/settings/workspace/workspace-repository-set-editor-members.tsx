@@ -110,7 +110,7 @@ export function RepositorySetMembersField({
   return (
     <div className="space-y-2">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-medium">{t("workspaces:repositorySetsMembersLabel")}</p>
           <p className="text-xs text-muted-foreground">
             {t("workspaces:repositorySetsMembersHint")}
@@ -124,7 +124,7 @@ export function RepositorySetMembersField({
           searchPlaceholder={t("workspaces:repositorySetsSearchRepositories")}
           emptyMessage={t("workspaces:repositorySetsNoMatchingRepositories")}
           disabled={availableRepositories.length === 0}
-          triggerClassName="min-h-11 border border-input bg-background px-3"
+          triggerClassName="min-h-11 border border-input bg-background px-3 sm:w-56 sm:shrink-0"
           testId="repository-set-add-repository"
           dropdownTestId="repository-set-add-repository-dropdown"
           ariaLabel={t("workspaces:repositorySetsAddRepository")}
