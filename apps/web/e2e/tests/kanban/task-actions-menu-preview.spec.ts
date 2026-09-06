@@ -88,6 +88,7 @@ test.describe("Task preview panel actions menu", () => {
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Preview Menu Delete Task");
+    await dialog.getByTestId("delete-discard-worktree-checkbox").click();
     await dialog.getByRole("button", { name: "Delete" }).click();
 
     await expect(kanban.taskCardByTitle("Preview Menu Delete Task")).not.toBeVisible({
