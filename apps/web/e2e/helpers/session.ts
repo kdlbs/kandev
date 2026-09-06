@@ -1,7 +1,8 @@
-import { expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
-import { SessionPage } from "../pages/session-page";
+import type { SessionPage } from "../pages/session-page";
+import { pollUntil } from "./poll-until";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const FAILED_STATES = ["FAILED", "CANCELLED"];
@@ -23,18 +24,18 @@ export async function waitForLatestSessionDone(
   message: string,
   timeout = 120_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        if (sessions.length < expectedCount) return false;
-        // API returns sessions newest-first.
-        const latest = sessions[0];
-        return sessionDoneOrThrow(latest);
-      },
-      { timeout, message },
-    )
-    .toBe(true);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      if (sessions.length < expectedCount) return false;
+      // API returns sessions newest-first.
+      const latest = sessions[0];
+      return sessionDoneOrThrow(latest);
+    },
+    (done) => done,
+    timeout,
+    message,
+  );
 }
 
 export async function waitForSessionDone(
@@ -44,16 +45,16 @@ export async function waitForSessionDone(
   message: string,
   timeout = 120_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        const session = sessions.find((s) => s.id === sessionId);
-        return sessionDoneOrThrow(session);
-      },
-      { timeout, message },
-    )
-    .toBe(true);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((s) => s.id === sessionId);
+      return sessionDoneOrThrow(session);
+    },
+    (done) => done,
+    timeout,
+    message,
+  );
 }
 
 export async function waitForAgentMessage(
@@ -62,17 +63,17 @@ export async function waitForAgentMessage(
   content: string,
   timeout = 60_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(sessionId);
-        return messages.some(
-          (message) => message.author_type === "agent" && message.content.includes(content),
-        );
-      },
-      { timeout, message: `Waiting for agent message containing ${JSON.stringify(content)}` },
-    )
-    .toBe(true);
+  await pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.some(
+        (message) => message.author_type === "agent" && message.content.includes(content),
+      );
+    },
+    (found) => found,
+    timeout,
+    `Waiting for agent message containing ${JSON.stringify(content)}`,
+  );
 }
 
 export async function waitForSessionState(
@@ -85,15 +86,15 @@ export async function waitForSessionState(
     timeout?: number;
   },
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(options.taskId);
-        return sessions.find((session) => session.id === options.sessionId)?.state ?? null;
-      },
-      { timeout: options.timeout ?? 120_000, message: options.message },
-    )
-    .toBe(options.expectedState);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(options.taskId);
+      return sessions.find((session) => session.id === options.sessionId)?.state ?? null;
+    },
+    (state) => state === options.expectedState,
+    options.timeout ?? 120_000,
+    options.message,
+  );
 }
 
 export async function waitForSessionEnvironment(
@@ -106,21 +107,22 @@ export async function waitForSessionEnvironment(
     timeout?: number;
   },
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(options.taskId);
-        const session = sessions.find((s) => s.id === options.sessionId);
-        return session?.task_environment_id ?? "";
-      },
-      { timeout: options.timeout ?? 60_000, message: options.message },
-    )
-    .toBe(options.expectedEnvironmentId);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(options.taskId);
+      const session = sessions.find((s) => s.id === options.sessionId);
+      return session?.task_environment_id ?? "";
+    },
+    (environmentId) => environmentId === options.expectedEnvironmentId,
+    options.timeout ?? 60_000,
+    options.message,
+  );
 }
 
 export async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
+  const { SessionPage: SessionPageClass } = await import("../pages/session-page");
   await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
+  const session = new SessionPageClass(page);
   await session.waitForLoad();
   return session;
 }

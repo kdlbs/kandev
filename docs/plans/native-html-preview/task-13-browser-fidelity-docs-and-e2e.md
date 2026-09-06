@@ -120,3 +120,10 @@ Verification:
 - Mobile Chrome preview E2E passed: 2 tests.
 - Desktop shell E2E passed.
 - Fresh desktop and mobile PR screenshots were captured and compressed.
+- Reproduced and fixed the frontend CI failure caused by a synchronous
+  assertion racing Radix repository-menu dismissal, and removed unhandled
+  Happy DOM loopback requests caused by Playwright runtime imports in Vitest
+  helper tests.
+- Full frontend Vitest verification passed after the fix: 1,870 test files,
+  15,851 passed, and 4 skipped, with no unhandled network errors. Direct web
+  typecheck, lint, i18n, and formatting checks passed as well.

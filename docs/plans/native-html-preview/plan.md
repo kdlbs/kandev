@@ -176,3 +176,14 @@ licenses, and PR CI. Every review thread must have a disposition before merge.
 - Desktop shell E2E passed.
 - Fresh desktop and mobile screenshots were captured, inspected, and compressed
   for the pull request.
+- Reproduced and fixed the CI-only frontend failure in the saved-repository
+  picker by synchronizing the Radix menu dismissal and asynchronous discovery
+  assertions.
+- Disabled Happy DOM main-frame and child-frame fixture navigation, and isolated
+  Vitest-importable E2E utilities from Playwright runtime imports to remove the
+  unhandled loopback `ECONNREFUSED` failures.
+- The full frontend suite passed after the fix: 1,870 test files, 15,851
+  passed, and 4 skipped, with no unhandled network errors.
+- Re-ran desktop and mobile native preview E2E locally: 2 tests passed in each
+  project. Web lint, direct web typecheck, i18n checks, and formatting checks
+  also passed.
