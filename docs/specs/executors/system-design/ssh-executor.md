@@ -18,6 +18,7 @@ This design preserves the technical source detail for `REQ-EXECUTORS-SSH-EXECUTO
 | Requirement | Design section |
 | --- | --- |
 | `REQ-EXECUTORS-SSH-EXECUTOR-001` | [Migrated source detail](#migrated-source-detail) |
+| `AC-EXECUTORS-SSH-EXECUTOR-001.11` and `AC-EXECUTORS-SSH-EXECUTOR-001.12` | [Credential-file conflict policy](#credential-file-conflict-policy) |
 
 ## Migrated source detail
 
@@ -134,6 +135,26 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - New `sshFileUploader` implements `FileUploader` (write file at path with mode) via SFTP.
 - The existing `executor_sprites_credentials.go` selection + upload logic for `remote_credentials` / `remote_auth_secrets` is the reference; SSH v1 wires the uploader and writes credentials to the SSH user's home dir.
 - GitHub CLI token: same special case as Sprites (run `gh auth token` locally, inject as env var).
+
+### Credential-file conflict policy
+
+The agent descriptor owns the policy for an existing credential file. The transfer layer must not infer file semantics from a path or an executor type.
+
+OpenCode declares a top-level JSON-object merge for `auth.json`. The transfer layer reads the target before it writes the source file.
+
+The transfer layer preserves providers that exist only in the target. It adds providers that exist only in the source.
+
+When both files contain a provider, the source entry replaces the target entry. This rule preserves the selected host credential as the copy source.
+
+When the target does not exist, the transfer layer writes the source object. Other agent credential files keep the existing replace policy.
+
+The merge requires two valid JSON objects. An unreadable or malformed target causes a copy error and remains unchanged.
+
+The merge runs in the shared credential-upload path. Persistent transports expose target reads only for this policy and keep ordinary writes unchanged.
+
+An isolated transport has no pre-existing user file. It validates the source object and writes it without a target read.
+
+This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../../../decisions/2026-09-05-agent-owned-credential-file-conflicts.md).
 
 ### Recovery after backend restart
 

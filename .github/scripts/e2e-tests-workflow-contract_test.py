@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Contract tests for the prebuilt desktop E2E image path."""
+"""Contract tests for the E2E workflow and prebuilt images."""
 
+import hashlib
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 
@@ -10,6 +14,16 @@ DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
+IMAGE_DIGEST_RESOLVER = REPO_ROOT / ".github" / "scripts" / "resolve-image-digest.sh"
+VALID_IMAGE_INDEX = (
+    b'{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json",'
+    b'"digest":"sha256:' + b"1" * 64 + b'","size":2}]}'
+)
+VALID_IMAGE_MANIFEST = (
+    b'{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json",'
+    b'"digest":"sha256:' + b"0" * 64 + b'","size":2},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip",'
+    b'"digest":"sha256:' + b"2" * 64 + b'","size":2}]}'
+)
 
 
 def job_block(workflow: str, job: str, next_job: str) -> str:
@@ -21,7 +35,85 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
     return remainder.partition(f"\n  {next_job}:\n")[0]
 
 
-class DesktopE2EWorkflowContractTest(unittest.TestCase):
+class E2EWorkflowContractTest(unittest.TestCase):
+    def run_image_digest_resolver(
+        self,
+        *,
+        manifest: bytes,
+        failures_before_success: int,
+        attempt_timeout: str = "5s",
+        stalls_before_success: int = 0,
+        invalid_manifest: bytes = b"",
+        invalid_responses_before_success: int = 0,
+    ) -> tuple[subprocess.CompletedProcess[str], int]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bin_dir = temp_path / "bin"
+            bin_dir.mkdir()
+            count_file = temp_path / "docker-count"
+            manifest_file = temp_path / "manifest.json"
+            manifest_file.write_bytes(manifest)
+            invalid_manifest_file = temp_path / "invalid-manifest.json"
+            invalid_manifest_file.write_bytes(invalid_manifest)
+
+            docker = bin_dir / "docker"
+            docker.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [[ -f "${FAKE_DOCKER_COUNT}" ]]; then
+  count="$(cat "${FAKE_DOCKER_COUNT}")"
+fi
+count="$((count + 1))"
+printf '%s' "${count}" > "${FAKE_DOCKER_COUNT}"
+if (( count <= FAKE_DOCKER_FAILURES )); then
+  echo "transient registry failure" >&2
+  exit 1
+fi
+if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS )); then
+  echo "stalled registry lookup" >&2
+  /bin/sleep 1
+  exit 1
+fi
+if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS + FAKE_DOCKER_INVALID_RESPONSES )); then
+  cat "${FAKE_DOCKER_INVALID_MANIFEST}"
+  exit 0
+fi
+cat "${FAKE_DOCKER_MANIFEST}"
+""",
+                encoding="utf-8",
+            )
+            docker.chmod(0o755)
+
+            sleep = bin_dir / "sleep"
+            sleep.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            sleep.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bin_dir}:{env['PATH']}",
+                    "FAKE_DOCKER_COUNT": str(count_file),
+                    "FAKE_DOCKER_FAILURES": str(failures_before_success),
+                    "FAKE_DOCKER_STALLS": str(stalls_before_success),
+                    "FAKE_DOCKER_INVALID_MANIFEST": str(invalid_manifest_file),
+                    "FAKE_DOCKER_INVALID_RESPONSES": str(
+                        invalid_responses_before_success
+                    ),
+                    "FAKE_DOCKER_MANIFEST": str(manifest_file),
+                    "IMAGE_RESOLVE_ATTEMPT_TIMEOUT": attempt_timeout,
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(IMAGE_DIGEST_RESOLVER), "ghcr.io/kdlbs/kandev-ci:runtime-latest"],
+                check=False,
+                capture_output=True,
+                env=env,
+                text=True,
+            )
+            attempts = int(count_file.read_text(encoding="utf-8")) if count_file.exists() else 0
+            return result, attempts
+
     def test_desktop_image_contains_pinned_toolchain_and_system_dependencies(self) -> None:
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
@@ -85,13 +177,14 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         changes_job = job_block(workflow, "changes", "build")
         for pattern in (
             ".github/docker/ci-base/**",
+            ".github/scripts/resolve-image-digest.sh",
             ".github/workflows/ci-base-image.yml",
         ):
             self.assertIn(pattern, changes_job)
 
     def test_normal_shard_has_queue_safe_timeout(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
-        normal_job = job_block(workflow, "e2e", "e2e-containers")
+        normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
             "# 35 min covers the serial count-fallback tail and setup overhead",
@@ -126,7 +219,8 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.2
     def test_container_job_reuses_verified_browser_cache_with_fallback(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
-        container_job = job_block(workflow, "e2e-containers", "desktop-e2e")
+        resolver_job = job_block(workflow, "playwright_image", "e2e-containers")
+        container_job = job_block(workflow, "e2e-containers", "e2e-kubernetes-compatibility")
 
         self.assertIn(
             "uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
@@ -136,36 +230,30 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             "uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
             container_job,
         )
-        self.assertIn("id: playwright_image", container_job)
-        self.assertLess(
-            container_job.index("- name: Log in to GHCR"),
-            container_job.index("- name: Resolve immutable Playwright runtime image"),
-        )
+        self.assertIn("needs: [changes, build, playwright_image]", container_job)
+        self.assertNotIn("docker buildx imagetools inspect", container_job)
         self.assertIn(
             "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f",
-            container_job,
+            resolver_job,
         )
         self.assertIn(
-            "image=ghcr.io/kdlbs/kandev-ci:runtime-latest",
-            container_job,
+            ".github/scripts/resolve-image-digest.sh \"$image\"",
+            resolver_job,
         )
         self.assertIn(
-            'docker buildx imagetools inspect "$image"',
-            container_job,
+            "digest: ${{ steps.resolve.outputs.digest }}",
+            resolver_job,
         )
-        self.assertIn("for attempt in 1 2 3; do", container_job)
+        gate_job = workflow.partition("  e2e-gate:\n")[2]
+        self.assertIn("PLAYWRIGHT_IMAGE_RESULT", gate_job)
+        self.assertIn('"playwright-image:${PLAYWRIGHT_IMAGE_RESULT}"', gate_job)
         self.assertIn(
-            'if candidate="$(docker buildx imagetools inspect "$image"',
+            "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ needs.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}",
             container_job,
         )
-        self.assertIn('sleep "$((attempt * 2))"', container_job)
         self.assertIn("path: /tmp/ms-playwright", container_job)
         self.assertIn(
-            "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}",
-            container_job,
-        )
-        self.assertIn(
-            "restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-",
+            "restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ needs.playwright_image.outputs.digest }}-",
             container_job,
         )
         self.assertIn("id: playwright_cache", container_job)
@@ -184,7 +272,7 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             container_job,
         )
         self.assertIn(
-            "PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}",
+            "PLAYWRIGHT_RUNTIME_REF: ${{ needs.playwright_image.outputs.ref }}",
             container_job,
         )
         self.assertIn('docker pull "$PLAYWRIGHT_RUNTIME_REF"', container_job)
@@ -200,6 +288,105 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         self.assertIn('setup_mode="cache-hit"', container_job)
         self.assertIn('setup_mode="image-fallback"', container_job)
         self.assertGreaterEqual(container_job.count("continue-on-error: true"), 2)
+
+    def test_image_digest_resolver_hashes_raw_manifest_bytes(self) -> None:
+        self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
+        resolver = IMAGE_DIGEST_RESOLVER.read_text(encoding="utf-8")
+        self.assertIn('imagetools inspect --raw "$image"', resolver)
+        manifest = VALID_IMAGE_MANIFEST
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest, failures_before_success=0
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(), f"sha256:{hashlib.sha256(manifest).hexdigest()}"
+        )
+        self.assertEqual(attempts, 1)
+
+    def test_image_digest_resolver_retries_transient_registry_failures(self) -> None:
+        self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
+        manifest = VALID_IMAGE_INDEX
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest, failures_before_success=2
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(attempts, 3)
+        self.assertIn("attempt 1/5", result.stderr)
+        self.assertIn("transient registry failure", result.stderr)
+
+    def test_image_digest_resolver_times_out_stalled_registry_lookup(self) -> None:
+        manifest = VALID_IMAGE_INDEX
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest,
+            failures_before_success=0,
+            attempt_timeout="0.5s",
+            stalls_before_success=1,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(attempts, 2)
+        self.assertIn("timed out after 0.5s", result.stderr)
+
+    def test_image_digest_resolver_retries_invalid_manifest_then_succeeds(self) -> None:
+        self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
+        manifest = VALID_IMAGE_INDEX
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest,
+            failures_before_success=0,
+            invalid_manifest=b'{"schemaVersion":1}',
+            invalid_responses_before_success=2,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(), f"sha256:{hashlib.sha256(manifest).hexdigest()}"
+        )
+        self.assertEqual(attempts, 3)
+        self.assertIn("attempt 1/5", result.stderr)
+
+    def test_image_digest_resolver_rejects_invalid_manifest_responses(self) -> None:
+        for name, invalid_manifest in (
+            ("empty", b""),
+            ("malformed", b"not-json"),
+            ("wrong-schema", b'{"schemaVersion":1}'),
+            ("schema-only", b'{"schemaVersion":2}'),
+            ("empty-index", b'{"schemaVersion":2,"manifests":[]}'),
+            ("missing-descriptor-fields", b'{"schemaVersion":2,"manifests":[{}]}'),
+            (
+                "empty-layers",
+                b'{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json",'
+                b'"digest":"sha256:' + b"0" * 64 + b'","size":2},"layers":[]}',
+            ),
+        ):
+            with self.subTest(name=name):
+                result, attempts = self.run_image_digest_resolver(
+                    manifest=VALID_IMAGE_INDEX,
+                    failures_before_success=0,
+                    invalid_manifest=invalid_manifest,
+                    invalid_responses_before_success=5,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(attempts, 5)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("Could not resolve an immutable digest", result.stderr)
+
+    def test_image_digest_resolver_fails_closed_after_bounded_retries(self) -> None:
+        self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=VALID_IMAGE_INDEX, failures_before_success=5
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(attempts, 5)
+        self.assertIn("Could not resolve an immutable digest", result.stderr)
 
 
 if __name__ == "__main__":

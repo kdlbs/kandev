@@ -799,6 +799,7 @@ type Executor struct {
 	capabilities      ExecutorTypeCapabilities
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
+	canvasesEnabled   bool
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -1081,6 +1082,13 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 // claimed descriptors into passthrough workspaces.
 func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 	e.attachmentReader = reader
+}
+
+// SetCanvasesEnabled controls whether task MCP profiles receive the gated
+// canvas-authoring capability. The flag is applied during backend startup
+// before any new agent session is launched.
+func (e *Executor) SetCanvasesEnabled(enabled bool) {
+	e.canvasesEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.
