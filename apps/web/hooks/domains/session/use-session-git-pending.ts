@@ -162,7 +162,9 @@ function pendingFileOperationCompleted(
   fileStateIndex: Map<string, PendingFileState>,
 ): boolean {
   const state = fileStateIndex.get(key);
-  if (!state) return false;
+  // Unstaging a staged-only file can make it clean, so the refreshed status
+  // legitimately omits it entirely.
+  if (!state) return operation === "unstage";
   return operation === "stage"
     ? state.hasStaged && !state.hasUnstaged
     : state.hasUnstaged && !state.hasStaged;
