@@ -38,14 +38,13 @@ Amending the ADR's text is a documentation change, out of scope for the contract
 workaround that exists because the argument does not work. One card made 26 step
 transitions on 2026-09-03/04; every handoff it wrote was discarded.
 
-**Prior-art leg receipts.** The wiki leg RAN and returned nothing useful:
-`OBSIDIAN_VAULT_PATH` = `/Users/henry/Documents/henry/wiki` from
-`~/.obsidian-wiki/config.henry` (pinned, not the mutable `config` symlink), QMD
-collection `wiki`; all three transports were unavailable (`obsidian-wiki` not
-installed, `qmd` not on `PATH`, `~/Documents` reads returning
-`Operation not permitted` under this process's macOS privacy scope). The vendor leg
-DID NOT RUN: `saas-kb` / `search_fsm_docs` are not registered in this session, so
-`ai_sdlc` was not queried. Neither informed the requirement.
+**Prior-art leg receipts.** The wiki leg RAN and returned nothing useful: the
+configured Obsidian vault and QMD collection were unreachable in this
+environment (all three transports unavailable — the wiki CLI not installed,
+the query tool not on `PATH`, and the vault path denied by local filesystem
+permissions). The vendor leg DID NOT RUN: `saas-kb` / `search_fsm_docs` are not
+registered in this session, so `ai_sdlc` was not queried. Neither informed the
+requirement.
 
 ## Measured input
 
