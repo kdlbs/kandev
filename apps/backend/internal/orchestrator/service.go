@@ -607,6 +607,12 @@ type Service struct {
 	// seam.
 	routeActionHandler func(context.Context, RouteActionRequest) (*RouteActionResult, error)
 
+	// routeActionLocks serializes manual route actions for one session from the
+	// active-turn check through handler completion. It is separate from
+	// cancelInFlight because route handlers can reach the lifecycle lock.
+	routeActionLocksMu sync.Mutex
+	routeActionLocks   map[string]*routeActionOperationLock
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -1260,22 +1266,55 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
-	lock, release := s.acquireCancelInFlightGuard(request.SessionID)
+	releaseRouteAction := s.acquireRouteActionOperationLock(request.SessionID)
+	defer releaseRouteAction()
+	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
+		return nil, err
+	}
+	return s.routeActionHandler(ctx, request)
+}
+
+// rejectRouteActionDuringActiveTurn holds the cancel-in-flight guard only for
+// the active-turn read, making it atomic against a concurrent cancel
+// decision. The guard is released before ApplyRouteAction calls
+// routeActionHandler: that handler can reach acquireSessionLifecycleLock
+// (dynamic route launches relaunch through startCreatedSession), and holding
+// the guard across it would invert the global lock order documented on
+// acquireSessionLifecycleLock.
+//
+// route-action-vs-route-action is serialized locally by the per-session
+// operation lock held by ApplyRouteAction. ResolveRouteAction's generation CAS
+// remains the cross-process fence (for example, ErrStaleGeneration).
+// route-action-vs-cancellation is protected for projection writes: every
+// full-session-row write in dynamic_routing.go is conditioned via
+// UpdateTaskSessionIfCurrentState on a state confirmed no earlier than the
+// write itself, and relaunchDynamicTaskAfterFailure's CREATED reset reloads
+// the session immediately before writing, refuses a reloaded terminal state,
+// and CASes on that reload. Launch admission after that reset still needs the
+// lifecycle cancellation fence described in the dynamic launch follow-up.
+// route-action-vs-turn-admission is protected at the final RUNNING/turn claim:
+// both direct and lifecycle prompt admission check the operation marker while
+// holding cancelInFlight, so a new turn cannot be admitted after a route action
+// claims the session. Pre-admission process resume can still race that handler
+// and remains a separate lifecycle handoff concern.
+func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
+	if s.turnService == nil {
+		return nil
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	defer func() {
 		lock.Unlock()
 		release()
 	}()
-	if s.turnService != nil {
-		activeTurn, err := s.turnService.GetActiveTurn(ctx, request.SessionID)
-		if err != nil && !isNoActiveTurnError(err) {
-			return nil, fmt.Errorf("check active turn for route action: %w", err)
-		}
-		if activeTurn != nil {
-			return nil, ErrRouteActionActiveTurn
-		}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil && !isNoActiveTurnError(err) {
+		return fmt.Errorf("check active turn for route action: %w", err)
 	}
-	return s.routeActionHandler(ctx, request)
+	if activeTurn != nil {
+		return ErrRouteActionActiveTurn
+	}
+	return nil
 }
 
 // Status contains orchestrator status information
@@ -2476,6 +2515,29 @@ func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 // session's persisted conversation identity. Keep the critical section around
 // the complete reset/resume operation, including the bounded runtime wait, so
 // no caller can launch with a token that a concurrent reset is invalidating.
+//
+// Global lock order: this lock is OUTER to acquireCancelInFlightGuard. A
+// caller that holds the cancel-in-flight guard for sessionID must release it
+// (lockedCancelInFlightGuard's unlock/relock protocol) before acquiring this
+// lock, or it can deadlock against every caller that already takes lifecycle
+// first — resetAgentContext, ResumeTaskSessionWithOptions,
+// ensureSessionRunning, reclaimIdleSession. handleAgentCompletedLocked and
+// ApplyRouteAction's route-action dispatch follow this order.
+//
+// Known remaining inversions, both guard-then-lifecycle chains that reach
+// this lock while still holding the cancel-in-flight guard, by design, to
+// keep terminalization/failure-routing from racing launch admission. Closing
+// them needs a redesign of that admission invariant, tracked separately
+// rather than in this lock-order fix:
+//   - autoStartStepPrompt (event_handlers_workflow.go) holds the guard across
+//     the whole StartCreatedSession launch for a session in CREATED state.
+//   - runDetachedDynamicSuccessorLaunch (dynamic_launch.go) acquires its own
+//     guard and reaches this lock via relaunchDynamicTaskAfterFailure ->
+//     StartCreatedSession. Both handleAgentFailedLocked and
+//     handleAgentErrorEvent schedule it (via routeDynamicAgentFailure ->
+//     launchDynamicSuccessorAfterFailure -> launchDynamicSuccessorDetached)
+//     as a detached goroutine rather than reaching it while holding their own
+//     dispatch-level guard, so this is one call site, not two.
 func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	if sessionID == "" {
 		return func() {}
