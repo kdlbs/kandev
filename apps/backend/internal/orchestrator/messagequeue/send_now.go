@@ -140,6 +140,7 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 	seenReferences := make(map[string]struct{})
 	references := make([]apiv1.EntityReference, 0)
 	sources := make([]map[string]interface{}, 0, len(entries))
+	var handoffText string
 
 	for _, entry := range entries {
 		if entry.Content != "" {
@@ -153,6 +154,12 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 			}
 			seenReferences[reference.Ref] = struct{}{}
 			references = append(references, reference)
+		}
+
+		if handoffText == "" {
+			if text, ok := entry.Metadata[MetadataStepHandoff].(string); ok && text != "" {
+				handoffText = text
+			}
 		}
 
 		sources = append(sources, map[string]interface{}{
@@ -171,6 +178,11 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 		delete(metadata, MetadataEntityReferences)
 	} else {
 		metadata[MetadataEntityReferences] = references
+	}
+	if handoffText == "" {
+		delete(metadata, MetadataStepHandoff)
+	} else {
+		metadata[MetadataStepHandoff] = handoffText
 	}
 	metadata[MetadataSendNowSources] = sources
 
