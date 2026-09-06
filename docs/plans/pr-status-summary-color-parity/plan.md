@@ -48,6 +48,8 @@ fallback icon state at all.
 - Add focused backend regression coverage for combined PR states.
 - Pass the persisted compact summary to the Kanban PR icon while full PR data
   is unavailable.
+- Keep the preview deploy command compatible with the current default-branch
+  workflow's `--skip-description` flag.
 - Prove reload parity in the desktop sidebar and Kanban card.
 - Prove the same compact-summary color in the mobile task switcher.
 

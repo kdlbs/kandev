@@ -108,9 +108,11 @@ checks, while a pending review without a passed CI signal remains yellow. The
 multi-PR rank table follows the same ordering. Kanban cards pass their
 persisted task summary through the existing PR icon fallback. The icon is
 yellow before reload, after reload, and after full-record hydration on the
-covered desktop and mobile surfaces.
+covered desktop and mobile surfaces. The preview deploy command also accepts
+the `--skip-description` flag used by the current default-branch workflow.
 
 Verification completed with 10 focused projector cases, all 90 status summary
 package tests, 14 Kanban component tests, 2 desktop browser regressions, and 1
 mobile browser regression passing. Backend and web production builds,
-frontend typecheck, and `git diff --check` also passed before this remediation.
+preview command tests, frontend typecheck, and `git diff --check` also passed
+before this remediation.
