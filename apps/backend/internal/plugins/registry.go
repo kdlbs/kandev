@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
@@ -40,6 +41,12 @@ func (r *Registry) Load(s store.Store) error {
 
 	byID := make(map[string]*store.Record, len(records))
 	for _, rec := range records {
+		if rec.InstallationID == "" {
+			rec.InstallationID = uuid.NewString()
+			if err := s.Save(rec); err != nil {
+				return fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err)
+			}
+		}
 		byID[rec.ID] = cloneRecord(rec)
 	}
 

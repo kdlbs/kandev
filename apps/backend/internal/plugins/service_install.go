@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -114,11 +115,28 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// not a manifest fact) must be carried forward or an auto-update would
 	// silently reset the very toggle that triggered it.
 	if hadOldRec {
+		rec.InstallationID = oldRec.InstallationID
 		rec.AutoUpdate = oldRec.AutoUpdate
+	}
+	if rec.InstallationID == "" {
+		rec.InstallationID = uuid.NewString()
 	}
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
+	}
+	if err := s.reviewInstalledApprovals(rec); err != nil {
+		if hadOldRec {
+			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
+				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
+					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+			}
+		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
+			s.log.Warn("plugins: failed to delete plugin record after approval review error",
+				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+		}
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+		return nil, err
 	}
 	s.registry.Add(rec)
 	s.agentToolInstallMu.Unlock()
@@ -141,6 +159,18 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
+	ledger := s.approvalLedger()
+	if ledger == nil {
+		return nil
+	}
+	caps, err := ManifestCapabilityIDs(rec.Manifest)
+	if err != nil {
+		return err
+	}
+	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC())
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -357,6 +387,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
+	if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
+		return fmt.Errorf("plugins: tombstone approval history: %w", err)
+	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
