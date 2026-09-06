@@ -601,6 +601,56 @@ func TestSwitchSessionForStep_ReuseOnStartParkOnEndRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPrepareWorkflowStepSession_QAToPRDoesNotReuseSolRuntime verifies that a
+// completion-driven QA to PR transition owns a new exact-profile session.
+// The source session's runtime model and ACP resume identity must never become
+// PR launch state merely because the workflow transition is immediate.
+func TestPrepareWorkflowStepSession_QAToPRDoesNotReuseSolRuntime(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+
+	fixture.current.AgentProfileID = "qa-sol-profile"
+	fixture.current.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-sol"}
+	fixture.current.Metadata = map[string]interface{}{
+		models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-sol"},
+	}
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+
+	qaRuntime, err := fixture.repo.GetExecutorRunningBySessionID(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	qaRuntime.ResumeToken = "qa-sol-acp-token"
+	require.NoError(t, fixture.repo.UpsertExecutorRunning(ctx, qaRuntime))
+
+	prStep := &wfmodels.WorkflowStep{
+		ID:                        "step-pr",
+		WorkflowID:                "wf1",
+		AgentProfileID:            "pr-gpt-5.4-profile",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	}
+	qaStep := &wfmodels.WorkflowStep{
+		ID: "step-qa", WorkflowID: "wf1", AgentProfileID: "qa-sol-profile",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+
+	prSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, prStep, qaStep)
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.NotNil(t, prSession)
+	require.NotEqual(t, fixture.current.ID, prSession.ID)
+	require.Equal(t, "pr-gpt-5.4-profile", prSession.AgentProfileID)
+	require.Empty(t, prSession.AgentProfileSnapshot["model"])
+	_, inheritedRuntime := models.LoadSessionRuntimeConfig(prSession.Metadata)
+	require.False(t, inheritedRuntime)
+
+	qaSession, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	require.False(t, qaSession.IsPrimary)
+	require.Equal(t, "gpt-5.6-sol", qaSession.AgentProfileSnapshot["model"])
+
+	_, err = fixture.repo.GetExecutorRunningBySessionID(ctx, prSession.ID)
+	require.Error(t, err, "the destination must not inherit the QA ACP resume identity before launch")
+}
+
 func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
