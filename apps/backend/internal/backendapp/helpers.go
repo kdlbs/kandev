@@ -1429,9 +1429,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {
