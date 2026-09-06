@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -27,7 +28,14 @@ type githubCIAutoFixAttemptService interface {
 type githubCIAutoFixAttemptStartupService interface {
 	ListTaskCIAutoFixStates(context.Context) ([]*github.TaskCIPRAutomationState, error)
 	ReconcileTaskCIAutoFixTurnCompletion(context.Context, string, string, string) error
+	ReconcileTaskCIAutoFixProviderProgress(context.Context, github.TaskCIAutoFixProviderProgress) error
 }
+
+const (
+	ciAutoFixAttemptBindAttempts   = 3
+	ciAutoFixAttemptBindRetryDelay = 50 * time.Millisecond
+	ciAutoFixAttemptBindTimeout    = 500 * time.Millisecond
+)
 
 func (s *Service) githubCIAutoFixAttemptService() (githubCIAutoFixAttemptService, bool) {
 	if s == nil || s.githubService == nil {
@@ -50,7 +58,7 @@ func (s *Service) reconcileCIAutoFixAttemptsOnStartup(ctx context.Context) {
 		s.logger.Warn("CI auto-fix startup reconciliation was incomplete", zap.Error(err))
 	}
 	if reconciled > 0 {
-		s.logger.Info("reconciled terminal CI auto-fix attempts on startup", zap.Int("count", reconciled))
+		s.logger.Info("reconciled stale CI auto-fix attempts on startup", zap.Int("count", reconciled))
 	}
 }
 
@@ -82,6 +90,25 @@ func reconcileCIAutoFixAttemptState(
 	attempts githubCIAutoFixAttemptStartupService,
 	state *github.TaskCIPRAutomationState,
 ) (bool, error) {
+	if state == nil {
+		return false, nil
+	}
+	if state.AutoFixAttemptState == github.TaskCIAutoFixAttemptAwaitingProviderProgress &&
+		state.AutoFixAttemptProgressDeadline != nil &&
+		!state.AutoFixAttemptProgressDeadline.After(time.Now().UTC()) {
+		err := attempts.ReconcileTaskCIAutoFixProviderProgress(ctx, github.TaskCIAutoFixProviderProgress{
+			TaskID:             state.TaskID,
+			RepositoryID:       state.RepositoryID,
+			PRNumber:           state.PRNumber,
+			Signature:          state.AutoFixAttemptSignature,
+			ProviderGeneration: state.AutoFixAttemptProviderGeneration,
+			ObservedAt:         time.Now().UTC(),
+		})
+		if errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	}
 	if !isReconciliableCIAutoFixAttempt(state) {
 		return false, nil
 	}
@@ -125,10 +152,6 @@ func (s *Service) bindQueuedCIAutoFixAttempt(ctx context.Context, queuedMsg *mes
 	if queuedMsg == nil || strings.TrimSpace(turnID) == "" || !isCIAutoFixMetadata(queuedMsg.Metadata) {
 		return
 	}
-	service, ok := s.githubCIAutoFixAttemptService()
-	if !ok {
-		return
-	}
 	binding, ok := ciAutoFixAttemptBindingFromMetadata(
 		queuedMsg.Metadata, queuedMsg.TaskID, queuedMsg.SessionID, queuedMsg.ID, turnID,
 	)
@@ -137,10 +160,53 @@ func (s *Service) bindQueuedCIAutoFixAttempt(ctx context.Context, queuedMsg *mes
 			zap.String("task_id", queuedMsg.TaskID), zap.String("queue_id", queuedMsg.ID))
 		return
 	}
-	if err := service.BindTaskCIAutoFixAttemptTurn(context.WithoutCancel(ctx), binding); err != nil &&
-		!errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound) {
-		s.logger.Debug("bind queued CI auto-fix attempt turn failed",
-			zap.String("task_id", queuedMsg.TaskID), zap.String("queue_id", queuedMsg.ID), zap.Error(err))
+	s.bindCIAutoFixAttemptTurnWithRecovery(ctx, binding)
+}
+
+// bindCIAutoFixAttemptTurnWithRecovery binds the accepted turn with a short
+// bounded retry window. A failed bind must not strand a queued attempt: the
+// matching reservation is released to retryable state so a later settled watch
+// can dispatch it again.
+func (s *Service) bindCIAutoFixAttemptTurnWithRecovery(ctx context.Context, binding github.TaskCIAutoFixAttemptBinding) {
+	service, ok := s.githubCIAutoFixAttemptService()
+	if !ok {
+		return
+	}
+	bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutoFixAttemptBindTimeout)
+	defer cancel()
+	var bindErr error
+	for attempt := 0; attempt < ciAutoFixAttemptBindAttempts; attempt++ {
+		bindErr = service.BindTaskCIAutoFixAttemptTurn(bindCtx, binding)
+		if bindErr == nil {
+			return
+		}
+		if attempt == ciAutoFixAttemptBindAttempts-1 {
+			break
+		}
+		timer := time.NewTimer(ciAutoFixAttemptBindRetryDelay)
+		select {
+		case <-bindCtx.Done():
+			timer.Stop()
+			attempt = ciAutoFixAttemptBindAttempts - 1
+		case <-timer.C:
+		}
+	}
+
+	s.logger.Debug("bind CI auto-fix attempt turn failed after retries",
+		zap.String("task_id", binding.TaskID), zap.String("session_id", binding.SessionID),
+		zap.String("queue_id", binding.QueueEntryID), zap.String("turn_id", binding.TurnID), zap.Error(bindErr))
+	var recoveryErr error
+	if strings.TrimSpace(binding.QueueEntryID) != "" {
+		recoveryErr = service.ReconcileTaskCIAutoFixQueuedDispatchFailure(context.WithoutCancel(ctx), binding)
+	} else {
+		recoveryErr = service.ReconcileTaskCIAutoFixTurnCompletion(
+			context.WithoutCancel(ctx), binding.TaskID, binding.SessionID, binding.TurnID,
+		)
+	}
+	if recoveryErr != nil && !errors.Is(recoveryErr, github.ErrTaskCIAutoFixAttemptNotFound) {
+		s.logger.Debug("reconcile failed CI auto-fix attempt bind",
+			zap.String("task_id", binding.TaskID), zap.String("session_id", binding.SessionID),
+			zap.String("queue_id", binding.QueueEntryID), zap.Error(recoveryErr))
 	}
 }
 

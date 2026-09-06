@@ -4345,7 +4345,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Cache and reserve the replay identity before model switching. A restart
 	// based switch dispatches its prompt from StartAgentProcess, before the
 	// ordinary PromptTask admission path can initialize these records.
-	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
+	s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, options.onAccepted)
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
 	}

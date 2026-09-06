@@ -215,6 +215,45 @@ func TestStoreTaskCIAutoFixAttemptCompletionAndOutcomeDisposition(t *testing.T) 
 	}
 }
 
+func TestStoreTaskCIAutoFixAttemptRebindsRetryableTurn(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	attempt := TaskCIFixAttempt{
+		TaskID:             "task-rebind",
+		RepositoryID:       "repo-rebind",
+		PRNumber:           19,
+		Signature:          "feedback-rebind",
+		CheckpointJSON:     `{}`,
+		SessionID:          "session-rebind",
+		TurnID:             "turn-first",
+		ProviderGeneration: "generation-rebind",
+		State:              TaskCIAutoFixAttemptRunning,
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, attempt); err != nil {
+		t.Fatalf("record running attempt: %v", err)
+	}
+	if err := store.ReconcileTaskCIAutoFixTurnCompletion(ctx, attempt.TaskID, attempt.SessionID, attempt.TurnID); err != nil {
+		t.Fatalf("make attempt retryable: %v", err)
+	}
+	if err := store.BindTaskCIAutoFixAttemptTurn(ctx, TaskCIAutoFixAttemptBinding{
+		TaskID:       attempt.TaskID,
+		RepositoryID: attempt.RepositoryID,
+		PRNumber:     attempt.PRNumber,
+		SessionID:    attempt.SessionID,
+		Signature:    attempt.Signature,
+		TurnID:       "turn-retry",
+	}); err != nil {
+		t.Fatalf("rebind retryable attempt: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber)
+	if err != nil {
+		t.Fatalf("get rebound state: %v", err)
+	}
+	if state == nil || state.AutoFixAttemptState != TaskCIAutoFixAttemptRunning || state.AutoFixAttemptTurnID != "turn-retry" {
+		t.Fatalf("rebound state = %+v", state)
+	}
+}
+
 func TestStoreRetryMergeAuthorizesOneSameSignatureAttempt(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

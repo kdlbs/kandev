@@ -399,7 +399,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 			return recordAttempt(github.TaskCIAutoFixAttemptQueued, queueEntryID, "", queueRecovery || !replaced)
 		},
 		OnAccepted: func(turnID, queueEntryID string) {
-			bindErr := attemptService.BindTaskCIAutoFixAttemptTurn(context.WithoutCancel(ctx), github.TaskCIAutoFixAttemptBinding{
+			s.bindCIAutoFixAttemptTurnWithRecovery(ctx, github.TaskCIAutoFixAttemptBinding{
 				TaskID:       pr.TaskID,
 				RepositoryID: pr.RepositoryID,
 				PRNumber:     pr.PRNumber,
@@ -408,9 +408,6 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 				Signature:    signature,
 				TurnID:       turnID,
 			})
-			if bindErr != nil && !errors.Is(bindErr, github.ErrTaskCIAutoFixAttemptNotFound) {
-				s.logger.Debug("bind CI auto-fix attempt turn failed", zap.String("task_id", pr.TaskID), zap.Error(bindErr))
-			}
 		},
 		OnRejected: func(turnID, _ string) {
 			if strings.TrimSpace(turnID) == "" {
@@ -866,7 +863,14 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		if check.Status != ciAutomationCheckCompleted || !ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
 			continue
 		}
-		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
+		snap := ciAutomationCheckSnapshot{
+			Name:        check.Name,
+			Conclusion:  check.Conclusion,
+			HTMLURL:     check.HTMLURL,
+			Output:      check.Output,
+			StartedAt:   check.StartedAt,
+			CompletedAt: check.CompletedAt,
+		}
 		if _, seen := prevChecks[ciAutomationCheckKey(snap)]; !seen {
 			delta.FailedChecks = append(delta.FailedChecks, snap)
 		}
@@ -950,7 +954,8 @@ func ciAutomationDuplicateFixAttemptBlocksMergeAt(state *github.TaskCIPRAutomati
 }
 
 func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {
-	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output
+	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output + "|" +
+		ciAutomationProviderTime(check.StartedAt) + "|" + ciAutomationProviderTime(check.CompletedAt)
 }
 
 // ciAutomationProviderGeneration captures provider-visible execution state
@@ -1000,8 +1005,16 @@ func ciAutomationProviderGeneration(pr *github.TaskPR, feedback *github.PRFeedba
 		if current.Checks[i].Name != current.Checks[j].Name {
 			return current.Checks[i].Name < current.Checks[j].Name
 		}
-		return current.Checks[i].StartedAt+current.Checks[i].CompletedAt <
-			current.Checks[j].StartedAt+current.Checks[j].CompletedAt
+		if current.Checks[i].StartedAt != current.Checks[j].StartedAt {
+			return current.Checks[i].StartedAt < current.Checks[j].StartedAt
+		}
+		if current.Checks[i].CompletedAt != current.Checks[j].CompletedAt {
+			return current.Checks[i].CompletedAt < current.Checks[j].CompletedAt
+		}
+		if current.Checks[i].Status != current.Checks[j].Status {
+			return current.Checks[i].Status < current.Checks[j].Status
+		}
+		return current.Checks[i].Conclusion < current.Checks[j].Conclusion
 	})
 	encoded, _ := json.Marshal(current)
 	sum := sha256.Sum256(encoded)

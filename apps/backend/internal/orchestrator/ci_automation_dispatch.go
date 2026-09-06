@@ -148,23 +148,35 @@ func (s *Service) queueOrReplaceCIAutomationPrompt(
 	if s.messageQueue == nil {
 		return ciAutomationDispatchResult{}, fmt.Errorf("message queue is not configured")
 	}
-	queued, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(
-		ctx, session.ID, session.TaskID, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
-		false, nil, params.Metadata, params.CoalesceKey, allowInsert,
-	)
+	var queued *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	var err error
+	if params.OnQueued == nil {
+		queued, replaced, err = s.messageQueue.QueueMessageWithCoalesceKey(
+			ctx, session.ID, session.TaskID, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
+			false, nil, params.Metadata, params.CoalesceKey, allowInsert,
+		)
+		accepted = err == nil
+	} else {
+		queued, replaced, accepted, err = s.messageQueue.QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+			ctx, session.ID, session.TaskID, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
+			false, nil, params.Metadata, params.CoalesceKey, allowInsert,
+			func(_ context.Context, queued *messagequeue.QueuedMessage, replaced bool) error {
+				return params.OnQueued(queued.ID, replaced)
+			},
+		)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowInsert {
 			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
 		return ciAutomationDispatchResult{}, err
 	}
+	if !accepted {
+		return ciAutomationDispatchResult{}, messagequeue.ErrLifecycleCancelled
+	}
 	if queued == nil {
 		return ciAutomationDispatchResult{}, fmt.Errorf("CI automation queue returned no entry")
-	}
-	if params.OnQueued != nil {
-		if err := params.OnQueued(queued.ID, replaced); err != nil {
-			return ciAutomationDispatchResult{}, err
-		}
 	}
 	s.publishQueueStatusEvent(ctx, session.ID)
 	if replaced {

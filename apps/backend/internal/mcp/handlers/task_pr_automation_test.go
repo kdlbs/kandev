@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/github"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,13 @@ type recordingTaskPRAutomationService struct {
 	outcome          string
 	outcomeSummary   string
 	outcomeErr       error
+}
+
+func taskPRAutoFixOutcomeContext() context.Context {
+	return mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		CallerTaskID:    "task-current",
+		CallerSessionID: "session-current",
+	})
 }
 
 func (s *recordingTaskPRAutomationService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
@@ -159,7 +167,7 @@ func TestHandleReportTaskPRAutoFixOutcomeForwardsBoundIdentity(t *testing.T) {
 		"outcome":    "action_taken",
 		"summary":    "committed the failing test fix",
 	})
-	response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), msg)
+	response, err := h.handleReportTaskPRAutoFixOutcome(taskPRAutoFixOutcomeContext(), msg)
 
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeResponse, response.Type)
@@ -181,7 +189,7 @@ func TestHandleReportTaskPRAutoFixOutcomeRejectsInvalidAndStaleReports(t *testin
 		t.Run(name, func(t *testing.T) {
 			automation := &recordingTaskPRAutomationService{}
 			h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
-			response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, payload))
+			response, err := h.handleReportTaskPRAutoFixOutcome(taskPRAutoFixOutcomeContext(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, payload))
 			require.NoError(t, err)
 			assert.Equal(t, ws.MessageTypeError, response.Type)
 			assert.Empty(t, automation.outcome)
@@ -190,10 +198,40 @@ func TestHandleReportTaskPRAutoFixOutcomeRejectsInvalidAndStaleReports(t *testin
 
 	automation := &recordingTaskPRAutomationService{outcomeErr: github.ErrTaskCIAutoFixAttemptNotFound}
 	h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
-	response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
+	response, err := h.handleReportTaskPRAutoFixOutcome(taskPRAutoFixOutcomeContext(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
 		"task_id": "task-current", "session_id": "session-current", "outcome": "blocked", "summary": "provider is unavailable",
 	}))
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeError, response.Type)
 	assert.Contains(t, string(response.Payload), "not found")
+}
+
+func TestHandleReportTaskPRAutoFixOutcomeRejectsSpoofedIdentity(t *testing.T) {
+	automation := &recordingTaskPRAutomationService{}
+	h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
+	response, err := h.handleReportTaskPRAutoFixOutcome(taskPRAutoFixOutcomeContext(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
+		"task_id":    "task-other",
+		"session_id": "session-other",
+		"outcome":    "blocked",
+		"summary":    "provider is unavailable",
+	}))
+
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, response.Type)
+	assert.Contains(t, string(response.Payload), ws.ErrorCodeForbidden)
+	assert.Empty(t, automation.outcome)
+}
+
+func TestHandleReportTaskPRAutoFixOutcomeDerivesIdentity(t *testing.T) {
+	automation := &recordingTaskPRAutomationService{}
+	h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
+	response, err := h.handleReportTaskPRAutoFixOutcome(taskPRAutoFixOutcomeContext(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
+		"outcome": "non_actionable",
+		"summary": "the provider reported no actionable failure",
+	}))
+
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	assert.Equal(t, "task-current", automation.outcomeTaskID)
+	assert.Equal(t, "session-current", automation.outcomeSessionID)
 }

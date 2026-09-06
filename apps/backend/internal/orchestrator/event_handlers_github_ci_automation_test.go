@@ -345,6 +345,44 @@ func TestCIAutomationFeedbackDeltaIncludesChangedCheckOutput(t *testing.T) {
 	}
 }
 
+func TestCIAutomationFeedbackDeltaIncludesRerunExecutionTimestamps(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	rerunCompleted := completed.Add(time.Minute)
+	previous := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{{
+			Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit",
+			StartedAt: &started, CompletedAt: &completed,
+		}},
+	}
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit",
+		StartedAt: &started, CompletedAt: &rerunCompleted,
+	}}}
+
+	delta := ciAutomationBuildDelta(feedback, previous)
+	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].CompletedAt == nil ||
+		!delta.FailedChecks[0].CompletedAt.Equal(rerunCompleted) {
+		t.Fatalf("expected rerun execution timestamp in delta, got %+v", delta.FailedChecks)
+	}
+}
+
+func TestCIAutomationProviderGenerationSortsSameTimestampChecksDeterministically(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	checks := []github.CheckRun{
+		{Name: "unit", Status: "completed", Conclusion: "failure", StartedAt: &started, CompletedAt: &completed},
+		{Name: "unit", Status: "in_progress", StartedAt: &started, CompletedAt: &completed},
+	}
+	first := ciAutomationProviderGeneration(nil, &github.PRFeedback{Checks: checks})
+	secondChecks := append([]github.CheckRun(nil), checks...)
+	secondChecks[0], secondChecks[1] = secondChecks[1], secondChecks[0]
+	second := ciAutomationProviderGeneration(nil, &github.PRFeedback{Checks: secondChecks})
+	if first != second {
+		t.Fatalf("same-timestamp check generation depended on provider order: %q != %q", first, second)
+	}
+}
+
 func TestCIAutomationFeedbackDeltaIgnoresNeutralChecks(t *testing.T) {
 	feedback := &github.PRFeedback{
 		Checks: []github.CheckRun{

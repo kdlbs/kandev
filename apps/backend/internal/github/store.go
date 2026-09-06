@@ -3171,12 +3171,13 @@ func (s *Store) BindTaskCIAutoFixAttemptTurn(ctx context.Context, binding TaskCI
 			  AND auto_fix_attempt_session_id = ?
 			  AND auto_fix_attempt_queue_entry_id = ?
 			  AND auto_fix_attempt_signature = ?
-			  AND auto_fix_attempt_state IN (?, ?)
-			  AND (auto_fix_attempt_turn_id = '' OR auto_fix_attempt_turn_id = ?)`),
+			  AND auto_fix_attempt_state IN (?, ?, ?)
+			  AND (auto_fix_attempt_turn_id = '' OR auto_fix_attempt_turn_id = ? OR auto_fix_attempt_state = ?)`),
 			string(TaskCIAutoFixAttemptRunning), binding.TurnID, now,
 			binding.TaskID, binding.RepositoryID, binding.PRNumber,
 			binding.SessionID, binding.QueueEntryID, binding.Signature,
-			string(TaskCIAutoFixAttemptQueued), string(TaskCIAutoFixAttemptRunning), binding.TurnID)
+			string(TaskCIAutoFixAttemptQueued), string(TaskCIAutoFixAttemptRunning),
+			string(TaskCIAutoFixAttemptRetryable), binding.TurnID, string(TaskCIAutoFixAttemptRetryable))
 		if err != nil {
 			return err
 		}

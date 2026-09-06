@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -127,9 +128,16 @@ func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.Outcome = strings.TrimSpace(req.Outcome)
 	req.Summary = strings.TrimSpace(req.Summary)
-	if req.TaskID == "" || req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "MCP caller identity is unavailable", nil)
 	}
+	if (req.TaskID != "" && req.TaskID != principal.CallerTaskID) ||
+		(req.SessionID != "" && req.SessionID != principal.CallerSessionID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task_id and session_id must match the current MCP caller", nil)
+	}
+	req.TaskID = principal.CallerTaskID
+	req.SessionID = principal.CallerSessionID
 	if req.Outcome != string(github.TaskCIAutoFixOutcomeActionTaken) &&
 		req.Outcome != string(github.TaskCIAutoFixOutcomeNonActionable) &&
 		req.Outcome != string(github.TaskCIAutoFixOutcomeBlocked) {
