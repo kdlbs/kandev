@@ -296,7 +296,7 @@ test.describe("Prompt history panel on mobile", () => {
       .getAttribute("data-message-id");
     if (!middlePromptMessageId) throw new Error("Middle prompt row has no message id");
     await installTargetScrollCounter(testPage, middlePromptMessageId, true);
-    await middleRow.locator('[role="button"]').first().tap();
+    await middleRow.locator("[data-message-id]").tap();
     await expect.poll(() => aroundRequests, { timeout: 10_000 }).toBe(1);
     const targetMessage = new SessionPage(testPage)
       .activeChat()
