@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,7 +134,16 @@ func (s *Service) MarkAgentPausedFixed(
 		return nil
 	}
 
-	if err := s.repo.UpdateAgentStatusFields(ctx, agentID, string(agent.Status), ""); err != nil {
+	// Only a paused agent is actually resumable (allowedTransitions).
+	// If it left paused through some other path (e.g. a manual stop)
+	// before this dismissal was processed, don't resurrect it into
+	// idle — just clear the now-stale pause reason.
+	if agent.Status == models.AgentStatusPaused {
+		if _, err := s.UpdateAgentStatus(ctx, agentID, models.AgentStatusIdle, ""); err != nil {
+			return fmt.Errorf("unpause agent: %w", err)
+		}
+		s.publishAgentStatusChanged(ctx, agentID, agent.WorkspaceID, string(models.AgentStatusIdle))
+	} else if err := s.repo.UpdateAgentStatusFields(ctx, agentID, string(agent.Status), ""); err != nil {
 		return fmt.Errorf("clear pause reason: %w", err)
 	}
 	if err := s.repo.ResetAgentConsecutiveFailures(ctx, agentID); err != nil {
@@ -152,6 +162,7 @@ func (s *Service) MarkAgentPausedFixed(
 		return fmt.Errorf("list failed runs: %w", err)
 	}
 	seenTasks := map[string]bool{}
+	var requeueErrs []error
 	for _, wID := range runIDs {
 		// Auto-dismiss every prior failed run row so it doesn't
 		// re-emerge in the inbox when the agent unpauses.
@@ -169,9 +180,10 @@ func (s *Service) MarkAgentPausedFixed(
 			s.logger.Warn("requeue on unpause failed",
 				zap.String("agent", agentID), zap.String("task_id", taskID),
 				zap.Error(err))
+			requeueErrs = append(requeueErrs, fmt.Errorf("requeue task %s: %w", taskID, err))
 		}
 	}
-	return nil
+	return errors.Join(requeueErrs...)
 }
 
 // IsInboxItemDismissed delegates to the repository — exposed so the

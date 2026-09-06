@@ -187,6 +187,148 @@ func TestHandleAgentFailure_RespectsPerAgentThreshold(t *testing.T) {
 	}
 }
 
+// autoPauseAgent drives HandleAgentFailure exactly `count` times across
+// distinct tasks so the agent crosses whatever its effective threshold
+// is, then returns the resulting paused agent for assertions.
+func autoPauseAgent(
+	t *testing.T, svc *service.Service, wsID, agentID string, count int,
+) *models.AgentInstance {
+	t.Helper()
+	ctx := context.Background()
+	for i := 0; i < count; i++ {
+		taskID := agentID + "-task-" + uuidish("p", i)
+		insertSyntheticTask(t, svc, taskID, wsID, agentID)
+		w := queueAndReadRun(t, svc, agentID, taskID)
+		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+			t.Fatalf("handle failure %d: %v", i, err)
+		}
+	}
+	agent, err := svc.GetAgentInstance(ctx, agentID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if !strings.HasPrefix(agent.PauseReason, "Auto-paused:") {
+		t.Fatalf("setup failed: expected auto-pause after %d failures, got pause_reason=%q",
+			count, agent.PauseReason)
+	}
+	if agent.Status != models.AgentStatusPaused {
+		t.Fatalf("setup failed: expected paused status, got %q", agent.Status)
+	}
+	return agent
+}
+
+// Regression for "Mark fixed does not recover an auto-paused Office
+// agent": MarkAgentPausedFixed must actually unpause the agent (write
+// idle, not the pre-existing paused status back), zero the counter,
+// and leave QueueRun able to succeed again.
+func TestMarkAgentPausedFixed_RecoversAgent(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-recover")
+	autoPauseAgent(t, svc, "ws-1", "agent-recover", 3)
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-recover"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-recover")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Status != models.AgentStatusIdle {
+		t.Fatalf("expected status idle after mark fixed, got %q", agent.Status)
+	}
+	if agent.ConsecutiveFailures != 0 {
+		t.Fatalf("expected counter reset, got %d", agent.ConsecutiveFailures)
+	}
+	if agent.PauseReason != "" {
+		t.Fatalf("expected pause reason cleared, got %q", agent.PauseReason)
+	}
+
+	// Proves the guardAgentStatus rejection is gone: QueueRun must
+	// succeed now that the agent is actually idle.
+	if err := svc.QueueRun(ctx, "agent-recover", service.RunReasonTaskAssigned,
+		mustMarshalJSON(map[string]string{"task_id": "agent-recover-task-a"}),
+		"agent-recover:post-fix"); err != nil {
+		t.Fatalf("expected QueueRun to succeed after mark fixed, got: %v", err)
+	}
+}
+
+// Threshold-agnostic: the fix must not assume the default threshold
+// of 3. A per-agent override to a different value must still recover.
+func TestMarkAgentPausedFixed_ThresholdAgnostic(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-threshold")
+	override := 5
+	agent, err := svc.GetAgentInstance(ctx, "agent-threshold")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	agent.FailureThreshold = &override
+	if err := svc.UpdateAgentInstance(ctx, agent); err != nil {
+		t.Skipf("update agent unsupported: %v", err)
+	}
+
+	autoPauseAgent(t, svc, "ws-1", "agent-threshold", override)
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-threshold"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	agent, err = svc.GetAgentInstance(ctx, "agent-threshold")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Status != models.AgentStatusIdle {
+		t.Fatalf("expected status idle after mark fixed, got %q", agent.Status)
+	}
+	if agent.ConsecutiveFailures != 0 {
+		t.Fatalf("expected counter reset, got %d", agent.ConsecutiveFailures)
+	}
+	if agent.PauseReason != "" {
+		t.Fatalf("expected pause reason cleared, got %q", agent.PauseReason)
+	}
+}
+
+// If the agent left "paused" through some other path (e.g. a manual
+// stop) before the inbox dismissal is processed, mark-fixed must not
+// resurrect it into idle — only the stale pause reason is cleared.
+// The requeue attempts that follow then genuinely fail (the agent is
+// stopped), and that failure must be returned, not swallowed.
+func TestMarkAgentPausedFixed_NonPausedAgentGuardAndRequeueError(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-guarded")
+	agent := autoPauseAgent(t, svc, "ws-1", "agent-guarded", 3)
+
+	// Simulate the agent having moved to stopped via another path while
+	// the stale Auto-paused reason is still on the row.
+	if err := svc.UpdateAgentStatusFields(ctx, "agent-guarded",
+		string(models.AgentStatusStopped), agent.PauseReason); err != nil {
+		t.Fatalf("force stopped: %v", err)
+	}
+
+	err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-guarded")
+	if err == nil {
+		t.Fatalf("expected requeue failure to be returned, got nil error")
+	}
+
+	after, getErr := svc.GetAgentInstance(ctx, "agent-guarded")
+	if getErr != nil {
+		t.Fatalf("get agent: %v", getErr)
+	}
+	if after.Status != models.AgentStatusStopped {
+		t.Fatalf("expected status to remain stopped, got %q", after.Status)
+	}
+	if after.PauseReason != "" {
+		t.Fatalf("expected stale pause reason cleared, got %q", after.PauseReason)
+	}
+}
+
 // Pins that reassigning a task auto-dismisses the per-task inbox
 // entry for the OLD agent without resetting that agent's counter.
 func TestOnAssigneeChanged_DismissesPriorEntryWithoutResettingCounter(t *testing.T) {
