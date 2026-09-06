@@ -1169,6 +1169,13 @@ type MoveTaskResponse struct {
 	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
 	MoveID       string                     `json:"move_id,omitempty"`
 	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	// Disposition reports how an MCP move_task call was resolved: "applied" when
+	// the move committed immediately, or "deferred" when it was recorded to run
+	// at the source session's turn-end. It lets an agent distinguish deferred
+	// acceptance from an immediate move and correlate the retained one-shot
+	// EntryOptions (via MoveID) with the eventual step entry. The HTTP move path
+	// always applies immediately and leaves this empty.
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // Session Workflow Review DTOs

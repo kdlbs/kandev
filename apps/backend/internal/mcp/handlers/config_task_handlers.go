@@ -36,6 +36,14 @@ type moveTaskRequest struct {
 	EntryOptions    *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
+const (
+	// moveDispositionApplied marks an MCP move that committed immediately.
+	moveDispositionApplied = "applied"
+	// moveDispositionDeferred marks an MCP move recorded to run at the source
+	// session's turn-end.
+	moveDispositionDeferred = "deferred"
+)
+
 func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req moveTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -187,8 +195,12 @@ func (h *Handlers) deferMoveTask(
 		SenderSessionID: req.SenderSessionID,
 		EntryOptions:    req.EntryOptions,
 	})
-	return ws.NewResponse(msg.ID, msg.Action,
-		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
+	return ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+		Task:         h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position),
+		MoveID:       moveID,
+		EntryOptions: req.EntryOptions,
+		Disposition:  moveDispositionDeferred,
+	})
 }
 
 // moveChange classifies a move as a workflow step change or position-only based
@@ -234,7 +246,16 @@ func (h *Handlers) applyMoveTaskImmediate(
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
+	response := dto.MoveTaskResponse{
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
+		Disposition:  moveDispositionApplied,
+	}
+	if result.WorkflowStep != nil {
+		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 func classifyMoveTaskError(err error) string {
@@ -282,17 +303,17 @@ func moveTaskErrorMessage(err error) string {
 // sees a "successful move" response shape, freeing it to end the turn (which
 // is what triggers applyPendingMove). If we can't load the task, fall back to
 // a minimal map so the call still resolves.
-func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowID, workflowStepID string, position int) any {
+func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowID, workflowStepID string, position int) dto.TaskDTO {
 	task, err := h.taskSvc.GetTask(ctx, taskID)
 	if err != nil || task == nil {
 		h.logger.Warn("failed to load task for synthetic move response",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		return map[string]any{
-			"id":               taskID,
-			"workflow_id":      workflowID,
-			"workflow_step_id": workflowStepID,
-			"position":         position,
+		return dto.TaskDTO{
+			ID:             taskID,
+			WorkflowID:     workflowID,
+			WorkflowStepID: workflowStepID,
+			Position:       position,
 		}
 	}
 	clone := *task
