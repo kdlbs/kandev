@@ -40,18 +40,20 @@ GitHub-hosted runners with a visible warning.
 Store the complete external labels in two independent repository variables:
 
 - `KANDEV_CI_RUNNER_LIGHT` for change detection and the required gate.
-- `KANDEV_CI_RUNNER_STANDARD` for build, normal shards, reports, and Linux
-  backend and frontend tests.
+- `KANDEV_CI_RUNNER_STANDARD` for normal E2E shards and eligible frontend
+  tests. Credential-bearing build/report and backend checkout paths remain
+  hosted during the pilot.
 
 If burst mode is active but a tier label is empty, jobs in that class use
 `ubuntu-latest`. A non-empty invalid label remains visible as a queued or failed
 job. Do not mix instance types inside the normal shard matrix.
 
-Apply the same tier contract to the read-only Linux jobs in the E2E, backend,
-frontend, architecture-lint, action-pinning, and harness-lint workflows. Keep
-the Playwright image-resolution job, Docker/Kind shards, Kubernetes
-compatibility jobs, desktop E2E, Postgres service jobs, and Windows jobs on
-`ubuntu-latest` during the initial pilot. Do not apply this variable to
+Apply the same tier contract to eligible read-only Linux jobs in the E2E and
+frontend workflows, plus the backend aggregate gate. Keep E2E build/report
+jobs, backend checkout/static/test-shard/ambient jobs, architecture and
+harness linters, the Playwright image-resolution job, Docker/Kind shards,
+Kubernetes compatibility jobs, desktop E2E, Postgres service jobs, and Windows
+jobs on `ubuntu-latest` during the initial pilot. Do not apply this variable to
 `pull_request_target`, production, deployment, release, publishing, signing,
 or other credential-bearing jobs.
 

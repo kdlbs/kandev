@@ -134,9 +134,10 @@ to its normal level. The two tier variables stay configured between bursts, so
 changing the instance type requires only an Actions variable update.
 
 Set `KANDEV_CI_EXTERNAL_PERCENT` to `50` for a pilot. The E2E matrix then sends
-seven of fourteen shards to the standard tier. The backend matrix sends one of
-two test shards to the standard tier. Singleton jobs use a stable hash cohort,
-so their share approaches the percentage across workflow runs.
+seven of fourteen normal shards to the standard tier. Backend checkout and
+report-token jobs remain on GitHub-hosted runners; the aggregate backend gate
+and frontend jobs are eligible. Singleton jobs use a stable hash cohort, so
+their share approaches the percentage across workflow runs.
 
 Leave the percentage unset for the default GitHub-only mode. Set it to `100`
 to send every eligible job with a non-empty tier label to external capacity.
@@ -157,9 +158,10 @@ label is unavailable, GitHub leaves the job queued or fails it. Clear the
 invalid label and rerun the workflow. Jobs already queued or running keep their
 original runner. New jobs use the current variables.
 
-The E2E Docker/Kind shards, Kubernetes compatibility jobs, Playwright image
-job, desktop smoke job, backend Postgres service job, and Windows job stay on
-GitHub-hosted runners. Release, publishing, signing, deployment, and
+The E2E build and report jobs, Docker/Kind shards, Kubernetes compatibility
+jobs, Playwright image job, desktop smoke job, backend checkout/static/test
+shards, Postgres service job, architecture and harness linters, and Windows job
+stay on GitHub-hosted runners. Release, publishing, signing, deployment, and
 credential-bearing jobs stay on their existing runners. The workflows do not
 add permissions, secrets, or persistent state.
 

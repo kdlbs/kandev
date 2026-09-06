@@ -209,9 +209,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             "e2e-gate": (None, "KANDEV_CI_RUNNER_LIGHT", "e2e_gate_runner"),
         }
         standard_jobs = {
-            "build": ("e2e", "KANDEV_CI_RUNNER_STANDARD", "build_runner"),
             "e2e": ("playwright_image", "KANDEV_CI_RUNNER_STANDARD", "e2e_matrix"),
-            "e2e-report": ("e2e-gate", "KANDEV_CI_RUNNER_STANDARD", "e2e_report_runner"),
         }
 
         for job, (next_job, tier_variable, output_name) in (
@@ -241,6 +239,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         )
 
         protected_jobs = {
+            "build": "e2e",
+            "e2e-report": "e2e-gate",
             "playwright_image": "e2e-containers",
             "e2e-containers": "e2e-kubernetes-compatibility",
             "e2e-kubernetes-compatibility": "desktop-e2e",
@@ -249,7 +249,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         for job, next_job in protected_jobs.items():
             protected_text = job_block(workflow, job, next_job)
             self.assertIn("runs-on: ubuntu-latest", protected_text)
-            self.assertNotIn("KANDEV_CI_EXTERNAL_ENABLED", protected_text)
+            self.assertNotIn("needs.runner_plan.outputs", protected_text)
+            self.assertNotIn("KANDEV_CI_EXTERNAL", protected_text)
             self.assertNotIn("KANDEV_CI_RUNNER_", protected_text)
 
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:

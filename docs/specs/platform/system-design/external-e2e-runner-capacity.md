@@ -27,8 +27,8 @@ The operator can also change an instance type without a workflow edit.
 The design changes only runner placement. The duration-aware planner, shard
 manifests, build artifacts, reports, required gates, and workflow permissions
 remain authoritative. Host-Docker, Kind, compatibility, image-resolution,
-desktop, service, Windows, credential, release, and deployment jobs remain
-outside the initial pilot.
+desktop, service, Windows, checkout-token, report-token, release, and
+deployment jobs remain outside the initial pilot.
 
 ## Requirement mapping
 
@@ -104,10 +104,11 @@ The planner applies these rules:
    warning. It never emits an unvalidated external label for invalid input.
 
 Each job family is allocated independently. At 50 percent, the fourteen E2E
-shards receive seven external assignments, the two backend test shards receive
-one, and singleton jobs approximate 50 percent across runs. The planner does
-not promise an exact percentage of total compute across workflows with
-different family sizes.
+shards receive seven external assignments. Protected backend checkout jobs
+remain hosted; the backend aggregate gate and frontend jobs are still
+eligible. Singleton jobs use a stable hash cohort, so their share approaches
+50 percent across runs. The planner does not promise an exact percentage of
+total compute across workflows with different family sizes.
 
 ## Workflow integration
 
@@ -128,12 +129,13 @@ Contract tests assert the output wiring and the protected-job boundary.
 | Job | Initial runner selection | Rationale |
 | --- | --- | --- |
 | `E2E changes`, `e2e-gate` | Light tier with GitHub fallback | Control jobs are short but can wait many minutes for capacity. |
-| `E2E build`, `e2e`, `e2e-report` | Standard tier with GitHub fallback | Build, report, and all fourteen normal shards need comparable CPU and memory. |
-| `Backend changes`, `test` gate | Light tier with GitHub fallback | Control and aggregate jobs are short but can block the merge queue. |
-| `Backend static_checks`, `test_shards`, `test_ambient_env` | Standard tier with GitHub fallback | These Linux tests spend meaningful time in containers. |
+| `E2E build`, `e2e-report` | `ubuntu-latest` | They query GitHub history or download artifacts with the job token. |
+| `e2e` | Standard tier with GitHub fallback | The fourteen normal shards need comparable CPU and memory and do not use explicit repository-token inputs. |
+| `Backend changes`, `static_checks`, `test_shards`, `test_ambient_env` | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
+| `Backend test` gate | Light tier with GitHub fallback | The aggregate gate is short and has no checkout or service dependency. |
 | `Frontend changes`, `frontend-gate` | Light tier with GitHub fallback | Control jobs are short and queue-sensitive. |
 | `Frontend frontend` | Standard tier with GitHub fallback | The single frontend test job is a recurring queue bottleneck. |
-| `Architecture lint`, action-pinning, harness-lint | Light tier with GitHub fallback | Short, read-only jobs can be dispatched during a capacity burst. |
+| `Architecture lint`, action-pinning, harness-lint | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
 | `playwright_image` | `ubuntu-latest` | Retains the reviewed host-Docker and GHCR metadata path during the pilot. |
 | `e2e-containers` | `ubuntu-latest` | Requires direct host Docker and creates Kind resources. |
 | `e2e-kubernetes-compatibility` | `ubuntu-latest` | Requires direct host Docker and pinned Kind clusters. |
@@ -165,8 +167,10 @@ isolation does not make the provider part of GitHub's hosted trust boundary.
 
 The initial eligible jobs keep the workflow's existing top-level read-only
 permissions: `contents: read`, `actions: read`, and `packages: read`. Checkout
-continues to use `persist-credentials: false`. The change adds no repository,
-environment, deployment, publishing, signing, or production secret.
+continues to use `persist-credentials: false`. Jobs whose checkout, GitHub API,
+or artifact action receives the short-lived token remain on `ubuntu-latest`.
+The change adds no repository, environment, deployment, publishing, signing,
+or production secret.
 
 The initial Ubicloud installation uses clean ephemeral x64 VMs and just-in-time
 runner registration. Keep the default branch protection if the Ubicloud
@@ -174,9 +178,10 @@ transparent cache is enabled. Do not replace the pinned `actions/cache`
 references during this rollout.
 
 Jobs triggered by `pull_request_target`, jobs with production or deployment
-credentials, releases, publishing, signing, and Windows builds are not
-eligible for burst mode. Future container jobs can use a heavy tier only after
-a separate host-dependency, performance, and security review.
+credentials, checkout-token paths, E2E build/report token paths, releases,
+publishing, signing, and Windows builds are not eligible for burst mode.
+Future container jobs can use a heavy tier only after a separate host-
+dependency, performance, and security review.
 
 Ubicloud Premium Runners remain disabled. Ubicloud controls Premium Runners at
 the account level, so that setting cannot provide job-level tier selection.

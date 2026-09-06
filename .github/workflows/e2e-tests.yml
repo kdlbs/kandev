@@ -147,7 +147,9 @@ jobs:
     name: Build
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ needs.runner_plan.outputs.build_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    # Build reads the GitHub API and downloads a timing artifact with the job token.
+    # Keep this credential-bearing path on the GitHub-hosted boundary.
+    runs-on: ubuntu-latest
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
     # because this job compiles the backend.
@@ -1138,7 +1140,9 @@ jobs:
     # reports to download, and the artifact step would fail on an empty run.
     # `e2e-gate` below, not this job, is what the merge queue waits on.
     if: always() && needs.changes.outputs.run == 'true'
-    runs-on: ${{ needs.runner_plan.outputs.e2e_report_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    # Report aggregation queries GitHub history and downloads artifacts with the
+    # job token, so it remains on a GitHub-hosted runner during the pilot.
+    runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     # `runtime` tag — no Go needed for merging blob reports.
     container: ghcr.io/kdlbs/kandev-ci:runtime-latest

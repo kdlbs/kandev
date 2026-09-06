@@ -21,8 +21,10 @@ to own contributor trust gates for privileged pull-request automation.
 
 ## Terminology
 
-- **Eligible Linux CI job:** A read-only Linux job in the E2E, backend,
-  frontend, architecture-lint, action-pinning, or harness-lint workflows.
+- **Eligible Linux CI job:** A read-only Linux job in the E2E or frontend
+  workflows, plus backend aggregate gates that do not receive checkout or
+  report tokens. Credential-bearing checkout, report, service, and platform
+  jobs are protected and stay on GitHub-hosted runners.
 - **Light tier:** External capacity for control jobs that run for seconds.
 - **Standard tier:** External capacity for build, report, browser-test, and
   Linux test jobs that need more CPU or memory.

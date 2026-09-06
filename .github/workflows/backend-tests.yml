@@ -72,7 +72,9 @@ jobs:
   changes:
     name: Detect relevant changes
     needs: runner_plan
-    runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -140,7 +142,9 @@ jobs:
     name: Backend Static Checks
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ needs.runner_plan.outputs.static_checks_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -260,7 +264,9 @@ jobs:
     name: Backend Tests (${{ matrix.shard }}/2)
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ matrix.runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.runner_plan.outputs.backend_test_matrix) }}
@@ -401,7 +407,9 @@ jobs:
     name: Backend (ambient integration env)
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ needs.runner_plan.outputs.test_ambient_env_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
     # test_shards runs in the same clean container and never sets these vars,
     # so it cannot catch a package that starts reading them again — the class
     # of bug that shipped alongside internal/gitlab's host-trust tests (they

@@ -128,6 +128,21 @@ class RunnerPlanTest(unittest.TestCase):
         matrix = json.loads(plan.outputs["e2e_matrix"])["include"]
         self.assertTrue(all(item["runner"] == "github" for item in matrix))
 
+    def test_unicode_digits_fail_closed_with_warning(self) -> None:
+        plan = runner_plan.build_plan(
+            workflow="e2e",
+            run_id="108",
+            burst="true",
+            percent="²",
+            light_label="light-runner",
+            standard_label="standard-runner",
+        )
+
+        self.assertTrue(plan.warnings)
+        self.assertEqual(plan.outputs["changes_runner"], "github")
+        matrix = json.loads(plan.outputs["e2e_matrix"])["include"]
+        self.assertTrue(all(item["runner"] == "github" for item in matrix))
+
     def test_full_percentage_uses_external_for_non_empty_tier(self) -> None:
         plan = runner_plan.build_plan(
             workflow="frontend",

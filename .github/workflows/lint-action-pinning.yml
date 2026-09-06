@@ -65,7 +65,9 @@ jobs:
     name: All action refs are SHA-pinned
     needs: runner_plan
     if: always()
-    runs-on: ${{ needs.runner_plan.outputs.lint_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
 
     steps:
       - name: Require runner plan

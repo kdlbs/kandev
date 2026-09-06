@@ -27,20 +27,20 @@ system_design:
 
 ## Summary
 
-Apply the existing light and standard runner contract to the read-only Linux
-jobs that can add merge-queue delay in backend, frontend, architecture-lint,
-action-pinning, and harness-lint workflows. Keep host-service, container,
-Windows, release, deployment, and credential boundaries on GitHub-hosted
-runners.
+Apply the existing light and standard runner contract to eligible read-only
+Linux jobs that can add merge-queue delay in the E2E, backend, and frontend
+workflows. Keep checkout-token, report-token, host-service, container, Windows,
+release, deployment, architecture-lint, action-pinning, and harness-lint
+boundaries on GitHub-hosted runners.
 
 ## In scope
 
-- Route backend control jobs through the light tier and backend Linux test jobs
-  through the standard tier.
+- Route the backend aggregate gate through the light tier. Keep backend jobs
+  that check out source or publish reports on GitHub-hosted runners.
 - Route frontend control jobs through the light tier and the frontend test job
   through the standard tier.
-- Route architecture-lint, action-pinning, and harness-lint source-only jobs
-  through the light tier.
+- Keep architecture-lint, action-pinning, and harness-lint checkout jobs on
+  GitHub-hosted runners.
 - Extend workflow contract tests to assert eligible and protected placement.
 - Update the merge-queue runbook with the complete eligible-job table.
 
@@ -107,10 +107,12 @@ already established.
 
 ## Results
 
-- Added planner-backed light and standard runner selection to the backend,
-  frontend, architecture-lint, action-pinning, and harness-lint workflows.
-- Kept Postgres service, Windows, Docker/Kind, Kubernetes, image, desktop,
-  release, deployment, and credential-bearing jobs on their existing runners.
+- Added planner-backed light and standard runner selection to eligible E2E,
+  backend-gate, and frontend jobs.
+- Kept E2E build/report, backend checkout/static/test-shard/ambient,
+  architecture-lint, action-pinning, harness-lint, Postgres service, Windows,
+  Docker/Kind, Kubernetes, image, desktop, release, deployment, and
+  credential-bearing jobs on GitHub-hosted runners.
 - Added workflow contract coverage for eligible jobs and protected boundaries.
 - The renamed activation variable is `KANDEV_CI_EXTERNAL_ENABLED`.
 - Contract, action-pinning, harness-lint, actionlint, specification, and diff

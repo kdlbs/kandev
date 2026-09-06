@@ -23,7 +23,7 @@ def _parse_percentage(raw: str | None) -> tuple[int, list[str]]:
     if raw is None or raw.strip() == "":
         return 0, []
     value = raw.strip()
-    if not value.isdigit():
+    if not value.isascii() or not value.isdigit():
         return 0, [f"KANDEV_CI_EXTERNAL_PERCENT must be an integer from 0 to 100, got {raw!r}"]
     percentage = int(value)
     if percentage > 100:

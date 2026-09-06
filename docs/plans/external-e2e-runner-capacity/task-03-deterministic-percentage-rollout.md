@@ -55,7 +55,7 @@ operator input.
 - Percentage `100` assigns all eligible jobs with non-empty tier labels to the
   configured tier; empty labels still use `ubuntu-latest`.
 - At 50 percent, a fourteen-instance E2E matrix receives seven external
-  assignments and a two-instance backend matrix receives one.
+  assignments. Protected backend checkout jobs remain hosted.
 - A rerun of the same workflow run receives the same assignments. Singleton
   jobs approach the configured percentage across different runs.
 - Missing input means `0`. Malformed or out-of-range input emits a visible
