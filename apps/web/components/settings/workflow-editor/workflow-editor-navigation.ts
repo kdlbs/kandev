@@ -87,12 +87,15 @@ export function useWorkflowEditorNavigation(draft: WorkflowEditorNavigationDraft
   );
   const handleTabChange = useCallback(
     (tab: WorkflowEditorTab) =>
-      navigateSelection({
-        ...routeSelection,
-        tab,
-        trigger: null,
-        actionIndex: null,
-      }),
+      navigateSelection(
+        {
+          ...routeSelection,
+          tab,
+          trigger: null,
+          actionIndex: null,
+        },
+        "replace",
+      ),
     [navigateSelection, routeSelection],
   );
   const handleFocusAction = useCallback(
