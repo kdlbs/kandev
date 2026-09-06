@@ -1,7 +1,7 @@
 ---
 id: 11-harden-script-occurrence-and-locks
 title: Harden script occurrence and lock ownership
-status: pending
+status: done
 wave: 9
 depends_on:
   - 04-integrate-workflow-triggers
@@ -83,4 +83,8 @@ git diff --check
 
 ## Results
 
-Pending implementation.
+Implemented durable occurrence propagation through legacy and engine workflow
+transition paths, so duplicate delivery reuses one run while later cycles get
+new runs. Replaced the unbounded per-run lock map with a keyed reference-counted
+registry and added profile-switch coverage asserting source and destination
+session/execution identities. Race-enabled focused orchestrator tests pass.

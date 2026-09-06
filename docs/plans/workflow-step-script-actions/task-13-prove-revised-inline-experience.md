@@ -1,7 +1,7 @@
 ---
 id: 13-prove-revised-inline-experience
 title: Prove the revised inline experience
-status: pending
+status: done
 wave: 10
 depends_on:
   - 11-harden-script-occurrence-and-locks
@@ -92,4 +92,9 @@ git diff --check
 
 ## Results
 
-Pending implementation.
+Added desktop and mobile inline workflow-card coverage plus runtime E2E for
+profile switching, success, non-zero exit, timeout, block/continue policies,
+repeated occurrences, reload idempotency, and interrupted recovery. The
+focused desktop script/profile suite passes 7/7, the desktop inline workflow
+suite passes 27/27, and the mobile workflow suite passes 7/7. Backend focused
+and package-level verification also passes.

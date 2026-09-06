@@ -32,6 +32,7 @@ const TRIGGER_LABEL_KEYS: Record<WorkflowLifecycleTrigger, string> = {
   on_turn_start: "workflows:onTurnStartLabel",
   on_turn_complete: "workflows:onTurnCompleteLabel",
   on_exit: "workflows:onExit",
+  on_children_completed: "workflows:childrenCompletedHelpAria",
 };
 
 const TRIGGER_DESCRIPTION_KEYS: Record<WorkflowLifecycleTrigger, string> = {
@@ -39,6 +40,7 @@ const TRIGGER_DESCRIPTION_KEYS: Record<WorkflowLifecycleTrigger, string> = {
   on_turn_start: "workflows:onTurnStartHelp",
   on_turn_complete: "workflows:runScriptHelp",
   on_exit: "workflows:runScriptHelp",
+  on_children_completed: "workflows:childrenCompletedHelp",
 };
 
 const ADD_ACTION_LABEL_KEY = "workflows:addAction";
@@ -184,6 +186,7 @@ function WorkflowActionRow({
     ...getWorkflowActionCatalog("on_turn_start"),
     ...getWorkflowActionCatalog("on_turn_complete"),
     ...getWorkflowActionCatalog("on_exit"),
+    ...getWorkflowActionCatalog("on_children_completed"),
   ].find((item) => item.type === action.type);
   const summary = actionSummary(action, descriptor, t);
   return (

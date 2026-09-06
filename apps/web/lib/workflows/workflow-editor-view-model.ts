@@ -42,6 +42,7 @@ const SUMMARY_TRIGGERS: readonly WorkflowLifecycleTrigger[] = [
   "on_turn_start",
   "on_turn_complete",
   "on_exit",
+  "on_children_completed",
 ];
 
 export function buildWorkflowEditorViewModel(

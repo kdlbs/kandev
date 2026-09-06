@@ -1,6 +1,6 @@
 ---
 created: 2026-09-05
-status: building
+status: done
 requirements:
   - REQ-TASKS-WORKFLOW-STEP-SCRIPT-001
   - REQ-TASKS-WORKFLOW-STEP-SCRIPT-002
@@ -167,9 +167,9 @@ manual save, and mobile information hierarchy remain intact.
 - [x] [Task 08: Build mobile workflow editing (superseded)](task-08-build-mobile-workflow-editing.md)
 - [x] [Task 09: Render workflow scripts in chat](task-09-render-workflow-scripts-in-chat.md)
 - [x] [Task 10: Prove the workflow experience (superseded)](task-10-prove-and-document-experience.md)
-- [ ] [Task 11: Harden script occurrence and lock ownership](task-11-harden-script-occurrence-and-locks.md)
-- [ ] [Task 12: Restore inline workflow editing with compact tabs](task-12-restore-inline-workflow-tabs.md)
-- [ ] [Task 13: Prove the revised inline experience](task-13-prove-revised-inline-experience.md)
+- [x] [Task 11: Harden script occurrence and lock ownership](task-11-harden-script-occurrence-and-locks.md)
+- [x] [Task 12: Restore inline workflow editing with compact tabs](task-12-restore-inline-workflow-tabs.md)
+- [x] [Task 13: Prove the revised inline experience](task-13-prove-revised-inline-experience.md)
 
 Tasks 01 through 10 record the first implementation pass. The review and design
 revision add Tasks 11 through 13. Tasks 11 and 12 can proceed independently;
@@ -177,20 +177,20 @@ Task 13 follows both and owns final integration evidence.
 
 ## Verification results
 
-- Focused frontend Vitest coverage passes for the action catalog, editor view
-  model, step mutations, workflow draft creation, focused editor, chat
-  rendering, and processed-message filtering.
-- Frontend typecheck, lint, i18n check, and new-code i18n ratchet pass.
-- The first-pass dedicated editor E2E passes its persisted and client-only draft
-  flows, but that layout is superseded and its route-specific tests must be
-  replaced by inline workflow-card coverage.
-- Affected backend package tests pass, including workflow script persistence,
-  process lifecycle, orchestration, and engine packages. The broad backend
-  suite has seven host-home config discovery failures because
-  `/root/.kandev/config.yaml` is selected by those tests.
-- Specification lint and public documentation validation passed for the first
-  pass. The profile-switch and script failure E2E files named by the original
-  plan were not implemented and remain required by Task 13.
+- Backend race-enabled workflow-script/profile-switch tests pass (27 tests),
+  and the affected orchestrator, engine, task-model, and SQLite repository
+  packages pass (3,825 tests).
+- Frontend action-catalog, editor-view-model, automation, and focused editor
+  tests pass; frontend typecheck, targeted lint, i18n check, and the new-code
+  i18n ratchet pass.
+- Desktop inline workflow settings/editor and script/profile-switch E2E pass
+  (27 tests); the mobile workflow editor/settings suite passes (7 tests); the
+  dedicated script/profile-switch suite passes (7 tests).
+- Runtime evidence covers source/destination session binding, non-zero and
+  timeout outcomes, block/continue policies, repeated occurrences, reload
+  idempotency, and interrupted recovery without rerunning a process.
+- Specification lint, public documentation validation, work-order audits, and
+  `git diff --check` pass for the revised package.
 
 ## Risks
 

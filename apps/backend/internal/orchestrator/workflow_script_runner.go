@@ -50,6 +50,47 @@ type workflowScriptExecutionRequest struct {
 	Action           wfmodels.WorkflowScriptAction
 }
 
+type workflowScriptRunLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type workflowScriptLockRegistry struct {
+	mu      sync.Mutex
+	entries map[string]*workflowScriptRunLock
+}
+
+func (r *workflowScriptLockRegistry) acquire(key string) func() {
+	r.mu.Lock()
+	if r.entries == nil {
+		r.entries = make(map[string]*workflowScriptRunLock)
+	}
+	entry := r.entries[key]
+	if entry == nil {
+		entry = &workflowScriptRunLock{}
+		r.entries[key] = entry
+	}
+	entry.refs++
+	r.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		r.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(r.entries, key)
+		}
+		r.mu.Unlock()
+	}
+}
+
+func (r *workflowScriptLockRegistry) size() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.entries)
+}
+
 // WorkflowScriptBlockedError identifies the durable run that prevented a
 // workflow callback from continuing. Callers use errors.As to keep the
 // transition gate separate from the process and message implementations.
@@ -83,7 +124,7 @@ type workflowScriptRunner struct {
 	messages  workflowScriptMessageWriter
 	logger    *logger.Logger
 
-	locks sync.Map
+	locks workflowScriptLockRegistry
 
 	activeMu        sync.Mutex
 	active          map[string]context.CancelFunc
@@ -161,10 +202,8 @@ func (r *workflowScriptRunner) withRunLock(ctx context.Context, run *taskmodels.
 	if run == nil || run.ID == "" {
 		return errors.New("workflow script claim returned no run identity")
 	}
-	value, _ := r.locks.LoadOrStore(run.ID, &sync.Mutex{})
-	lock := value.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	release := r.locks.acquire(run.ID)
+	defer release()
 	return fn()
 }
 

@@ -29,6 +29,7 @@ describe("AutomationTab", () => {
     expect(screen.getByTestId(enterActionList)).toBeTruthy();
     expect(screen.getByTestId("workflow-action-list-on_turn_complete")).toBeTruthy();
     expect(screen.getByTestId("workflow-action-list-on_exit")).toBeTruthy();
+    expect(screen.getByTestId("workflow-action-list-on_children_completed")).toBeTruthy();
     expect(screen.getByText("echo enter")).toBeTruthy();
     expect(screen.getByText("echo exit")).toBeTruthy();
   });

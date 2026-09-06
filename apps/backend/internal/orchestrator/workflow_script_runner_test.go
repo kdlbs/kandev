@@ -160,23 +160,35 @@ func (f *workflowScriptRunStoreFake) findLocked(id string) *taskmodels.WorkflowS
 }
 
 type workflowScriptMessageFake struct {
-	mu       sync.Mutex
-	created  []string
-	updated  []string
-	content  map[string]string
-	metadata map[string]map[string]interface{}
+	mu         sync.Mutex
+	created    []string
+	updated    []string
+	content    map[string]string
+	metadata   map[string]map[string]interface{}
+	taskIDs    map[string]string
+	sessionIDs map[string]string
 }
 
-func (f *workflowScriptMessageFake) CreateWorkflowScriptMessage(_ context.Context, messageID, _ string, _ string, content string, metadata map[string]interface{}) error {
+func (f *workflowScriptMessageFake) CreateWorkflowScriptMessage(_ context.Context, messageID, taskID, sessionID string, content string, metadata map[string]interface{}) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.content == nil {
 		f.content = make(map[string]string)
+	}
+	if f.metadata == nil {
 		f.metadata = make(map[string]map[string]interface{})
+	}
+	if f.taskIDs == nil {
+		f.taskIDs = make(map[string]string)
+	}
+	if f.sessionIDs == nil {
+		f.sessionIDs = make(map[string]string)
 	}
 	f.created = append(f.created, messageID)
 	f.content[messageID] = content
 	f.metadata[messageID] = cloneWorkflowScriptMetadata(metadata)
+	f.taskIDs[messageID] = taskID
+	f.sessionIDs[messageID] = sessionID
 	return nil
 }
 
@@ -297,6 +309,37 @@ func TestWorkflowScriptRunnerExecutesOnceAndProjectsTerminalOutput(t *testing.T)
 	}
 	if processes.starts[0].SessionID != "session-destination" || processes.starts[0].ExecutionID != "execution-destination" {
 		t.Fatalf("process binding = %+v", processes.starts[0])
+	}
+}
+
+func TestWorkflowScriptRunnerUsesDistinctOccurrenceForRepeatedCycles(t *testing.T) {
+	runs := &workflowScriptRunStoreFake{}
+	processes := &workflowScriptProcessFake{}
+	runner := newWorkflowScriptRunner(runs, processes, &workflowScriptMessageFake{}, testLogger())
+	request := workflowScriptExecutionRequest{
+		TaskID: "task-1", WorkflowID: "workflow-1", WorkflowStepID: "step-1", WorkflowStepName: "Build",
+		Trigger: taskmodels.WorkflowScriptRunTriggerOnExit, ActionPosition: 0,
+		SessionID: "session-source", ExecutionID: "execution-source",
+		Action: wfmodels.WorkflowScriptAction{Command: "./verify.sh", TimeoutSeconds: 5, FailurePolicy: wfmodels.WorkflowScriptFailurePolicyBlock},
+	}
+
+	for _, occurrenceID := range []string{"turn-cycle-1", "turn-cycle-2", "turn-cycle-1", "turn-cycle-2"} {
+		request.OccurrenceID = occurrenceID
+		if err := runner.Execute(context.Background(), request); err != nil {
+			t.Fatalf("Execute(%q): %v", occurrenceID, err)
+		}
+	}
+
+	if got := len(processes.starts); got != 2 {
+		t.Fatalf("process starts = %d, want one process per cycle", got)
+	}
+	for _, occurrenceID := range []string{"turn-cycle-1", "turn-cycle-2"} {
+		key := taskmodels.NewWorkflowScriptOccurrenceKey(
+			taskmodels.WorkflowScriptRunTriggerOnExit, occurrenceID, "step-1", 0,
+		)
+		if _, err := runs.GetWorkflowScriptRunByOccurrence(context.Background(), key); err != nil {
+			t.Fatalf("load run for %q: %v", occurrenceID, err)
+		}
 	}
 }
 
@@ -501,6 +544,32 @@ func TestWorkflowScriptRunnerRunLockRemainsExclusiveAcrossConcurrentCalls(t *tes
 	}
 	if maximum != 1 {
 		t.Fatalf("maximum concurrent run callbacks = %d, want 1", maximum)
+	}
+}
+
+func TestWorkflowScriptRunnerRunLockRegistryReleasesAfterWaiters(t *testing.T) {
+	runner := newWorkflowScriptRunner(nil, nil, nil, testLogger())
+	run := &taskmodels.WorkflowScriptRun{ID: "run-lock-registry"}
+	const callers = 64
+	start := make(chan struct{})
+	done := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			<-start
+			done <- runner.withRunLock(context.Background(), run, func() error {
+				time.Sleep(time.Millisecond)
+				return nil
+			})
+		}()
+	}
+	close(start)
+	for i := 0; i < callers; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("withRunLock: %v", err)
+		}
+	}
+	if got := runner.locks.size(); got != 0 {
+		t.Fatalf("run lock registry size = %d, want 0 after all callers release", got)
 	}
 }
 

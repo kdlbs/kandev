@@ -35,6 +35,7 @@ const TRIGGER_HELP_KEYS: Record<WorkflowLifecycleTrigger, string> = {
   on_turn_start: "workflows:onTurnStartHelp",
   on_turn_complete: "workflows:onTurnCompleteHelp",
   on_exit: "workflows:onExitHelp",
+  on_children_completed: "workflows:childrenCompletedHelp",
 };
 
 export function WorkflowActionEditor({
