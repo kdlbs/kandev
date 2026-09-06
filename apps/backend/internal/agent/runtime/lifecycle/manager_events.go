@@ -22,26 +22,28 @@ const (
 )
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
+//
+// ACP message chunks do not carry the lifecycle prompt generation, so each
+// publish below resolves its own execution.promptGenerationSnapshot()
+// immediately before publishing, rather than reusing one value captured at
+// function entry across every publish in the call. This handler never runs
+// while execution.promptLifecycleMu is held, so each snapshot is safe; a new
+// generation cannot begin on this execution until waitForPendingDispatchedPrompt
+// observes the prior generation's completion signal, which itself only fires
+// after this handler's own event stream has finished flushing that prior
+// generation — so no concurrent generation reset can interleave with a single
+// invocation of this handler in the ordinary dispatch flow.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
-	// ACP message chunks do not carry the lifecycle prompt generation. The
-	// messageMu acquisition is therefore the only reliable turn boundary: a
-	// chunk observed before an atomic reset is detached with the old turn,
-	// while one observed after reset is retained for the replacement turn.
-	// The generation published on the resulting stream events is instead
-	// taken from a fresh snapshot here (this handler never runs while
-	// execution.promptLifecycleMu is held), so recovery-evidence correlation
-	// can fence on it downstream.
-	promptGeneration := execution.promptGenerationSnapshot()
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyMessage(execution, promptGeneration)
-		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, promptGeneration)
+		m.flushPendingLegacyMessage(execution, execution.promptGenerationSnapshot())
+		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot())
 		return
 	}
-	m.flushMessageBufferOnDiagnosticChange(execution, event.ProviderDiagnosticCandidate, promptGeneration)
+	m.flushMessageBufferOnDiagnosticChange(execution, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot())
 
 	execution.messageMu.Lock()
 	execution.messageBufferDiagnostic = event.ProviderDiagnosticCandidate
@@ -67,7 +69,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingMessage(execution, toFlush, diagnostic, promptGeneration)
+		m.publishStreamingMessage(execution, toFlush, diagnostic, execution.promptGenerationSnapshot())
 	}
 }
 
@@ -97,17 +99,17 @@ func (m *Manager) flushMessageBufferOnDiagnosticChange(execution *AgentExecution
 	}
 }
 
-// handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
+// handleReasoningEvent handles a "reasoning" agent event, accumulating and
+// flushing on newlines. See handleMessageChunkEvent for why each publish
+// below resolves its own fresh promptGenerationSnapshot() rather than reusing
+// one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
 		return
 	}
-	// See handleMessageChunkEvent: this handler never runs while
-	// execution.promptLifecycleMu is held, so a fresh snapshot is safe here.
-	promptGeneration := execution.promptGenerationSnapshot()
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyThinking(execution, promptGeneration)
-		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText, promptGeneration)
+		m.flushPendingLegacyThinking(execution, execution.promptGenerationSnapshot())
+		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText, execution.promptGenerationSnapshot())
 		return
 	}
 	execution.messageMu.Lock()
@@ -126,7 +128,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingThinking(execution, toFlush, promptGeneration)
+		m.publishStreamingThinking(execution, toFlush, execution.promptGenerationSnapshot())
 	}
 }
 
