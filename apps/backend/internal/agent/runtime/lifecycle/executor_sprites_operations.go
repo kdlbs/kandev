@@ -26,6 +26,23 @@ import (
 // validSlugRe matches slugs that are safe for use in shell commands and file paths.
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+func spriteProjectSkillDir(metadata map[string]interface{}) string {
+	manifestJSON := getMetadataString(metadata, MetadataKeySkillManifestJSON)
+	if manifestJSON == "" {
+		return ""
+	}
+	var manifest struct {
+		ProjectSkillDir string `json:"ProjectSkillDir"`
+	}
+	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(manifest.ProjectSkillDir) == "" {
+		return skill.DefaultProjectSkillDir
+	}
+	return manifest.ProjectSkillDir
+}
+
 // createSprite creates a new sprite via the API (explicit POST, not lazy).
 func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Client, name string) (*sprites.Sprite, error) {
 	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
@@ -113,7 +130,7 @@ func (r *SpritesExecutor) uploadSkillFiles(
 
 	projectSkillDir := manifest.ProjectSkillDir
 	if projectSkillDir == "" {
-		projectSkillDir = ".agents/skills"
+		projectSkillDir = skill.DefaultProjectSkillDir
 	}
 
 	// Wipe any kandev-* skills from a previous session and append the
@@ -313,6 +330,9 @@ func (r *SpritesExecutor) runPrepareScript(
 // commit straight onto main.
 func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
+	if isLegacySpritesPrepareScript(script) {
+		script = DefaultPrepareScript("sprites")
+	}
 	if script == "" {
 		script = DefaultPrepareScript("sprites")
 	}

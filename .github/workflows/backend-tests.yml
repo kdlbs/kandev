@@ -33,11 +33,38 @@ permissions:
   packages: read
 
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        uses: ./.github/actions/plan-external-runners
+        with:
+          workflow: backend
+          run-id: ${{ github.run_id }}
+          families: >-
+            [{"name":"test","tier":"light"}]
+          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+
   # The former trigger-level `paths:` list, applied one level down so a skip
   # still produces a conclusion. `.github/scripts/changed-paths.py` implements
   # the same last-match-wins semantics GitHub applies to `paths:`.
   changes:
     name: Detect relevant changes
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -106,6 +133,8 @@ jobs:
     name: Backend Static Checks
     needs: changes
     if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
@@ -226,6 +255,8 @@ jobs:
     name: Backend Tests (${{ matrix.shard }}/2)
     needs: changes
     if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -334,11 +365,13 @@ jobs:
         if: always()
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
-          report_summary="$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
+          report_summary="$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md"
           : > "$report_summary"
           GITHUB_STEP_SUMMARY="$report_summary" \
-          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${{ matrix.shard }}.json" \
+          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${BACKEND_TEST_SHARD}.json" \
           INPUT_MODULEDIRECTORY="$GITHUB_WORKSPACE/apps/backend" \
           INPUT_OMIT="successful" \
             node ".github/vendor/go-test-action/dist/index.js"
@@ -347,12 +380,14 @@ jobs:
         if: always()
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
           python3 .github/scripts/bounded-step-summary.py \
-            --input "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md" \
+            --input "$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md" \
             --output "$GITHUB_STEP_SUMMARY" \
-            --diagnostics-label "backend-test-results-${{ matrix.shard }}" \
-            --diagnostics-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+            --diagnostics-label "backend-test-results-${BACKEND_TEST_SHARD}" \
+            --diagnostics-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -368,6 +403,8 @@ jobs:
     name: Backend (ambient integration env)
     needs: changes
     if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     # test_shards runs in the same clean container and never sets these vars,
     # so it cannot catch a package that starts reading them again — the class
@@ -430,9 +467,10 @@ jobs:
   # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}
     needs:
       - changes
+      - runner_plan
       - static_checks
       - test_shards
       - test_ambient_env
@@ -442,6 +480,7 @@ jobs:
     steps:
       - name: Require backend checks to pass
         env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
@@ -451,12 +490,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
           echo "Change detection: ${CHANGES_RESULT}"
           echo "Static checks: ${STATIC_CHECKS_RESULT}"
           echo "Test shards: ${TEST_SHARDS_RESULT}"
           echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
           echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
           echo "Windows tests: ${TEST_WINDOWS_RESULT}"
+
+          # Runner planning must succeed because its outputs select the runner
+          # fleet. A planner error cannot silently become a hosted fallback.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning did not succeed; refusing to report a pass." >&2
+            exit 1
+          fi
 
           # Change detection itself must succeed: if it errored we do not know
           # whether the skips below were deliberate.

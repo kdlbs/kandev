@@ -20,6 +20,7 @@ import type { KanbanExternalLinkAvailability } from "./kanban-external-link-avai
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
@@ -140,8 +141,8 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: TaskActionOptions) => void;
+  onArchive?: (task: Task, opts?: TaskActionOptions) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
@@ -178,10 +179,7 @@ function useKanbanCardMoveMenuActions({
     });
   };
   const moveToStepFromDropdown = (stepId: string) => {
-    if (onMove) {
-      onMove(task, stepId);
-      return;
-    }
+    if (onMove) return onMove(task, stepId);
     if (moveTargets.currentWorkflowId) {
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
