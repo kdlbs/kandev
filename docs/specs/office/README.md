@@ -60,6 +60,11 @@ dashboard projections, and Office testing contracts.
 - [Office Stall Visibility](requirements/stall-visibility.md)
 - [Step Entry Sequence Execution](requirements/step-entry-sequence-execution.md)
 - [Office Tasks](requirements/tasks.md)
+- [Office Enqueue Consolidation](requirements/enqueue-consolidation.md)
+- [Office Launch Backpressure](requirements/launch-backpressure.md)
+- [Office Launch Budgets](requirements/launch-budgets.md)
+- [Office Run Causation Chain](requirements/run-causation-chain.md)
+- [Office Unattended Launch Safety](requirements/unattended-launch-safety.md)
 - [Office: E2E Mock Harness for Task Sessions and Messages](requirements/testing.md)
 - [Office: Slack-Style Unread Divider](requirements/unread-divider.md)
 
@@ -113,6 +118,8 @@ dashboard projections, and Office testing contracts.
 - [Office Scheduler System Design Part 2](system-design/scheduler-02.md)
 - [Office Tasks System Design Part 1](system-design/tasks-01.md)
 - [Office Tasks System Design Part 2](system-design/tasks-02.md)
+- [Office Unattended Launch Safety System Design](system-design/unattended-launch-safety-01.md)
+- [Office Unattended Launch Safety System Design Part 2](system-design/unattended-launch-safety-02.md)
 
 ## Migration record
 
