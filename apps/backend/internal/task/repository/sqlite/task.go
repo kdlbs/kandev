@@ -465,20 +465,25 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 }
 
 // lockWorkflowStepForWrite serializes callers writing tasks.position for the
-// same step (REQ-TASKS-KANBAN-TASK-REORDERING-001.28, .37, design
-// "## Concurrency"): a reorder's renumbering, and an arrival's
-// max(position)+1 read-then-write, must not straddle each other. On SQLite
-// the writer pool is a single connection (db.SetMaxOpenConns(1)), so any
-// caller running this inside its own write transaction already gets that
-// serialization for free and this is a no-op. On Postgres it takes the
-// step row's FOR UPDATE lock for the rest of the transaction, extending the
-// same primitive WIP-capacity callers already use.
+// same step: a reorder's renumbering, and an arrival's max(position)+1
+// read-then-write, must not straddle each other. On SQLite the writer pool
+// is a single connection (db.SetMaxOpenConns(1)), so any caller running this
+// inside its own write transaction already gets that serialization for free
+// and this is a no-op. On Postgres it takes the step row's FOR UPDATE lock
+// for the rest of the transaction. A stepID with no matching row has no
+// concurrent writer to serialize against either (nothing else can look it
+// up), so a missing row is not an error here — callers that need the step
+// to exist verify that separately.
 func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
 	if !dialect.IsPostgres(driver) {
 		return nil
 	}
 	var lockedID string
-	return tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE`), stepID).Scan(&lockedID)
+	err := tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE`), stepID).Scan(&lockedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
 }
 
 // assignArrivalPosition locks stepID for the rest of tx (see
