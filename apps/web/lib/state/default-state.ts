@@ -291,6 +291,10 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
     },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
   };
 }
 

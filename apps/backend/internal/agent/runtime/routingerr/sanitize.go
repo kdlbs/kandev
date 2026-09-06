@@ -3,6 +3,7 @@ package routingerr
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
@@ -90,16 +91,28 @@ func redactUnixPath(path string) string {
 	}
 }
 
-// Sanitize redacts likely credentials and local paths, then truncates to
-// MaxRawExcerptBytes. The function is idempotent: applying it twice equals
-// applying it once.
-func Sanitize(s string) string {
+// Redact applies the credential and local-path rules without truncation.
+// The function is idempotent: applying it twice equals applying it once.
+func Redact(s string) string {
 	for _, r := range redactions {
 		s = r.pattern.ReplaceAllString(s, r.replace)
 	}
 	s = redactLocalPaths(s)
+	return s
+}
+
+// Sanitize redacts likely credentials and local paths, then truncates
+// to MaxRawExcerptBytes on a rune boundary so a multi-byte character (e.g.
+// Vietnamese, CJK) is never split into invalid UTF-8. The function is
+// idempotent: applying it twice equals applying it once.
+func Sanitize(s string) string {
+	s = Redact(s)
 	if len(s) > MaxRawExcerptBytes {
-		s = s[:MaxRawExcerptBytes]
+		cut := MaxRawExcerptBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
 	}
 	return s
 }

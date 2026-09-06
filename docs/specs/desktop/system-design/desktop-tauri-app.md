@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-08-19
+updated: 2026-08-27
 owners:
   - tbd
 ---
@@ -189,10 +189,13 @@ when native permission is denied or native delivery fails.
 ## Desktop bridge and permissions
 
 The Go-served SPA may receive a small versioned set of desktop events and commands for menu
-actions, updater state/actions, native notification delivery, focus, and safe external links. The
+actions, updater state/actions, native notification delivery, explicit directory selection,
+focus, and safe external links. The
 capability schema allows loopback ports because the port is selected at launch, but every
 privileged command verifies the exact health-verified backend origin before executing. The bridge
-exposes no arbitrary shell command, filesystem access, or unrestricted URL opening.
+exposes no arbitrary shell command, directory enumeration, caller-selected filesystem access, or
+unrestricted URL opening. Its directory command only returns a folder selected through the native
+system panel.
 
 External `http`, `https`, and `mailto` links open in the system browser/client. Internal loopback
 navigation, downloads, and blob URLs remain in the WebView unless an existing workflow specifies
@@ -263,6 +266,8 @@ display before being shown.
 - A native notification never infers a task route from an ordinary focus, Dock reopen, or
   second-instance activation event.
 - External links with unsupported schemes remain blocked.
+- Native folder-picker cancellation changes no repository grant and starts no scan.
+- A folder-picker request from an origin other than the owned backend is rejected.
 
 ## Persistence guarantees
 
@@ -333,6 +338,7 @@ display before being shown.
   remain responsive and preserve browser/mobile behavior.
 - Replacing npm, Homebrew, Docker, runtime tarball, or existing package-manager update channels.
 - Rewriting the shared frontend or backend in Rust.
+- General native filesystem plugin access from the SPA.
 
 ## Implementation plans and decisions
 
@@ -340,3 +346,4 @@ display before being shown.
 - [Desktop Native Integration plan](../../../plans/desktop-native-integration/plan.md)
 - [ADR-0026: Tauri desktop shell over native runtime](../../../decisions/0026-tauri-desktop-shell.md)
 - [ADR-0039: Native desktop integration boundary](../../../decisions/0039-native-desktop-integration-boundary.md)
+- [Desktop Repository Discovery Consent plan](../../../plans/desktop-repository-discovery-consent/plan.md)

@@ -226,7 +226,7 @@ function MessageRow({
       id={`msg-${key}`}
       data-turn-id={getItemTurnId(item)}
       tabIndex={-1}
-      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
+      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] md:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
       {dividerBeforeItemKey === key && <UnreadDivider />}

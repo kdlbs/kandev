@@ -16,6 +16,7 @@ SHORT_HEAD_SHA = HEAD_SHA[:12]
 URL = f"https://walkthrough.kandev.ai/pr/{PR_NUMBER}/{SHORT_HEAD_SHA}.html"
 START = "<!-- kandev-pr-walkthrough-start -->"
 END = "<!-- kandev-pr-walkthrough-end -->"
+NO_WALKTHROUGH = 4
 
 
 class PRWalkthroughPRBodyTest(unittest.TestCase):
@@ -26,6 +27,7 @@ class PRWalkthroughPRBodyTest(unittest.TestCase):
         url: str = URL,
         response_number: int = PR_NUMBER,
         response_sha: str = HEAD_SHA,
+        require_existing: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], Path, tempfile.TemporaryDirectory[str]]:
         temp_dir = tempfile.TemporaryDirectory()
         root = Path(temp_dir.name)
@@ -41,21 +43,24 @@ class PRWalkthroughPRBodyTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        command = [
+            "python3",
+            str(SCRIPT),
+            "--github-response",
+            str(response),
+            "--output",
+            str(output),
+            "--url",
+            url,
+            "--pr-number",
+            str(PR_NUMBER),
+            "--head-sha",
+            HEAD_SHA,
+        ]
+        if require_existing:
+            command.append("--require-existing")
         result = subprocess.run(
-            [
-                "python3",
-                str(SCRIPT),
-                "--github-response",
-                str(response),
-                "--output",
-                str(output),
-                "--url",
-                url,
-                "--pr-number",
-                str(PR_NUMBER),
-                "--head-sha",
-                HEAD_SHA,
-            ],
+            command,
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -88,7 +93,7 @@ class PRWalkthroughPRBodyTest(unittest.TestCase):
             f"> **PR walkthrough:** [Open the visual walkthrough]({old_url})\n"
             f"{END}\n\nContributor content"
         )
-        result, output, temp_dir = self.run_updater(original)
+        result, output, temp_dir = self.run_updater(original, require_existing=True)
         self.addCleanup(temp_dir.cleanup)
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -98,6 +103,15 @@ class PRWalkthroughPRBodyTest(unittest.TestCase):
         self.assertIn(URL, updated)
         self.assertNotIn(old_url, updated)
         self.assertTrue(updated.endswith("\n\nContributor content"))
+
+    def test_reconciliation_without_an_owned_block_is_a_no_op(self) -> None:
+        result, output, temp_dir = self.run_updater(
+            "Contributor content", require_existing=True
+        )
+        self.addCleanup(temp_dir.cleanup)
+
+        self.assertEqual(result.returncode, NO_WALKTHROUGH, result.stderr)
+        self.assertFalse(output.exists())
 
     def test_reports_an_unchanged_body_without_writing_a_payload(self) -> None:
         original = (
@@ -159,7 +173,7 @@ class PRWalkthroughPRBodyTest(unittest.TestCase):
             f"{START}\none\n{END}\n{START}\ntwo\n{END}",
         ):
             with self.subTest(body=body):
-                result, output, temp_dir = self.run_updater(body)
+                result, output, temp_dir = self.run_updater(body, require_existing=True)
                 self.addCleanup(temp_dir.cleanup)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(output.exists())

@@ -38,11 +38,10 @@ export type PillAction = {
 };
 
 /**
- * `Pill` wraps cmdk's `Command` / `CommandInput` / `CommandList`. Its popover
- * body only supports cmdk children (`CommandItem`, etc.) — keyboard nav and
- * focus are routed through cmdk. If you need a popover with mixed content
- * (search list + a free-form `<input>`, banners, etc.), build a custom
- * `Popover` from `@kandev/ui/popover` instead of warping `Pill`.
+ * `Pill` wraps cmdk's `Command` / `CommandInput` / `CommandList`. Searchable
+ * content must remain cmdk children so keyboard navigation and focus stay
+ * correct. Contextual controls can use `popoverHeader`, which renders outside
+ * `Command`; mixed searchable content still needs a custom `Popover`.
  */
 
 type PillProps = {
@@ -84,6 +83,8 @@ type PillProps = {
   prefix?: string;
   /** Optional icon action rendered beside the search input. */
   action?: PillAction;
+  /** Optional contextual controls rendered above the searchable list. */
+  popoverHeader?: React.ReactNode;
 };
 
 /** Returns the active-state hover classes for the pill trigger button. */
@@ -244,6 +245,7 @@ function PillPopoverContent({
   emptyMessage,
   portalContainer,
   action,
+  popoverHeader,
 }: {
   filter?: PillProps["filter"];
   searchPlaceholder: string;
@@ -258,6 +260,7 @@ function PillPopoverContent({
   emptyMessage: string;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  popoverHeader?: React.ReactNode;
 }) {
   return (
     <PopoverContent
@@ -265,6 +268,7 @@ function PillPopoverContent({
       align="start"
       portalContainer={portalContainer}
     >
+      {popoverHeader}
       <Command filter={filter}>
         <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
           <div className="min-w-0 flex-1">
@@ -328,6 +332,7 @@ function PillPopover({
   emptyMessage,
   portalContainer,
   action,
+  popoverHeader,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -344,6 +349,7 @@ function PillPopover({
   emptyMessage: string;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  popoverHeader?: React.ReactNode;
 }) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -362,6 +368,7 @@ function PillPopover({
         emptyMessage={emptyMessage}
         portalContainer={portalContainer}
         action={action}
+        popoverHeader={popoverHeader}
       />
     </Popover>
   );
@@ -383,6 +390,7 @@ type PillPopoverShellProps = {
   emptyMessage: string;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  popoverHeader?: React.ReactNode;
   tooltip?: string;
   tooltipOpenState: boolean;
   suppressTooltip: boolean;
@@ -407,6 +415,7 @@ function renderPillPopover({
   emptyMessage,
   portalContainer,
   action,
+  popoverHeader,
   tooltip,
   tooltipOpenState,
   suppressTooltip,
@@ -434,6 +443,7 @@ function renderPillPopover({
       emptyMessage={emptyMessage}
       portalContainer={portalContainer}
       action={action}
+      popoverHeader={popoverHeader}
     />
   );
 
@@ -539,6 +549,7 @@ export function Pill({
   tooltip,
   prefix,
   action,
+  popoverHeader,
 }: PillProps) {
   const [open, setOpenState] = useState(false);
   const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
@@ -606,6 +617,7 @@ export function Pill({
     emptyMessage,
     portalContainer,
     action,
+    popoverHeader,
     tooltip,
     tooltipOpenState,
     suppressTooltip,

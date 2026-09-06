@@ -92,3 +92,46 @@ export async function waitForDockerContainerRemoved(
     })
     .toBe(false);
 }
+
+export type DockerExecResult = { status: number | null; stdout: string; stderr: string };
+
+export function dockerExec(containerID: string, ...command: string[]): DockerExecResult {
+  const result = spawnSync("docker", ["exec", containerID, ...command], { encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * Returns true when the container can perform a full user-namespace map,
+ * which requires both the seccomp/AppArmor relaxation AND functioning
+ * sub-id mapping (newuidmap/newgidmap setuid binaries or /etc/subuid
+ * entries). Without this bwrap will fail with "setting up uid map:
+ * Permission denied" even when namespace creation is allowed.
+ *
+ * The probe uses `unshare --map-root-user` which goes one step beyond
+ * `unshare --user`: it also maps the UID inside the new namespace, the
+ * operation bwrap needs. On hosts where user namespaces are allowed but
+ * mapping is unavailable, `unshare --user` succeeds but this probe fails.
+ */
+export function dockerHasSubuidMapping(containerID: string): boolean {
+  const result = spawnSync(
+    "docker",
+    ["exec", containerID, "sh", "-c", "unshare --map-root-user --user true 2>/dev/null"],
+    { encoding: "utf8", stdio: "pipe" },
+  );
+  return result.status === 0;
+}
+
+export function dockerSecurityOpt(containerID: string): string[] | null {
+  const result = spawnSync(
+    "docker",
+    ["inspect", "--format", "{{json .HostConfig.SecurityOpt}}", containerID],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (result.status !== 0)
+    throw new Error(
+      `failed to inspect Docker SecurityOpt for ${containerID}: ${result.stderr.trim()}`,
+    );
+  return JSON.parse(result.stdout) as string[] | null;
+}

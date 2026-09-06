@@ -47,6 +47,7 @@ signals, and task-scoped scheduling contracts.
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
 - [Task Documents](requirements/documents.md)
 - [Detached Workspace Continuity](requirements/detached-workspace-continuity.md)
+- [Task plan append-mode write](requirements/plan-write-append-mode.md)
 - [Task Execution Stages](requirements/execution-stages.md)
 - [External task ID idempotency boundaries](requirements/external-id-idempotency-boundaries.md)
 - [External task ID idempotency scenarios](requirements/external-id-idempotency-scenarios.md)
@@ -144,6 +145,8 @@ signals, and task-scoped scheduling contracts.
 - [Task plan content size limit](system-design/plan-content-size-limit.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
+- [Task plan append-mode write](system-design/plan-write-append-mode.md)
+- [Task plan append-mode agent text](system-design/plan-write-append-mode-agent-text.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
@@ -159,6 +162,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
+- [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)
 
 ## Migration record

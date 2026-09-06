@@ -49,6 +49,11 @@ function applyPromptMeta(
   }
 }
 
+function bumpPromptRevision(state: SessionSliceState, sessionId: string) {
+  const revisions = (state.messagePrompts.refreshGenerationBySession ??= {});
+  revisions[sessionId] = (revisions[sessionId] ?? 0) + 1;
+}
+
 /** Returns whether a row is a valid user prompt with a parseable timestamp. */
 function isValidPrompt(message: Message) {
   return message.author_type === "user" && messageTimestampNanoseconds(message.created_at) !== null;
@@ -77,7 +82,12 @@ function isIncomingPromptAtLeastAsFresh(existing: Message, incoming: Message) {
 /** Merges a prompt update without regressing its immutable creation order. */
 function mergePromptMessage(existing: Message, incoming: Message) {
   return isIncomingPromptAtLeastAsFresh(existing, incoming)
-    ? { ...existing, ...incoming, created_at: existing.created_at }
+    ? {
+        ...existing,
+        ...incoming,
+        created_at: existing.created_at,
+        prompt_index: incoming.prompt_index ?? existing.prompt_index,
+      }
     : existing;
 }
 
@@ -86,6 +96,7 @@ function upsertPromptMessage(state: SessionSliceState, message: Message) {
   if (!isValidPrompt(message)) return;
   const sessionId = message.session_id;
   const prompts = state.messagePrompts.bySession[sessionId] ?? [];
+  bumpPromptRevision(state, sessionId);
   const index = prompts.findIndex((prompt) => prompt.id === message.id);
   if (index === -1) prompts.push(message);
   else prompts[index] = mergePromptMessage(prompts[index], message);
@@ -96,6 +107,7 @@ function upsertPromptMessage(state: SessionSliceState, message: Message) {
 /** Applies a live user-message update to the prompt cache when present. */
 export function updatePromptMessage(state: SessionSliceState, message: Message) {
   if (!isValidPrompt(message)) return;
+  bumpPromptRevision(state, message.session_id);
   const prompts = state.messagePrompts.bySession[message.session_id];
   if (!prompts) return;
   const index = prompts.findIndex((entry) => entry.id === message.id);
@@ -115,12 +127,15 @@ export function removePromptMessage(
   sessionId: string,
   messageId: string,
 ) {
+  bumpPromptRevision(state, sessionId);
   const prompts = state.messagePrompts.bySession[sessionId];
   if (!prompts) return;
-  state.messagePrompts.bySession[sessionId] = prompts.filter((message) => message.id !== messageId);
+  const nextPrompts = prompts.filter((message) => message.id !== messageId);
+  if (nextPrompts.length === prompts.length) return;
+  state.messagePrompts.bySession[sessionId] = nextPrompts;
   const meta = state.messagePrompts.metaBySession[sessionId];
   if (meta?.oldestCursor === messageId) {
-    meta.oldestCursor = state.messagePrompts.bySession[sessionId][0]?.id ?? null;
+    meta.oldestCursor = nextPrompts[0]?.id ?? null;
   }
 }
 
@@ -165,7 +180,13 @@ export function buildPromptMessageActions(set: ImmerSet) {
       }),
     setPromptMessagesLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {
+        const promptMeta = draft.messagePrompts.metaBySession[sessionId];
+        const wasLoading = promptMeta?.isLoading ?? false;
         applyPromptMeta(draft.messagePrompts.metaBySession, sessionId, { isLoading: loading });
+        if (loading && !wasLoading) {
+          const generations = (draft.messagePrompts.refreshGenerationBySession ??= {});
+          generations[sessionId] = (generations[sessionId] ?? 0) + 1;
+        }
       }),
     setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) =>
       set((draft) => {
