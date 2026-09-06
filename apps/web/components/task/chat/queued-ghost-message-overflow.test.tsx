@@ -174,7 +174,7 @@ beforeEach(() => {
     value: visualViewport,
   });
   vi.spyOn(window, "addEventListener").mockImplementation((type, listener, options) => {
-    if (type === "resize") windowResizeListeners.push(listener);
+    if (String(type) === "resize") windowResizeListeners.push(listener);
     originalWindowAddEventListener(type, listener, options);
   });
   installGeometryGetters();
@@ -456,7 +456,7 @@ describe("queued message rendered overflow stale callback guards", () => {
     visualViewport.invokeDuringRemove = true;
     const originalRemove = window.removeEventListener.bind(window);
     vi.spyOn(window, "removeEventListener").mockImplementation((type, listener, options) => {
-      if (type === "resize") invokeListener(listener);
+      if (String(type) === "resize") invokeListener(listener);
       originalRemove(type, listener, options);
     });
     geometryReads = [];

@@ -7,7 +7,6 @@ import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { JiraConfig } from "@/lib/types/jira";
 import type { LinearConfig, LinearTeam } from "@/lib/types/linear";
 import type { SentryConfig } from "@/lib/types/sentry";
-import type { SlackConfig } from "@/lib/types/slack";
 import type {
   CumulativeDiff,
   FileInfo,
@@ -113,7 +112,7 @@ const DEMO_SENTRY_INSTANCES: SentryConfig[] = [
     updatedAt: DEMO_TIMESTAMP,
   },
 ];
-const DEMO_SLACK_CONFIG: SlackConfig = {
+const DEMO_SLACK_CONFIG = {
   workspaceId: DEMO_IDS.workspace,
   authMethod: "cookie",
   commandPrefix: "!kandev",
@@ -313,9 +312,7 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
   if (path === "/api/v1/github/user/issues")
     return json({ issues: [], total_count: 0, page: 1, per_page: 25 });
   if (path === "/api/v1/github/repos") return json({ repos: demoAccessibleRepositories });
-  const remoteBranchesMatch = path.match(
-    /^\/api\/v1\/github\/repos\/([^/]+)\/([^/]+)\/branches$/,
-  );
+  const remoteBranchesMatch = path.match(/^\/api\/v1\/github\/repos\/([^/]+)\/([^/]+)\/branches$/);
   if (remoteBranchesMatch) {
     const owner = decodeURIComponent(remoteBranchesMatch[1]);
     const repo = decodeURIComponent(remoteBranchesMatch[2]);
@@ -473,7 +470,9 @@ export function handleSocketRequest(socketId: string, raw: string) {
       return;
     }
 
-    const status = payload.cancelled ? "expired" : payload.rejected ? "rejected" : "approved";
+    let status = "approved";
+    if (payload.cancelled) status = "expired";
+    else if (payload.rejected) status = "rejected";
     const now = new Date().toISOString();
     permission.metadata = { ...permission.metadata, status };
     permission.requests_input = false;

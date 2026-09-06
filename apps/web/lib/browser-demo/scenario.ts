@@ -1434,7 +1434,7 @@ export function createBootPayload(state: DemoState): BootPayload {
         loading: false,
       },
       taskPRs: { byTaskId: state.taskPRs },
-    },
+    } as never,
   };
 }
 
@@ -1556,7 +1556,7 @@ function makeTask(
     title,
     description: options.description ?? "",
     state,
-    priority: 2,
+    priority: "medium",
     repositories: options.repositories ?? [makeTaskRepository(id, DEMO_IDS.repository, 0)],
     primary_session_id: options.primarySessionId as never,
     primary_session_state: options.primarySessionState,
@@ -1698,6 +1698,7 @@ function makeTaskPR(): TaskPR {
   return {
     id: "demo-pr-audit",
     task_id: "demo-task-audit",
+    workspace_id: DEMO_IDS.workspace,
     repository_id: DEMO_IDS.repository,
     owner: "kandev-demo",
     repo: "acme-web",

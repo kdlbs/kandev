@@ -25,7 +25,7 @@ const DEFAULT_STORAGE_SETTINGS: StorageMaintenanceSettings = {
   idle_for_minutes: 20,
   orphan_grace_hours: 72,
   quarantine_retention_hours: 168,
-  workspaces: { enabled: true },
+  workspaces: { enabled: true, dependency_cleanup_enabled: true },
   kandev_containers: { enabled: true },
   go_cache: { enabled: true, max_bytes: 12 * GIB, adopted_path: "" },
   docker: {
@@ -41,6 +41,7 @@ const DEFAULT_STORAGE_SETTINGS: StorageMaintenanceSettings = {
 const STORAGE_CAPABILITIES: StorageCapabilities = {
   managed_go_cache_path: "/demo/.kandev/cache/go-build",
   go_cache_adoption_available: true,
+  temporary_artifacts_available: true,
   docker_available: true,
   docker_host: "unix:///var/run/docker.sock",
   host_global_docker_cleanup_allowed: false,
@@ -325,6 +326,7 @@ function databaseStats(sizeBytes: number, walSizeBytes: number): DatabaseStats {
   return {
     driver: "sqlite",
     path: "/demo/.kandev/kandev.db",
+    backup_directory: "/demo/.kandev/backups",
     size_bytes: sizeBytes,
     wal_size_bytes: walSizeBytes,
     schema_version: "v1.24.0",
@@ -340,6 +342,20 @@ function storageOverview(
   return {
     settings,
     capabilities: STORAGE_CAPABILITIES,
+    analyzed_at: NOW,
+    analysis: {
+      generation: 1,
+      state: "ready",
+      started_at: NOW,
+      completed_at: NOW,
+      duration_ms: 240,
+      cache_ttl_seconds: 300,
+      refresh_due_at: "2026-07-18T12:05:00.000Z",
+      stale: false,
+      error: null,
+      progress: { completed_sources: 4, total_sources: 4, sources: {} },
+      partial_summary: null,
+    },
     summary: {
       workspaces: {
         total_bytes: 2.4 * GIB,
@@ -360,6 +376,19 @@ function storageOverview(
       quarantine: {
         count: quarantine.length,
         size_bytes: quarantine.reduce((total, entry) => total + entry.size_bytes, 0),
+      },
+      temporary_artifacts: {
+        available: true,
+        total_count: 12,
+        total_bytes: 64 * MIB,
+        active_count: 3,
+        active_bytes: 12 * MIB,
+        protected_count: 2,
+        protected_bytes: 8 * MIB,
+        stale_count: 7,
+        stale_bytes: 44 * MIB,
+        skipped_count: 0,
+        warnings: [],
       },
       docker: {
         available: true,

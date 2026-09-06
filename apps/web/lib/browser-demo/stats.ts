@@ -1,5 +1,5 @@
 import type {
-  AgentUsageDTO,
+  ModelUsageDTO,
   CompletedTaskActivityDTO,
   DailyActivityDTO,
   GitStatsDTO,
@@ -15,6 +15,7 @@ export type DemoStatsSection =
   | "daily-activity"
   | "completed-activity"
   | "agent-usage"
+  | "model-usage"
   | "repositories"
   | "git";
 
@@ -39,6 +40,7 @@ export function createDemoStats(section: string, state: DemoState): unknown | un
     case "completed-activity":
       return createCompletedActivity();
     case "agent-usage":
+    case "model-usage":
       return createAgentUsage(state, taskStats);
     case "repositories":
       return createRepositoryStats(state, taskStats, git);
@@ -120,12 +122,10 @@ function createCompletedActivity(): CompletedTaskActivityDTO[] {
   ];
 }
 
-function createAgentUsage(state: DemoState, tasks: TaskStatsDTO[]): AgentUsageDTO[] {
+function createAgentUsage(state: DemoState, tasks: TaskStatsDTO[]): ModelUsageDTO[] {
   return [
     {
-      agent_profile_id: DEMO_IDS.profile,
-      agent_profile_name: "Mock agent",
-      agent_model: "Browser demo model",
+      model: "Browser demo model",
       session_count: state.sessions.length,
       turn_count: tasks.reduce((sum, task) => sum + task.turn_count, 0),
       total_duration_ms: tasks.reduce((sum, task) => sum + task.total_duration_ms, 0),

@@ -30,8 +30,10 @@ function routeSyncConfig(
   if (!owner || !name) return error("repo_owner and repo_name are required", 400);
   state.syncConfig = {
     workspace_id: DEMO_IDS.workspace,
+    provider: "github",
     repo_owner: owner,
     repo_name: name,
+    project_path: "",
     branch: stringValue(input.branch) || "main",
     path: stringValue(input.path) || ".kandev/workflows",
     interval_seconds: numberValue(input.interval_seconds, 300),
