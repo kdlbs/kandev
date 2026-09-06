@@ -260,6 +260,23 @@ func TestSSHRemoteAgentEnvForwardsOnlyScopedCredentials(t *testing.T) {
 		}
 	})
 
+	t.Run("runtime timeout overrides are forwarded", func(t *testing.T) {
+		env := sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{
+			"MCP_TIMEOUT":      "45000",
+			"MCP_TOOL_TIMEOUT": "9000000",
+			"PROFILE_ONLY":     "must-not-forward",
+		}})
+		if env["MCP_TIMEOUT"] != "45000" {
+			t.Fatalf("MCP_TIMEOUT = %q, want the resolved runtime value", env["MCP_TIMEOUT"])
+		}
+		if env["MCP_TOOL_TIMEOUT"] != "9000000" {
+			t.Fatalf("MCP_TOOL_TIMEOUT = %q, want the resolved runtime value", env["MCP_TOOL_TIMEOUT"])
+		}
+		if _, ok := env["PROFILE_ONLY"]; ok {
+			t.Fatal("unapproved profile key must not be forwarded to the remote agent")
+		}
+	})
+
 	t.Run("managed broker env and indexed git config ride along", func(t *testing.T) {
 		env := sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{
 			githubauth.CredentialBrokerURLEnv: "http://127.0.0.1:9/broker",

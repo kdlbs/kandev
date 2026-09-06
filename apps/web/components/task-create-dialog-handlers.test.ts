@@ -181,6 +181,7 @@ describe("repository source changes", () => {
     const setUseRemote = vi.fn();
     const setExecutorId = vi.fn();
     const setExecutorProfileId = vi.fn();
+    const setPreferLocalExecutor = vi.fn();
     const setWorkspacePath = vi.fn();
     const fs = {
       noRepository: true,
@@ -192,6 +193,7 @@ describe("repository source changes", () => {
       setUseRemote,
       setExecutorId,
       setExecutorProfileId,
+      setPreferLocalExecutor,
       setWorkspacePath,
     } as unknown as DialogFormState;
     const { result } = renderHook(() => useDialogHandlers(fs, []));
@@ -456,6 +458,24 @@ describe("queueTaskCreateLastUsedFromPayload workflow history", () => {
         [WORKSPACE_ONE]: WORKFLOW_ONE,
         [WORKSPACE_TWO]: WORKFLOW_TWO,
       },
+    });
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-WORKFLOW-MEMORY-001.1
+  it("keeps the latest workflow from consecutive submissions in one workspace", () => {
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_ONE,
+      repositories: [],
+    });
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_TWO,
+      repositories: [],
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      workflowIdsByWorkspace: { [WORKSPACE_ONE]: WORKFLOW_TWO },
     });
   });
 

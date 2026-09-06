@@ -39,6 +39,8 @@
   "installing": "正在安裝…",
   "latestVersion": "最新版本 v{{version}}",
   "loadingMarketplace": "正在載入市場…",
+  "webAppLoading": "正在載入畫布…",
+  "webAppUnavailable": "此畫布不可用。",
   "loadingPlugins": "正在載入外掛…",
   "loadingSelectedUtilityAgent": "正在載入所選輔助代理程式…",
   "loadingSettings": "正在載入設定…",

@@ -15,8 +15,10 @@ import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
 import { GroupPicker } from "./group-picker";
-import { SortPicker } from "./sort-picker";
+import { SortPicker, sortKeyLabelKey } from "./sort-picker";
 import { TaskRowSettings } from "./task-row-settings";
+import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
+import { AutomaticColorSettings } from "./automatic-color-settings";
 import { ViewHeaderRow } from "./view-manager";
 
 export type SidebarViewEditorCurrent = {
@@ -46,6 +48,13 @@ export function SidebarViewEditor({
   onRemoveClause,
 }: Props) {
   const { t } = useTranslation();
+  const sortSummary =
+    current.sort.key === "custom"
+      ? t(sortKeyLabelKey(current.sort.key))
+      : t("task:sortSummary", {
+          sort: t(sortKeyLabelKey(current.sort.key)),
+          direction: t("task:sortDirection", { direction: current.sort.direction }),
+        });
   return (
     <>
       <div className="border-b p-2">
@@ -58,19 +67,30 @@ export function SidebarViewEditor({
         onChange={onChangeClause}
         onRemove={onRemoveClause}
       />
-      <div className={`border-b px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
-        <SectionLabel isDrawerLayout={isDrawerLayout}>{t("task:sort")}</SectionLabel>
+      <SidebarSettingsDisclosure
+        title={t("task:sort")}
+        summary={sortSummary}
+        testId="sidebar-sort-settings"
+        className="border-b"
+        contentClassName="pt-1"
+      >
         <SortPicker value={current.sort} onChange={(sort) => onUpdate({ sort })} />
-      </div>
-      <div className={`px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
-        <SectionLabel isDrawerLayout={isDrawerLayout}>{t("task:groupBy")}</SectionLabel>
+      </SidebarSettingsDisclosure>
+      <SidebarSettingsDisclosure
+        title={t("task:groupBy")}
+        summary={t(GROUP_SUMMARY_KEYS[current.group])}
+        testId="sidebar-group-settings"
+        className="border-b"
+        contentClassName="pt-1"
+      >
         <GroupPicker value={current.group} onChange={(group) => onUpdate({ group })} />
-      </div>
+      </SidebarSettingsDisclosure>
       <TaskRowSettings
         value={current.taskRow}
         sort={current.sort}
         onChange={(taskRow) => onUpdate({ taskRow })}
       />
+      <AutomaticColorSettings isDrawerLayout={isDrawerLayout} />
     </>
   );
 }
@@ -78,19 +98,14 @@ export function SidebarViewEditor({
 const SECTION_LABEL_CLASS =
   "text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground";
 
-function SectionLabel({
-  children,
-  isDrawerLayout,
-}: {
-  children: React.ReactNode;
-  isDrawerLayout: boolean;
-}) {
-  return (
-    <span className={`${isDrawerLayout ? "" : "-mt-1 "}mb-1 block ${SECTION_LABEL_CLASS}`}>
-      {children}
-    </span>
-  );
-}
+const GROUP_SUMMARY_KEYS: Record<GroupKey, string> = {
+  none: "task:groupNone",
+  repository: "task:groupRepository",
+  workflow: "task:groupWorkflow",
+  workflowStep: "task:groupWorkflowStep",
+  executorType: "task:groupExecutorType",
+  state: "task:groupState",
+};
 
 function FilterSection({
   filters,

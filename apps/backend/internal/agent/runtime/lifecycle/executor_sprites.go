@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -30,6 +32,39 @@ type RemoteAuthAgentLister interface {
 type spriteFileUploader struct {
 	sprite  *sprites.Sprite
 	runtime *SpritesExecutor
+}
+
+func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	filesystem := u.sprite.Filesystem()
+	reader, ok := filesystem.(interface {
+		ReadFileContext(context.Context, string) ([]byte, error)
+	})
+	if !ok {
+		return filesystem.ReadFile(path)
+	}
+	data, err := reader.ReadFileContext(ctx, path)
+	if err == nil {
+		return data, err
+	}
+	if isSpritesNotFound(err) {
+		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+	}
+	return data, err
+}
+
+func isSpritesNotFound(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") || strings.Contains(message, "http 404") || strings.Contains(message, "status 404")
 }
 
 func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {
@@ -442,6 +477,9 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 		step.Output = output
 		report(spriteStepRunPrepareScript, step)
 	})
+	if projectSkillDir := spriteProjectSkillDir(req.Metadata); projectSkillDir != "" {
+		r.ensureSpriteGitExclude(ctx, sprite, projectSkillDir)
+	}
 	if err != nil {
 		completeStepError(&step, err.Error())
 		report(spriteStepRunPrepareScript, step)

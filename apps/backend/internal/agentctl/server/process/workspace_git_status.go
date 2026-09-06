@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -45,7 +46,11 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 		if wt.isGitStatusCancellation(err) {
 			wt.logger.Debug("updateGitStatus: getGitStatus canceled", zap.Error(err))
 		} else {
-			wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+			if fsdiagnostics.IsAccessDenied(err) {
+				wt.recordFilesystemFailure("workspace.git_status", workspaceTrigger(ctx, "poll"), err)
+			} else {
+				wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+			}
 		}
 		return false
 	}
@@ -96,6 +101,35 @@ func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateMu.Lock()
 	defer wt.updateMu.Unlock()
 	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
+}
+
+// RefreshWorkspace performs one file and Git scan for a lifecycle boundary or
+// an explicit user retry. The update lock keeps the two snapshots coherent
+// with the normal polling loops.
+func (wt *WorkspaceTracker) RefreshWorkspace(ctx context.Context, trigger string) {
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.clearAccessDeniedForUserOperation(trigger)
+	if trigger == workspaceManualRefreshTrigger || trigger == workspaceUserSelectTrigger {
+		wt.SetPollMode(PollModeFast)
+	}
+	ctx = withWorkspaceTrigger(ctx, trigger)
+	wt.updateMu.Lock()
+	defer wt.updateMu.Unlock()
+	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.updateFilesClass(ctx, subproc.GitInteractive)
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
+		Timestamp:      time.Now(),
+		RepositoryName: wt.repositoryName,
+		Operation:      types.FileOpRefresh,
+	})
 }
 
 // GetCurrentGitStatus returns the current cached git status. If no status has

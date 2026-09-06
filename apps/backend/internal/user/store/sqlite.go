@@ -24,6 +24,7 @@ const (
 	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
+	jsonNull                  = "null"
 )
 
 type sqliteRepository struct {
@@ -66,6 +67,8 @@ func (r *sqliteRepository) initSchema() error {
 		email TEXT NOT NULL,
 		display_name TEXT NOT NULL DEFAULT '',
 		role TEXT NOT NULL DEFAULT 'admin',
+		org_id TEXT NOT NULL DEFAULT '',
+		is_operator INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'active',
 		settings TEXT NOT NULL DEFAULT '{}',
 		settings_revision BIGINT NOT NULL DEFAULT 0,
@@ -101,6 +104,16 @@ func (r *sqliteRepository) runMigrations() {
 	m.Apply("users.role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
 	m.Apply("users.status", "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
 	m.Apply("users.settings_revision", "ALTER TABLE users ADD COLUMN settings_revision BIGINT NOT NULL DEFAULT 0")
+	// Organizations. Empty means "not yet assigned"; the tenancy migration
+	// puts every existing account into the default org on first boot with the
+	// feature on. Email stays unique instance-wide rather than per-org, so an
+	// address identifies one person and the login form needs no org picker.
+	m.Apply("users.org_id", "ALTER TABLE users ADD COLUMN org_id TEXT NOT NULL DEFAULT ''")
+	m.Apply("users.org_idx", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id)")
+	// The instance operator tier. Granted to the first admin by the tenancy
+	// migration so an upgraded instance is never left with nobody able to
+	// manage organizations.
+	m.Apply("users.is_operator", "ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0")
 	// Safe pre-auth: the table only ever held the single default-user row.
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 }
@@ -141,7 +154,7 @@ func (r *sqliteRepository) SetAgentProfileRecentUseLogger(log *commonlogger.Logg
 	r.recentUseLogger = log
 }
 
-const userColumns = "id, email, display_name, role, status, created_at, updated_at"
+const userColumns = "id, email, display_name, role, status, org_id, is_operator, created_at, updated_at"
 
 // GetUser returns the user row for the given id.
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
@@ -200,9 +213,10 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO users (id, email, display_name, role, status, settings, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
+		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, user.IsOperator,
+		user.CreatedAt, user.UpdatedAt)
 	return err
 }
 
@@ -580,6 +594,11 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		threadViews = []models.ThreadView{}
 	}
 	sidebarTaskPrefs := normalizeSidebarTaskPrefs(settings.SidebarTaskPrefs)
+	sidebarTaskColorAutomation := settings.SidebarTaskColorAutomation
+	if sidebarTaskColorAutomation.Rules == nil {
+		sidebarTaskColorAutomation.Rules = []models.SidebarTaskColorRule{}
+	}
+	sidebarTaskColors := models.CloneSidebarTaskColors(settings.SidebarTaskColors)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
@@ -625,6 +644,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"thread_active_view_id":                    settings.ThreadActiveViewID,
 		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       sidebarTaskPrefs,
+		"sidebar_task_color_automation":            sidebarTaskColorAutomation,
+		"sidebar_task_colors":                      sidebarTaskColors,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,
@@ -684,7 +705,7 @@ func (r *sqliteRepository) scanConditionalSettingsUpdate(ctx context.Context, sc
 // scanUser scans a single user row into a models.User.
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
 	user := &models.User{}
-	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.OrgID, &user.IsOperator, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -726,6 +747,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ThreadViews:                       DefaultThreadViews(),
 		ThreadActiveViewID:                DefaultThreadViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
+		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
+		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
 		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
@@ -799,6 +822,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ThreadActiveViewID                json.RawMessage                     `json:"thread_active_view_id"`
 		ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+		SidebarTaskColorAutomation        json.RawMessage                     `json:"sidebar_task_color_automation"`
+		SidebarTaskColors                 json.RawMessage                     `json:"sidebar_task_colors"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
 		JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets"`
@@ -947,6 +972,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.ThreadViewDraft = payload.ThreadViewDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
+	settings.SidebarTaskColorAutomation = decodeSidebarTaskColorAutomation(payload.SidebarTaskColorAutomation)
+	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
 	settings.JiraTaskPresets = payload.JiraTaskPresets
@@ -991,8 +1018,27 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	return settings, nil
 }
 
+// decodeSidebarTaskColorAutomation keeps one corrupt personal rule set from
+// preventing the rest of user settings from loading.
+func decodeSidebarTaskColorAutomation(raw json.RawMessage) models.SidebarTaskColorAutomation {
+	if len(raw) == 0 || string(raw) == jsonNull {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	var value models.SidebarTaskColorAutomation
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	if err := models.ValidateSidebarTaskColorAutomation(value); err != nil {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	if value.Rules == nil {
+		value.Rules = []models.SidebarTaskColorRule{}
+	}
+	return value
+}
+
 func decodeStringIDs(raw json.RawMessage) []string {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return []string{}
 	}
 	var ids []string

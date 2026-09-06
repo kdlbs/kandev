@@ -39,8 +39,25 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
 	}
+	// A scope denial is 403, not 404: workspace.read was already granted, so
+	// existence is known to the caller and there is nothing left to hide.
+	if service.IsForbidden(err) {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	// A rejected assignee is the caller naming someone who cannot reach the
+	// workspace, not a server fault. Its message is written to be shown.
+	if errors.Is(err, service.ErrAssigneeCannotReachWorkspace) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, service.ErrWIPLimitExceeded) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
 		return
 	}
 	if isValidationError(err) {
@@ -66,6 +83,13 @@ func taskErrorDetails(err error) map[string]interface{} {
 	}
 	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
 		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		return map[string]interface{}{
+			"error_code":      service.TaskDeleteDirtyWorktreeErrorCode,
+			"dirty_worktrees": dirtyWorktreeErr.DirtyWorktrees,
+		}
 	}
 	return nil
 }

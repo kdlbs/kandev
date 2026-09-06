@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -34,6 +35,7 @@ type WorkspaceDTO struct {
 	Name                        string    `json:"name"`
 	Description                 *string   `json:"description,omitempty"`
 	OwnerID                     string    `json:"owner_id"`
+	UnitID                      string    `json:"unit_id,omitempty"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -43,6 +45,13 @@ type WorkspaceDTO struct {
 	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+
+	// ViewerRole and Scopes describe what the *requesting* user may do here.
+	// The frontend gates every control on Scopes rather than comparing the
+	// current user ID to OwnerID, so permission logic lives in one place.
+	ViewerRole  string   `json:"viewer_role,omitempty"`
+	Scopes      []string `json:"scopes,omitempty"`
+	MemberCount int      `json:"member_count,omitempty"`
 }
 
 type RepositoryDTO struct {
@@ -191,6 +200,7 @@ type TaskDTO struct {
 	SessionCount                *int                     `json:"session_count,omitempty"`
 	ReviewStatus                models.ReviewStatus      `json:"review_status,omitempty"`
 	PrimaryExecutorID           *string                  `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorProfileID    *string                  `json:"primary_executor_profile_id,omitempty"`
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
@@ -244,10 +254,12 @@ type TaskDTO struct {
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string `json:"origin,omitempty"`
-	ProjectID              string `json:"project_id,omitempty"`
-	Labels                 string `json:"labels,omitempty"`
-	Identifier             string `json:"identifier,omitempty"`
+	// AssigneeUserID is the human assignee, independent of the agent one.
+	AssigneeUserID string `json:"assignee_user_id,omitempty"`
+	Origin         string `json:"origin,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	Labels         string `json:"labels,omitempty"`
+	Identifier     string `json:"identifier,omitempty"`
 	// ExternalID is a caller-supplied identity used for task create-
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
@@ -588,9 +600,26 @@ type LocalRepositoryDTO struct {
 }
 
 type RepositoryDiscoveryResponse struct {
-	Roots        []string             `json:"roots"`
-	Repositories []LocalRepositoryDTO `json:"repositories"`
-	Total        int                  `json:"total"`
+	Roots                    []string                  `json:"roots"`
+	Repositories             []LocalRepositoryDTO      `json:"repositories"`
+	Total                    int                       `json:"total"`
+	DesktopRuntime           bool                      `json:"desktop_runtime"`
+	RootStates               []DesktopDiscoveryRootDTO `json:"root_states"`
+	ScanTime                 *time.Time                `json:"scan_time,omitempty"`
+	Refreshing               bool                      `json:"refreshing"`
+	Cached                   bool                      `json:"cached"`
+	HomeConfirmationRequired bool                      `json:"home_confirmation_required"`
+	FailedRoots              []string                  `json:"failed_roots,omitempty"`
+}
+
+type DesktopDiscoveryRootDTO struct {
+	ID              string     `json:"id"`
+	Path            string     `json:"path"`
+	DisplayPath     string     `json:"display_path"`
+	State           string     `json:"state"`
+	LastScanAt      *time.Time `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time `json:"last_failure_at,omitempty"`
+	LastFailureCode string     `json:"last_failure_code,omitempty"`
 }
 
 type RepositoryPathValidationResponse struct {
@@ -649,6 +678,7 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		Name:                        workspace.Name,
 		Description:                 description,
 		OwnerID:                     workspace.OwnerID,
+		UnitID:                      workspace.UnitID,
 		DefaultExecutorID:           workspace.DefaultExecutorID,
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
@@ -659,6 +689,16 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
 	}
+}
+
+// FromWorkspaceWithAccess projects a workspace together with the requesting
+// user's resolved role and scopes.
+func FromWorkspaceWithAccess(workspace *models.Workspace, decision authz.Decision, memberCount int) WorkspaceDTO {
+	out := FromWorkspace(workspace)
+	out.ViewerRole = string(decision.Role)
+	out.Scopes = decision.Scopes.Strings()
+	out.MemberCount = memberCount
+	return out
 }
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
@@ -796,13 +836,25 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 	}
 }
 
+func FromDesktopDiscoveryRoot(root models.DesktopDiscoveryRoot) DesktopDiscoveryRootDTO {
+	return DesktopDiscoveryRootDTO{
+		ID:              root.ID,
+		Path:            root.Path,
+		DisplayPath:     root.DisplayPath,
+		State:           string(root.State),
+		LastScanAt:      root.LastScanAt,
+		LastFailureAt:   root.LastFailureAt,
+		LastFailureCode: root.LastFailureCode,
+	}
+}
+
 func FromTask(task *models.Task) TaskDTO {
 	return FromTaskWithPrimarySession(task, nil)
 }
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -812,6 +864,7 @@ func FromTaskWithSessionInfo(
 	sessionCount *int,
 	reviewStatus models.ReviewStatus,
 	primaryExecutorID *string,
+	primaryExecutorProfileID *string,
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
@@ -820,6 +873,11 @@ func FromTaskWithSessionInfo(
 	primarySessionState *string,
 	primarySessionPendingAction *string,
 ) TaskDTO {
+	if primaryExecutorProfileID == nil {
+		if value, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && value != "" {
+			primaryExecutorProfileID = &value
+		}
+	}
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -872,6 +930,7 @@ func FromTaskWithSessionInfo(
 		SessionCount:                sessionCount,
 		ReviewStatus:                reviewStatus,
 		PrimaryExecutorID:           primaryExecutorID,
+		PrimaryExecutorProfileID:    primaryExecutorProfileID,
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,
@@ -892,6 +951,7 @@ func FromTaskWithSessionInfo(
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
 		AssigneeAgentProfileID: task.AssigneeAgentProfileID,
+		AssigneeUserID:         task.AssigneeUserID,
 		Origin:                 task.Origin,
 		ProjectID:              task.ProjectID,
 		Labels:                 task.Labels,

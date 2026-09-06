@@ -424,7 +424,7 @@ Tune from observed startup time. Keep liveness on `/health` and readiness on `/r
 
 ## Ingress and exposure
 
-Kandev has no built-in user-auth boundary. Do not expose the example Ingress publicly until an authenticated gateway and TLS are in place.
+Kandev ships with its experimental authentication boundary disabled. Do not expose the example Ingress publicly until authentication and TLS are in place; use an authenticated gateway when relying on a supported external identity boundary.
 
 Before applying `k8s/ingress.yaml`:
 

@@ -295,5 +295,6 @@
   "dynamicRouteRetryDescription": "提供商出错后重试同一候选配置。适用于可能暂时恢复的故障。",
   "dynamicRouteTryNextDescription": "本次执行跳过此候选配置，继续使用下一个符合条件的配置。",
   "dynamicRouteStopDescription": "此候选配置失败后停止路由。任务会等待手动恢复操作。",
-  "dynamicProfileSaved": "动态配置已保存。"
+  "dynamicProfileSaved": "动态配置已保存。",
+  "adminOnly": "只有管理员可以更改代理和代理配置文件。"
 }

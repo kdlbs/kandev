@@ -8,12 +8,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -21,6 +25,7 @@ type RepositoryDiscoveryConfig struct {
 	Roots             []string
 	MaxDepth          int
 	TaskWorktreeRoots []string
+	DesktopRuntime    bool
 }
 
 const (
@@ -49,8 +54,15 @@ type Branch struct {
 }
 
 type RepositoryDiscoveryResult struct {
-	Roots        []string
-	Repositories []LocalRepository
+	Roots                    []string
+	Repositories             []LocalRepository
+	DesktopRuntime           bool
+	RootStates               []models.DesktopDiscoveryRoot
+	ScanTime                 *time.Time
+	Refreshing               bool
+	Cached                   bool
+	HomeConfirmationRequired bool
+	FailedRoots              []string
 }
 
 type RepositoryPathValidation struct {
@@ -78,48 +90,22 @@ const sourceTypeLocal = "local"
 const sourceTypeProvider = "provider"
 
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
-	roots := s.discoveryRoots()
-	if root != "" {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			return RepositoryDiscoveryResult{}, fmt.Errorf("invalid root path: %w", err)
-		}
-		if !isPathAllowed(absRoot, roots) {
-			return RepositoryDiscoveryResult{}, ErrPathNotAllowed
-		}
-		roots = []string{absRoot}
-	}
+	return s.RefreshLocalRepositoryDiscovery(ctx, root)
+}
 
-	repos := make([]LocalRepository, 0)
-	seen := make(map[string]struct{})
-	for _, scanRoot := range roots {
-		select {
-		case <-ctx.Done():
-			return RepositoryDiscoveryResult{}, ctx.Err()
-		default:
-		}
-		found, err := scanRootForRepos(ctx, scanRoot, s.discoveryMaxDepth())
-		if err != nil {
-			return RepositoryDiscoveryResult{}, err
-		}
-		for _, repo := range found {
-			if _, ok := seen[repo.Path]; ok {
-				continue
-			}
-			seen[repo.Path] = struct{}{}
-			repos = append(repos, repo)
-		}
-	}
-
-	return RepositoryDiscoveryResult{
-		Roots:        roots,
-		Repositories: repos,
-	}, nil
+// DiscoverLocalRepositoriesForWorkspace applies the workspace visibility
+// check before using the legacy discovery endpoint.
+func (s *Service) DiscoverLocalRepositoriesForWorkspace(
+	ctx context.Context,
+	workspaceID, root string,
+) (RepositoryDiscoveryResult, error) {
+	return s.refreshLocalRepositoryDiscovery(ctx, workspaceID, root, discoveryTriggerManualRefresh)
 }
 
 func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) (RepositoryPathValidation, error) {
 	absPath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.validation", path, "user_select", err)
 		return RepositoryPathValidation{}, fmt.Errorf("invalid path: %w", err)
 	}
 	result := RepositoryPathValidation{Path: absPath, Allowed: true}
@@ -135,6 +121,9 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	// codeql[go/path-injection] Intentional read-only diagnostics for the local path selected by the user.
 	info, statErr := os.Stat(absPath)
 	result.Exists = statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		s.logFilesystemFailure("repository.discovery.validation", absPath, "user_select", statErr)
+	}
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
 		result.Message = "Path does not exist"
@@ -682,8 +671,19 @@ func (s *Service) discoveryRoots() []string {
 	var roots []string
 	if len(s.discoveryConfig.Roots) > 0 {
 		roots = append(roots, s.discoveryConfig.Roots...)
-	} else if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, home)
+	} else if !s.discoveryConfig.DesktopRuntime {
+		if home, err := os.UserHomeDir(); err == nil {
+			roots = append(roots, home)
+		}
+	}
+	if s.discoveryConfig.DesktopRuntime && s.desktopRootStore != nil {
+		if saved, err := s.desktopRootStore.ListDesktopDiscoveryRoots(context.Background()); err == nil {
+			for _, root := range saved {
+				if root != nil {
+					roots = append(roots, root.Path)
+				}
+			}
+		}
 	}
 	// The orchestrator clones provider-backed repos into a configurable base
 	// path. When that base path sits outside HOME (e.g. /data/repos in a
@@ -728,12 +728,18 @@ func normalizeRoots(roots []string) []string {
 }
 
 func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRepository, error) {
+	if _, err := os.Stat(root); err != nil {
+		return nil, err
+	}
 	repos := make([]LocalRepository, 0)
+	home, _ := os.UserHomeDir()
 	walker := &repoWalker{
 		root:        root,
 		maxDepth:    maxDepth,
 		libraryRoot: filepath.Join(root, "Library"),
 		cacheRoot:   filepath.Join(root, ".cache"),
+		homeRoot:    home,
+		goos:        runtime.GOOS,
 		ctx:         ctx,
 	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -761,13 +767,18 @@ type repoWalker struct {
 	maxDepth    int
 	libraryRoot string
 	cacheRoot   string
+	homeRoot    string
+	goos        string
 	ctx         context.Context
 }
 
 // visit is the WalkDir callback. Returns a non-nil *LocalRepository when a git repo is found.
 func (w *repoWalker) visit(path string, d fs.DirEntry, err error) (*LocalRepository, error) {
 	if err != nil {
-		return nil, nil //nolint:nilerr // skip entries that cannot be accessed
+		if path == w.root || fsdiagnostics.IsAccessDenied(err) {
+			return nil, err
+		}
+		return nil, nil //nolint:nilerr // skip non-permission entries that cannot be accessed
 	}
 	if w.ctx.Err() != nil {
 		return nil, w.ctx.Err()
@@ -811,6 +822,9 @@ func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
 		return nil
 	}
 	name := d.Name()
+	if shouldSkipMacOSHomeChild(w.root, path, w.homeRoot, w.goos) {
+		return fs.SkipDir
+	}
 	if (name == "Library" || name == ".cache") && filepath.Dir(path) == w.root {
 		return fs.SkipDir
 	}
@@ -821,6 +835,19 @@ func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
 		return fs.SkipDir
 	}
 	return nil
+}
+
+func shouldSkipMacOSHomeChild(root, path, home, goos string) bool {
+	if goos != "darwin" || home == "" || !sameCanonicalPath(root, home) {
+		return false
+	}
+	if !sameCanonicalPath(filepath.Dir(path), root) {
+		return false
+	}
+	name := filepath.Base(path)
+	return strings.EqualFold(name, "Desktop") ||
+		strings.EqualFold(name, "Documents") ||
+		strings.EqualFold(name, "Downloads")
 }
 
 // makeRepo builds a LocalRepository from a .git entry path.

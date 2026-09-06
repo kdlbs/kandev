@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -62,6 +63,7 @@ type ContainerConfig struct {
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
 	LocalClonePath                 string // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce                 string // one-time nonce for agentctl handshake (set internally)
 	AgentctlStartupConfig          commonconfig.AgentctlStartupConfig
@@ -582,6 +584,13 @@ exec /usr/local/bin/agentctl`,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
+	if config.AllowUserNamespaces {
+		securityOpt, err := securityOptsForUserNamespaces()
+		if err != nil {
+			return docker.ContainerConfig{}, err
+		}
+		containerCfg.SecurityOpt = securityOpt
+	}
 	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
 		containerCfg.Labels[e2eDockerScopeLabel] = scope
 	}
@@ -598,6 +607,23 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	return containerCfg, nil
+}
+
+// securityOptsForUserNamespaces returns Docker SecurityOpt values that relax
+// seccomp and AppArmor to allow user namespace creation by processes without
+// CAP_SYS_ADMIN. An error is returned rather than swallowed: the operator
+// explicitly opted the profile in, so silently launching a container without
+// the relaxation would reproduce the exact bwrap failure the setting exists to
+// fix, with no signal as to why.
+func securityOptsForUserNamespaces() ([]string, error) {
+	profileJSON, err := seccomp.UsernsProfileJSON()
+	if err != nil {
+		return nil, fmt.Errorf("build user namespace seccomp profile: %w", err)
+	}
+	return []string{
+		"seccomp=" + profileJSON,
+		"apparmor=unconfined",
+	}, nil
 }
 
 // formatCoreutilsTimeout converts a Go duration to the single-unit format

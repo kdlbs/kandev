@@ -157,6 +157,23 @@ func TestAnalyzeReportsAllWorkspaceBytesIncludingYoungOrphans(t *testing.T) {
 	}
 }
 
+func TestEligibleCandidatesSkipsRootsThatFailedMeasurement(t *testing.T) {
+	provider, root, _ := newProviderFixture(t, Inventory{Complete: true}, nil)
+	failedPath := filepath.Join(root, "unreadable-workspace")
+
+	candidates, err := provider.eligibleCandidates(
+		[]candidate{{path: failedPath, measurementFailed: true}},
+		map[string]struct{}{},
+		filepath.Join(filepath.Dir(root), "trash"),
+	)
+	if err != nil {
+		t.Fatalf("eligibleCandidates: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want failed root skipped", candidates)
+	}
+}
+
 func TestCleanupQuarantinesOldOwnedOrphanAndRestoreIsConflictSafe(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
 	candidate := createOwnedCandidate(t, root, "orphan-task_abc", OwnershipMarker{

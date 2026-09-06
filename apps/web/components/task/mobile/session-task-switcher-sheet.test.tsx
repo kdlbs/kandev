@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     taskPRs: { byTaskId: {} },
     taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
+    userSettings: { sidebarTaskColors: {} },
   },
 }));
 
@@ -34,7 +35,10 @@ vi.mock("@/components/state-provider", () => ({
   // TaskNestContextMenuItems (rendered inside the shared context menu) reads
   // the store api via useNestTask; provide a minimal stub so it renders.
   useAppStoreApi: () => ({
-    getState: () => ({ kanbanMulti: { snapshots: {} } }),
+    getState: () => ({
+      kanbanMulti: { snapshots: {} },
+      userSettings: { revision: null, sidebarTaskColors: {} },
+    }),
   }),
 }));
 

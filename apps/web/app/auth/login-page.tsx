@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { IconLock } from "@tabler/icons-react";
+import type { TFunction } from "i18next";
 import { ApiError } from "@/lib/api/client";
 import { login } from "@/lib/api/domains/auth-api";
 import { useAppStore } from "@/components/state-provider";
@@ -61,7 +62,7 @@ export function LoginPage() {
     } catch (err) {
       setSubmitting(false);
       if (err instanceof ApiError) {
-        setError(err.status === 429 ? t("auth:tooManyAttempts") : t("auth:invalidEmailOrPassword"));
+        setError(loginErrorMessage(err, t));
         return;
       }
       setError(t("auth:somethingWentWrong"));
@@ -126,4 +127,17 @@ export function LoginPage() {
       </Card>
     </div>
   );
+}
+
+/**
+ * Maps a failed sign-in to the message that tells the user what to actually do.
+ *
+ * A suspended organization must NOT read as a bad password: the credential was
+ * accepted, and saying otherwise sends the user to reset a password that works.
+ */
+function loginErrorMessage(err: ApiError, t: TFunction): string {
+  if (err.status === 429) return t("auth:tooManyAttempts");
+  const code = (err.body as { code?: string } | null)?.code;
+  if (code === "org_suspended") return t("auth:organizationUnavailable");
+  return t("auth:invalidEmailOrPassword");
 }

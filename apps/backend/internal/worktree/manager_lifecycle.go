@@ -654,6 +654,13 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 	return SanitizeBranchSlug(req.BranchSlug)
 }
 
+func recreateSourceBranch(existingBranch, checkoutBranch string) string {
+	if checkoutBranch != "" {
+		return checkoutBranch
+	}
+	return existingBranch
+}
+
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally
 // pulling from origin first, and falling back to req.FallbackBaseBranch when the
 // requested base branch is missing. When the fallback path is taken, req.BaseBranch
@@ -2015,22 +2022,21 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 	refreshedStartPoint := ""
 	if req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == "" {
-		sourceBranch := existing.Branch
-		if req.CheckoutBranch != "" {
-			sourceBranch = req.CheckoutBranch
-		}
+		sourceBranch := recreateSourceBranch(existing.Branch, req.CheckoutBranch)
 		selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
 			ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
 		)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
-		if selectedRef == "" {
+		if selectedRef == "" && !req.AllowBranchReplacement {
 			err := &BranchUnrecoverableError{Branch: sourceBranch}
-			if req.AllowBranchReplacement {
-				return m.replaceUnrecoverableWorktree(ctx, existing, req, err)
-			}
 			return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", err, sourceBranch)
+		}
+		if selectedRef == "" {
+			return m.replaceUnrecoverableWorktree(
+				ctx, existing, req, &BranchUnrecoverableError{Branch: sourceBranch},
+			)
 		}
 		if selectedRef != existing.Branch {
 			refreshedStartPoint = selectedRef

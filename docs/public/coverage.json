@@ -61,11 +61,19 @@
       ],
       "sources": [
         "apps/backend/internal/task/handlers/workspace_handlers.go",
-        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"
+        "apps/backend/internal/task/service/repository_discovery.go",
+        "apps/backend/internal/task/service/repository_discovery_state.go",
+        "apps/backend/internal/task/repository/sqlite/desktop_discovery_root.go",
+        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx",
+        "apps/web/hooks/domains/workspace/use-repository-discovery.ts",
+        "apps/web/app/settings/workspace/workspace-repositories-dialog.tsx"
       ],
       "tests": [
         "apps/backend/internal/task/handlers/workspace_handlers_test.go",
-        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"
+        "apps/backend/internal/task/service/repository_discovery_test.go",
+        "apps/backend/internal/task/repository/sqlite/desktop_discovery_root_test.go",
+        "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx",
+        "apps/web/hooks/domains/workspace/use-repository-discovery.test.ts"
       ],
       "settingsRoutes": [
         "/settings/workspace",
@@ -555,7 +563,7 @@
         "user",
         "operator"
       ],
-      "stability": "beta",
+      "stability": "experimental",
       "docs": [
         "authentication"
       ],
@@ -575,6 +583,52 @@
         "/settings/account/security",
         "/settings/account/tokens"
       ]
+    },
+    {
+      "id": "team-access",
+      "audiences": ["user", "operator"],
+      "stability": "experimental",
+      "docs": ["team-access"],
+      "sources": [
+        "apps/backend/internal/authz/scopes.go",
+        "apps/backend/internal/authz/roles.go",
+        "apps/backend/internal/authz/resolve.go",
+        "apps/backend/internal/task/service/service_access.go",
+        "apps/backend/internal/task/service/service_members.go",
+        "apps/web/components/settings/workspaces/workspace-team-access-card.tsx",
+        "apps/web/components/task/task-assignee-control.tsx",
+        "apps/web/components/kanban-card-assignee-badge.tsx",
+        "apps/web/hooks/domains/users/use-assignable-people.ts",
+        "apps/web/components/settings/workspaces/workspace-placement-card.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/authz/registry_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go",
+        "apps/web/lib/types/team-access.test.ts",
+        "apps/backend/internal/task/service/service_events_assignee_test.go",
+        "apps/web/components/task/task-assignee-control.test.tsx",
+        "apps/web/lib/ws/handlers/tasks-assignee.test.ts",
+        "apps/web/components/settings/workspaces/workspace-placement-card.test.tsx"
+      ],
+      "settingsRoutes": ["/settings/units"]
+    },
+    {
+      "id": "organizations",
+      "audiences": ["operator"],
+      "stability": "experimental",
+      "docs": ["organizations"],
+      "sources": [
+        "apps/backend/internal/org/service.go",
+        "apps/backend/internal/org/store.go",
+        "apps/backend/internal/org/controller.go",
+        "apps/web/components/settings/system/organizations/organizations-page.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go"
+      ],
+      "settingsRoutes": ["/settings/system/organizations"]
     },
     {
       "id": "system-health-and-maintenance",
@@ -695,6 +749,50 @@
         "apps/backend/internal/plugins/service_test.go",
         "apps/backend/internal/plugins/manifest/manifest_test.go",
         "apps/web/lib/plugins/host-api.test.ts"
+      ]
+    },
+    {
+      "id": "agent-authored-canvases",
+      "audiences": ["user", "operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["canvases"],
+      "sources": [
+        "apps/backend/internal/canvas/service.go",
+        "apps/backend/internal/canvas/repository.go",
+        "apps/backend/internal/mcp/handlers/canvas.go",
+        "apps/backend/internal/mcp/server/canvas_tools.go",
+        "apps/backend/internal/plugins/instances/store.go",
+        "apps/backend/internal/plugins/manifest/manifest.go",
+        "apps/backend/internal/plugins/manifest/validate.go",
+        "apps/backend/internal/plugins/webapp/package.go",
+        "apps/backend/internal/plugins/webapp/policy.go",
+        "apps/backend/internal/plugins/webapp/runtime.go",
+        "apps/backend/internal/runtimeflags/registry.go",
+        "apps/web/components/plugins/canvas-page.tsx",
+        "apps/web/components/plugins/web-app-frame.tsx",
+        "apps/web/lib/api/domains/canvas-api.ts"
+      ],
+      "tests": [
+        "apps/backend/internal/canvas/canvas_test.go",
+        "apps/backend/internal/mcp/handlers/canvas_test.go",
+        "apps/backend/internal/mcp/server/canvas_tools_test.go",
+        "apps/backend/internal/plugins/instances/store_test.go",
+        "apps/backend/internal/plugins/manifest/manifest_test.go",
+        "apps/backend/internal/plugins/webapp/package_test.go",
+        "apps/backend/internal/plugins/webapp/policy_test.go",
+        "apps/backend/internal/plugins/webapp/runtime_test.go",
+        "apps/web/components/plugins/canvas-page.test.tsx",
+        "apps/web/components/plugins/web-app-frame.test.tsx",
+        "apps/web/lib/api/domains/canvas-api.test.ts"
+      ],
+      "mcpTools": [
+        "list_canvases_kandev",
+        "read_canvas_authoring_skill_kandev",
+        "create_canvas_kandev",
+        "get_canvas_kandev",
+        "publish_canvas_kandev",
+        "get_canvas_state_kandev",
+        "set_canvas_state_kandev"
       ]
     },
     {

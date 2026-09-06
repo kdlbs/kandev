@@ -1074,7 +1074,8 @@ func TestResolvePrepareScript(t *testing.T) {
 		if !strings.Contains(script, "git remote set-url") {
 			t.Error("expected token stripping after clone")
 		}
-		if !strings.Contains(script, "git checkout -b 'feature/task-abc'") {
+		if !strings.Contains(script, `worktree_branch='feature/task-abc'`) ||
+			!strings.Contains(script, `git checkout -b "$worktree_branch" "origin/$worktree_branch"`) {
 			t.Fatalf("expected Docker prepare script to create task branch, got:\n%s", script)
 		}
 	})

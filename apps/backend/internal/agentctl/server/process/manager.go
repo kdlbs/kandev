@@ -1036,6 +1036,20 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	}()
 }
 
+// RefreshWorkspace performs one file and Git scan across the root and all
+// repository trackers. Lifecycle uses this at turn completion; the manual
+// refresh surface uses it as an explicit access retry.
+func (m *Manager) RefreshWorkspace(ctx context.Context, trigger string) {
+	trigger = NormalizeWorkspaceTrigger(trigger)
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.RefreshWorkspace(ctx, trigger)
+	}
+	for _, tracker := range trackers {
+		tracker.RefreshWorkspace(ctx, trigger)
+	}
+}
+
 // GitOperator returns the git operator for git operations against the
 // workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {

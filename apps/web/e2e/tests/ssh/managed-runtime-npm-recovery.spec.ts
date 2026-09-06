@@ -3,7 +3,6 @@ import { readRemoteFile, remotePathExists } from "../../helpers/ssh";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
-  MANAGED_RUNTIME_PACKAGE_SPEC,
   managedRuntimeExecutionCacheKey,
   prepareManagedRuntimeProfile,
   restoreE2EAgentRegistry,
@@ -20,7 +19,7 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
     test.setTimeout(240_000);
     let profileId = "";
     try {
-      const profile = await prepareManagedRuntimeProfile(apiClient, backend);
+      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend);
       profileId = profile.id;
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
@@ -40,7 +39,7 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
         (candidate) => candidate.task_id === task.id,
       );
       expect(session?.remote_task_dir).toBeTruthy();
-      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey()}`;
+      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey(packageSpec)}`;
       const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
       expect(remotePathExists(seedData.sshTarget, `${target}/stale-marker`)).toBe(false);
       expect(readRemoteFile(seedData.sshTarget, `${target}/fresh-marker`)).toBe("fresh\n");
@@ -49,8 +48,7 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
         seedData.sshTarget,
         `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
       );
-      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([MANAGED_RUNTIME_PACKAGE_SPEC]);
-      expect(MANAGED_RUNTIME_PACKAGE_SPEC).toBe("@agentclientprotocol/codex-acp@1.6.0");
+      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([packageSpec]);
 
       await testPage.goto(`/t/${task.id}`);
       const page = new SessionPage(testPage);

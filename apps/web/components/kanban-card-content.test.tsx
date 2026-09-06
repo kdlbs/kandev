@@ -2,6 +2,12 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAppState = {
+  auth: {
+    mode: "enabled",
+    authenticated: true,
+    user: { id: "user-1" },
+    ssoProviders: [],
+  },
   workspaces: { activeId: "ws-1" },
   kanban: { tasks: [] as Array<{ id: string; title: string; parentTaskId?: string }> },
   kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
@@ -69,6 +75,25 @@ describe("KanbanCardBody — task-card-indicators slot", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
     expect(screen.getByTestId(INDICATOR_TEST_ID).textContent).toBe(SLOT_PROPS_TEXT);
+  });
+});
+
+describe("KanbanCardBody — priority indicator", () => {
+  it("renders the priority indicator inside the title row for a critical task", () => {
+    const { container } = render(
+      <KanbanCardBody task={{ ...TASK, priority: "critical" }} repositoryChips={[]} />,
+    );
+    const titleRow = container.querySelector('[data-testid="kanban-card-title-row"]');
+    expect(
+      titleRow?.querySelector('[data-testid="kanban-card-priority-indicator"]'),
+    ).not.toBeNull();
+  });
+
+  it("renders no priority indicator for a medium-priority task", () => {
+    const { container } = render(
+      <KanbanCardBody task={{ ...TASK, priority: "medium" }} repositoryChips={[]} />,
+    );
+    expect(container.querySelector('[data-testid="kanban-card-priority-indicator"]')).toBeNull();
   });
 });
 

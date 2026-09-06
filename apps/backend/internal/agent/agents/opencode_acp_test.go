@@ -130,6 +130,9 @@ func TestOpenCodeACPRemoteAuth(t *testing.T) {
 	if m.TargetRelDir != ".local/share/opencode" {
 		t.Errorf("TargetRelDir = %q, want %q", m.TargetRelDir, ".local/share/opencode")
 	}
+	if m.FileConflictPolicy != RemoteAuthFileConflictPolicyMergeJSONObject {
+		t.Errorf("FileConflictPolicy = %q, want %q", m.FileConflictPolicy, RemoteAuthFileConflictPolicyMergeJSONObject)
+	}
 	want := []string{".local/share/opencode/auth.json"}
 	for _, os := range []string{"darwin", "linux"} {
 		got := m.SourceFiles[os]

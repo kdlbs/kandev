@@ -54,6 +54,7 @@ type MobileToolbarProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   composerCapability?: PluginComposerCapability;
   composerSurface?: "task-chat" | "quick-chat";
+  presentation?: "desktop" | "mobile";
 };
 
 type MobileLeftActionsProps = MobileToolbarProps & {
@@ -61,13 +62,13 @@ type MobileLeftActionsProps = MobileToolbarProps & {
   onResetConfirmationOpenChange: (open: boolean) => void;
 };
 
-function mobileContextButton(contextCount: number) {
+function mobileContextButton(contextCount: number, presentation: "desktop" | "mobile") {
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
+      className={`${presentation === "mobile" ? "min-h-11 min-w-11" : "h-7"} gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative`}
       data-testid="chat-context-button"
       aria-label={t("task:sessionContext")}
     >
@@ -82,6 +83,7 @@ function mobileContextButton(contextCount: number) {
 }
 
 function MobileDefaultLeftActions(props: MobileToolbarProps) {
+  const presentation = props.presentation ?? "mobile";
   return (
     <>
       {!props.hidePlanMode && (
@@ -89,6 +91,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           planModeEnabled={props.planModeEnabled}
           planModeAvailable={props.planModeAvailable}
           onPlanModeChange={props.onPlanModeChange}
+          presentation={presentation}
         />
       )}
       {!props.hideAgentControls && (
@@ -119,12 +122,14 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           )}
         </>
       )}
-      {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
+      {props.onAttachFiles && (
+        <AttachFilesButton onClick={props.onAttachFiles} presentation={presentation} />
+      )}
       <div data-testid="toolbar-item-context">
         <ContextPopover
           open={props.contextPopoverOpen}
           onOpenChange={props.onContextPopoverOpenChange}
-          trigger={mobileContextButton(props.contextCount)}
+          trigger={mobileContextButton(props.contextCount, presentation)}
           sessionId={props.sessionId}
           planContextEnabled={props.planContextEnabled}
           contextFiles={props.contextFiles}
@@ -191,6 +196,7 @@ function MobileLeftActions(props: MobileLeftActionsProps) {
 
 export function MobileChatInputToolbar(props: MobileToolbarProps) {
   const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
+  const presentation = props.presentation ?? "mobile";
 
   return (
     <div
@@ -209,7 +215,7 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         <div className="flex shrink-0 items-center gap-1">
           <TokenUsageDisplay sessionId={props.sessionId} />
           {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-            <ImplementPlanButton onClick={props.onImplementPlan} />
+            <ImplementPlanButton onClick={props.onImplementPlan} presentation={presentation} />
           )}
           {!props.hideAgentControls && (
             <ChatInputPluginActions
@@ -228,6 +234,8 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             isAgentBusy={props.isAgentBusy}
             canCancelAgent={props.canCancelAgent}
             sessionId={props.sessionId}
+            taskId={props.taskId}
+            taskTitle={props.taskTitle}
             hasContent={props.hasContent}
             isDisabled={props.isDisabled}
             submitDisabledReason={props.submitDisabledReason}
@@ -236,6 +244,7 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             onCancel={props.onCancel}
             onSubmit={props.onSubmit}
             submitShortcut={props.submitShortcut}
+            presentation={presentation}
           />
         </div>
       ) : null}
