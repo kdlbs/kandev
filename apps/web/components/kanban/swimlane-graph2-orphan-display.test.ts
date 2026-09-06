@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ORPHAN_STEP_ID } from "./swimlane-kanban-content";
 import { getGraph2DisplayState, SwimlaneGraph2Content } from "./swimlane-graph2-content";
@@ -59,19 +60,23 @@ describe("SwimlaneGraph2Content auto-hidden steps", () => {
       createElement(
         StateProvider,
         null,
-        createElement(TooltipProvider, {
-          delayDuration: 0,
-          children: createElement(SwimlaneGraph2Content, {
-            workflowId: "wf-1",
-            steps: visibleSteps,
-            moveTargetSteps,
-            tasks,
-            onPreviewTask: () => undefined,
-            onOpenTask: () => undefined,
-            onEditTask: () => undefined,
-            onDeleteTask: () => undefined,
+        createElement(
+          ToastProvider,
+          null,
+          createElement(TooltipProvider, {
+            delayDuration: 0,
+            children: createElement(SwimlaneGraph2Content, {
+              workflowId: "wf-1",
+              steps: visibleSteps,
+              moveTargetSteps,
+              tasks,
+              onPreviewTask: () => undefined,
+              onOpenTask: () => undefined,
+              onEditTask: () => undefined,
+              onDeleteTask: () => undefined,
+            }),
           }),
-        }),
+        ),
       ),
     );
   }

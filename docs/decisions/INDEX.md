@@ -208,6 +208,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
 | 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |
 | 2026-08-23-pr-walkthrough-workflow-provenance | [Use the workflow SHA for trusted PR walkthrough inputs](2026-08-23-pr-walkthrough-workflow-provenance.md) | accepted | workflow, infra, security | 2026-08-23 |
+| 2026-09-05-pr-walkthrough-description-integrity | [Keep PR walkthrough description updates canonical and race-safe](2026-09-05-pr-walkthrough-description-integrity.md) | accepted | workflow, infra, GitHub | 2026-09-05 |
 | 2026-08-24-opt-in-ssh-task-directory-reclamation | [Opt-in reclamation of remote SSH task directories](2026-08-24-opt-in-ssh-task-directory-reclamation.md) | accepted | backend, frontend, operations | 2026-08-24 |
 | 2026-08-24-agentctl-local-managed-runtime-cache-repair | [Run cache repair where npm runs](2026-08-24-agentctl-local-managed-runtime-cache-repair.md) | accepted | backend, agentctl, protocol, security | 2026-08-24 |
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
@@ -245,3 +246,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
 | 2026-09-04-use-repository-token-for-runtime-pin-prs | [Use the built-in Actions token for runtime pin PRs](2026-09-04-use-repository-token-for-runtime-pin-prs.md) | accepted | workflow, security | 2026-09-04 |
 | 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
+| 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |

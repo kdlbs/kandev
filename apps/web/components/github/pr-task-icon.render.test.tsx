@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { TaskContributionIcons } from "@/components/task/task-contribution-icons";
-import { PRTaskIcon } from "./pr-task-icon";
+import { normalizeTaskPRs, PRTaskIcon } from "./pr-task-icon";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskCIAutomationOptions } from "@/lib/types/github";
@@ -100,6 +100,11 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("PRTaskIcon corrupted store entry", () => {
+  it("reuses one empty list for missing or malformed PR data", () => {
+    expect(normalizeTaskPRs(undefined)).toBe(normalizeTaskPRs(null));
+    expect(normalizeTaskPRs({})).toBe(normalizeTaskPRs([]));
+  });
+
   // Regression: an upstream payload (partial hydration, WS reorder, etc.) once
   // landed in taskPRs.byTaskId[TASK_ID] as a non-array truthy value. The
   // length-based guards then fell through into MultiPRIcon, where for-of

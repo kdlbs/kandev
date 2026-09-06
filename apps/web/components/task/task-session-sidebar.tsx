@@ -15,7 +15,11 @@ import { PanelRoot } from "./panel-primitives";
 import { TaskSidebarScrollArea } from "./task-sidebar-scroll-area";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
-import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import {
+  useTaskActions,
+  useArchiveAndSwitchTask,
+  type TaskActionOptions,
+} from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
@@ -146,7 +150,7 @@ function useArchiveActions(store: StoreApi) {
   const [isArchiving, setIsArchiving] = useState(false);
 
   const runArchive = useCallback(
-    async (taskId: string, opts: { cascade?: boolean }) => {
+    async (taskId: string, opts: TaskActionOptions) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -163,7 +167,7 @@ function useArchiveActions(store: StoreApi) {
   );
 
   const handleArchiveTask = useCallback(
-    (taskId: string, opts?: { cascade?: boolean }) => {
+    (taskId: string, opts?: TaskActionOptions) => {
       if (opts) {
         void runArchive(taskId, opts);
         return;
@@ -224,7 +228,7 @@ function useDeleteActions(
   );
 
   const handleDeleteConfirm = useCallback(
-    async (opts: { cascade: boolean }) => {
+    async (opts: TaskActionOptions & { cascade: boolean; discardWorktreeChanges: boolean }) => {
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
