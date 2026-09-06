@@ -996,6 +996,12 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
+	// Persist terminal status before releasing the in-memory execution. Privileged
+	// MCP operations revalidate this durable mirror in their transaction, so a
+	// stopped execution must never leave a live-looking attestation behind.
+	if err := m.persistStoppedExecutorRunning(context.WithoutCancel(ctx), execution); err != nil {
+		return fmt.Errorf("persist terminal status for execution %q: %w", executionID, err)
+	}
 
 	// End session trace span
 	execution.EndSessionSpan()

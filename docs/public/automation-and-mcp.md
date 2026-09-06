@@ -210,6 +210,36 @@ Automation sessions receive one fixed, workspace-scoped coordinator MCP surface.
 
 The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
+The designated workspace Coordinator also receives
+`cancel_pending_move_kandev` for reviewed recovery from one hazardous deferred
+workflow move. This is an exact, effect-idempotent administrative operation, not
+a general queue control. It requires the pending-row ID, session, task, move,
+workflow, expected current step, and expected target step. Kandev verifies the
+live Coordinator grant and all seven predicates in one transaction. A changed,
+replaced, unknown, unauthorized, or cross-workspace target returns the same
+not-found-or-changed error and leaves state untouched. A successful call removes
+only that pending-move row; it does not message or resume the session, move the
+task, change tags, or remove queued prompts. Every attempt is audited without
+logging the request payload.
+
+The same Coordinator also receives `read_pending_move_kandev`, a read-only
+companion that requires only the target `task_id`. It performs the identical
+authorization check as cancellation, then reports whether that task still has
+an armed pending move. An authorized caller with nothing to find receives an
+audited `found: false`, not an error; every authorization or relation failure
+still returns the same not-found-or-changed error cancellation uses, so an
+unauthorized caller cannot distinguish "denied" from "empty." A found result
+returns the exact row ID, move, workflow, session, and step identifiers needed
+to call `cancel_pending_move_kandev` next. The read never deletes anything, and
+a row it surfaces remains cancellable afterward with the identifiers it
+returned. Every call is audited the same way as cancellation, without logging
+the request payload.
+
+Do not use either tool as routine cleanup. Automatic expiration and orphan
+reaping remain the normal lifecycle, and a live administrative cancellation
+should use identifiers captured from `read_pending_move_kandev` or another
+reviewed readback.
+
 ## Export automations
 
 The automations settings page (**Settings > Workspaces > _Workspace_ > Automations**) has an **Export** control next to **New Automation**. It downloads every automation in the workspace as a zip, one YAML file per automation at `.kandev/automations/<slug>.yml`, ready to read, diff, or check into a repository. A workspace with no automations still downloads a (empty) zip rather than showing an error.

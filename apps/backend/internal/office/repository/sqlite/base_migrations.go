@@ -558,6 +558,7 @@ func taskPriorityMigrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_workspace_id_id ON tasks(workspace_id, id)`,
 		// idx_tasks_assignee was removed in ADR 0005 Wave F when the
 		// per-task assignee moved to workflow_step_participants.
 		//

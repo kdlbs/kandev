@@ -146,3 +146,37 @@ func TestChannelBackendClientRedactsPluginInvocationPayload(t *testing.T) {
 	_, loggedArguments := payload["arguments"]
 	require.False(t, loggedArguments)
 }
+
+func TestChannelBackendClientRedactsPendingMoveCancellationPayload(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	client := NewChannelBackendClient(log)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = client.RequestPayload(ctx, ws.ActionMCPCancelPendingMove, map[string]any{
+		"pending_move_id": "secret-target-row", "task_id": "secret-target-task",
+	}, nil)
+
+	entries := observed.FilterMessage("sending MCP request through agent stream").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "<redacted>", entries[0].ContextMap()["payload"])
+}
+
+func TestChannelBackendClientRedactsPendingMoveReadPayload(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	client := NewChannelBackendClient(log)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = client.RequestPayload(ctx, ws.ActionMCPReadPendingMove, map[string]any{
+		"task_id": "secret-target-task",
+	}, nil)
+
+	entries := observed.FilterMessage("sending MCP request through agent stream").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "<redacted>", entries[0].ContextMap()["payload"])
+}

@@ -212,6 +212,21 @@ type AgentPermissionService interface {
 	ResolveAgentPermission(ctx context.Context, request orchestrator.ResolveAgentPermissionRequest) (*orchestrator.ResolveAgentPermissionResult, error)
 }
 
+// PendingMoveCanceller is the narrow privileged deferred-move cancellation seam.
+type PendingMoveCanceller interface {
+	ExactCancelPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, messagequeue.ExactPendingMoveMatch, string) (*messagequeue.PendingMoveCancellationResult, error)
+	AuditInvalidPendingMoveCancellation(context.Context, messagequeue.PendingMoveCancellationActor, string, bool, bool) error
+}
+
+// PendingMoveReader is the narrow privileged deferred-move read seam. It
+// authorizes identically to PendingMoveCanceller but never mutates state; it
+// is the safe way a Coordinator discovers the exact tuple a cancellation
+// requires before calling it.
+type PendingMoveReader interface {
+	ReadPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, string, string) (*messagequeue.PendingMoveCensusResult, error)
+	AuditInvalidPendingMoveCensus(context.Context, messagequeue.PendingMoveCancellationActor, string, bool, bool) error
+}
+
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
 // owner session accepts a prompt-first task title.
 type TaskTitleBranchRenamer interface {
@@ -319,7 +334,9 @@ type Handlers struct {
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
-	agentPermissionSvc AgentPermissionService
+	agentPermissionSvc   AgentPermissionService
+	pendingMoveCanceller PendingMoveCanceller
+	pendingMoveReader    PendingMoveReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -369,6 +386,12 @@ func NewHandlers(
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
 	}
+	if canceller, ok := messageQueue.(PendingMoveCanceller); ok {
+		h.pendingMoveCanceller = canceller
+	}
+	if reader, ok := messageQueue.(PendingMoveReader); ok {
+		h.pendingMoveReader = reader
+	}
 	return h
 }
 
@@ -395,6 +418,16 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 // SetAgentPermissionService wires the authorized permission domain service.
 func (h *Handlers) SetAgentPermissionService(svc AgentPermissionService) {
 	h.agentPermissionSvc = svc
+}
+
+// SetPendingMoveCanceller wires the exact administrative cancellation service.
+func (h *Handlers) SetPendingMoveCanceller(canceller PendingMoveCanceller) {
+	h.pendingMoveCanceller = canceller
+}
+
+// SetPendingMoveReader wires the exact administrative read-only census service.
+func (h *Handlers) SetPendingMoveReader(reader PendingMoveReader) {
+	h.pendingMoveReader = reader
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -491,6 +524,8 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
+	d.RegisterFunc(ws.ActionMCPCancelPendingMove, h.handleCancelPendingMove)
+	d.RegisterFunc(ws.ActionMCPReadPendingMove, h.handleReadPendingMove)
 }
 
 func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
