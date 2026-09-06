@@ -87,6 +87,15 @@ func TestApprovalLedgerGrantRejectsZeroRevision(t *testing.T) {
 	}
 }
 
+func TestApprovalLedgerGrantRejectsNonInitialRevision(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+
+	if _, err := ledger.grant("inst-1", "ws-1", 2, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", time.Now().UTC()); err == nil {
+		t.Fatal("grant accepted non-initial revision")
+	}
+}
+
 func TestApprovalLedgerTombstonePersistsAcrossReload(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)
@@ -128,8 +137,11 @@ func TestAuthorizePluginCapabilityDeniesStaleRevision(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 2, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
-		t.Fatalf("grant: %v", err)
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("initial grant: %v", err)
+	}
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 2, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-2"); err != nil {
+		t.Fatalf("second grant: %v", err)
 	}
 
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "api_read:tasks", 1, "req", "method")
@@ -315,6 +327,28 @@ func TestApprovalTombstoneRetryDoesNotAdvanceRevisionOrDuplicateEvents(t *testin
 	}
 	if len(file.Events) != 2 {
 		t.Fatalf("event count = %d, want grant plus one tombstone revoke", len(file.Events))
+	}
+}
+
+func TestApprovalLedgerRejectsGrantForTombstonedInstallation(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", time.Now().UTC()); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := ledger.tombstoneInstallation("inst-1", time.Now().UTC()); err != nil {
+		t.Fatalf("tombstone: %v", err)
+	}
+	if _, err := ledger.grant("inst-1", "ws-1", 3, "digest-b", []string{"api_read:tasks"}, "human", "regrant", "audit-2", time.Now().UTC()); err == nil {
+		t.Fatal("grant accepted tombstoned installation")
+	}
+}
+
+func TestApprovalLedgerRejectsMissingAuditID(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "", time.Now().UTC()); err == nil {
+		t.Fatal("grant accepted empty audit id")
 	}
 }
 

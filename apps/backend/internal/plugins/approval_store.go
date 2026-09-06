@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -72,8 +73,9 @@ type approvalLedgerFile struct {
 }
 
 var (
-	ErrApprovalRevisionConflict    = errors.New("plugins: approval revision conflict")
-	ErrApprovalIdempotencyConflict = errors.New("plugins: approval idempotency conflict")
+	ErrApprovalRevisionConflict       = errors.New("plugins: approval revision conflict")
+	ErrApprovalIdempotencyConflict    = errors.New("plugins: approval idempotency conflict")
+	ErrApprovalInstallationTombstoned = errors.New("plugins: installation approval tombstoned")
 )
 
 type approvalLedger struct {
@@ -157,6 +159,9 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	if revision == 0 {
 		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
+	if strings.TrimSpace(auditID) == "" {
+		return CapabilityApproval{}, errors.New("plugins: approval audit id is required")
+	}
 	canonical, err := CanonicalCapabilityList(capabilityIDs)
 	if err != nil {
 		return CapabilityApproval{}, err
@@ -170,15 +175,13 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	}
 	key := approvalKey(installationID, workspaceID)
 	current := file.Approvals[key]
-	if auditID != "" {
-		if replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)]; ok {
-			if replayed.Revision == revision && replayed.ManifestDigest == manifestDigest && equalStrings(replayed.CapabilityIDs, capabilityIDs) {
-				return replayed, nil
-			}
-			return CapabilityApproval{}, ErrApprovalIdempotencyConflict
-		}
+	if _, tombstoned := file.Tombstones[installationID]; tombstoned {
+		return CapabilityApproval{}, ErrApprovalInstallationTombstoned
 	}
-	if current.Revision != 0 && current.Revision != revision-1 {
+	if replayed, found, err := approvalGrantReplay(file, installationID, workspaceID, revision, manifestDigest, capabilityIDs, auditID); found || err != nil {
+		return replayed, err
+	}
+	if !approvalRevisionFollows(current.Revision, revision) {
 		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
 	approval := CapabilityApproval{
@@ -197,9 +200,7 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 		approval.CreatedAt = current.CreatedAt
 	}
 	file.Approvals[key] = approval
-	if auditID != "" {
-		file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approval
-	}
+	file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approval
 	file.Events = append(file.Events, CapabilityApprovalEvent{
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
 		BeforeRevision: current.Revision, AfterRevision: revision,
@@ -209,11 +210,32 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	return approval, l.save(file)
 }
 
+func approvalGrantReplay(file *approvalLedgerFile, installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, auditID string) (CapabilityApproval, bool, error) {
+	replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)]
+	if !ok {
+		return CapabilityApproval{}, false, nil
+	}
+	if replayed.Revision == revision && replayed.ManifestDigest == manifestDigest && equalStrings(replayed.CapabilityIDs, capabilityIDs) {
+		return replayed, true, nil
+	}
+	return CapabilityApproval{}, true, ErrApprovalIdempotencyConflict
+}
+
+func approvalRevisionFollows(current, next uint64) bool {
+	if current == 0 {
+		return next == 1
+	}
+	return next == current+1
+}
+
 func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
 	return l.revokeIfRevision(installationID, workspaceID, 0, actor, reason, auditID, at, true)
 }
 
 func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, expectedRevision uint64, actor, reason, auditID string, at time.Time, allowCurrent bool) (CapabilityApproval, error) {
+	if strings.TrimSpace(auditID) == "" {
+		return CapabilityApproval{}, errors.New("plugins: approval audit id is required")
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
