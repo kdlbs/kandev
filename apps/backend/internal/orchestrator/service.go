@@ -1556,6 +1556,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
 }
 
+// SetCanvasesEnabled applies the release gate to task MCP profiles before
+// agentctl receives them. Disabled profiles do not register canvas tools.
+func (s *Service) SetCanvasesEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
 // SetLaunchAttachmentClaimer wires staged-descriptor admission into the
 // unified session launch boundary.
 func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {

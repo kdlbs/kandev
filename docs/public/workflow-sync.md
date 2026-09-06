@@ -133,7 +133,7 @@ A valid fetch that returns no supported files is different: it is an empty desir
 
 Repository listing or file-download failures fail the run before apply. Per-workspace locking serializes sync, configuration changes, and removal, so two requests cannot interleave their changes.
 
-> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's stored credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+> **Network security:** With authentication disabled, the HTTP API is open and can read or change sync configuration with the backend's stored credentials. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing it.
 
 <details>
 <summary>HTTP API, reconciliation, and cleanup details</summary>
