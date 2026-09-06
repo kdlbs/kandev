@@ -34,6 +34,7 @@ func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
 
 func (s *Service) handleTaskDeleted(ctx context.Context, data watcher.TaskEventData) {
 	s.scheduler.RemoveTask(data.TaskID)
+	s.clearParkedProjectionOnTaskDeleted(data.TaskID)
 }
 
 func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {

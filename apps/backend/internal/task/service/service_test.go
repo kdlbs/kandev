@@ -53,6 +53,28 @@ func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
 	return 1, c.err
 }
 
+type parkedProjectionCancelCall struct {
+	taskID      string
+	sessionID   string
+	newState    models.TaskSessionState
+	hasDeadline bool
+}
+
+type recordingParkedProjectionCanceller struct {
+	calls []parkedProjectionCancelCall
+}
+
+func (c *recordingParkedProjectionCanceller) ClearParkedProjectionOnSessionTerminated(
+	ctx context.Context,
+	taskID, sessionID string,
+	newState models.TaskSessionState,
+) {
+	_, hasDeadline := ctx.Deadline()
+	c.calls = append(c.calls, parkedProjectionCancelCall{
+		taskID: taskID, sessionID: sessionID, newState: newState, hasDeadline: hasDeadline,
+	})
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -2059,6 +2081,57 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
 		t.Fatalf("clarification expiry context errors = %v, want active context", clarifications.contextErrs)
+	}
+}
+
+// TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions is the
+// regression test for the archive-side parked-projection leak: ArchiveTask
+// cancels active sessions through a bulk repository update that never passes
+// through the orchestrator's per-session state-transition chokepoint, so
+// nothing stopped that session's parked sampling loop or cleared its
+// tracking. Without a wired ParkedProjectionCanceller, an archived task whose
+// session was parked would keep publishing parked_on_background_work forever.
+func TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-parked", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	parked := &recordingParkedProjectionCanceller{}
+	svc.SetParkedProjectionCanceller(parked)
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	if len(parked.calls) != 1 {
+		t.Fatalf("parked projection cancel calls = %v, want exactly one", parked.calls)
+	}
+	call := parked.calls[0]
+	if call.taskID != "task-1" || call.sessionID != "session-parked" {
+		t.Errorf("call = %+v, want task-1/session-parked", call)
+	}
+	if call.newState != models.TaskSessionStateCancelled {
+		t.Errorf("newState = %q, want CANCELLED", call.newState)
+	}
+	if !call.hasDeadline {
+		t.Error("expected a bounded context for the parked-projection cancel call")
 	}
 }
 

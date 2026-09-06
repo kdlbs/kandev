@@ -740,6 +740,11 @@ func registerRoutes(p routeParams) {
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).

@@ -474,6 +474,95 @@ func TestClearParkedOnSessionStateLeft_DeletedSessionCleansProjection(t *testing
 	}
 }
 
+// TestClearParkedProjectionOnTaskDeleted_StopsLoopAndRemovesTaskEntryEntirely
+// is the regression test for the delete-cascade parked-projection leak:
+// DeleteTask removes session rows directly and publishes task.deleted without
+// ever passing through updateTaskSessionStateWithHook, so nothing else stops
+// a parked session's sampling loop or clears its tracking. Unlike the
+// per-session delete path (clearParkedProjectionOnSessionDeleted), the
+// task-level entry must be removed entirely rather than kept as a revision
+// tombstone: a deleted task's ID is never reused.
+func TestClearParkedProjectionOnTaskDeleted_StopsLoopAndRemovesTaskEntryEntirely(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.backgroundProbeConfig.Interval = time.Hour // never fires during the test
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); !parked {
+		t.Fatal("precondition: session should be parked before task deletion")
+	}
+	svc.parkedMu.Lock()
+	loopRunning := svc.parkedStates["sess-1"] != nil && svc.parkedStates["sess-1"].loopCancel != nil
+	svc.parkedMu.Unlock()
+	if !loopRunning {
+		t.Fatal("precondition: sampling loop should be running before task deletion")
+	}
+
+	svc.clearParkedProjectionOnTaskDeleted("task-1")
+
+	if parked, revision := svc.ParkedSnapshot("sess-1"); parked || revision != 0 {
+		t.Fatalf("ParkedSnapshot after task deletion = (%v, %d), want (false, 0)", parked, revision)
+	}
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); parked || revision != 0 {
+		t.Fatalf("TaskParkedSnapshot after task deletion = (%v, %d), want (false, 0) — no tombstone for a deleted task", parked, revision)
+	}
+	svc.parkedMu.Lock()
+	_, sessionTracked := svc.parkedStates["sess-1"]
+	_, taskTracked := svc.taskParkedStates["task-1"]
+	svc.parkedMu.Unlock()
+	if sessionTracked {
+		t.Fatal("deleted task's session remained in parkedStates")
+	}
+	if taskTracked {
+		t.Fatal("deleted task remained in taskParkedStates")
+	}
+	if svc.ObservedDetachedLaunch("sess-1") {
+		t.Fatal("deleted task's session retained its detached-launch attestation")
+	}
+}
+
+// TestClearParkedProjectionOnTaskDeleted_NoTrackedState_NoOp covers a task
+// with no parked sessions (or an unknown task ID): must not panic and must
+// leave the maps as-is.
+func TestClearParkedProjectionOnTaskDeleted_NoTrackedState_NoOp(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, _ := newParkedTestService(t, repo)
+
+	svc.clearParkedProjectionOnTaskDeleted("task-1")
+	svc.clearParkedProjectionOnTaskDeleted("")
+
+	if parked, _ := svc.TaskParkedSnapshot("task-1"); parked {
+		t.Fatal("expected no parked state for a task that never had one")
+	}
+}
+
+// TestClearParkedProjectionOnSessionTerminated_ExportedWrapper covers the
+// task/service.ParkedProjectionCanceller seam: archive's bulk session
+// cancellation calls this exported method (across the package boundary)
+// instead of the chokepoint-only clearParkedOnSessionStateLeft directly, so
+// it must behave identically — both the CANCELLED (archive) and "" (delete)
+// forms.
+func TestClearParkedProjectionOnSessionTerminated_ExportedWrapper(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); !parked {
+		t.Fatal("precondition: session should be parked before archive cancellation")
+	}
+
+	svc.ClearParkedProjectionOnSessionTerminated(context.Background(), "task-1", "sess-1", models.TaskSessionStateCancelled)
+
+	if parked, _ := svc.ParkedSnapshot("sess-1"); parked {
+		t.Fatal("expected the session to un-park after the exported archive-cancel call")
+	}
+	if parked, _ := svc.TaskParkedSnapshot("task-1"); parked {
+		t.Fatal("expected the task aggregate to clear once its only parked session is cancelled")
+	}
+}
+
 func TestParkedSamplingLoop_SelfTerminationReleasesSlotAndCanRestart(t *testing.T) {
 	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe := newParkedTestService(t, repo)

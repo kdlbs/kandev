@@ -745,6 +745,45 @@ func TestHandleTaskDeleted_PurgesLifecycleRowsAfterUserCancellation(t *testing.T
 	}
 }
 
+// TestHandleTaskDeleted_ClearsParkedProjection is the wiring test for the
+// delete-cascade parked-projection leak (see
+// TestClearParkedProjectionOnTaskDeleted_StopsLoopAndRemovesTaskEntryEntirely
+// in parked_projection_test.go for the underlying behavior): the production
+// task.deleted handler must actually call the cleanup, not just leave it
+// reachable as a private method nothing invokes.
+func TestHandleTaskDeleted_ClearsParkedProjection(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+
+	loopCancelled := false
+	svc.parkedMu.Lock()
+	svc.parkedStates = map[string]*parkedSessionState{
+		"s1": {parked: true, loopCancel: func() { loopCancelled = true }},
+	}
+	svc.taskParkedStates = map[string]*taskParkedState{
+		"t1": {sessions: map[string]bool{"s1": true}, parked: true, revision: 1},
+	}
+	svc.parkedMu.Unlock()
+
+	if err := repo.DeleteTask(ctx, "t1"); err != nil {
+		t.Fatalf("delete task: %v", err)
+	}
+	svc.handleTaskDeleted(ctx, watcher.TaskEventData{TaskID: "t1"})
+
+	if !loopCancelled {
+		t.Fatal("expected the deleted task's sampling loop to be cancelled")
+	}
+	svc.parkedMu.Lock()
+	_, sessionTracked := svc.parkedStates["s1"]
+	_, taskTracked := svc.taskParkedStates["t1"]
+	svc.parkedMu.Unlock()
+	if sessionTracked || taskTracked {
+		t.Fatalf("parked-projection state survived task deletion: session=%v task=%v", sessionTracked, taskTracked)
+	}
+}
+
 func TestExecuteQueuedMessage_LifecycleBusyClaimRequeuesInsteadOfDropping(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)

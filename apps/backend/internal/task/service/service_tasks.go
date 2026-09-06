@@ -2568,6 +2568,16 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 			}
 		}
 	}
+	if s.parkedProjectionCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			parkedCtx, cancelParked := context.WithTimeout(detachedCtx, taskPublicationTimeout)
+			s.parkedProjectionCanceller.ClearParkedProjectionOnSessionTerminated(parkedCtx, taskID, session.ID, session.State)
+			cancelParked()
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

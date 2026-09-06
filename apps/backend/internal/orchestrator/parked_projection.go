@@ -296,6 +296,17 @@ func (s *Service) applySettledParkedSample(
 	return transition, true
 }
 
+// ClearParkedProjectionOnSessionTerminated implements
+// task/service.ParkedProjectionCanceller for a session terminated through the
+// task service's own bulk paths — archive's batch session cancellation
+// (newState is the session's new terminal state) and delete's cascaded
+// session removal (newState is "") — neither of which passes through
+// updateTaskSessionStateWithHook, the chokepoint this same cleanup normally
+// rides on for every other transition (see onSessionStateChangedForParkedProjection).
+func (s *Service) ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState) {
+	s.clearParkedOnSessionStateLeft(ctx, taskID, sessionID, newState)
+}
+
 // clearParkedOnSessionStateLeft is D8's session-state term: when a session
 // leaves WAITING_FOR_INPUT (self-resume, an admitted prompt, or the session
 // stopping/ending), the projection clears immediately without a new probe
@@ -352,6 +363,48 @@ func (s *Service) clearParkedProjectionOnSessionDeleted(ctx context.Context, tas
 	}
 	if taskChanged {
 		s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+	}
+}
+
+// clearParkedProjectionOnTaskDeleted removes every tracked session-level and
+// the task-level parked-projection entry for a task whose row (and cascaded
+// session rows) are already gone. DeleteTask never transitions its sessions
+// through updateTaskSessionStateWithHook — it deletes the rows directly and
+// publishes task.deleted — so this is the only place that stops their
+// sampling loops and clears their attestation; without it, a session that was
+// parked when its task was deleted keeps sampling and publishing
+// parked_on_background_work forever. Unlike clearParkedProjectionOnSessionDeleted,
+// this drops the task-level entry entirely rather than keeping it as a
+// revision tombstone: a deleted task's ID is never reused, so there is no
+// later session on the same ID whose ordering the tombstone would protect.
+func (s *Service) clearParkedProjectionOnTaskDeleted(taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.parkedMu.Lock()
+	tst := s.taskParkedStates[taskID]
+	var sessionIDs []string
+	var cancels []context.CancelFunc
+	if tst != nil {
+		sessionIDs = make([]string, 0, len(tst.sessions))
+		for sessionID := range tst.sessions {
+			sessionIDs = append(sessionIDs, sessionID)
+			if st := s.parkedStates[sessionID]; st != nil {
+				if st.loopCancel != nil {
+					cancels = append(cancels, st.loopCancel)
+				}
+				delete(s.parkedStates, sessionID)
+			}
+		}
+	}
+	delete(s.taskParkedStates, taskID)
+	s.parkedMu.Unlock()
+
+	for _, sessionID := range sessionIDs {
+		s.clearObservedDetachedLaunch(sessionID)
+	}
+	for _, cancel := range cancels {
+		cancel()
 	}
 }
 
