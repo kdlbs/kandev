@@ -106,6 +106,7 @@ import (
 const (
 	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
 	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
@@ -1054,9 +1055,11 @@ func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
-		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
-		Locale:        i18n.FromRequest(req),
-		TitlePrefix:   strings.TrimSpace(titlePrefix),
+		NonProduction:               profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:                      i18n.FromRequest(req),
+		TitlePrefix:                 strings.TrimSpace(titlePrefix),
+		NativeFolderPickerAvailable: strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
+		DesktopRuntime:              strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
 	}
 }
 
@@ -1441,9 +1444,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {

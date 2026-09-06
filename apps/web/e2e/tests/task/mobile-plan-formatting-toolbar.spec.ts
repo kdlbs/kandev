@@ -38,7 +38,7 @@ async function seedMobilePlan(
   await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
   await session.waitForChatIdle({ timeout: 45_000 });
   await session.togglePlanMode();
-  await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
+  await testPage.getByRole("navigation").getByRole("button", { name: "Plan", exact: true }).tap();
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
   await expect(session.planPanel).toContainText(PLAN_TEXT, { timeout: 15_000 });
   return session;

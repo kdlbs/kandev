@@ -13,14 +13,13 @@ owners:
 
 ## Overview
 
-A plugin can already relocate a card on the board, and doing so starts nothing.
-`Host.UpdateTask` accepts `workflow_step_id` and the adapter forwards it to
-`taskservice.UpdateTask`, which assigns `task.WorkflowStepID` directly
-(`service_tasks.go:1593`) and never calls `publishTaskMovedEvent`, whose only
-call sites are the shared move and queue-promotion paths. Without that event
-`autoStartTaskForStep` never runs, so no `on_enter` action fires and no agent
-launches. A plugin "Dispatch" button built on `UpdateTask` moves cards and
-starts no work.
+A plugin can relocate a card through the dedicated `Host.MoveTask` path, which
+uses the board move implementation and can run step-entry actions. The
+plugin-facing `Host.UpdateTask` contract deliberately rejects
+`workflow_step_id`; using the generic update path would assign
+`task.WorkflowStepID` directly without calling `publishTaskMovedEvent`, so no
+`on_enter` action would fire and no agent would launch. A plugin "Dispatch"
+button must therefore use `MoveTask` rather than `UpdateTask`.
 
 This system owns the contract because the durable decision is *what a plugin
 may do to an operator's board and under whose identity*, not how a move is

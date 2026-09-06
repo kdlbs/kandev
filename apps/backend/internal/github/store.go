@@ -3060,7 +3060,6 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 				last_fix_signature = excluded.last_fix_signature,
 				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 				last_fix_enqueued_at = NULL,
-				last_fix_session_id = NULL,
 				last_error = NULL,
 				last_error_kind = '',
 				updated_at = excluded.updated_at`),
@@ -3224,8 +3223,9 @@ func (s *Store) RecordTaskCIMergeAttemptResult(
 // RecordTaskCIMergeQueueObservation persists an active queue attempt or a
 // conservative current-head baseline when a removal is observed first. The
 // baseline is written only when no queue attempt has been recorded yet, so a
-// later poll cannot move the guard to a newer head and accidentally requeue a
-// removal that belongs to an older attempt.
+// later poll cannot move the automatic requeue guard to a newer head. The
+// passive baseline is not auto-fix provenance; queue-removal auto-fix also
+// requires the durable merge-attempt signature.
 func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
 	return s.mutateTaskCIPRState(ctx, observation.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		baselineHead := ""

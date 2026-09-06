@@ -849,7 +849,7 @@ func TestStartRemoteAgentctlOnPortBuildsLaunchScript(t *testing.T) {
 		">> '/remote/session'/agentctl.log 2>&1 < /dev/null &",
 		`echo "$AGENTCTL_PID" > '/remote/session'/agentctl.pid`,
 		"mkdir -p '/remote/session'",
-		". /dev/stdin",
+		`eval "$(cat)"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("launch script missing %q:\n%s", want, script)

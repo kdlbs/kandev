@@ -106,6 +106,20 @@ async function interceptTallPRFeedback(testPage: import("@playwright/test").Page
   );
 }
 
+async function primarySessionId(apiClient: ApiClient, taskId: string) {
+  const { sessions } = await apiClient.listTaskSessions(taskId);
+  const session = sessions.find((item) => item.is_primary) ?? sessions[0];
+  if (!session) throw new Error(`Task ${taskId} has no session`);
+  return session.id;
+}
+
+async function listAutoFixMessages(apiClient: ApiClient, sessionId: string) {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  return messages.filter(
+    (message) => message.author_type === "user" && message.content.includes("@ci-auto-fix"),
+  );
+}
+
 test.describe("mobile PR CI automation options", () => {
   test("drawer exposes automation controls and task prompt settings link", async ({
     testPage,
@@ -185,6 +199,110 @@ test.describe("mobile PR CI automation options", () => {
     await expect(promptDialog.getByTestId("ci-auto-fix-pr-feedback-help")).toContainText(
       "new or changed review comments",
     );
+    await expect(promptDialog).toContainText("ordinary merge-conflict context");
+    await expect(promptDialog).toContainText("actionable queue-removal context");
+    await testPage.keyboard.press("Escape");
+  });
+
+  test("mobile auto-fix repairs an existing merge conflict once", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const headSHA = "head-conflict-mobile";
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI conflict auto-fix mobile", {
+      head_sha: headSHA,
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+    const sessionId = await primarySessionId(apiClient, taskId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await expect(drawer.getByTestId("pr-ci-automation-controls")).toBeVisible();
+    await drawer.getByLabel("Explain CI automation options").tap();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Auto-fix repairs ordinary merge conflicts and actionable queue removals.",
+    );
+    await testPage.keyboard.press("Escape");
+
+    await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      pr_url: PR_URL,
+      pr_title: "Add mobile CI automation options",
+      head_branch: "feat/mobile-ci-automation",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      head_sha: headSHA,
+      review_state: "approved",
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        return options.pr_states?.find((item) => item.pr_number === PR_NUMBER)
+          ?.auto_fix_round_count;
+      })
+      .toBe(1);
+    await expect(session.prStatusChip().getByTestId("pr-status-auto-fix-chip")).toContainText(
+      "Auto-fix 1/10",
+    );
+    await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
+    const [firstMessage] = await listAutoFixMessages(apiClient, sessionId);
+    expect(firstMessage).toBeDefined();
+    expect(firstMessage?.content).toContain("Merge conflict");
+    expect(firstMessage?.content).toContain("feat/mobile-ci-automation");
+    expect(firstMessage?.content).toContain("main");
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      pr_url: PR_URL,
+      pr_title: "Add mobile CI automation options",
+      head_branch: "feat/mobile-ci-automation",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      head_sha: headSHA,
+      review_state: "approved",
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        return options.pr_states?.find((item) => item.pr_number === PR_NUMBER)
+          ?.auto_fix_round_count;
+      })
+      .toBe(1);
+    await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
   });
 
   test("drawer keeps two linked PRs' automation switches independent", async ({

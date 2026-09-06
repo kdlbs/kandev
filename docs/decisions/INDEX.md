@@ -46,7 +46,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
 | 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted (amended 2026-07-24) | desktop, frontend, backend, infra | 2026-07-15 |
 | 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)              | accepted   | desktop, infra, workflow    | 2026-07-15 |
-| 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted (amended 2026-07-31) | backend, frontend | 2026-07-15 |
+| 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted (amended 2026-09-03) | backend, frontend | 2026-07-15 |
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
 | 0043 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0043-plugin-host-data-api.md)                                  | accepted   | backend, protocol           | 2026-07-17 |
 | 2026-07-14-typed-utility-chat-sessions | [Typed Utility Chats Share the Quick Chat Session Model](2026-07-14-typed-utility-chat-sessions.md) | accepted   | backend, frontend           | 2026-07-14 |
@@ -185,6 +185,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-18-session-mcp-tool-definition-details | [Bound MCP Tool Definition Details to Current Sessions](2026-08-18-session-mcp-tool-definition-details.md) | accepted | backend, agentctl, frontend, protocol, security | 2026-08-18 |
 | 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted (amended 2026-08-29) | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
+| 2026-08-18-executor-userns-security-options | [Executor Container Security Options for User Namespace Support](2026-08-18-executor-userns-security-options.md) | accepted | backend, security, docker | 2026-08-18 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
 | 2026-08-18-plugin-task-row-metadata | [Keep Task Row Plugin Metadata Generic](2026-08-18-plugin-task-row-metadata.md) | accepted | frontend | 2026-08-18 |
 | 2026-08-20-settings-prompt-editor-provider-ownership | [Settings Prompt Editors Own Monaco Completion Providers](2026-08-20-settings-prompt-editor-provider-ownership.md) | accepted | frontend | 2026-08-20 |
@@ -207,6 +208,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
 | 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |
 | 2026-08-23-pr-walkthrough-workflow-provenance | [Use the workflow SHA for trusted PR walkthrough inputs](2026-08-23-pr-walkthrough-workflow-provenance.md) | accepted | workflow, infra, security | 2026-08-23 |
+| 2026-09-05-pr-walkthrough-description-integrity | [Keep PR walkthrough description updates canonical and race-safe](2026-09-05-pr-walkthrough-description-integrity.md) | accepted | workflow, infra, GitHub | 2026-09-05 |
 | 2026-08-24-opt-in-ssh-task-directory-reclamation | [Opt-in reclamation of remote SSH task directories](2026-08-24-opt-in-ssh-task-directory-reclamation.md) | accepted | backend, frontend, operations | 2026-08-24 |
 | 2026-08-24-agentctl-local-managed-runtime-cache-repair | [Run cache repair where npm runs](2026-08-24-agentctl-local-managed-runtime-cache-repair.md) | accepted | backend, agentctl, protocol, security | 2026-08-24 |
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
@@ -218,6 +220,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |
 | 2026-08-27-protect-deferred-launch-attribution | [Protect Deferred Launch Attribution](2026-08-27-protect-deferred-launch-attribution.md) | accepted | backend, protocol | 2026-08-27 |
 | 2026-08-27-preserve-legacy-sqlite-before-default-initialization | [Preserve Legacy SQLite Data Before Default Initialization](2026-08-27-preserve-legacy-sqlite-before-default-initialization.md) | accepted | backend, cli, operations | 2026-08-27 |
+| 2026-08-27-explicit-desktop-repository-discovery-roots | [Use Explicit Roots for Desktop Repository Discovery](2026-08-27-explicit-desktop-repository-discovery-roots.md) | proposed | desktop, backend, frontend, security, operations | 2026-08-27 |
 | 2026-08-27-mixed-git-change-facets | [Preserve mixed Git changes as path facets](2026-08-27-mixed-git-change-facets.md) | accepted | backend, agentctl, frontend, protocol | 2026-08-27 |
 | 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |
 | 2026-08-28-viewport-activation-owns-thread-streams | [Viewport Activation Owns Threads Session Streams](2026-08-28-viewport-activation-owns-thread-streams.md) | proposed | backend, frontend, protocol | 2026-08-28 |
@@ -243,3 +246,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
 | 2026-09-04-use-repository-token-for-runtime-pin-prs | [Use the built-in Actions token for runtime pin PRs](2026-09-04-use-repository-token-for-runtime-pin-prs.md) | accepted | workflow, security | 2026-09-04 |
 | 2026-09-05-required-internal-persistence | [Required internal persistence fails startup](2026-09-05-required-internal-persistence.md) | accepted | backend | 2026-09-05 |
+| 2026-09-05-bounded-clarification-response-path | [Bound Clarification Responses with Indexed Lookup](2026-09-05-bounded-clarification-response-path.md) | accepted | backend, frontend, protocol | 2026-09-05 |
+| 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
+| 2026-09-05-bounded-progressive-storage-analysis | [Use bounded progressive storage analysis](2026-09-05-bounded-progressive-storage-analysis.md) | accepted | backend, frontend, protocol | 2026-09-05 |
+| 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |

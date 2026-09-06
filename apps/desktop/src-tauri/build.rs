@@ -8,6 +8,7 @@ fn main() {
             "get_native_notification_permission",
             "request_native_notification_permission",
             "open_external_url",
+            "pick_directory",
         ]);
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
             .expect("failed to build Tauri desktop application");

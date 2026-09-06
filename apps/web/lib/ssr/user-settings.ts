@@ -14,6 +14,8 @@ import {
 } from "@/lib/state/slices/ui/thread-view-builtins";
 import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
+import { parseSidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
+import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
@@ -68,6 +70,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     threadActiveViewId: DEFAULT_THREAD_VIEW_ID,
     threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+    sidebarTaskColorAutomation: parseSidebarTaskColorAutomation(undefined),
+    sidebarTaskColors: {},
     taskCreateLastUsed: {
       repositoryId: null,
       branch: null,
@@ -323,6 +327,16 @@ export function buildCoreFields(
       s.sidebar_task_prefs,
       current.sidebarTaskPrefs,
       parseSidebarTaskPrefs,
+    ),
+    sidebarTaskColorAutomation: mapDefined(
+      s.sidebar_task_color_automation,
+      current.sidebarTaskColorAutomation,
+      parseSidebarTaskColorAutomation,
+    ),
+    sidebarTaskColors: mapDefined(
+      s.sidebar_task_colors,
+      current.sidebarTaskColors,
+      parseSidebarTaskColors,
     ),
     taskCreateLastUsed: mapDefined(
       s.task_create_last_used,
