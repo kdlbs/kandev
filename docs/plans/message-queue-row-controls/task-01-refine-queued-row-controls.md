@@ -26,7 +26,7 @@ Make queued-message disclosure depend on rendered overflow and remain responsive
 - Add desktop exact-title E2E. Use `queue-entry-actions`; when disclosure appears, evaluate direct children and require its `nextElementSibling` to be `queue-entry-remove`, with Remove the final actionable child. Retain authoritative setup, fit/overflow/fit, opacity, role/name, title, color, and removal assertions.
 - Add Pixel 5 exact-title E2E with exact panel, scroll-region, fixture-filtered row, preview, actions, expand, and Remove test-ID locators. Require document width equality and scroll-region `overflowY === "auto"`. Evaluate panel plus all descendants, filter computed overflow-Y `auto|scroll`, map `data-testid`, and require exactly `["queue-scroll-region"]`. With `EPSILON = 1`, use explicit left/right inequalities for panel within viewport, scroll region/row/preview/actions within their named parent, and both Expand and Remove within actions. Require preview `scrollWidth <= clientWidth + EPSILON` and effective expand/Remove width and height each at least 44. Retain media, adjacency, icon, accessibility, color, capture, and removal.
 - Extract measurement to `use-queued-message-overflow.ts`. Return preview and disclosure-button refs plus `canExpand`; keep `DisplayView` state/rendering ownership. Pass the button ref through row actions and expose `data-testid="queue-entry-actions"`.
-- Probe at no-disclosure width by saving inline `display`, setting it to `none`, reading geometry synchronously, and restoring exactly in `finally` before state updates. Guard callbacks/lifecycles as specified; use callable observer detection and additive viewport signals.
+- Probe at no-disclosure width by saving inline `display`, setting it to `none`, reading geometry synchronously, and restoring exactly in `finally` before state updates. Guard callbacks/lifecycles as specified; use callable observer detection with additive viewport, descendant-load, and font-completion signals.
 - Reorder disclosure as Remove's direct DOM predecessor; replace close with `IconTrash`; use `variant={null}`, local ghost background, `text-muted-foreground`, and `[@media(pointer:fine)]:hover:text-destructive`.
 - Run the focused Vitest, desktop Playwright, and mobile Playwright tests, then the user-required repository checks.
 
@@ -106,7 +106,7 @@ None.
 - Stale-callback tests cover foreign target, same-element generation, replaced-element identity, and unmount. Invoke all captured callback types after unmount. Separately, make mocked listener removal and observer disconnect synchronously invoke captured callbacks during cleanup. Every path asserts no geometry getter, `setExpanded`, or render/state output, behaviorally proving invalidation happens before teardown calls.
 - Expanded measurement suppresses disclosure and compares natural height against the stored collapsed no-control cap. Manual and automatic collapse refresh final geometry with no transition.
 - The optional button can create a flex-width fixed point. Boundary tests make it the sole overflow cause and require removal. The probe must restore inline display in `finally`; no permanent blank slot or visible two-pass state is allowed.
-- Signals are asynchronous and additive. Observer-present tests prove each. Fallback stubs `ResizeObserver` undefined, asserts no constructor or observe call, and proves initial/window/visual-viewport behavior; implementation uses callable-value detection. Optional visual viewport, cleanup, absent previews, and stale callbacks remain covered.
+- Signals are asynchronous and additive. Observer-present tests prove each. Capture-phase descendant loads and document font completion remeasure rendered content that changes without a preview-box resize. Fallback stubs `ResizeObserver` undefined, asserts no constructor or observe call, and proves initial/window/visual-viewport behavior; implementation uses callable-value detection. Optional visual viewport, cleanup, absent previews, and stale callbacks remain covered.
 - Both the existing component and test files are near `max-lines`. Keep all new measurement logic in `use-queued-message-overflow.ts` and all new component coverage in `queued-ghost-message-overflow.test.tsx`; do not grow the near-limit files.
 - Remove cannot retain ghost variant because it injects `hover:text-foreground`. Use `variant={null}`, local ghost backgrounds, and `[@media(pointer:fine)]:hover:text-destructive`. Tests prove destructive hover only with a fine primary pointer and muted color under Pixel 5 coarse-pointer media.
 
@@ -133,6 +133,7 @@ None.
   `use-queued-message-overflow.ts`, including no-control-width probing, exact
   inline-style restoration, additive layout signals, collapsed-cap behavior,
   and stale-callback guards.
+- Review remediation: descendant resource loads and font completion now remeasure a preview whose box remains capped while rendered content grows; focused Vitest coverage passed all 16 cases.
 - Reordered disclosure immediately before terminal Remove, switched Remove to
   the trash icon, preserved muted idle presentation, and limited destructive
   hover color to fine primary pointers.

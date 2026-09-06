@@ -22,7 +22,7 @@ The message queue panel renders each pending message as a compact row on desktop
 - `DisplayView` retains rendering and expanded-state ownership. It passes visible content and expanded state/setter to the adjacent hook, and passes the returned preview and disclosure-button refs into the preview and action component.
 - `useQueuedMessageOverflow` owns both refs, collapsed cap, `canExpand`, lifecycle generation, measurement, signals, and cleanup.
 - `QueuedGhostRowActions` forwards the disclosure ref to the optional button, exposes `data-testid="queue-entry-actions"` on the action container, and renders disclosure immediately before Remove.
-- `ResizeObserver`, window resize, and visual-viewport resize are additive signals. Callable-value detection selects observer or viewport-only fallback.
+- `ResizeObserver`, window resize, visual-viewport resize, capture-phase descendant load, and font-completion signals are additive. Callable-value detection selects observer or viewport-only fallback.
 
 ## Adaptive disclosure
 
@@ -32,7 +32,7 @@ Collapsed fit remains strict `scrollHeight > clientHeight`; a mutable cap ref up
 
 Each lifecycle owns generation and element identity. Cleanup invalidates generation before teardown. Every callback guards before reads/publication; observer batches require the captured target. Observer support uses `typeof ResizeObserver === "function"`.
 
-Measurement runs in a layout effect for content/state changes and from additive layout signals. The temporary inline style is restored even if a geometry getter throws. If expanded content fits at no-control width, expanded/disclosure clear together. No maximum-height transition remains. Fallback supports initial and viewport-triggered measurement, not element-only panel resizing.
+Measurement runs in a layout effect for content/state changes and from additive layout, descendant-resource, and font-completion signals. The temporary inline style is restored even if a geometry getter throws. If expanded content fits at no-control width, expanded/disclosure clear together. No maximum-height transition remains. Fallback supports initial and viewport-triggered measurement, not element-only panel resizing.
 
 ## Action presentation
 

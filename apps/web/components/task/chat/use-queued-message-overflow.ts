@@ -79,6 +79,13 @@ export function useQueuedMessageOverflow(
 
     const handleWindowResize = () => measure();
     const visualViewport = window.visualViewport;
+    const handleAsyncContent = () => measure();
+    const fonts = document.fonts;
+
+    preview.addEventListener("load", handleAsyncContent, true);
+    fonts?.addEventListener("loadingdone", handleAsyncContent);
+    void fonts?.ready.then(handleAsyncContent);
+
     measure();
     window.addEventListener("resize", handleWindowResize);
     visualViewport?.addEventListener("resize", handleWindowResize);
@@ -97,6 +104,8 @@ export function useQueuedMessageOverflow(
       if (generationRef.current === generation) generationRef.current += 1;
       window.removeEventListener("resize", handleWindowResize);
       visualViewport?.removeEventListener("resize", handleWindowResize);
+      preview.removeEventListener("load", handleAsyncContent, true);
+      fonts?.removeEventListener("loadingdone", handleAsyncContent);
       observer?.disconnect();
     };
   }, [expanded, previewElement, setExpanded, visible]);

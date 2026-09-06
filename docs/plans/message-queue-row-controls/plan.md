@@ -19,7 +19,7 @@ Replace the queued-message disclosure's character-count heuristic with rendered 
 ### In scope
 
 - Hide the expand/collapse control when the collapsed queued-message preview does not overflow.
-- Re-evaluate disclosure availability after content, viewport, `ResizeObserver`-reported panel-width, or browser-zoom layout changes.
+- Re-evaluate disclosure availability after content, asynchronous descendant-resource or font completion, viewport, `ResizeObserver`-reported panel-width, or browser-zoom layout changes.
 - Render the disclosure immediately before Remove when both actions are present.
 - Replace Remove's close glyph with the shared trash glyph and apply the destructive color on fine-pointer hover.
 - Preserve desktop hover disclosure, coarse-pointer visibility, 44 by 44 CSS-pixel touch targets, action permissions, action handlers, and accessible copy.
@@ -40,7 +40,7 @@ Remove `EXPAND_THRESHOLD` and `shouldOfferExpand`. `DisplayView` retains expande
 
 Every fit probe measures with the optional disclosure omitted from layout: save its inline `display`, set it to `none`, read preview geometry synchronously, and restore the exact value in `finally` before state publication. No button means direct measurement. This avoids a self-induced fixed point without a state-driven two-pass render or permanent empty slot. Collapsed measurements update cap before publication; expanded measurements use that cap. Remove max-height transition and reset absent content.
 
-Each lifecycle captures generation and preview identity. Cleanup invalidates first. Callbacks guard before reads/publication; observer batches require target identity. Observer support uses a callable-value check. Window and available visual-viewport signals remain additive; fallback is initial plus viewport only.
+Each lifecycle captures generation and preview identity. Cleanup invalidates first. Callbacks guard before reads/publication; observer batches require target identity. Observer support uses a callable-value check. Window, available visual-viewport, capture-phase descendant load, and document font-completion signals remain additive; fallback is initial plus viewport only.
 
 Keep collapsed/expanded maximum heights. The collapsed height measured at no-disclosure width is the fit source of truth.
 

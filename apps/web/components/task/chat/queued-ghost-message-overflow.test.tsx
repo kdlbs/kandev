@@ -18,6 +18,11 @@ let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 let originalVisualViewport: VisualViewport | null;
 let windowResizeListeners: ResizeListener[];
 let originalWindowAddEventListener: typeof window.addEventListener;
+let originalDocumentFonts: PropertyDescriptor | undefined;
+
+class FontFaceSetStub extends EventTarget {
+  readonly ready: Promise<FontFaceSet> = Promise.resolve(this as unknown as FontFaceSet);
+}
 
 class VisualViewportStub {
   readonly resizeListeners = new Set<ResizeListener>();
@@ -149,6 +154,7 @@ beforeEach(() => {
   originalResizeObserver = globalThis.ResizeObserver;
   originalVisualViewport = window.visualViewport;
   originalWindowAddEventListener = window.addEventListener.bind(window);
+  originalDocumentFonts = Object.getOwnPropertyDescriptor(document, "fonts");
   geometry = () => ({ scrollHeight: 44, clientHeight: 44 });
   geometryReads = [];
   throwOnScrollHeight = false;
@@ -189,6 +195,11 @@ afterEach(() => {
     configurable: true,
     value: originalVisualViewport,
   });
+  if (originalDocumentFonts) {
+    Object.defineProperty(document, "fonts", originalDocumentFonts);
+  } else {
+    delete (document as unknown as Record<string, unknown>).fonts;
+  }
 });
 
 describe("queued message rendered overflow measurement semantics", () => {
@@ -283,6 +294,35 @@ describe("queued message rendered overflow signals and fallbacks", () => {
 
     geometry = () => ({ scrollHeight: 45, clientHeight: 44 });
     act(() => latestObserver().emit());
+    expect(screen.getByTestId(EXPAND_TEST_ID)).toBeTruthy();
+  });
+
+  it("remeasures when an asynchronous preview descendant loads", () => {
+    geometry = () => ({ scrollHeight: 44, clientHeight: 44 });
+    renderMessage("x".repeat(120));
+    expect(screen.queryByTestId(EXPAND_TEST_ID)).toBeNull();
+
+    geometry = () => ({ scrollHeight: 45, clientHeight: 44 });
+    const image = document.createElement("img");
+    screen.getByTestId(PREVIEW_TEST_ID).append(image);
+
+    act(() => image.dispatchEvent(new Event("load")));
+
+    expect(screen.getByTestId(EXPAND_TEST_ID)).toBeTruthy();
+  });
+
+  it("remeasures when web fonts settle", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: new FontFaceSetStub(),
+    });
+    geometry = () => ({ scrollHeight: 44, clientHeight: 44 });
+    renderMessage("x".repeat(120));
+    expect(screen.queryByTestId(EXPAND_TEST_ID)).toBeNull();
+
+    geometry = () => ({ scrollHeight: 45, clientHeight: 44 });
+    act(() => document.fonts.dispatchEvent(new Event("loadingdone")));
+
     expect(screen.getByTestId(EXPAND_TEST_ID)).toBeTruthy();
   });
 
