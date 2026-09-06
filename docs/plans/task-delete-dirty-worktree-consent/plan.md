@@ -181,3 +181,6 @@ backend contract from Task 01. The wave labels do not authorize subagents.
 - Follow-up verification passed: 2,693 backend tests across worktree, task service, and task
   handlers; 58 focused frontend tests; web typecheck and targeted ESLint; specification lint; and
   the mobile confirmation E2E suite (4 passed).
+- PR follow-up aligned the test-only E2E reset with explicit discard consent and updated existing
+  browser deletion fixtures to select that consent. Focused Chromium deletion/reset coverage passed
+  37 tests, the mobile dirty-worktree flow passed 4 tests, and the backend reset regression passed.

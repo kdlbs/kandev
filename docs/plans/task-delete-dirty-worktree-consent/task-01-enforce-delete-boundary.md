@@ -115,6 +115,8 @@ the same conversation.
   closed after cache enrichment.
 - The cascade service regression drives `DeleteTaskTreeWithOptions` through the complete root,
   child, and grandchild set, proving refusal is atomic and the discard option reaches admission.
+- The E2E reset boundary now explicitly opts into discarding disposable worktree changes, with a
+  focused regression covering the option passed to task deletion.
 - Follow-up verification: `go test ./internal/worktree ./internal/task/service
   ./internal/task/handlers -count=1` passed 2,693 tests across the three packages; specification
   lint also passed.

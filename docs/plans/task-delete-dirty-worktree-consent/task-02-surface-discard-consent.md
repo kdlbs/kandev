@@ -138,3 +138,6 @@ results. Update this work order and `plan.md` in the same conversation.
   deletion removes both. Follow-up verification passed 58 focused Vitest tests, web typecheck,
   targeted ESLint, and `pnpm e2e:run --project mobile-chrome
   tests/task/mobile-confirmation-text-hierarchy.spec.ts` (4 passed).
+- PR follow-up aligned the test-only E2E reset and existing browser deletion fixtures with the
+  explicit discard-consent contract. Focused Chromium deletion/reset coverage passed 37 tests,
+  and the mobile dirty-worktree flow passed 4 tests.
