@@ -5,8 +5,8 @@ import (
 )
 
 // stepCompletionSignalFieldLimitBytes is the fixed, compiled-in ceiling for
-// the step_complete_kandev handoff and blockers arguments (REQ-003). It is
-// inclusive of stepCompletionSignalTruncationMarker and applies to each field
+// the step_complete_kandev handoff and blockers arguments. It is inclusive of
+// stepCompletionSignalTruncationMarker and applies to each field
 // independently, so it is never configurable at runtime or per deployment.
 const stepCompletionSignalFieldLimitBytes = 8192
 

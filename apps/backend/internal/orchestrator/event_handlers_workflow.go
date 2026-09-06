@@ -79,8 +79,7 @@ type taskMetadataKeySetterIfNoActiveSession interface {
 
 // taskMetadataCarryTaker is the compare-and-swap claim behind the
 // completion-handoff carry token. A repository that lacks it degrades to
-// today's behavior (no handoff delivered) rather than erroring — see
-// AC-005.3.
+// today's behavior (no handoff delivered) rather than erroring.
 type taskMetadataCarryTaker interface {
 	TakeTaskMetadataKeyIfDestinationStep(
 		ctx context.Context, taskID, key, expectedStepID, expectedStamp string,
@@ -2873,7 +2872,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		// This step entry never reaches buildWorkflowEntryPrompt or
 		// launchAfterOnEnterDispatch (no on_enter actions, no profile switch),
-		// so a single-use claim helper covers it (F22).
+		// so a single-use claim helper covers it.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, newStepHandoffOnce())
 		return
 	}
@@ -3104,7 +3103,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// steps without auto_start_agent (e.g. Review). Drain here to match the
 		// pre-#677 behavior where handleAgentReady always drained after returning
 		// from inline processOnEnter. This is the ordinary no-on_enter-actions
-		// step shape, so it carries the completion handoff too (F22).
+		// step shape, so it carries the completion handoff too.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
 	}
 
