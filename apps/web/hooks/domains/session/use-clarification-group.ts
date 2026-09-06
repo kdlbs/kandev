@@ -29,9 +29,9 @@ type ResolvedStatus = "answered" | "rejected";
 type ClarificationRespondResult = {
   state: SubmitState;
   // Present only when the server returned a parseable 200 body. Absent on a
-  // 409 (legacy backend, no body) or a network/non-2xx failure — callers
-  // treat an absent `claimed` the same as an older backend that never sent
-  // one (W3: keep applying this client's own answers).
+  // 409 (legacy backend, no body), malformed 200 body, or a network/non-2xx
+  // failure — callers treat an absent `claimed` the same as an older backend
+  // that never sent one (W3: keep applying this client's own answers).
   claimed?: boolean;
   status?: ResolvedStatus;
   answers?: ClarificationAnswer[];
@@ -139,7 +139,7 @@ async function postClarification(
       };
     } catch (err) {
       console.error("Clarification response body parse failed:", err);
-      return { state: "ok" };
+      return { state: "error" };
     }
   } catch (err) {
     console.error("Clarification request failed:", err);

@@ -228,6 +228,10 @@ func (r *Resolver) ResolveBundle(ctx context.Context, pendingID string, outcome 
 	validationStarted := time.Now()
 	questions := bundleQuestions(msgs)
 	if err := validateOutcome(questions, outcome); err != nil {
+		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, err); IsPreClaimTimeoutError(timeoutErr) {
+			r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(timeoutErr))
+			return nil, false, timeoutErr
+		}
 		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "invalid")
 		return nil, false, err // N8c, R2c: validation runs before the claim
 	}

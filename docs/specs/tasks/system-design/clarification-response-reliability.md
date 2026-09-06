@@ -117,9 +117,11 @@ disconnected caller does not require a best-effort response write.
 
 `postClarification` owns an `AbortController` timer for the 40-second client
 deadline and clears it on every completion path. A timeout, network error, HTTP
-503, or unexpected 5xx produces the existing `error` submission state. The
-hook retains the selected answers and last action. It releases its in-flight
-guard and restores normal overlay interaction.
+503, unexpected 5xx, or malformed 200 response body produces the existing
+`error` submission state. The hook retains the selected answers and last
+action. It releases its in-flight guard and restores normal overlay
+interaction. A malformed response is never treated as an authoritative
+success or used for an optimistic update.
 
 Retry sends the same action through the response endpoint. The existing
 resolver loser path is the authoritative reconciliation: it returns a prior

@@ -33,6 +33,13 @@ type preClaimBlockingMessageCreator struct {
 	entered       chan struct{}
 }
 
+type preClaimExpiredAuthorizer struct{}
+
+func (preClaimExpiredAuthorizer) AuthorizeTaskAccess(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	return nil
+}
+
 func (s *preClaimBlockingMessageCreator) CompleteActiveClarificationBundle(
 	ctx context.Context,
 	_ string,
@@ -114,6 +121,35 @@ func TestResolverPreClaimClaimFailureDoesNotDeliver(t *testing.T) {
 	}
 	if got := stringFromMetadata(repo.messages[pendingID][0].Metadata, metaStatusKey); got != string(StatusPending) {
 		t.Fatalf("status after pre-claim timeout = %q, want pending", got)
+	}
+}
+
+func TestResolverExpiredPreClaimDeadlineWinsOverValidationError(t *testing.T) {
+	shortenPreClaimTimeout(t)
+	const pendingID = "pending-preclaim-validation"
+	repo := &stubMessageStore{messages: map[string][]*taskmodels.Message{
+		pendingID: {resolverDeliveryMessage(pendingID, "message-preclaim-validation", "turn-1")},
+	}}
+	resolver := NewResolver(
+		NewStore(time.Minute),
+		repo,
+		nil,
+		preClaimExpiredAuthorizer{},
+		nil,
+		nil,
+		nil,
+		logger.Default(),
+	)
+
+	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, Outcome{})
+	if claimed {
+		t.Fatal("expired validation reported a claimed response")
+	}
+	if !IsPreClaimTimeoutError(err) {
+		t.Fatalf("expired validation error = %v, want pre-claim timeout classification", err)
+	}
+	if IsValidationError(err) {
+		t.Fatalf("expired validation retained validation classification: %v", err)
 	}
 }
 

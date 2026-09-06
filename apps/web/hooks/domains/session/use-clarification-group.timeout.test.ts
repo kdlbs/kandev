@@ -116,4 +116,22 @@ describe("useClarificationGroup — bounded submission", () => {
       selected_options: ["o1"],
     });
   });
+
+  it("treats a malformed 200 body as retryable without applying optimistic success", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not json", { status: 200 }));
+    const { result } = renderHook(() => useClarificationGroup([clarMessage()]));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+
+    expect(result.current.submitState).toBe("error");
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(result.current.answers.q1).toEqual({
+      question_id: "q1",
+      selected_options: ["o1"],
+    });
+  });
 });
