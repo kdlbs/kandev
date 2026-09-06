@@ -17,20 +17,35 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
+// moveTaskRequest is the parsed move_task_kandev payload. Prompt is a legacy
+// alias for entry_options.instructions: it is folded into EntryOptions during
+// normalization and never used directly by the move paths afterward.
+type moveTaskRequest struct {
+	TaskID          string                     `json:"task_id"`
+	WorkflowID      string                     `json:"workflow_id"`
+	WorkflowStepID  string                     `json:"workflow_step_id"`
+	Position        int                        `json:"position"`
+	Prompt          string                     `json:"prompt"`
+	SenderSessionID string                     `json:"sender_session_id"`
+	EntryOptions    *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+}
+
+const (
+	// moveDispositionApplied marks an MCP move that committed immediately.
+	moveDispositionApplied = "applied"
+	// moveDispositionDeferred marks an MCP move recorded to run at the source
+	// session's turn-end.
+	moveDispositionDeferred = "deferred"
+)
+
 func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	}
+	var req moveTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -44,10 +59,21 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
 
-	// Prompt is OPTIONAL — config-mode/admin moves don't always have an agent
-	// to hand off to. When supplied, it activates the deferred-move path that
-	// hands the receiving agent a directive on its first turn at the new step.
-	// When omitted, we just move the task and return.
+	// Fold the legacy top-level prompt into entry_options.instructions and trim
+	// all fields. Supplying both a legacy prompt and a nested instructions value
+	// is rejected. The normalized options are the single request shape used by
+	// both the deferred and immediate paths below.
+	entryOptions, err := workflowmove.NormalizeEntryOptions(req.EntryOptions, req.Prompt)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	req.EntryOptions = entryOptions
+	req.Prompt = ""
+
+	// entry_options are OPTIONAL — config-mode/admin moves don't always have an
+	// agent to hand off to. When supplied, one-shot instructions/reset/profile
+	// are applied when the task enters the target step. When omitted, we just
+	// move the task and return.
 	session, lookupErr := h.lookupSession(ctx, req.TaskID)
 	if lookupErr != nil {
 		// Backend lookup failure is an internal error, not validation — don't
@@ -81,14 +107,7 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 func (h *Handlers) deferMoveTask(
 	ctx context.Context,
 	msg *ws.Message,
-	req struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	},
+	req moveTaskRequest,
 	session *models.TaskSession,
 ) (*ws.Message, error) {
 	if h.messageQueue == nil {
@@ -154,18 +173,18 @@ func (h *Handlers) deferMoveTask(
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 				"target workflow is in a different workspace", nil)
 		}
-	}
-
-	moveID := uuid.NewString()
-	if req.Prompt != "" {
-		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		if err := h.queueMoveTaskPromptWithMoveID(ctx, req.TaskID, session.ID, wrapped, moveID); err != nil {
-			h.logger.Error("move_task: failed to queue hand-off prompt",
-				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to queue move_task hand-off prompt", nil)
+		// One-shot entry options require an actual workflow step change; the
+		// deferred path bypasses the service that otherwise enforces this.
+		if err := workflowmove.ValidateEntryOptions(req.EntryOptions, moveChange(task.WorkflowStepID, req.WorkflowStepID)); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 	}
+
+	// The one-shot options travel on the PendingMove and are applied when the
+	// target step is entered at turn-end (appended to an auto-start prompt or
+	// queued once for an existing session). No hand-off message is pre-queued
+	// here; instructions ride the entry overlay.
+	moveID := uuid.NewString()
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
 		MoveID:          moveID,
 		TaskID:          req.TaskID,
@@ -174,9 +193,23 @@ func (h *Handlers) deferMoveTask(
 		Position:        req.Position,
 		Actor:           string(wfmodels.StepTransitionActorAgent),
 		SenderSessionID: req.SenderSessionID,
+		EntryOptions:    req.EntryOptions,
 	})
-	return ws.NewResponse(msg.ID, msg.Action,
-		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
+	return ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+		Task:         h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position),
+		MoveID:       moveID,
+		EntryOptions: req.EntryOptions,
+		Disposition:  moveDispositionDeferred,
+	})
+}
+
+// moveChange classifies a move as a workflow step change or position-only based
+// on the task's current and target step IDs.
+func moveChange(fromStepID, toStepID string) workflowmove.MoveChange {
+	if fromStepID != toStepID {
+		return workflowmove.MoveChangeStep
+	}
+	return workflowmove.MoveChangePositionOnly
 }
 
 // applyMoveTaskImmediate runs the move now, optionally queueing a hand-off
@@ -186,28 +219,9 @@ func (h *Handlers) deferMoveTask(
 func (h *Handlers) applyMoveTaskImmediate(
 	ctx context.Context,
 	msg *ws.Message,
-	req struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	},
+	req moveTaskRequest,
 	session *models.TaskSession,
 ) (*ws.Message, error) {
-	queuedSessionID := ""
-	if req.Prompt != "" && session != nil {
-		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
-			h.logger.Error("move_task: failed to queue hand-off prompt for idle session",
-				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to queue move_task hand-off prompt", nil)
-		}
-		queuedSessionID = session.ID
-	}
-
 	// Attribution uses the CALLING session (req.SenderSessionID, injected
 	// server-side by the MCP server from its own bound session — see
 	// moveTaskHandler), never the target task's session captured above:
@@ -222,27 +236,40 @@ func (h *Handlers) applyMoveTaskImmediate(
 		attribution.SessionID = req.SenderSessionID
 	}
 	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	// One-shot options are validated (normalization, step-change requirement,
+	// profile preflight, recipient availability) inside MoveTaskWithOptions and
+	// applied when the task enters the target step. No hand-off message is
+	// pre-queued here; instructions ride the entry overlay.
 	result, err := h.taskSvc.MoveTaskWithOptions(moveCtx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
-		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent})
+		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent, EntryOptions: req.EntryOptions})
 	if err != nil {
-		// Roll back the queued prompt — without this, the next turn would
-		// deliver a "You were moved to this step…" message for a transition
-		// that didn't actually happen.
-		if queuedSessionID != "" && h.messageQueue != nil {
-			if _, ok := h.messageQueue.TakeQueued(ctx, queuedSessionID); ok {
-				h.logger.Warn("move_task: dropped queued hand-off prompt after MoveTask failure",
-					zap.String("task_id", req.TaskID), zap.String("session_id", queuedSessionID))
-			}
-		}
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
+	response := dto.MoveTaskResponse{
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
+		Disposition:  moveDispositionApplied,
+	}
+	if result.WorkflowStep != nil {
+		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 func classifyMoveTaskError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
+	}
+	if errors.Is(err, workflowmove.ErrMoveConflict) {
+		return ws.ErrorCodeConflict
+	}
+	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
+		return ws.ErrorCodeValidation
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -276,17 +303,17 @@ func moveTaskErrorMessage(err error) string {
 // sees a "successful move" response shape, freeing it to end the turn (which
 // is what triggers applyPendingMove). If we can't load the task, fall back to
 // a minimal map so the call still resolves.
-func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowID, workflowStepID string, position int) any {
+func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowID, workflowStepID string, position int) dto.TaskDTO {
 	task, err := h.taskSvc.GetTask(ctx, taskID)
 	if err != nil || task == nil {
 		h.logger.Warn("failed to load task for synthetic move response",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		return map[string]any{
-			"id":               taskID,
-			"workflow_id":      workflowID,
-			"workflow_step_id": workflowStepID,
-			"position":         position,
+		return dto.TaskDTO{
+			ID:             taskID,
+			WorkflowID:     workflowID,
+			WorkflowStepID: workflowStepID,
+			Position:       position,
 		}
 	}
 	clone := *task

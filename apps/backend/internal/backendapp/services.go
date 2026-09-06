@@ -212,6 +212,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)

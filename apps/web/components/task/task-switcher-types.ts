@@ -17,6 +17,7 @@ export type StepDef = {
   id: string;
   title: string;
   color?: string;
+  agent_profile_id?: string | null;
   events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
 };
 
@@ -100,6 +101,8 @@ export type TaskSwitcherProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;

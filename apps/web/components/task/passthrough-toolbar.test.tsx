@@ -75,6 +75,9 @@ vi.mock("@/components/state-provider", () => ({
       kanban: { workflowId: null, tasks: [] },
       kanbanMulti: { snapshots: {} },
       workflows: { items: [] },
+      availableAgents: { items: [], loaded: true, loading: false },
+      setAvailableAgents: vi.fn(),
+      setAvailableAgentsLoading: vi.fn(),
       userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
     }),
   useAppStoreApi: () => ({

@@ -16,6 +16,7 @@ import type {
   ChatInputContainerHandle,
   MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -67,39 +68,43 @@ export function useNextWorkflowStep(taskId: string | null) {
     return hasAutoStart && !hasPlanMode;
   }, [nextStep]);
 
-  const proceed = useCallback(async () => {
-    if (!taskId || !workflowId || !nextStep) return false;
-    const capturedSessionId = activeSessionId;
-    setMoveFromSessionId(capturedSessionId);
-    try {
-      await moveTask(taskId, {
-        workflow_id: workflowId,
-        workflow_step_id: nextStep.id,
-        position: 0,
-      });
-      // Safety: if the next step reuses the same session (no agent-profile
-      // override), activeSessionId never changes and isMoving would be stuck.
-      // Clear after 10 s if no session handoff occurred.
-      setTimeout(() => {
-        setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
-      }, 10_000);
-      return true;
-    } catch (err) {
-      console.error("Failed to proceed to next step:", err);
-      // The backend refuses some transitions (an active session, a WIP limit)
-      // and says why in the response. Reporting only the headline left the user
-      // on a phone with no way to see the reason short of devtools.
-      const title = t("task:failedToProceedToNextStep");
-      const detail = getTaskMoveErrorDetail(err, title, t);
-      toast({
-        title,
-        ...(detail !== null && { description: detail }),
-        variant: "error",
-      });
-      setMoveFromSessionId(null);
-      return false;
-    }
-  }, [taskId, workflowId, nextStep, activeSessionId, t, toast]);
+  const proceed = useCallback(
+    async (entryOptions?: WorkflowMoveEntryOptions) => {
+      if (!taskId || !workflowId || !nextStep) return false;
+      const capturedSessionId = activeSessionId;
+      setMoveFromSessionId(capturedSessionId);
+      try {
+        await moveTask(taskId, {
+          workflow_id: workflowId,
+          workflow_step_id: nextStep.id,
+          position: 0,
+          entry_options: entryOptions,
+        });
+        // Safety: if the next step reuses the same session (no agent-profile
+        // override), activeSessionId never changes and isMoving would be stuck.
+        // Clear after 10 s if no session handoff occurred.
+        setTimeout(() => {
+          setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
+        }, 10_000);
+        return true;
+      } catch (err) {
+        console.error("Failed to proceed to next step:", err);
+        // The backend refuses some transitions (an active session, a WIP limit)
+        // and says why in the response. Reporting only the headline left the user
+        // on a phone with no way to see the reason short of devtools.
+        const title = t("task:failedToProceedToNextStep");
+        const detail = getTaskMoveErrorDetail(err, title, t);
+        toast({
+          title,
+          ...(detail !== null && { description: detail }),
+          variant: "error",
+        });
+        setMoveFromSessionId(null);
+        return false;
+      }
+    },
+    [taskId, workflowId, nextStep, activeSessionId, t, toast],
+  );
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 
@@ -288,12 +293,16 @@ export function usePlanActions(opts: {
   const { planModeEnabled } = opts;
   // Disable plan mode only after a successful move. A failed workflow move
   // should leave the plan layout and context intact for retry.
-  const proceed = useCallback(async () => {
-    const moved = await rawProceed();
-    if (moved && planModeEnabled) {
-      disablePlanMode();
-    }
-  }, [planModeEnabled, disablePlanMode, rawProceed]);
+  const proceed = useCallback(
+    async (entryOptions?: WorkflowMoveEntryOptions) => {
+      const moved = await rawProceed(entryOptions);
+      if (moved && planModeEnabled) {
+        disablePlanMode();
+      }
+      return moved;
+    },
+    [planModeEnabled, disablePlanMode, rawProceed],
+  );
 
   const showImplement = opts.planModeEnabled;
   const implementPlanHandler = showImplement

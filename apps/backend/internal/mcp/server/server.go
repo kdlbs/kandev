@@ -1261,7 +1261,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription("Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately."),
+			mcp.WithDescription(`Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately. Returns a move-result envelope: "disposition" is "applied" when the move committed immediately or "deferred" when it was recorded for turn-end, "task" is the moved (or target-step) task, and an optioned move also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),

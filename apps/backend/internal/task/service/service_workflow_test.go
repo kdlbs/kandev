@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -165,6 +166,57 @@ func TestService_MoveTaskRejectsInvalidWorkflowTargets(t *testing.T) {
 				t.Fatalf("task moved despite validation error: workflow=%s step=%s", task.WorkflowID, task.WorkflowStepID)
 			}
 		})
+	}
+}
+
+func TestService_MoveTaskWithEntryOptionsPersistsPendingMarker(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-opts", "wf-source", "step-source", nil)
+	// An idle active session makes the target step (no auto-start) a valid
+	// recipient for the one-shot instructions.
+	createMoveSession(t, ctx, repo, "session-opts", "task-opts", models.TaskSessionStateWaitingForInput, models.ReviewStatusNone)
+
+	result, err := svc.MoveTaskWithOptions(ctx, "task-opts", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+		EntryOptions:              &workflowmove.EntryOptions{Instructions: "please review"},
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if result.MoveID == "" || result.EntryOptions == nil {
+		t.Fatalf("expected move id and entry options on result, got %+v", result)
+	}
+	stored, err := repo.GetTask(ctx, "task-opts")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	marker, ok := stored.Metadata[models.MetaKeyWorkflowMovePending].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected workflow_move_pending marker, metadata=%+v", stored.Metadata)
+	}
+	if marker["move_id"] != result.MoveID {
+		t.Errorf("marker move_id = %v, want %s", marker["move_id"], result.MoveID)
+	}
+	if encoded, _ := marker["options"].(string); encoded == "" {
+		t.Error("expected encoded options on marker")
+	}
+}
+
+func TestService_MoveTaskWithEntryOptionsRejectsPositionOnly(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-noop", "wf-source", "step-source", nil)
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-noop", "wf-source", "step-source", 1, MoveTaskOptions{
+		EntryOptions: &workflowmove.EntryOptions{Instructions: "noop"},
+	})
+	if !errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) {
+		t.Fatalf("expected ErrEntryOptionsRequireStepChange, got %v", err)
 	}
 }
 

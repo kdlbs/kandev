@@ -35,6 +35,16 @@ The task carries the outcome through the workflow. The repository and session pr
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
+## Move a task with one-time entry options
+
+The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
+
+Available options are **Reset context**, **Instructions**, and **Skip step prompt**. The normalized one-time `entry_options` object carries `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. By default, instructions are appended after the destination step prompt. Skip step prompt suppresses the destination step's configured prompt (and its task-description fallback) for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
+
+Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. Reset runs when either the destination or override requests it, and instructions are appended once. An entry override that carries instructions requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
+
+When the source agent is running, the move is deferred until its turn ends. The complete normalized options survive WIP admission, promotion, and backend restart, then apply once at destination entry. A plain move remains valid without a target session or auto-start, but agent-facing options are rejected when there is no recipient.
+
 ## Prepare a workspace
 
 A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow
@@ -568,7 +578,7 @@ For a Review or Approval step:
 
 ### Avoid automation loops
 
-An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits stop over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
+An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits queue over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
 
 For examples and portability, see [Workflow tips](workflow-tips.md), [Workflow import and export](workflow-import-export.md), and [Workflow sync](workflow-sync.md).
 

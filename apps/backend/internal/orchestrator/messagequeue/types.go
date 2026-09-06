@@ -3,6 +3,8 @@ package messagequeue
 import (
 	"errors"
 	"time"
+
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // DefaultMaxPerSession is the default cap for queued messages per session
@@ -228,6 +230,11 @@ type PendingMove struct {
 	// distinct from the session owning this queue, which is only the execution
 	// context used to apply the deferred move.
 	SenderSessionID string `json:"sender_session_id,omitempty"`
+	// EntryOptions carries the complete typed one-shot move overrides for a
+	// deferred move so the target-step entry can apply them once the source
+	// turn ends. It survives the queue's normal restart/reload path; existing
+	// rows decode as nil (an ordinary move).
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 // PendingMoveTTL bounds how long a deferred move may stay armed before it is

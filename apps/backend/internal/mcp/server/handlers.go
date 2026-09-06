@@ -47,6 +47,7 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	agentProfileIDArg    = "agent_profile_id"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -184,7 +185,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
 			autopilotArg:          req.GetBool(autopilotArg, false),
-			"agent_profile_id":    req.GetString("agent_profile_id", ""),
+			agentProfileIDArg:     req.GetString(agentProfileIDArg, ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
@@ -507,7 +508,7 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
-		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, agentProfileIDArg)
 		copyOptionalStringArg(payload, req, "name")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {

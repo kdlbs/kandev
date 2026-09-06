@@ -84,7 +84,7 @@ describe("TaskPreviewPanel step indicator", () => {
       await Promise.resolve();
     });
 
-    expect(onMoveStep).toHaveBeenCalledWith("b");
+    expect(onMoveStep).toHaveBeenCalledWith("b", undefined);
     expect(screen.queryByTestId(DISCLOSURE_TEST_ID)).toBeNull();
   });
 
@@ -139,7 +139,7 @@ describe("TaskPreviewPanel step indicator", () => {
 
     fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
     fireEvent.click(screen.getByTestId("workflow-step-disclosure-move-b"));
-    expect(onMoveStepForA).toHaveBeenCalledWith("b");
+    expect(onMoveStepForA).toHaveBeenCalledWith("b", undefined);
 
     rerender(
       <TaskPreviewPanel

@@ -6,9 +6,15 @@ import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { useTranslation } from "react-i18next";
 
-type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
+type MovePayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  position: number;
+  entry_options?: WorkflowMoveEntryOptions;
+};
 
 export type TaskActionOptions = {
   cascade?: boolean;
