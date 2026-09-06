@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
@@ -15,8 +16,13 @@ import { sendMessageRequest } from "@/hooks/use-message-handler";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
+import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
+import { SessionTabDialogs } from "./session-tab-menu";
+import { TabRenameInput } from "./tab-rename-input";
 import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
 import { TaskChatPanel } from "./task-chat-panel";
+import type { HandoffPreset } from "./new-session-dialog";
+import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
 import {
   buildAgentLabelsById,
   isSessionActive,
@@ -39,12 +45,211 @@ type PreviewSessionTabsProps = {
   onSessionChange?: (sessionId: string | null) => void;
 };
 
+/** Delete-confirmation state hoisted out of the per-tab menu: `SessionTabs`
+ * only gives each tab a slot for its `ContextMenuContent`, not a sibling
+ * slot for a dialog, so the confirmation popover and the anchor it needs
+ * live here instead. */
+type MenuDeleteState = { sessionId: string; confirm: () => Promise<boolean> };
+
+/** Holds the rename/delete/share/handoff UI state shared by every preview tab. */
+function usePreviewSessionTabDialogs(taskId: string, sortedSessions: TaskSession[]) {
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [menuDeleteState, setMenuDeleteState] = useState<MenuDeleteState | null>(null);
+  const menuDeleteAnchorRef = useRef<HTMLElement>(null);
+  const menuDeleteFocusBoundaryRef = useRef<HTMLElement>(null);
+  const [shareSessionId, setShareSessionId] = useState<string | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
+
+  const handleRequestDelete = useCallback(
+    (targetSessionId: string, event: Event, confirmDelete: () => Promise<boolean>) => {
+      const anchor = event.currentTarget;
+      if (!(anchor instanceof HTMLElement)) return;
+      menuDeleteAnchorRef.current = anchor;
+      menuDeleteFocusBoundaryRef.current = anchor.closest('[data-slot="context-menu-content"]');
+      setMenuDeleteState({ sessionId: targetSessionId, confirm: confirmDelete });
+    },
+    [],
+  );
+  const handleConfirmDelete = useCallback(() => {
+    void menuDeleteState?.confirm();
+  }, [menuDeleteState]);
+  const handleMenuDeleteOpenChange = useCallback((open: boolean) => {
+    if (!open) setMenuDeleteState(null);
+  }, []);
+  const handleHandoffProfile = useCallback((sourceSessionId: string, targetProfileId: string) => {
+    setHandoffPreset({ sourceSessionId, targetProfileId });
+    setHandoffOpen(true);
+  }, []);
+
+  const renamingSession = sortedSessions.find((s) => s.id === renamingSessionId) ?? null;
+  const handleCommitRename = useSessionRenameCommitter(
+    renamingSessionId ?? undefined,
+    taskId,
+    renamingSession?.name ?? null,
+    () => setRenamingSessionId(null),
+  );
+
+  return {
+    renamingSessionId,
+    setRenamingSessionId,
+    handleCommitRename,
+    menuDeleteState,
+    menuDeleteAnchorRef,
+    menuDeleteFocusBoundaryRef,
+    handleRequestDelete,
+    handleConfirmDelete,
+    handleMenuDeleteOpenChange,
+    shareSessionId,
+    setShareSessionId,
+    handoffOpen,
+    setHandoffOpen,
+    handoffPreset,
+    setHandoffPreset,
+    handleHandoffProfile,
+  };
+}
+
+type PreviewDialogsState = ReturnType<typeof usePreviewSessionTabDialogs>;
+
+/** Builds the `SessionTab[]` for the preview strip, wiring each tab's
+ * context menu and (while renaming) its inline rename input. */
+function useBuildPreviewTabs({
+  sortedSessions,
+  profilesById,
+  agentLabelsById,
+  taskId,
+  isPrimarySession,
+  dialogs,
+  handleSessionRemoved,
+}: {
+  sortedSessions: TaskSession[];
+  profilesById: Record<string, AgentProfileOption>;
+  agentLabelsById: Record<string, string>;
+  taskId: string;
+  isPrimarySession: (session: TaskSession) => boolean;
+  dialogs: PreviewDialogsState;
+  handleSessionRemoved: (sessionId: string) => void;
+}): SessionTab[] {
+  return useMemo(
+    () =>
+      sortedSessions.map((session) => {
+        const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
+        // Custom name wins over the agent-derived label, mirroring the
+        // full-page tab title (resolveSessionTabTitle) so a rename is
+        // visible here, not just persisted.
+        const label = session.name || resolveProfileSubLabel(session, profile, agentLabelsById);
+        return {
+          id: session.id,
+          label,
+          icon: isSessionActive(session.state) ? (
+            <RunningSpinner />
+          ) : (
+            <SessionAgentLogo profile={profile} />
+          ),
+          testId: `preview-session-tab-${session.id}`,
+          className: PREVIEW_TAB_CLASS_NAME,
+          renderContextMenu: () => (
+            <PreviewSessionTabMenu
+              session={session}
+              taskId={taskId}
+              isPrimary={isPrimarySession(session)}
+              onRename={dialogs.setRenamingSessionId}
+              onRequestDelete={dialogs.handleRequestDelete}
+              onSessionRemoved={handleSessionRemoved}
+              onShareRequested={dialogs.setShareSessionId}
+              onHandoff={dialogs.handleHandoffProfile}
+            />
+          ),
+          content:
+            dialogs.renamingSessionId === session.id ? (
+              <TabRenameInput
+                initial={label}
+                seqBadge={null}
+                onCommit={dialogs.handleCommitRename}
+                onCancel={() => dialogs.setRenamingSessionId(null)}
+                testId="preview-session-tab-rename-input"
+                maxLength={MAX_SESSION_NAME_LENGTH}
+              />
+            ) : undefined,
+        };
+      }),
+    [
+      sortedSessions,
+      agentLabelsById,
+      profilesById,
+      taskId,
+      isPrimarySession,
+      dialogs,
+      handleSessionRemoved,
+    ],
+  );
+}
+
+/** Hoisted delete/share/handoff dialogs, keyed off whichever session is
+ * currently the target (see `usePreviewSessionTabDialogs`). */
+function PreviewSessionTabDialogHost({
+  dialogs,
+  sortedSessions,
+  profilesById,
+  agentLabelsById,
+  taskId,
+  isPrimarySession,
+}: {
+  dialogs: PreviewDialogsState;
+  sortedSessions: TaskSession[];
+  profilesById: Record<string, AgentProfileOption>;
+  agentLabelsById: Record<string, string>;
+  taskId: string;
+  isPrimarySession: (session: TaskSession) => boolean;
+}) {
+  const deleteTargetSession = dialogs.menuDeleteState
+    ? (sortedSessions.find((s) => s.id === dialogs.menuDeleteState?.sessionId) ?? null)
+    : null;
+  const deleteTargetName = deleteTargetSession
+    ? deleteTargetSession.name ||
+      resolveProfileSubLabel(
+        deleteTargetSession,
+        deleteTargetSession.agent_profile_id
+          ? profilesById[deleteTargetSession.agent_profile_id]
+          : null,
+        agentLabelsById,
+      )
+    : null;
+  return (
+    <SessionTabDialogs
+      confirmDelete={false}
+      menuDeleteOpen={dialogs.menuDeleteState !== null}
+      menuDeleteAnchorRef={dialogs.menuDeleteAnchorRef}
+      menuDeleteFocusBoundaryRef={dialogs.menuDeleteFocusBoundaryRef}
+      setConfirmDelete={dialogs.handleMenuDeleteOpenChange}
+      isPrimary={deleteTargetSession ? isPrimarySession(deleteTargetSession) : false}
+      sessionCount={sortedSessions.length}
+      onConfirmDelete={dialogs.handleConfirmDelete}
+      targetName={deleteTargetName}
+      taskId={taskId}
+      sessionId={dialogs.shareSessionId ?? undefined}
+      shareOpen={dialogs.shareSessionId !== null}
+      setShareOpen={(open) => {
+        if (!open) dialogs.setShareSessionId(null);
+      }}
+      handoffOpen={dialogs.handoffOpen}
+      setHandoffOpen={dialogs.setHandoffOpen}
+      handoffPreset={dialogs.handoffPreset}
+      setHandoffPreset={dialogs.setHandoffPreset}
+      groupId={undefined}
+    />
+  );
+}
+
 /**
- * Read-only session tabs for the kanban preview panel.
+ * Session tabs for the kanban preview panel.
  *
- * Tabs only switch between existing sessions — creating or deleting sessions
- * is deliberately restricted to the full-page task view.
+ * Right-click a tab for the same lifecycle context menu as the full-page
+ * task view (rename, set primary, stop/resume, delete, share, handoff).
+ * Creating a new session is still restricted to the full-page view.
  */
+// eslint-disable-next-line max-lines-per-function -- preview owns the shared session and Plan-tab composition.
 export function PreviewSessionTabs({
   taskId,
   sessionId,
@@ -55,12 +260,24 @@ export function PreviewSessionTabs({
   const { t } = useTranslation();
   const { sessions, isLoaded } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const primarySessionId = useAppStore(
+    (state) =>
+      (
+        state.kanban.tasks.find((task) => task.id === taskId) ??
+        findTaskInSnapshots(taskId, state.kanbanMulti.snapshots)
+      )?.primarySessionId ?? null,
+  );
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
   const profilesById = useMemo(
     () => Object.fromEntries(agentProfiles.map((p) => [p.id, p])),
     [agentProfiles],
+  );
+  const isPrimarySession = useCallback(
+    (session: TaskSession) =>
+      primarySessionId ? primarySessionId === session.id : session.is_primary === true,
+    [primarySessionId],
   );
 
   const activeSessionId = useMemo(
@@ -77,6 +294,26 @@ export function PreviewSessionTabs({
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId);
 
+  const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
+  // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
+  // closure at the moment delete is confirmed, and `session.delete` can take
+  // a WS round-trip to settle. Reading these off refs (updated every render)
+  // instead of closing over `activeSessionId`/`sortedSessions` means the
+  // eventual `onDeleted` call sees which tab is active *now*, not which one
+  // was active when the delete was requested.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const sortedSessionsRef = useRef(sortedSessions);
+  sortedSessionsRef.current = sortedSessions;
+  const handleSessionRemoved = useCallback(
+    (removedSessionId: string) => {
+      if (removedSessionId !== activeSessionIdRef.current) return;
+      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
+      onSessionChange?.(remaining[0]?.id ?? null);
+    },
+    [onSessionChange],
+  );
+
   // Do not force the Plan view while the session list is still loading. The
   // first render can have zero sessions before the list arrives, and treating
   // that transient state as sessionless would mark an unseen plan as seen.
@@ -84,26 +321,17 @@ export function PreviewSessionTabs({
   const planTabState = usePreviewPlanTab(taskId, hasNoSessions, onSessionChange);
   const { viewMode, planTab, hasPlan } = planTabState;
 
-  const tabs = useMemo<SessionTab[]>(
-    () => [
-      ...sortedSessions.map((session) => {
-        const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
-        return {
-          id: session.id,
-          label: resolveProfileSubLabel(session, profile, agentLabelsById),
-          icon: isSessionActive(session.state) ? (
-            <RunningSpinner />
-          ) : (
-            <SessionAgentLogo profile={profile} />
-          ),
-          testId: `preview-session-tab-${session.id}`,
-          className: PREVIEW_TAB_CLASS_NAME,
-        };
-      }),
-      planTab,
-    ],
-    [sortedSessions, agentLabelsById, profilesById, planTab],
-  );
+  const sessionTabs = useBuildPreviewTabs({
+    sortedSessions,
+    profilesById,
+    agentLabelsById,
+    taskId,
+    isPrimarySession,
+    dialogs,
+    handleSessionRemoved,
+  });
+
+  const tabs = useMemo<SessionTab[]>(() => [...sessionTabs, planTab], [sessionTabs, planTab]);
 
   if (!isLoaded && sortedSessions.length === 0) {
     return <PreviewLoadingState label={t("task:loadingAgents")} />;
@@ -146,6 +374,14 @@ export function PreviewSessionTabs({
           taskId={taskId}
         />
       </div>
+      <PreviewSessionTabDialogHost
+        dialogs={dialogs}
+        sortedSessions={sortedSessions}
+        profilesById={profilesById}
+        agentLabelsById={agentLabelsById}
+        taskId={taskId}
+        isPrimarySession={isPrimarySession}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ApiError, INTERIM_SETTINGS_INTERLOCK_ERROR_CODE } from "@/lib/api/client";
 import { AddTUIAgentDialog } from "./add-tui-agent-dialog";
 
 afterEach(cleanup);
@@ -67,6 +68,24 @@ describe("AddTUIAgentDialog", () => {
     fireEvent.click(screen.getByText("Create"));
 
     await waitFor(() => expect(screen.getByText("Failed to create agent")).toBeTruthy());
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("closes without exposing a handled stale-page error", async () => {
+    const staleError = new ApiError("interim settings interlock required", 403, {
+      error_code: INTERIM_SETTINGS_INTERLOCK_ERROR_CODE,
+    });
+    staleError.handled = true;
+    const onSubmit = vi.fn().mockRejectedValue(staleError);
+    const onOpenChange = vi.fn();
+    render(<AddTUIAgentDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("Display Name"), { target: { value: "superclaude" } });
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "superclaude" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(screen.queryByText(staleError.message)).toBeNull();
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 });

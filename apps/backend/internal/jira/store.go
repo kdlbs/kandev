@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 )
 
@@ -106,7 +109,7 @@ func (s *Store) initSchema() error {
 	if err := s.migrateLegacySingletonTable(); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	if err := s.addInstanceTypeColumn(); err != nil {
@@ -139,17 +142,17 @@ func (s *Store) addConfigHealthColumns() error {
 		return nil
 	}
 	if _, ok := cols["last_checked_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_checked_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN last_checked_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_checked_at column: %w", err)
 		}
 	}
 	if _, ok := cols["last_ok"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_ok INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN last_ok INTEGER NOT NULL DEFAULT 0`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_ok column: %w", err)
 		}
 	}
 	if _, ok := cols["last_error"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error column: %w", err)
 		}
 	}
@@ -170,12 +173,12 @@ func (s *Store) addIssueWatchRepositoryColumns() error {
 		return nil
 	}
 	if _, ok := cols["repository_id"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add repository_id column: %w", err)
 		}
 	}
 	if _, ok := cols["base_branch"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add base_branch column: %w", err)
 		}
 	}
@@ -197,7 +200,7 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	if _, ok := cols["max_inflight_tasks"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
 	}
 	return nil
@@ -213,12 +216,12 @@ func (s *Store) addIssueWatchLastErrorColumns() error {
 		return err
 	}
 	if _, ok := cols["last_error"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error column: %w", err)
 		}
 	}
 	if _, ok := cols["last_error_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_issue_watches ADD COLUMN last_error_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error_at column: %w", err)
 		}
 	}
@@ -238,7 +241,7 @@ func (s *Store) addInstanceTypeColumn() error {
 	if _, ok := cols["instance_type"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN instance_type TEXT NOT NULL DEFAULT 'cloud'`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN instance_type TEXT NOT NULL DEFAULT 'cloud'`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add instance_type column: %w", err)
 	}
 	return nil
@@ -253,17 +256,17 @@ func (s *Store) addOAuthColumns() error {
 		return err
 	}
 	if _, ok := cols["client_id"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add client_id column: %w", err)
 		}
 	}
 	if _, ok := cols["cloud_id"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN cloud_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN cloud_id TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add cloud_id column: %w", err)
 		}
 	}
 	if _, ok := cols["token_expires_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN token_expires_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE jira_configs ADD COLUMN token_expires_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add token_expires_at column: %w", err)
 		}
 	}
@@ -274,6 +277,9 @@ func (s *Store) addOAuthColumns() error {
 // rewrites it into the workspace-scoped shape. Picks the active/default
 // workspace as the target so startup is deterministic.
 func (s *Store) migrateLegacySingletonTable() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	cols, err := s.tableColumns("jira_configs")
 	if err != nil {
 		return err
@@ -377,27 +383,27 @@ func nullableTime(t sql.NullTime) interface{} {
 }
 
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	cols := make(map[string]struct{})
-	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return nil, err
-		}
+	cols := make(map[string]struct{}, len(columns))
+	for name := range columns {
 		cols[name] = struct{}{}
 	}
-	return cols, rows.Err()
+	return cols, nil
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	schema = strings.ReplaceAll(schema, "TIMESTAMP", dialect.TimestampType(driver))
+	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
+	return schema
 }
 
 const selectConfigColumns = `workspace_id, site_url, email, auth_method, instance_type, default_project_key,
@@ -422,8 +428,8 @@ func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (
 		return nil, err
 	}
 	var cfg JiraConfig
-	err = s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectConfigColumns+` FROM jira_configs WHERE workspace_id = ?`, workspaceID)
+	err = s.ro.GetContext(ctx, &cfg, s.ro.Rebind(
+		`SELECT `+selectConfigColumns+` FROM jira_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -462,7 +468,7 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 	if cfg.InstanceType == "" {
 		cfg.InstanceType = InstanceTypeCloud
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO jira_configs (workspace_id, site_url, email, auth_method, instance_type, default_project_key,
 			client_id, cloud_id, token_expires_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -475,7 +481,7 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			client_id = excluded.client_id,
 			cloud_id = excluded.cloud_id,
 			token_expires_at = excluded.token_expires_at,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		workspaceID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey,
 		cfg.ClientID, cfg.CloudID, cfg.TokenExpiresAt, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
@@ -497,7 +503,7 @@ func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM jira_configs WHERE workspace_id = ?`, workspaceID)
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM jira_configs WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 
@@ -505,8 +511,7 @@ func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string
 // poller to decide whether to probe at all.
 func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 	var present int
-	err := s.ro.GetContext(ctx, &present,
-		`SELECT COUNT(*) FROM jira_configs`)
+	err := s.ro.GetContext(ctx, &present, s.ro.Rebind(`SELECT COUNT(*) FROM jira_configs`))
 	if err != nil {
 		return false, err
 	}
@@ -516,7 +521,7 @@ func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 // ListConfigWorkspaceIDs returns every workspace with a saved Jira config.
 func (s *Store) ListConfigWorkspaceIDs(ctx context.Context) ([]string, error) {
 	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids, `SELECT workspace_id FROM jira_configs ORDER BY workspace_id`); err != nil {
+	if err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`SELECT workspace_id FROM jira_configs ORDER BY workspace_id`)); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -541,10 +546,10 @@ func (s *Store) UpdateAuthHealthForWorkspace(ctx context.Context, workspaceID st
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE jira_configs
-		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE workspace_id = ?`,
+		SET last_checked_at = ?, last_ok = CASE WHEN ? THEN 1 ELSE 0 END, last_error = ?
+		WHERE workspace_id = ?`),
 		checkedAt, ok, errMsg, workspaceID)
 	return err
 }
@@ -556,8 +561,8 @@ func (s *Store) UpdateTokenExpiryForWorkspace(ctx context.Context, workspaceID s
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE jira_configs SET token_expires_at = ?, updated_at = ? WHERE workspace_id = ?`,
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE jira_configs SET token_expires_at = ?, updated_at = ? WHERE workspace_id = ?`),
 		expiresAt, time.Now().UTC(), workspaceID)
 	return err
 }
@@ -614,9 +619,9 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	if w.PollIntervalSeconds <= 0 {
 		w.PollIntervalSeconds = DefaultIssueWatchPollInterval
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO jira_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
@@ -629,8 +634,8 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 // GetIssueWatch returns a single watch by ID, or nil when no row matches.
 func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
 	var w IssueWatch
-	err := s.ro.GetContext(ctx, &w,
-		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -644,9 +649,9 @@ func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, erro
 // insertion order. The UI uses this to render the watcher table.
 func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
-	err := s.ro.SelectContext(ctx, &watches,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(
 		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches
-		 WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
+		 WHERE workspace_id = ? ORDER BY created_at`), workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -659,8 +664,8 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 // watches without first picking a workspace context.
 func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
-	err := s.ro.SelectContext(ctx, &watches,
-		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches ORDER BY workspace_id, created_at`)
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches ORDER BY workspace_id, created_at`))
 	if err != nil {
 		return nil, err
 	}
@@ -671,9 +676,9 @@ func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) 
 // used by the poller to decide what to query each tick.
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
-	err := s.ro.SelectContext(ctx, &watches,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(
 		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches
-		 WHERE enabled = 1 ORDER BY created_at`)
+		 WHERE enabled = TRUE ORDER BY created_at`))
 	if err != nil {
 		return nil, err
 	}
@@ -688,13 +693,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	if w.PollIntervalSeconds <= 0 {
 		w.PollIntervalSeconds = DefaultIssueWatchPollInterval
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE jira_issue_watches SET workflow_id = ?, workflow_step_id = ?,
 			repository_id = ?, base_branch = ?, jql = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
 			last_polled_at = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ?`),
 		w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
@@ -707,8 +712,8 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 // the rest of the row. The poller calls this after every check so the UI can
 // show "polled X seconds ago".
 func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE jira_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE jira_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
 		t, time.Now().UTC(), id)
 	return err
 }
@@ -720,10 +725,10 @@ func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t tim
 // soft-deleted.
 func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE jira_issue_watches
-		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
-		 WHERE id = ?`,
+		   SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`),
 		cause, now, now, id)
 	return err
 }
@@ -737,10 +742,10 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM jira_issue_watches WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM jira_issue_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -751,9 +756,10 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 // proceed to create the task. False either means another handler already
 // reserved the same ticket or the row already exists from a prior run.
 func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, issueURL string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO jira_issue_watch_tasks (id, issue_watch_id, issue_key, issue_url, task_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO jira_issue_watch_tasks (id, issue_watch_id, issue_key, issue_url, task_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(issue_watch_id, issue_key) DO NOTHING`),
 		uuid.New().String(), watchID, issueKey, issueURL, "", time.Now().UTC())
 	if err != nil {
 		return false, err
@@ -770,9 +776,9 @@ func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, is
 // that as a programming bug since they only call this after a successful
 // reservation.
 func (s *Store) AssignIssueWatchTaskID(ctx context.Context, watchID, issueKey, taskID string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE jira_issue_watch_tasks SET task_id = ?
-		WHERE issue_watch_id = ? AND issue_key = ?`,
+		WHERE issue_watch_id = ? AND issue_key = ?`),
 		taskID, watchID, issueKey)
 	if err != nil {
 		return err
@@ -790,8 +796,8 @@ func (s *Store) AssignIssueWatchTaskID(ctx context.Context, watchID, issueKey, t
 // ReleaseIssueWatchTask drops a reservation so the next poll can retry. Used
 // when task creation fails after a successful reserve.
 func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ? AND issue_key = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ? AND issue_key = ?`),
 		watchID, issueKey)
 	return err
 }
@@ -802,8 +808,8 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey str
 // per-call savings scale with the workspace's watch count.
 func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[string]struct{}, error) {
 	var keys []string
-	err := s.ro.SelectContext(ctx, &keys,
-		`SELECT issue_key FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	err := s.ro.SelectContext(ctx, &keys, s.ro.Rebind(
+		`SELECT issue_key FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
 	if err != nil {
 		return nil, err
 	}
@@ -819,8 +825,8 @@ func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[stri
 // Used by the reset flow to enumerate the tasks to cascade-delete.
 func (s *Store) ListIssueWatchTaskIDs(ctx context.Context, watchID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids,
-		`SELECT task_id FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT task_id FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
 	return ids, err
 }
 
@@ -834,12 +840,12 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`, watchID); err != nil {
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), watchID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE jira_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`,
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`UPDATE jira_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`),
 		time.Now().UTC(), watchID); err != nil {
 		return err
 	}

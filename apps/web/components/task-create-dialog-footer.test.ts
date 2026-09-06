@@ -12,6 +12,7 @@ import {
   REASON_AGENT,
   REASON_DESCRIPTION,
   REASON_PROMPT,
+  REASON_LOADING_DEPENDENCIES,
 } from "./task-create-dialog-footer";
 import { t } from "@/lib/i18n";
 import type { ButtonKind, TaskCreateDialogFooterProps } from "./task-create-dialog-footer";
@@ -59,6 +60,14 @@ describe("isNativeSubmitDisabled", () => {
 
   it("allows a complete native submission", () => {
     expect(isNativeSubmitDisabled(makeProps())).toBe(false);
+  });
+
+  it("blocks edit submission until dependencies are ready", () => {
+    expect(
+      isNativeSubmitDisabled(
+        makeProps({ isCreateMode: false, isEditMode: true, editDependenciesReady: false }),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -182,6 +191,19 @@ describe("computeDisabledReason (update)", () => {
         KIND_UPDATE,
       ),
     ).toBeNull();
+  });
+
+  it("explains why edit update waits for dependencies", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({
+          isCreateMode: false,
+          isEditMode: true,
+          editDependenciesReady: false,
+        }),
+        KIND_UPDATE,
+      ),
+    ).toBe(REASON_LOADING_DEPENDENCIES);
   });
 });
 

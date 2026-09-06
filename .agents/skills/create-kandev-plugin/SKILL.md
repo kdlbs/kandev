@@ -162,6 +162,10 @@ for later. In the same change:
    update `docs/public/plugins.md`, `docs/plugins-example.md`, or the relevant
    ADR when their claims or links change. Keep the public guide as a summary;
    never create a second schema or type definition in prose.
+   When a public plugin page benefits from an architecture, lifecycle, data-flow,
+   or trust-boundary visual, use `/diagram-design` and its
+   `references/kandev-public-docs.md` integration guide. Publish a reviewed
+   local image with precise alt text and nearby explanatory prose.
 5. Recheck the root/backend/web `AGENTS.md` authority pointers and this skill if
    the source-of-truth locations or author workflow changed.
 6. Run the focused implementation tests plus

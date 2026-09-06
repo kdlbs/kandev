@@ -311,10 +311,10 @@ func (s *DashboardService) recordTaskDecision(
 // resolveParticipantID looks up the workflow_step_participants row for
 // (step, task, role, agent) and returns its id. Singleton-user callers
 // project to a stable sentinel because the user has no participant row.
-// A miss for an agent caller falls back to the sentinel as well — the
-// office user is treated as the implicit fallback identity per Wave-E
-// spec, and RecordStepDecision tolerates a non-empty arbitrary
-// participant_id (it has no FK).
+// A miss for an agent caller falls back to a stable caller sentinel. The
+// decision repository still revalidates an existing agent seat inside its
+// write transaction, so a seat claimed after this lookup cannot accept a
+// stale decision.
 func (s *DashboardService) resolveParticipantID(
 	ctx context.Context, stepID, taskID, role, callerType, callerID string,
 ) string {

@@ -577,6 +577,52 @@
       ]
     },
     {
+      "id": "team-access",
+      "audiences": ["user", "operator"],
+      "stability": "beta",
+      "docs": ["team-access"],
+      "sources": [
+        "apps/backend/internal/authz/scopes.go",
+        "apps/backend/internal/authz/roles.go",
+        "apps/backend/internal/authz/resolve.go",
+        "apps/backend/internal/task/service/service_access.go",
+        "apps/backend/internal/task/service/service_members.go",
+        "apps/web/components/settings/workspaces/workspace-team-access-card.tsx",
+        "apps/web/components/task/task-assignee-control.tsx",
+        "apps/web/components/kanban-card-assignee-badge.tsx",
+        "apps/web/hooks/domains/users/use-assignable-people.ts",
+        "apps/web/components/settings/workspaces/workspace-placement-card.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/authz/registry_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go",
+        "apps/web/lib/types/team-access.test.ts",
+        "apps/backend/internal/task/service/service_events_assignee_test.go",
+        "apps/web/components/task/task-assignee-control.test.tsx",
+        "apps/web/lib/ws/handlers/tasks-assignee.test.ts",
+        "apps/web/components/settings/workspaces/workspace-placement-card.test.tsx"
+      ],
+      "settingsRoutes": ["/settings/units"]
+    },
+    {
+      "id": "organizations",
+      "audiences": ["operator"],
+      "stability": "experimental",
+      "docs": ["organizations"],
+      "sources": [
+        "apps/backend/internal/org/service.go",
+        "apps/backend/internal/org/store.go",
+        "apps/backend/internal/org/controller.go",
+        "apps/web/components/settings/system/organizations/organizations-page.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go"
+      ],
+      "settingsRoutes": ["/settings/system/organizations"]
+    },
+    {
       "id": "system-health-and-maintenance",
       "audiences": [
         "operator"

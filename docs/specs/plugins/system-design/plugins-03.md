@@ -68,6 +68,9 @@ Mattermost-webapp model), not iframes. The full contract lives in
   A status slot chooses the contribution's default side; portable user order may
   move either contribution across the desktop spacer and determines drawer order.
   Registrations are namespaced per plugin and bulk-revoked on disable/uninstall.
+  An exact plugin-detail settings route replaces the native detail content but
+  retains the host-owned personal shortcut card; nested settings routes remain
+  fully plugin-owned.
 - **Isolation (v1):** only active, operator-installed plugins load; a failing
   bundle/`initialize` is caught and never breaks boot; slot components render behind
   error boundaries. Plugin JS otherwise runs with full in-origin store access —
@@ -75,11 +78,12 @@ Mattermost-webapp model), not iframes. The full contract lives in
 - **Keybindings:** a plugin declares `ui.keybindings: [{ id, default, description }]`
   in its manifest (`default` is a combo string like `mod+shift+k`, validated at
   registration time). `registry.registerKeybinding(id, handler)` binds a JS handler
-  to a declared id; the host resolves the effective combo (a user override from
-  Settings > Keyboard Shortcuts if set, else the manifest `default`) and dispatches
-  it globally, skipping editable targets the same way core app shortcuts do. User
-  overrides are namespaced `plugin:{pluginId}:{id}` so they survive independently
-  per plugin.
+  to a declared id; the host resolves the effective combo from the user's override
+  or the manifest `default` and dispatches it globally, skipping editable targets
+  the same way core app shortcuts do. User overrides are namespaced
+  `plugin:{pluginId}:{id}` so they survive independently per plugin. The
+  configuration location, user/operator boundary, and cross-surface conflict
+  behavior are governed by [Plugin Shortcut Settings](plugin-shortcut-settings.md).
 - **Modals and drawers:** `host.openModal({ title?, description?, content, size?, dismissible?, presentation? })` imperatively
   opens a modal rendered by the host's `<PluginModalHost/>` (mounted once inside the
   authenticated `AppShell` theme/tooltip/toast provider tree and isolated behind its

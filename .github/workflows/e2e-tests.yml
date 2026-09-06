@@ -68,6 +68,7 @@ jobs:
             apps/pnpm-lock.yaml
             apps/pnpm-workspace.yaml
             .github/docker/ci-base/**
+            .github/scripts/resolve-image-digest.sh
             .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
             .github/scripts/changed-paths.py
@@ -486,6 +487,44 @@ jobs:
           path: apps/web/e2e/test-results/
           retention-days: 7
 
+  # Resolve the runtime tag once before the six container shards start. Fork
+  # pull requests use the public package anonymously, so sharing one bounded
+  # lookup avoids multiplying transient GHCR failures across the matrix.
+  playwright_image:
+    name: Resolve Playwright runtime image
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest }}
+      ref: ${{ steps.resolve.outputs.ref }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve immutable Playwright runtime image
+        id: resolve
+        run: |
+          set -euo pipefail
+          image=ghcr.io/kdlbs/kandev-ci:runtime-latest
+          digest="$(bash .github/scripts/resolve-image-digest.sh "$image")"
+          {
+            echo "digest=$digest"
+            echo "ref=$image@$digest"
+          } >> "$GITHUB_OUTPUT"
+
   # Real-container E2E: exercises the Docker, SSH, and Kubernetes executors.
   # ubuntu-latest ships with Docker preinstalled, so no service container is
   # required. Container-bound tests are slow (up to ~3 min each), so we shard across
@@ -497,7 +536,7 @@ jobs:
   # Sharded 6 ways — each shard is its own runner. See apps/web/e2e/README.md.
   e2e-containers:
     name: E2E Containers Shard ${{ matrix.shard }}/6
-    needs: [changes, build]
+    needs: [changes, build, playwright_image]
     if: needs.changes.outputs.run == 'true'
     # This job intentionally runs on the host ubuntu runner (NOT the kandev-ci
     # container image): the containers project needs direct access to the
@@ -565,36 +604,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Resolve the mutable convenience tag before restoring the cache. The
-      # digest binds both the cache and the fallback extraction to one image
-      # identity, while avoiding a full image pull on a verified cache hit.
-      - name: Resolve immutable Playwright runtime image
-        id: playwright_image
-        run: |
-          set -euo pipefail
-          image=ghcr.io/kdlbs/kandev-ci:runtime-latest
-          digest=""
-          for attempt in 1 2 3; do
-            candidate=""
-            if candidate="$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')" \
-              && [[ "$candidate" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              digest="$candidate"
-              break
-            fi
-            if (( attempt < 3 )); then
-              echo "::warning::Could not resolve $image on attempt $attempt/3; retrying"
-              sleep "$((attempt * 2))"
-            fi
-          done
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Could not resolve an immutable digest for $image"
-            exit 1
-          fi
-          {
-            echo "digest=$digest"
-            echo "ref=$image@$digest"
-          } >> "$GITHUB_OUTPUT"
-
       # The runtime image remains the browser source of truth. The cache only
       # avoids copying its already-installed browsers on warm host runners.
       # Each run has a unique primary key so a repaired fallback can replace a
@@ -606,8 +615,8 @@ jobs:
         continue-on-error: true
         with:
           path: /tmp/ms-playwright
-          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ needs.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ needs.playwright_image.outputs.digest }}-
 
       - name: Configure Playwright browser path
         run: echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
@@ -649,7 +658,7 @@ jobs:
         id: playwright_extract
         if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'
         env:
-          PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}
+          PLAYWRIGHT_RUNTIME_REF: ${{ needs.playwright_image.outputs.ref }}
         run: |
           set -euo pipefail
           docker pull "$PLAYWRIGHT_RUNTIME_REF"
@@ -702,7 +711,7 @@ jobs:
         continue-on-error: true
         with:
           path: /tmp/ms-playwright
-          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ needs.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Summarize Playwright browser setup
         if: always()
@@ -712,7 +721,7 @@ jobs:
           CACHE_VERIFY_OUTCOME: ${{ steps.playwright_cache_verify.outcome }}
           CACHE_EXTRACT_OUTCOME: ${{ steps.playwright_extract.outcome }}
           CACHE_SAVE_OUTCOME: ${{ steps.playwright_cache_save.outcome }}
-          IMAGE_DIGEST: ${{ steps.playwright_image.outputs.digest }}
+          IMAGE_DIGEST: ${{ needs.playwright_image.outputs.digest }}
           SETUP_STARTED_AT: ${{ steps.browser_setup_timer.outputs.started_at }}
         run: |
           set -euo pipefail
@@ -1469,6 +1478,7 @@ jobs:
       [
         changes,
         build,
+        playwright_image,
         e2e,
         e2e-containers,
         e2e-kubernetes-compatibility,
@@ -1482,6 +1492,7 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          PLAYWRIGHT_IMAGE_RESULT: ${{ needs.playwright_image.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
           E2E_KUBERNETES_COMPATIBILITY_RESULT: ${{ needs['e2e-kubernetes-compatibility'].result }}
@@ -1492,6 +1503,7 @@ jobs:
 
           echo "Change detection: ${CHANGES_RESULT}"
           echo "Build: ${BUILD_RESULT}"
+          echo "Playwright image: ${PLAYWRIGHT_IMAGE_RESULT}"
           echo "E2E shards: ${E2E_RESULT}"
           echo "E2E container shards: ${E2E_CONTAINERS_RESULT}"
           echo "Kubernetes compatibility: ${E2E_KUBERNETES_COMPATIBILITY_RESULT}"
@@ -1515,6 +1527,7 @@ jobs:
           # list above against twenty shard names.
           for entry in \
             "build:${BUILD_RESULT}" \
+            "playwright-image:${PLAYWRIGHT_IMAGE_RESULT}" \
             "e2e:${E2E_RESULT}" \
             "e2e-containers:${E2E_CONTAINERS_RESULT}" \
             "e2e-kubernetes-compatibility:${E2E_KUBERNETES_COMPATIBILITY_RESULT}" \

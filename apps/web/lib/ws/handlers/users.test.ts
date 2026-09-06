@@ -163,6 +163,23 @@ describe("status bar visibility websocket sync", () => {
   });
 });
 
+describe("session hostname resolution websocket sync", () => {
+  it("updates the setting and preserves it when omitted", () => {
+    const store = makeStore();
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        resolve_session_hostnames: true,
+      }),
+    );
+    expect(store.getState().userSettings.resolveSessionHostnames).toBe(true);
+
+    handler?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.resolveSessionHostnames).toBe(true);
+  });
+});
+
 describe("last seen display websocket sync", () => {
   it("applies a relative value and normalizes unknown values", () => {
     const store = makeStore();

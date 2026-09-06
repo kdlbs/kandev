@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -194,8 +195,16 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
       />
+      {props.isEditMode && (
+        <TaskEditDialogDependencies
+          state={props.editDependencies}
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
     </div>
   );
 }

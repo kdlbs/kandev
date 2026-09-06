@@ -46,6 +46,7 @@ signals, and task-scoped scheduling contracts.
 - [Active clarification lifecycle scenarios](requirements/clarification-active-lifecycle-scenarios.md)
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
 - [Task Documents](requirements/documents.md)
+- [Detached Workspace Continuity](requirements/detached-workspace-continuity.md)
 - [Task Execution Stages](requirements/execution-stages.md)
 - [External task ID idempotency boundaries](requirements/external-id-idempotency-boundaries.md)
 - [External task ID idempotency scenarios](requirements/external-id-idempotency-scenarios.md)
@@ -75,6 +76,7 @@ signals, and task-scoped scheduling contracts.
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
+- [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
@@ -88,8 +90,10 @@ signals, and task-scoped scheduling contracts.
 - [Task Create Workflow Memory](requirements/task-create-workflow-memory.md)
 - [Task-create advanced settings disclosure](requirements/task-dependencies-create-dialog-advanced-settings.md)
 - [Task-create dependency selector refinement](requirements/task-dependencies-create-dialog-dependency-selector.md)
+- [Edit task dependencies](requirements/task-dependency-detail-editing.md)
 - [Task Dependencies and Auto-Start Chains](requirements/task-dependencies.md)
 - [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
+- [Task priority visibility](requirements/task-priority-visibility.md)
 - [Task Title Length Limit](requirements/title-length-limit.md)
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
@@ -114,6 +118,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
 - [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
+- [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
 
@@ -121,6 +126,7 @@ signals, and task-scoped scheduling contracts.
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
+- [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
@@ -138,11 +144,14 @@ signals, and task-scoped scheduling contracts.
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
+- [Edit task dependencies](system-design/task-dependency-detail-editing.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
+- [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
@@ -152,7 +161,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The six requirements above now have
+Migration remains in progress. The seven requirements above now have
 authoritative, wrapper-free requirement/design pairs. Other migrated files still
 need the same extraction before this system can return to a complete migration
 state.

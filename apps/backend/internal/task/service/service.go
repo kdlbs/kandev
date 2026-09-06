@@ -319,6 +319,10 @@ type Repos struct {
 // Service provides task business logic
 type Service struct {
 	workspaces                      repository.WorkspaceRepository
+	userDirectory                   UserDirectory
+	unitPlacer                      UnitPlacer
+	unitReach                       UnitReachResolver
+	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
@@ -341,6 +345,7 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	workspacePolicyAttacher         WorkspacePolicyAttacher
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
@@ -376,17 +381,13 @@ type Service struct {
 	repositorySelectionResolver     RepositorySelectionResolver
 	repoCloneLocation               RepoCloneLocation
 	blockers                        BlockerRepository
-	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
-	// two concurrent adds cannot each pass a cycle walk that predates the
-	// other's insert and commit a cycle between them.
-	dependencyEdgeMu       sync.Mutex
-	comments               CommentRepository
-	taskStateActivity      TaskStateActivityLogger
-	secretStore            secrets.SecretStore
-	workspaceSecretDeleter WorkspaceSecretDeleter
-	baseBranchPusher       AgentBaseBranchPusher
-	comparisonTargetPusher AgentComparisonTargetPusher
-	runtimeOverridesMu     sync.Mutex
+	comments                        CommentRepository
+	taskStateActivity               TaskStateActivityLogger
+	secretStore                     secrets.SecretStore
+	workspaceSecretDeleter          WorkspaceSecretDeleter
+	baseBranchPusher                AgentBaseBranchPusher
+	comparisonTargetPusher          AgentComparisonTargetPusher
+	runtimeOverridesMu              sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -431,6 +432,20 @@ type Service struct {
 	lastPendingActionProjections    map[string]pendingActionProjectionState
 }
 
+// WorkspacePolicyAttacher persists the workspace-group relationship that is
+// required before a newly created child can be returned or launched.
+type WorkspacePolicyAttacher interface {
+	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// WorkspacePolicyMembershipReleaser removes a task's workspace-group
+// membership after a post-create rollback. It is an optional companion to
+// WorkspacePolicyAttacher because lightweight task-service test harnesses may
+// not persist workspace groups.
+type WorkspacePolicyMembershipReleaser interface {
+	ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error
+}
+
 // SetAttachmentService wires the file-backed prompt attachment owner into the
 // task service. It is optional for focused unit-test harnesses that never send
 // file-backed descriptors.
@@ -461,6 +476,12 @@ func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 // deletion. The callback runs only after the repository cascade succeeds.
 func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 	s.workspaceSecretDeleter = deleter
+}
+
+// SetWorkspacePolicyAttacher installs the canonical child-workspace
+// coordinator used by every CreateTask caller.
+func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
+	s.workspacePolicyAttacher = attacher
 }
 
 // NewService creates a new task service
