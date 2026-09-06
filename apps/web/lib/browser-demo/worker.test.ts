@@ -1,0 +1,376 @@
+/* eslint-disable max-lines-per-function */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DemoWorkerRequest, DemoWorkerResponse } from "./protocol";
+import { DEMO_IDS } from "./scenario";
+import { handleHttp, handleSocketRequest } from "./worker";
+
+function get(path: string) {
+  return handleHttp({ method: "GET", path, headers: {} });
+}
+
+function requestHttp(method: string, path: string, body: Record<string, unknown> = {}) {
+  return handleHttp({ method, path, headers: {}, body: JSON.stringify(body) });
+}
+
+let socketRequestSequence = 0;
+const CHECKOUT_SESSION_ID = "demo-session-checkout";
+const AUDIT_SESSION_ID = "demo-session-audit";
+const REACT_SESSION_ID = "demo-session-react";
+const REACT_TASK_ID = "demo-task-react";
+const WORKSPACE_TREE_ACTION = "workspace.tree.get";
+const WORKSPACE_FILE_GET_ACTION = "workspace.file.get";
+
+function requestSocket(action: string, payload: Record<string, unknown> = {}) {
+  const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
+  postMessage.mockClear();
+  const requestId = `request-${++socketRequestSequence}`;
+  handleSocketRequest(
+    "control-socket",
+    JSON.stringify({ id: requestId, type: "request", action, payload }),
+  );
+  const response = postMessage.mock.calls
+    .map(([message]) => message as DemoWorkerResponse)
+    .find(
+      (message) =>
+        message.kind === "ws-event" &&
+        message.event === "message" &&
+        JSON.parse(message.data ?? "{}").id === requestId,
+    );
+  expect(response).toBeDefined();
+  return JSON.parse((response as Extract<DemoWorkerResponse, { kind: "ws-event" }>).data ?? "{}");
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("browser demo worker HTTP runtime", () => {
+  it("serves the workspace and repository scripts used by settings and task panels", async () => {
+    const workspace = await get(`/api/v1/workspaces/${DEMO_IDS.workspace}`);
+    const scripts = await get(`/api/v1/repositories/${DEMO_IDS.repository}/scripts`);
+
+    expect(workspace).toMatchObject({ status: 200, body: { id: DEMO_IDS.workspace } });
+    expect(scripts.status).toBe(200);
+    expect(scripts.body).toMatchObject({ total: 2 });
+    expect((scripts.body as { scripts: unknown[] }).scripts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Run tests", command: "pnpm test" }),
+      ]),
+    );
+  });
+
+  it("adds the demo environment to task sessions and exposes an ordinary terminal", async () => {
+    const sessions = await get("/api/v1/tasks/demo-task-audit/sessions");
+    const terminals = await get("/api/v1/tasks/demo-task-audit/terminals");
+
+    expect(sessions).toMatchObject({
+      status: 200,
+      body: { sessions: [{ task_environment_id: "demo-environment-demo-task-audit" }] },
+    });
+    expect(terminals).toMatchObject({
+      status: 200,
+      body: { terminals: [{ kind: "ordinary", pty_status: "running" }] },
+    });
+  });
+
+  it("serves the resources required to navigate to tasks and configure new ones", async () => {
+    const [agents, executors, workflows, workflowTemplates, supportSnapshot] = await Promise.all([
+      get("/api/v1/agents"),
+      get("/api/v1/executors"),
+      get(`/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`),
+      get("/api/v1/workflow/templates"),
+      get(`/api/v1/workflows/${DEMO_IDS.supportWorkflow}/snapshot`),
+    ]);
+
+    expect(agents).toMatchObject({ status: 200, body: { total: 1 } });
+    expect(executors).toMatchObject({ status: 200, body: { total: 1 } });
+    expect(workflows).toMatchObject({ status: 200, body: { total: 2 } });
+    expect(workflowTemplates).toMatchObject({
+      status: 200,
+      body: { templates: [{ name: "Kanban" }, { name: "Plan and execute" }], total: 2 },
+    });
+    expect(supportSnapshot).toMatchObject({
+      status: 200,
+      body: { workflow: { id: DEMO_IDS.supportWorkflow }, steps: { length: 3 } },
+    });
+  });
+
+  it("serves PR reviews and comments for the demo pull request", async () => {
+    const response = await get("/api/v1/github/prs/kandev-demo/acme-web/142");
+
+    expect(response.status).toBe(200);
+    const feedback = response.body as { comments: unknown[]; checks: unknown[] };
+    expect(feedback.comments).toEqual(
+      expect.arrayContaining([expect.objectContaining({ author: "mira" })]),
+    );
+    expect(feedback.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ conclusion: "success" })]),
+    );
+  });
+
+  it("serves every statistics section used by the statistics page", async () => {
+    const sections = [
+      "global",
+      "tasks",
+      "daily-activity",
+      "completed-activity",
+      "agent-usage",
+      "repositories",
+      "git",
+    ];
+    const responses = await Promise.all(
+      sections.map((section) =>
+        get(`/api/v1/workspaces/${DEMO_IDS.workspace}/stats/${section}?range=week`),
+      ),
+    );
+
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(responses[0].body).toMatchObject({ total_tasks: expect.any(Number) });
+  });
+
+  it("serves remote repositories, integration settings, and system settings", async () => {
+    const repositories = await get("/api/v1/github/repos?limit=100");
+    const branches = await get("/api/v1/github/repos/kandev-demo/acme-api/branches");
+    const jira = await get(`/api/v1/jira/config?workspace_id=${DEMO_IDS.workspace}`);
+    const linear = await get(`/api/v1/linear/config?workspace_id=${DEMO_IDS.workspace}`);
+    const sentry = await get(`/api/v1/sentry/instances?workspace_id=${DEMO_IDS.workspace}`);
+    const slack = await get(`/api/v1/slack/config?workspace_id=${DEMO_IDS.workspace}`);
+    const preview = await requestHttp("POST", "/api/v1/agent-command-preview/mock", {
+      model: "demo-fast",
+    });
+    const disk = await get("/api/v1/system/disk-usage");
+    const database = await get("/api/v1/system/database");
+    const storage = await get("/api/v1/system/storage");
+
+    expect(repositories).toMatchObject({ status: 200, body: { repos: expect.any(Array) } });
+    expect(branches).toMatchObject({
+      status: 200,
+      body: { branches: expect.arrayContaining([{ name: "main" }, { name: "develop" }]) },
+    });
+    expect(jira).toMatchObject({ status: 200, body: { defaultProjectKey: "PLAT", lastOk: true } });
+    expect(linear).toMatchObject({ status: 200, body: { defaultTeamKey: "ENG", lastOk: true } });
+    expect(sentry).toMatchObject({ status: 200, body: { instances: expect.any(Array) } });
+    expect(slack).toMatchObject({ status: 200, body: { utilityAgentId: "demo-utility-triage" } });
+    expect(preview).toMatchObject({ status: 200, body: { supported: true } });
+    expect(disk).toMatchObject({ status: 200, body: { computing: false } });
+    expect(database).toMatchObject({ status: 200, body: { driver: "sqlite" } });
+    expect(storage).toMatchObject({ status: 200, body: { settings: { enabled: true } } });
+  });
+});
+
+describe("browser demo worker WebSocket runtime", () => {
+  it("announces the selected task's environment when a session subscribes", () => {
+    const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
+    const openSocket = self.onmessage as ((event: MessageEvent<DemoWorkerRequest>) => void) | null;
+    openSocket?.(
+      new MessageEvent("message", {
+        data: { kind: "ws-open", socketId: "control-socket", url: "ws://demo.test/ws" },
+      }),
+    );
+    postMessage.mockClear();
+    handleSocketRequest(
+      "control-socket",
+      JSON.stringify({
+        id: "subscribe-audit",
+        type: "request",
+        action: "session.subscribe",
+        payload: { session_id: AUDIT_SESSION_ID },
+      }),
+    );
+
+    const ready = postMessage.mock.calls
+      .map(([message]) => message as DemoWorkerResponse)
+      .flatMap((message) =>
+        message.kind === "ws-event" && message.event === "message"
+          ? [JSON.parse(message.data ?? "{}")]
+          : [],
+      )
+      .find((message) => message.action === "session.agentctl_ready");
+
+    expect(ready?.payload).toMatchObject({
+      session_id: AUDIT_SESSION_ID,
+      task_environment_id: "demo-environment-demo-task-audit",
+    });
+  });
+
+  it("serves the seeded task plan through the plan editor protocol", () => {
+    const plan = requestSocket("task.plan.get", { task_id: REACT_TASK_ID });
+    const revisions = requestSocket("task.plan.revisions.list", {
+      task_id: REACT_TASK_ID,
+    });
+
+    expect(plan.payload).toMatchObject({
+      task_id: REACT_TASK_ID,
+      title: "React 19 multi-repository upgrade",
+      created_by: "agent",
+    });
+    expect(plan.payload.content).toContain("acme-api");
+    expect(revisions.payload.revisions).toEqual([
+      expect.objectContaining({ task_id: REACT_TASK_ID, revision_number: 1 }),
+    ]);
+  });
+
+  it("serves changed files, commits, and cumulative diffs for seeded work", () => {
+    const commits = requestSocket("session.git.commits", {
+      session_id: CHECKOUT_SESSION_ID,
+    });
+    const diff = requestSocket("session.cumulative_diff", {
+      session_id: CHECKOUT_SESSION_ID,
+    });
+
+    expect(commits.payload).toMatchObject({
+      ready: true,
+      commits: [expect.objectContaining({ commit_message: expect.stringContaining("checkout") })],
+    });
+    expect(diff.payload.cumulative_diff).toMatchObject({
+      session_id: CHECKOUT_SESSION_ID,
+      total_commits: 1,
+      files: {
+        "src/checkout/complete-order.ts": {
+          status: "modified",
+          diff: expect.stringContaining("completePayment"),
+        },
+        "tests/checkout/concurrent-inventory.test.ts": { status: "added" },
+      },
+    });
+  });
+
+  it("returns an empty git history for tasks that have not changed files", () => {
+    const commits = requestSocket("session.git.commits", {
+      session_id: "demo-session-react",
+    });
+    const diff = requestSocket("session.cumulative_diff", {
+      session_id: "demo-session-react",
+    });
+
+    expect(commits.payload).toEqual({ commits: [], ready: true });
+    expect(diff.payload).toEqual({ cumulative_diff: null, ready: true });
+  });
+
+  it("resolves the seeded audit permission and clears the pending session action", async () => {
+    const before = requestSocket("message.list", { session_id: AUDIT_SESSION_ID });
+    const pending = before.payload.messages.find(
+      (message: { id: string }) => message.id === "audit-migration-permission",
+    );
+
+    expect(pending).toMatchObject({
+      requests_input: true,
+      metadata: { status: "pending", tool_call_id: "audit-migration-check" },
+    });
+    expect(
+      requestSocket("permission.respond", {
+        session_id: AUDIT_SESSION_ID,
+        pending_id: "audit-migration-permission",
+        option_id: "audit-allow-once",
+      }).payload,
+    ).toEqual({ success: true, status: "approved" });
+
+    const after = requestSocket("message.list", { session_id: AUDIT_SESSION_ID });
+    const resolved = after.payload.messages.find(
+      (message: { id: string }) => message.id === "audit-migration-permission",
+    );
+    expect(resolved).toMatchObject({ requests_input: false, metadata: { status: "approved" } });
+    expect(await get("/api/v1/tasks/demo-task-audit")).toMatchObject({
+      body: {
+        primary_session_state: "IDLE",
+        primary_session_pending_action: null,
+      },
+    });
+  });
+
+  it("serves a browsable workspace tree and file contents", () => {
+    const tree = requestSocket(WORKSPACE_TREE_ACTION, {
+      session_id: AUDIT_SESSION_ID,
+      path: "",
+      depth: 1,
+    });
+    const file = requestSocket(WORKSPACE_FILE_GET_ACTION, {
+      session_id: AUDIT_SESSION_ID,
+      path: "README.md",
+    });
+
+    expect(tree.payload.root.children).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "src", is_dir: true })]),
+    );
+    expect(file.payload).toMatchObject({ path: "README.md", is_binary: false });
+    expect(file.payload.content).toContain("Acme Web");
+  });
+
+  it("serves both worktrees, repository roots, and their own files", async () => {
+    const sessions = await get(`/api/v1/tasks/${REACT_TASK_ID}/sessions`);
+    const root = requestSocket(WORKSPACE_TREE_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "",
+      depth: 1,
+    });
+    const apiTree = requestSocket(WORKSPACE_TREE_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "acme-api",
+      depth: 1,
+    });
+    const apiContract = requestSocket(WORKSPACE_FILE_GET_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "internal/contracts/dashboard_fixture_test.go",
+      repo: "acme-api",
+    });
+    const webManifest = requestSocket(WORKSPACE_FILE_GET_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "acme-web/package.json",
+    });
+
+    expect(sessions).toMatchObject({
+      status: 200,
+      body: {
+        sessions: [
+          {
+            worktrees: [
+              {
+                repository_id: DEMO_IDS.repository,
+                worktree_path: expect.stringContaining("acme-web"),
+              },
+              {
+                repository_id: DEMO_IDS.apiRepository,
+                worktree_path: expect.stringContaining("acme-api"),
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(root.payload.root.children).toEqual([
+      expect.objectContaining({ name: "acme-web", is_dir: true }),
+      expect.objectContaining({ name: "acme-api", is_dir: true }),
+    ]);
+    expect(apiTree.payload.root.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "cmd", is_dir: true }),
+        expect.objectContaining({ name: "internal", is_dir: true }),
+        expect.objectContaining({ name: "go.mod", is_dir: false }),
+      ]),
+    );
+    expect(apiContract.payload).toMatchObject({
+      path: "acme-api/internal/contracts/dashboard_fixture_test.go",
+      is_binary: false,
+    });
+    expect(apiContract.payload.content).toContain("TestDashboardFixtureMatchesWebClient");
+    expect(webManifest.payload.content).toContain('"name": "@acme/web"');
+  });
+
+  it("lists the demo shell with the terminal union shape", () => {
+    const response = requestSocket("user_shell.list", {
+      task_id: "demo-task-audit",
+      task_environment_id: "demo-environment",
+      include_parked: true,
+    });
+
+    expect(response.payload.shells).toEqual([
+      expect.objectContaining({
+        id: "demo-terminal-1",
+        kind: "ordinary",
+        display_name: "Terminal 1",
+        state: "open",
+      }),
+    ]);
+  });
+});

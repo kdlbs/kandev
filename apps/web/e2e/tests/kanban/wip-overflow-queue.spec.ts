@@ -44,6 +44,12 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   await testPage.mouse.down();
   await testPage.mouse.move(sourceX + 20, sourceY, { steps: 4 });
   await expect(sourceCard).toHaveClass(/opacity-50/, { timeout: 5_000 });
+  // Dnd-kit re-renders the movable columns when the overlay activates. Wait
+  // for the next paint before measuring the drop target; otherwise a stale
+  // rect can land on the adjacent column under load.
+  await testPage.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
 
   // Dragging can temporarily move destinations before the anchored source
   // column, so scroll them back into the viewport before dropping.
@@ -61,11 +67,8 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
     feederBox = await feederColumn.boundingBox();
   }
   expect(feederBox).not.toBeNull();
-  await testPage.mouse.move(
-    feederBox!.x + feederBox!.width / 2,
-    feederBox!.y + feederBox!.height / 2,
-    { steps: 12 },
-  );
+  await feederColumn.hover({ position: { x: feederBox!.width / 2, y: feederBox!.height / 2 } });
+  await expect(feederColumn).toHaveClass(/bg-primary\/5/, { timeout: 5_000 });
   await testPage.mouse.up();
 
   await expect(pullColumn).toContainText("1/1");

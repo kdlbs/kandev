@@ -119,6 +119,7 @@
   "featureTogglesSaved": "Interruptores de funcionalidades guardados",
   "featureToggleSwitchLabel": "Alternar {{label}}",
   "featureToggleUseDefault": "Usar a pré-definição",
+  "browserDemoOpen": "Abrir demonstração do navegador",
   "healthAllPass": "Todas as verificações do sistema passam.",
   "healthHealthy": "Saudável",
   "healthIssue": "Problema",
