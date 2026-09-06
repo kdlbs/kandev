@@ -113,7 +113,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows)
+	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows, operationID)
 	if !ok {
 		return false
 	}
@@ -223,15 +223,20 @@ func (s *Service) evaluateChildrenCompleted(
 	parent *models.Task,
 	session *models.TaskSession,
 	rows []models.ChildCompletionRow,
+	operationID string,
 ) (engine.HandleResult, bool) {
 	state := s.buildMachineState(ctx, parent, session)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
-		TaskID:         parent.ID,
-		SessionID:      session.ID,
-		Trigger:        engine.TriggerOnChildrenCompleted,
-		EvaluateOnly:   true,
-		PreloadedState: &state,
-		Payload:        childCompletionPayload(rows),
+		TaskID:       parent.ID,
+		SessionID:    session.ID,
+		Trigger:      engine.TriggerOnChildrenCompleted,
+		OperationID:  operationID,
+		EvaluateOnly: true,
+		// The outer handler owns the final idempotency mark because it must
+		// commit the transition lifecycle before accepting this operation.
+		DeferOperationMark: true,
+		PreloadedState:     &state,
+		Payload:            childCompletionPayload(rows),
 	})
 	if err != nil {
 		s.logger.Warn("on_children_completed: workflow engine error",

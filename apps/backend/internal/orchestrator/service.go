@@ -651,6 +651,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// operationLedger is the OperationID idempotency ledger every
+	// workflowStore initWorkflowEngine builds shares, so rebuilding the
+	// engine (any Set* call) never discards a marked operation. Its zero
+	// value is usable and it is never reassigned — see
+	// docs/specs/workflow-engine-operation-ledger-lifetime/spec.md.
+	operationLedger operationLedger
 	// agentErrorDeps bundles the engine, callback registry and store the
 	// on_agent_error dispatch reads, published as one atomic value by
 	// initWorkflowEngine so a dispatch racing a Set* reinit never pairs a new
@@ -1881,7 +1887,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, &s.operationLedger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
 	store.setGuardedTransitionLifecycle(s.applyGuardedTransitionLifecycle)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
