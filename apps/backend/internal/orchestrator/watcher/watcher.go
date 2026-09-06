@@ -89,17 +89,18 @@ type GitEventData = lifecycle.GitEventPayload
 
 // TaskMovedEventData contains data from task.moved events (manual step changes).
 type TaskMovedEventData struct {
-	TaskID           string     `json:"task_id"`
-	StepTransitionID int64      `json:"step_transition_id,omitempty"`
-	FromStepID       string     `json:"from_step_id"`
-	ToStepID         string     `json:"to_step_id"`
-	SessionID        string     `json:"session_id"`
-	WorkflowID       string     `json:"workflow_id"`
-	TaskDescription  string     `json:"task_description"`
-	WIPAdmitted      bool       `json:"wip_admitted"`
-	QueuedForStepID  string     `json:"queued_for_step_id,omitempty"`
-	QueuedAt         *time.Time `json:"queued_at,omitempty"`
-	QueuePromotion   bool       `json:"queue_promotion,omitempty"`
+	TaskID                   string     `json:"task_id"`
+	StepTransitionID         int64      `json:"step_transition_id,omitempty"`
+	WorkflowStepOccurrenceID string     `json:"workflow_step_occurrence_id,omitempty"`
+	FromStepID               string     `json:"from_step_id"`
+	ToStepID                 string     `json:"to_step_id"`
+	SessionID                string     `json:"session_id"`
+	WorkflowID               string     `json:"workflow_id"`
+	TaskDescription          string     `json:"task_description"`
+	WIPAdmitted              bool       `json:"wip_admitted"`
+	QueuedForStepID          string     `json:"queued_for_step_id,omitempty"`
+	QueuedAt                 *time.Time `json:"queued_at,omitempty"`
+	QueuePromotion           bool       `json:"queue_promotion,omitempty"`
 }
 
 // ContextWindowData contains data from context window events

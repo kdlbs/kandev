@@ -70,10 +70,14 @@ func (r *Repository) insertMessageRow(
 	requestsInput int,
 	messageType, metadataJSON string,
 ) error {
+	var turnID interface{}
+	if message.TurnID != "" {
+		turnID = message.TurnID
+	}
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex)
+	`), message.ID, message.TaskSessionID, message.TaskID, turnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex)
 	return err
 }
 
@@ -111,15 +115,17 @@ func (r *Repository) insertMessageWithSessionLock(
 func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE id = ?
-	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
+	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 
@@ -443,11 +449,13 @@ func scanPromptIndexedMessageRows(rows interface {
 	for rows.Next() {
 		message := &models.Message{}
 		var requestsInput int
+		var turnID sql.NullString
 		var messageType string
 		var metadataJSON string
-		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt, &message.PromptIndex); err != nil {
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt, &message.PromptIndex); err != nil {
 			return nil, false, err
 		}
+		message.TurnID = turnID.String
 		message.RequestsInput = requestsInput == 1
 		message.Type = models.MessageType(messageType)
 		if metadataJSON != "" && metadataJSON != "{}" {
@@ -475,11 +483,13 @@ func scanMessageRows(rows interface {
 	for rows.Next() {
 		message := &models.Message{}
 		var requestsInput int
+		var turnID sql.NullString
 		var messageType string
 		var metadataJSON string
-		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt); err != nil {
 			return nil, false, err
 		}
+		message.TurnID = turnID.String
 		message.RequestsInput = requestsInput == 1
 		message.Type = models.MessageType(messageType)
 		if metadataJSON != "" && metadataJSON != "{}" {
@@ -550,6 +560,7 @@ func (r *Repository) DeleteMessage(ctx context.Context, id string) error {
 func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, fieldName, fieldValue, orderSuffix string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	drv := r.ro.DriverName()
@@ -558,11 +569,12 @@ func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, f
 		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
 		%s
 	`, dialect.JSONExtract(drv, "metadata", fieldName), orderSuffix)
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" {
@@ -605,6 +617,7 @@ func (r *Repository) GetPermissionMessageByIdentity(ctx context.Context, taskID,
 func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	drv := r.ro.DriverName()
@@ -613,11 +626,12 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 		FROM task_session_messages WHERE %s = ?
 		ORDER BY created_at DESC LIMIT 1
 	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" {
@@ -813,15 +827,17 @@ func (r *Repository) FindMessageByPendingIDAndQuestion(ctx context.Context, sess
 	)
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, pendingID, questionID).Scan(
-		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" {
@@ -1016,16 +1032,18 @@ func (r *Repository) getPermissionMessageByIdentity(ctx context.Context, taskID,
 	`, permissionJSONExtract(driver, "metadata", "request_id"), permissionJSONExtract(driver, "metadata", "pending_id"))
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), taskID, sessionID, requestID, pendingID).Scan(
-		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID,
+		&message.ID, &message.TaskSessionID, &message.TaskID, &turnID,
 		&message.AuthorType, &message.AuthorID, &message.Content, &requestsInput,
 		&messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" {

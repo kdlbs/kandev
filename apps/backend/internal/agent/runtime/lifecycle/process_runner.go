@@ -155,6 +155,32 @@ func (m *Manager) GetWorkspaceProcess(ctx context.Context, executionID, processI
 	return process, nil
 }
 
+// GetWorkspaceProcessByRequestID reads an admitted process through the exact
+// execution that owns it. The request identity is used only for recovery; it
+// never starts a replacement process.
+func (m *Manager) GetWorkspaceProcessByRequestID(ctx context.Context, executionID, requestID string, includeOutput bool) (*agentctl.ProcessInfo, error) {
+	if requestID == "" {
+		return nil, fmt.Errorf("request_id is required")
+	}
+	execution, err := m.workspaceProcessExecutionByID(executionID)
+	if err != nil {
+		return nil, err
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("agentctl client not available for execution %s", executionID)
+	}
+	process, err := client.GetProcessByRequestID(ctx, requestID, includeOutput)
+	if err != nil {
+		return nil, err
+	}
+	if process.SessionID != execution.SessionID {
+		return nil, fmt.Errorf("process request %s is not owned by session %s", requestID, execution.SessionID)
+	}
+	return process, nil
+}
+
 // StopWorkspaceProcess stops a process only after proving its execution and
 // session ownership.
 func (m *Manager) StopWorkspaceProcess(ctx context.Context, executionID, processID string) error {

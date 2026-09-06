@@ -1509,6 +1509,34 @@ func (s *Service) SetWorkspaceProcessRunner(runner agentruntime.WorkspaceProcess
 	s.initWorkflowEngine()
 }
 
+// BeforeWorkflowMove runs the source-step exit lifecycle for a task-service
+// move that explicitly allows an active primary session. The task service
+// calls this before its task write, so a blocking workflow script leaves the
+// task at its source step.
+func (s *Service) BeforeWorkflowMove(
+	ctx context.Context,
+	taskID, fromStepID, toStepID, sessionID, occurrenceID string,
+) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load workflow move session %s: %w", sessionID, err)
+	}
+	if session == nil {
+		return fmt.Errorf("workflow move session %s was not found", sessionID)
+	}
+	if session.TaskID != taskID {
+		return fmt.Errorf("workflow move session %s belongs to task %s, not %s", sessionID, session.TaskID, taskID)
+	}
+	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, fromStepID, "workflow move source")
+	if err != nil {
+		return err
+	}
+	if err := s.processOnExit(ctx, taskID, session, fromStep, occurrenceID); err != nil {
+		return fmt.Errorf("workflow move source step %s exit: %w", fromStepID, err)
+	}
+	return nil
+}
+
 // SetTransientRetryMessageService wires the task service used to retire
 // persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2690,10 +2718,12 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	var errs []error
 	if s.workflowScripts != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := s.workflowScripts.Stop(ctx); err != nil {
 			s.logger.Error("failed to stop workflow scripts", zap.Error(err))
+			errs = append(errs, fmt.Errorf("stop workflow scripts: %w", err))
 		}
 		cancel()
 	}
@@ -2704,7 +2734,6 @@ func (s *Service) Stop() error {
 	s.stopDynamicPolicyRecovery()
 
 	// Stop components in reverse order
-	var errs []error
 	s.stopIdleSessionReaper()
 	s.stopReservedPromptCallbacks()
 

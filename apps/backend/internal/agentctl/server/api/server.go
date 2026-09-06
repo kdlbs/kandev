@@ -171,6 +171,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/processes/start", s.handleStartProcess)
 		api.POST("/processes/stop", s.handleStopProcess)
 		api.GET("/processes", s.handleListProcesses)
+		api.GET("/processes/request/:request_id", s.handleGetProcessByRequestID)
 		api.GET("/processes/:id", s.handleGetProcess)
 
 		// VS Code server management

@@ -115,6 +115,7 @@ the workflow package depend on lifecycle internals:
 ```text
 WorkspaceProcessRunner.Start(ctx, request) -> process
 WorkspaceProcessRunner.Get(ctx, executionID, processID, includeOutput) -> state
+WorkspaceProcessRunner.GetByRequestID(ctx, executionID, requestID, includeOutput) -> state
 WorkspaceProcessRunner.Stop(ctx, executionID, processID) -> error
 ```
 
@@ -127,6 +128,11 @@ Agentctl starts the command with its current platform shell behavior and emits
 stdout, stderr, and status on the workspace process stream. The runtime does
 not start or prompt an LLM process. The action can run against a prepared
 workspace before the destination agent subprocess starts.
+
+`GetByRequestID` is a recovery-only lookup. It attaches a `starting` run to an
+already admitted process when the process ID was not persisted before a crash;
+it never starts a replacement command. Implementations must validate the exact
+execution and returned session before exposing the process.
 
 The start request carries the workflow script run ID as an idempotency key.
 Agentctl returns the existing process for a duplicate request with the same key
@@ -260,7 +266,8 @@ metadata:
 
 The message content holds the bounded combined output in process event order.
 The task service remains the single persistence and WebSocket publication path.
-Script messages have no user-input request and do not complete a turn.
+Script messages have no user-input request, carry no `turn_id`, and do not
+complete or create a turn.
 
 The frontend extends `ScriptExecutionMessage` with a workflow-step header and
 trigger badge. It displays command, output, duration, status, exit code,

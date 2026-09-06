@@ -32,7 +32,10 @@ live output, and durable terminal evidence in normal agent chat.
   duration, exit code, interruption, and truncation states.
 - In-place WebSocket updates, reload/reconnect behavior, and missing-metadata
   fallback.
-- Normal transcript filtering and turn-count exclusion.
+- Normal transcript filtering, turn-count exclusion, and lifecycle-only message
+  persistence for workflow scripts.
+- Recovery lookup by stable process-request identity without starting a
+  replacement command.
 - Desktop/mobile expansion, wrapping, accessibility, and localization.
 
 ## Out of scope
@@ -44,19 +47,21 @@ live output, and durable terminal evidence in normal agent chat.
 1. One chronological message streams from starting to a correct terminal state
    and remains identical after reload or reconnect.
 2. Workflow scripts stay out of preparation UI and never count as prompts,
-   replies, completed turns, or workflow completion signals.
+   replies, completed turns, or workflow completion signals. A replay or
+   recovery path updates the existing lifecycle message rather than creating a
+   completed turn.
 3. Every status and missing-field case is accessible on desktop/mobile without
    horizontal document overflow.
 
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/script-execution-message hooks/processed-message-filtering
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm run i18n:ratchet
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/script-execution-message hooks/processed-message-filtering)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm run i18n:ratchet)
 git diff --check
 ```
 
@@ -93,5 +98,5 @@ keys; Task 08 owns workflow editor mobile files and workflow locale keys.
 
 Implemented workflow lifecycle context, live and terminal output projection,
 duration and interruption metadata, truncation display, normal transcript
-filtering, and terminal success handling. Focused chat and filtering tests
-pass.
+filtering, lifecycle-only message persistence, request-identity recovery, and
+terminal success handling. Focused chat and filtering tests pass.

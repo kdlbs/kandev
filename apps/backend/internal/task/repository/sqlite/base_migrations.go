@@ -352,6 +352,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.backfillPromptSeq(); err != nil {
 		return err
 	}
+	if err := r.migrateTaskSessionMessagesTurnNullable(); err != nil {
+		return err
+	}
 
 	// Workflow step display snapshot on plan revisions, same pattern as
 	// author_name: the step a task was on when the revision was written.

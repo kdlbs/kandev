@@ -1108,6 +1108,7 @@ func (a *messageCreatorAdapter) CreateWorkflowScriptMessage(ctx context.Context,
 		Type:          string(models.MessageTypeScriptExecution),
 		Metadata:      metadata,
 		CompletedTurn: true,
+		SkipTurn:      true,
 	})
 	return err
 }

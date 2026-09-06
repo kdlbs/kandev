@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -550,9 +551,24 @@ func (s *Service) MoveTaskWithOptions(
 	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
 	stateAfterAdmission := *task
+	sessionID := ""
+	lifecycleOccurrenceID := ""
+	lifecycleExitCompleted := false
 	if stepChanged {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
+		}
+		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+			sessionID = activeSession.ID
+			if s.workflowMoveLifecycleGate != nil {
+				lifecycleOccurrenceID = uuid.NewString()
+				if err := s.workflowMoveLifecycleGate.BeforeWorkflowMove(
+					ctx, id, oldStepID, workflowStepID, sessionID, lifecycleOccurrenceID,
+				); err != nil {
+					return nil, fmt.Errorf("workflow move blocked by source-step lifecycle: %w", err)
+				}
+				lifecycleExitCompleted = true
+			}
 		}
 	}
 
@@ -569,6 +585,13 @@ func (s *Service) MoveTaskWithOptions(
 		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
 			"from_step_id": oldStepID,
 		}
+		if lifecycleExitCompleted {
+			task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
+				"from_step_id":   oldStepID,
+				"exit_completed": true,
+				"occurrence_id":  lifecycleOccurrenceID,
+			}
+		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
@@ -582,13 +605,16 @@ func (s *Service) MoveTaskWithOptions(
 	// the move whenever an active session exists. The admission repository removes
 	// the queued-exit marker for admitted tasks, so this separate marker carries
 	// the barrier across the task.moved event without changing WIP admission.
-	sessionID := ""
 	if stepChanged {
-		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
-			sessionID = activeSession.ID
-			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+		if sessionID != "" {
+			descriptor := map[string]interface{}{
 				"from_step_id": oldStepID,
 			}
+			if lifecycleExitCompleted {
+				descriptor["exit_completed"] = true
+				descriptor["occurrence_id"] = lifecycleOccurrenceID
+			}
+			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = descriptor
 		}
 	}
 

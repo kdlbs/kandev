@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -207,6 +208,81 @@ func TestCreateMessageIdempotentWithCompletedTurnKeepsCallerID(t *testing.T) {
 	}
 	if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
 		t.Fatalf("turn = %+v, want a completed lifecycle-only turn", turn)
+	}
+}
+
+func TestCreateMessageIdempotentResolvesReplayBeforeCompletedTurn(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	req := &CreateMessageRequest{
+		TaskSessionID: "sess-msg",
+		Content:       "script output",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeScriptExecution),
+		CompletedTurn: true,
+	}
+
+	var wait sync.WaitGroup
+	messages := make(chan *models.Message, 2)
+	errorsSeen := make(chan error, 2)
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			message, err := svc.CreateMessageIdempotent(context.Background(), "script-replay", req)
+			if err != nil {
+				errorsSeen <- err
+				return
+			}
+			messages <- message
+		}()
+	}
+	wait.Wait()
+	close(messages)
+	close(errorsSeen)
+	for err := range errorsSeen {
+		t.Fatalf("CreateMessageIdempotent: %v", err)
+	}
+	var first *models.Message
+	for message := range messages {
+		if first == nil {
+			first = message
+			continue
+		}
+		if message.ID != first.ID || message.TurnID != first.TurnID {
+			t.Fatalf("replayed message = %+v, want the first row %+v", message, first)
+		}
+	}
+	turns, err := repo.ListTurnsBySession(context.Background(), "sess-msg")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turn count = %d, want the seeded turn plus one completed turn", len(turns))
+	}
+}
+
+func TestCreateWorkflowScriptMessageCanSkipTurnCreation(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	message, err := svc.CreateMessageWithID(context.Background(), "script-no-turn", &CreateMessageRequest{
+		TaskSessionID: "sess-msg",
+		Content:       "script output",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeScriptExecution),
+		CompletedTurn: true,
+		SkipTurn:      true,
+	})
+	if err != nil {
+		t.Fatalf("CreateMessageWithID: %v", err)
+	}
+	if message.TurnID != "" {
+		t.Fatalf("workflow script message turn id = %q, want no turn", message.TurnID)
+	}
+	turns, err := repo.ListTurnsBySession(context.Background(), "sess-msg")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turn count = %d, want only the seeded conversational turn", len(turns))
 	}
 }
 

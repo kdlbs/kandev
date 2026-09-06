@@ -244,6 +244,13 @@ type asyncStepHistoryRecorder interface {
 	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
 }
 
+// WorkflowMoveLifecycleGate runs the source-step exit actions before a move
+// that has an active primary session is committed. The task service owns the
+// task write; the orchestrator owns workflow lifecycle side effects.
+type WorkflowMoveLifecycleGate interface {
+	BeforeWorkflowMove(ctx context.Context, taskID, fromStepID, toStepID, sessionID, occurrenceID string) error
+}
+
 // ContributionDestinationPreparer is an internal creation-time hook for a
 // server-owned publication route. It runs after request/workflow validation
 // and external-ID deduplication, but before the task row is inserted.
@@ -370,6 +377,7 @@ type Service struct {
 	workflowStepGetter              WorkflowStepGetter
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
+	workflowMoveLifecycleGate       WorkflowMoveLifecycleGate
 	contributionDestinationPreparer ContributionDestinationPreparer
 	prTaskResolver                  PRTaskResolver
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
@@ -430,6 +438,16 @@ type Service struct {
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
 	lastPendingActionProjections    map[string]pendingActionProjectionState
+	messageCreateLocksMu            sync.Mutex
+	messageCreateLocks              map[string]*messageCreateLock
+}
+
+// messageCreateLock serializes all side effects for one caller-owned message
+// ID. Its reference count allows idle entries to be removed without opening a
+// delete-after-unlock race.
+type messageCreateLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // WorkspacePolicyAttacher persists the workspace-group relationship that is
@@ -520,6 +538,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
 		lastPendingActionProjections: make(map[string]pendingActionProjectionState),
+		messageCreateLocks:           make(map[string]*messageCreateLock),
 	}
 }
 
@@ -643,6 +662,12 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 // step transitions (MoveTaskWithOptions). Optional.
 func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
 	s.stepHistoryRecorder = recorder
+}
+
+// SetWorkflowMoveLifecycleGate wires the orchestrator-owned source-step gate
+// used for moves that explicitly allow an active primary session.
+func (s *Service) SetWorkflowMoveLifecycleGate(gate WorkflowMoveLifecycleGate) {
+	s.workflowMoveLifecycleGate = gate
 }
 
 // SetContributionDestinationPreparer wires the optional server-side

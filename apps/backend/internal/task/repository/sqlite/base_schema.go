@@ -920,7 +920,7 @@ func (r *Repository) initMessageTurnSchema() error {
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
-		turn_id TEXT NOT NULL,
+		turn_id TEXT,
 		author_type TEXT NOT NULL DEFAULT 'user',
 		author_id TEXT DEFAULT '',
 		content TEXT NOT NULL,

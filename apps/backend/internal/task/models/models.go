@@ -1402,7 +1402,7 @@ type Message struct {
 	ID            string                 `json:"id"`
 	TaskSessionID string                 `json:"session_id"`
 	TaskID        string                 `json:"task_id,omitempty"`
-	TurnID        string                 `json:"turn_id"` // FK to task_session_turns
+	TurnID        string                 `json:"turn_id"` // Optional for lifecycle-only messages
 	AuthorType    MessageAuthorType      `json:"author_type"`
 	AuthorID      string                 `json:"author_id,omitempty"` // User ID or Agent Execution ID
 	Content       string                 `json:"content"`

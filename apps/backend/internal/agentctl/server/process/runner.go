@@ -614,6 +614,11 @@ func (r *ProcessRunner) StopAllAndWait(ctx context.Context) error {
 			}
 			if err := r.ensureProcessGroupReaped(ctx, proc); err != nil {
 				waitErrs = append(waitErrs, err)
+			} else {
+				// The initial wait completed without publishing because the
+				// process group was not yet reaped. Publish the terminal state
+				// only after this retry has released that ownership.
+				r.publishStatus(proc)
 			}
 		case <-ctx.Done():
 			waitErrs = append(waitErrs, fmt.Errorf("wait for workspace process %s: %w", proc.info.ID, ctx.Err()))
@@ -664,6 +669,23 @@ func (r *ProcessRunner) Get(id string, includeOutput bool) (*ProcessInfo, bool) 
 		if !ok {
 			return nil, false
 		}
+	}
+	info := proc.snapshot(includeOutput)
+	return &info, true
+}
+
+// GetByRequestID retrieves an active or retained process by its stable start
+// request identity. It is used only to attach durable workflow runs after a
+// restart that interrupted process-ID persistence.
+func (r *ProcessRunner) GetByRequestID(requestID string, includeOutput bool) (*ProcessInfo, bool) {
+	if requestID == "" {
+		return nil, false
+	}
+	r.mu.RLock()
+	proc, ok := r.requestIndex[requestID]
+	r.mu.RUnlock()
+	if !ok || proc == nil {
+		return nil, false
 	}
 	info := proc.snapshot(includeOutput)
 	return &info, true
@@ -728,30 +750,31 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 	}
 }
 
-// wait blocks until the process exits, then updates final status and cleans up.
+// wait blocks until the process exits, then reaps the process group before
+// publishing the final status.
 //
 // This runs in a background goroutine spawned by Start(). Responsibilities:
 //  1. Wait for process termination (blocks on cmd.Wait())
 //  2. Extract exit code from process state
 //  3. Determine final status: "exited" (code 0) vs "failed" (non-zero)
-//  4. Publish final status update to WebSocket clients
-//  5. Remove process from tracking map (makes ID unavailable for future lookups)
+//  4. Reap the complete process group
+//  5. Publish final status update to WebSocket clients
 //
 // Exit Code Extraction:
 //   - Success (exit code 0): Status = "exited"
 //   - Failure (exit code != 0): Status = "failed"
 //   - If exit code cannot be determined: Defaults to 1
 //
-// Cleanup Strategy:
-//   - Process is removed from r.processes after exit
-//   - This prevents Get() from returning stale/completed processes
-//   - Output is lost after removal (not persisted beyond memory)
-//   - Clients should stream output in real-time or call Get(id, true) before exit
+// Retention Strategy:
+//   - A completed process remains in the request-id index for idempotent
+//     recovery and bounded output lookup.
+//   - The terminal record is not published until the complete process group is
+//     reaped, so a caller never observes completion while descendants remain.
 //
 // Goroutine Safety:
 //   - Each process has exactly one wait() goroutine
 //   - wait() is the sole authority for final status updates
-//   - Cleanup happens after a delay to allow polling
+//   - The retained terminal record is removed by the existing retention cleanup.
 func (r *ProcessRunner) wait(proc *commandProcess) {
 	defer close(proc.done)
 	if proc.cancel != nil {
@@ -791,14 +814,20 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
 
-	// Publish final status to WebSocket clients
-	r.publishStatus(proc)
-
+	// A terminal process remains owned by the runner until its full process
+	// group is reaped. Do not publish the terminal state before that boundary:
+	// consumers may release the workspace as soon as they receive this event.
 	if err := r.ensureProcessGroupReaped(context.Background(), proc); err != nil {
 		proc.mu.Lock()
 		proc.reapErr = err
 		proc.mu.Unlock()
+		r.logger.Error("workspace process group was not reaped",
+			zap.String("process_id", proc.info.ID), zap.Error(err))
+		return
 	}
+
+	// Publish final status to WebSocket clients only after process-group reap.
+	r.publishStatus(proc)
 }
 
 func (r *ProcessRunner) ensureProcessGroupReaped(ctx context.Context, proc *commandProcess) error {

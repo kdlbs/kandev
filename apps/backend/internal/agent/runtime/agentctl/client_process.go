@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -178,6 +179,38 @@ func (c *Client) GetProcess(ctx context.Context, id string, includeOutput bool) 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("get process failed with status %d", resp.StatusCode)
+	}
+	var result ProcessInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetProcessByRequestID retrieves a process through its stable start-request
+// identity. Recovery uses this endpoint for a run whose process ID was not
+// persisted before a restart.
+func (c *Client) GetProcessByRequestID(ctx context.Context, requestID string, includeOutput bool) (*ProcessInfo, error) {
+	if requestID == "" {
+		return nil, fmt.Errorf("request id is required")
+	}
+	reqURL := c.baseURL + "/api/v1/processes/request/" + url.PathEscape(requestID)
+	if includeOutput {
+		reqURL += "?include_output=true"
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get process by request id failed with status %d", resp.StatusCode)
 	}
 	var result ProcessInfo
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

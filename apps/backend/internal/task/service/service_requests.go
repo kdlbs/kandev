@@ -352,10 +352,13 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"session_id"`
-	TaskID        string                 `json:"task_id,omitempty"`
-	TurnID        string                 `json:"turn_id"`
-	CompletedTurn bool                   `json:"-"`
+	TaskSessionID string `json:"session_id"`
+	TaskID        string `json:"task_id,omitempty"`
+	TurnID        string `json:"turn_id"`
+	CompletedTurn bool   `json:"-"`
+	// SkipTurn is reserved for durable lifecycle projections that are not
+	// conversational work. It prevents a synthetic turn from being created.
+	SkipTurn      bool                   `json:"-"`
 	Content       string                 `json:"content"`
 	AuthorType    string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
 	AuthorID      string                 `json:"author_id,omitempty"`

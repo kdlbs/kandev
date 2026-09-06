@@ -85,8 +85,13 @@ type workflowScriptRunner struct {
 
 	locks sync.Map
 
-	activeMu sync.Mutex
-	active   map[string]context.CancelFunc
+	activeMu        sync.Mutex
+	active          map[string]context.CancelFunc
+	admissionMu     sync.RWMutex
+	reconcileCtx    context.Context
+	reconcileCancel context.CancelFunc
+	reconcileWG     sync.WaitGroup
+	stopping        bool
 }
 
 func newWorkflowScriptRunner(
@@ -95,9 +100,11 @@ func newWorkflowScriptRunner(
 	messages workflowScriptMessageWriter,
 	log *logger.Logger,
 ) *workflowScriptRunner {
+	reconcileCtx, reconcileCancel := context.WithCancel(context.Background())
 	return &workflowScriptRunner{
 		runs: runs, processes: processes, messages: messages, logger: log,
-		active: make(map[string]context.CancelFunc),
+		active: make(map[string]context.CancelFunc), reconcileCtx: reconcileCtx,
+		reconcileCancel: reconcileCancel,
 	}
 }
 
@@ -157,10 +164,7 @@ func (r *workflowScriptRunner) withRunLock(ctx context.Context, run *taskmodels.
 	value, _ := r.locks.LoadOrStore(run.ID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
 	lock.Lock()
-	defer func() {
-		lock.Unlock()
-		r.locks.Delete(run.ID)
-	}()
+	defer lock.Unlock()
 	return fn()
 }
 
@@ -232,7 +236,10 @@ func workflowScriptMessageID(runID string) string {
 func (r *workflowScriptRunner) admitAndWait(ctx context.Context, run *taskmodels.WorkflowScriptRun) error {
 	r.recordStarted(run)
 	processCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	r.registerActive(run.ID, cancel)
+	if !r.registerActive(run.ID, cancel) {
+		cancel()
+		return r.interruptRun(ctx, run, nil, errors.New("workflow script admission rejected during shutdown"))
+	}
 	defer func() {
 		cancel()
 		r.unregisterActive(run.ID)
@@ -240,11 +247,17 @@ func (r *workflowScriptRunner) admitAndWait(ctx context.Context, run *taskmodels
 	if err := processCtx.Err(); err != nil {
 		return r.interruptRun(ctx, run, nil, errWorkflowScriptInterrupted)
 	}
+	r.admissionMu.RLock()
+	if r.isStopping() {
+		r.admissionMu.RUnlock()
+		return r.interruptRun(ctx, run, nil, errors.New("workflow script admission rejected during shutdown"))
+	}
 	process, err := r.processes.Start(processCtx, agentruntime.WorkspaceProcessRequest{
 		RunID: run.ProcessRequestID, SessionID: run.SessionID, ExecutionID: run.ExecutionID,
 		Command: run.Command, Timeout: time.Duration(run.TimeoutSeconds) * time.Second,
 		Kind: "workflow_script", BufferMaxBytes: workflowScriptOutputBufferBytes,
 	})
+	r.admissionMu.RUnlock()
 	if err != nil {
 		return r.completeFailure(ctx, run, nil, fmt.Errorf("start workflow script process: %w", err))
 	}
@@ -288,8 +301,56 @@ func (r *workflowScriptRunner) reconcileRunning(ctx context.Context, run *taskmo
 	if process.SessionID != run.SessionID {
 		return r.interruptRun(ctx, run, process, errors.New("reconciled process session does not match run"))
 	}
+	return r.observeProcess(ctx, run, process)
+}
+
+func (r *workflowScriptRunner) reconcileStartingRun(ctx context.Context, run *taskmodels.WorkflowScriptRun) error {
+	if r.processes == nil {
+		return r.interruptRunForRecovery(ctx, run, nil, errors.New("workspace process runner is unavailable during process admission recovery"))
+	}
+	if run.ProcessRequestID == "" {
+		return r.interruptRunForRecovery(ctx, run, nil, errors.New("workflow service restarted during process admission"))
+	}
+	lookup, ok := r.processes.(agentruntime.WorkspaceProcessRequestLookup)
+	if !ok {
+		return r.interruptRunForRecovery(ctx, run, nil, errors.New("workflow service restarted during process admission"))
+	}
+	process, err := lookup.GetByRequestID(ctx, run.ExecutionID, run.ProcessRequestID, true)
+	if err != nil || process == nil {
+		if err == nil {
+			err = errors.New("workspace process request was not found")
+		}
+		return r.interruptRunForRecovery(ctx, run, nil, fmt.Errorf("recover workflow script process admission: %w", err))
+	}
+	if process.ID == "" {
+		return r.interruptRunForRecovery(ctx, run, process, errors.New("recovered workflow script process has no identity"))
+	}
+	if process.SessionID != run.SessionID {
+		return r.interruptRunForRecovery(ctx, run, process, errors.New("recovered workflow script process session does not match run"))
+	}
+	running, err := r.runs.MarkWorkflowScriptRunRunning(ctx, run.ID, process.ID)
+	if err != nil {
+		return fmt.Errorf("mark recovered workflow script running: %w", err)
+	}
+	if !running {
+		fresh, loadErr := r.runs.GetWorkflowScriptRun(ctx, run.ID)
+		if loadErr != nil {
+			return loadErr
+		}
+		if fresh.Status.IsTerminal() {
+			return workflowScriptPolicyOutcome(fresh)
+		}
+		run = fresh
+	}
+	return r.observeProcess(ctx, run, process)
+}
+
+func (r *workflowScriptRunner) observeProcess(ctx context.Context, run *taskmodels.WorkflowScriptRun, process *agentruntime.WorkspaceProcessInfo) error {
 	processCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	r.registerActive(run.ID, cancel)
+	if !r.registerActive(run.ID, cancel) {
+		cancel()
+		return r.interruptRun(ctx, run, process, errors.New("workflow script reconciliation stopped"))
+	}
 	defer func() {
 		cancel()
 		r.unregisterActive(run.ID)
@@ -309,12 +370,11 @@ func (r *workflowScriptRunner) waitForProcess(ctx context.Context, run *taskmode
 			return r.completeFromProcess(context.Background(), run, process)
 		}
 		if err := r.updateProcessMessage(run, process, &lastContent, &lastStatus); err != nil {
-			_ = r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
-			return r.completeFailure(context.Background(), run, process, err)
+			stopErr := r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
+			return errors.Join(stopErr, r.completeFailure(context.Background(), run, process, err))
 		}
 		select {
 		case <-ctx.Done():
-			_ = r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
 			return r.interruptRun(context.Background(), run, process, errWorkflowScriptInterrupted)
 		case <-ticker.C:
 		}
@@ -378,10 +438,6 @@ func (r *workflowScriptRunner) completeProcess(
 	status taskmodels.WorkflowScriptRunStatus,
 	reason string,
 ) error {
-	if err := r.updateRunMessage(ctx, run, process, status, reason); err != nil {
-		status = taskmodels.WorkflowScriptRunFailed
-		reason = fmt.Sprintf("%s: %v", errWorkflowScriptMessage, err)
-	}
 	completion := taskmodels.WorkflowScriptRunCompletion{
 		Status: status, Output: workflowScriptProcessOutput(process),
 		OutputTruncated: workflowScriptProcessOutputTruncated(process), FailureReason: reason,
@@ -424,10 +480,28 @@ func (r *workflowScriptRunner) interruptRun(ctx context.Context, run *taskmodels
 	if reason == nil {
 		reason = errWorkflowScriptInterrupted
 	}
+	var stopErr error
 	if process != nil && r.processes != nil && !isTerminalWorkspaceProcess(process.Status) {
-		_ = r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
+		stopErr = r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
 	}
-	return r.completeProcess(ctx, run, process, taskmodels.WorkflowScriptRunInterrupted, reason.Error())
+	completionErr := r.completeProcess(ctx, run, process, taskmodels.WorkflowScriptRunInterrupted, reason.Error())
+	return errors.Join(stopErr, completionErr)
+}
+
+func (r *workflowScriptRunner) interruptRunForRecovery(ctx context.Context, run *taskmodels.WorkflowScriptRun, process *agentruntime.WorkspaceProcessInfo, reason error) error {
+	if reason == nil {
+		reason = errWorkflowScriptInterrupted
+	}
+	var stopErr error
+	if process != nil && r.processes != nil && !isTerminalWorkspaceProcess(process.Status) {
+		stopErr = r.processes.Stop(context.Background(), run.ExecutionID, process.ID)
+	}
+	completionErr := r.completeProcess(ctx, run, process, taskmodels.WorkflowScriptRunInterrupted, reason.Error())
+	var blocked *WorkflowScriptBlockedError
+	if errors.As(completionErr, &blocked) {
+		completionErr = nil
+	}
+	return errors.Join(stopErr, completionErr)
 }
 
 func (r *workflowScriptRunner) updateRunMessage(
@@ -550,16 +624,64 @@ func workflowScriptPolicyOutcome(run *taskmodels.WorkflowScriptRun) error {
 	}
 }
 
-func (r *workflowScriptRunner) registerActive(runID string, cancel context.CancelFunc) {
+func (r *workflowScriptRunner) registerActive(runID string, cancel context.CancelFunc) bool {
 	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	if r.stopping {
+		return false
+	}
 	r.active[runID] = cancel
-	r.activeMu.Unlock()
+	return true
 }
 
 func (r *workflowScriptRunner) unregisterActive(runID string) {
 	r.activeMu.Lock()
 	delete(r.active, runID)
 	r.activeMu.Unlock()
+}
+
+func (r *workflowScriptRunner) isStopping() bool {
+	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	return r.stopping
+}
+
+func (r *workflowScriptRunner) launchDetachedRun(run *taskmodels.WorkflowScriptRun) {
+	if run == nil || run.ID == "" {
+		return
+	}
+	r.activeMu.Lock()
+	if r.stopping {
+		r.activeMu.Unlock()
+		return
+	}
+	r.reconcileWG.Add(1)
+	ctx := r.reconcileCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.activeMu.Unlock()
+	go func() {
+		defer r.reconcileWG.Done()
+		if err := r.resumeDetachedRun(ctx, run); err != nil && r.logger != nil {
+			r.logger.Warn("workflow script reconciliation failed",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+	}()
+}
+
+func (r *workflowScriptRunner) waitForReconcileWorkers(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		r.reconcileWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for workflow script reconciliation: %w", ctx.Err())
+	}
 }
 
 func (r *workflowScriptRunner) recordStarted(run *taskmodels.WorkflowScriptRun) {
@@ -588,6 +710,29 @@ func (r *workflowScriptRunner) logCompletion(run *taskmodels.WorkflowScriptRun) 
 	workflowScriptTerminalTotal.Add(metricLabel("trigger", string(run.Trigger), "outcome", string(run.Status)), 1)
 }
 
+func (r *workflowScriptRunner) stopWorkflowScriptRun(ctx context.Context, run *taskmodels.WorkflowScriptRun) []error {
+	if run.Status != taskmodels.WorkflowScriptRunStarting && run.Status != taskmodels.WorkflowScriptRunRunning {
+		return nil
+	}
+	var process *agentruntime.WorkspaceProcessInfo
+	var observationErr error
+	if r.processes != nil {
+		if run.ProcessID != "" {
+			process, observationErr = r.processes.Get(ctx, run.ExecutionID, run.ProcessID, true)
+		} else if lookup, ok := r.processes.(agentruntime.WorkspaceProcessRequestLookup); ok && run.ProcessRequestID != "" {
+			process, observationErr = lookup.GetByRequestID(ctx, run.ExecutionID, run.ProcessRequestID, true)
+		}
+	}
+	errs := make([]error, 0, 2)
+	if observationErr != nil {
+		errs = append(errs, fmt.Errorf("observe workflow script run %s during shutdown: %w", run.ID, observationErr))
+	}
+	if err := r.interruptRunForShutdown(ctx, run, process, errors.New("workflow service stopped")); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
 // Stop interrupts all admitted workflow scripts. Pending rows are left for
 // startup recovery because no process admission crossed the at-most-once
 // boundary yet.
@@ -595,32 +740,31 @@ func (r *workflowScriptRunner) Stop(ctx context.Context) error {
 	if r == nil || r.runs == nil {
 		return nil
 	}
+	r.admissionMu.Lock()
 	r.activeMu.Lock()
+	if !r.stopping {
+		r.stopping = true
+		if r.reconcileCancel != nil {
+			r.reconcileCancel()
+		}
+	}
 	for _, cancel := range r.active {
 		cancel()
 	}
 	r.activeMu.Unlock()
+	r.admissionMu.Unlock()
+	if err := r.waitForReconcileWorkers(ctx); err != nil {
+		return err
+	}
 	runs, err := r.runs.ListNonTerminalWorkflowScriptRuns(ctx)
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, run := range runs {
-		if run.Status != taskmodels.WorkflowScriptRunStarting && run.Status != taskmodels.WorkflowScriptRunRunning {
-			continue
-		}
-		var process *agentruntime.WorkspaceProcessInfo
-		if run.ProcessID != "" && r.processes != nil {
-			process, _ = r.processes.Get(ctx, run.ExecutionID, run.ProcessID, true)
-			if process == nil {
-				// Keep the shutdown stop best-effort when observation fails. The
-				// durable run still records an interruption and recovery will not
-				// admit a replacement process for this occurrence.
-				_ = r.processes.Stop(ctx, run.ExecutionID, run.ProcessID)
-			}
-		}
-		_ = r.interruptRun(ctx, run, process, errors.New("workflow service stopped"))
+		errs = append(errs, r.stopWorkflowScriptRun(ctx, run)...)
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Reconcile resumes pending runs and observes admitted runs without creating a
@@ -636,42 +780,51 @@ func (r *workflowScriptRunner) Reconcile(ctx context.Context) error {
 	}
 	for _, run := range runs {
 		switch run.Status {
-		case taskmodels.WorkflowScriptRunPending:
-			go r.resumeDetachedRun(run)
-		case taskmodels.WorkflowScriptRunStarting:
-			completed, completeErr := r.runs.CompleteWorkflowScriptRun(ctx, run.ID, taskmodels.WorkflowScriptRunCompletion{
-				Status:        taskmodels.WorkflowScriptRunInterrupted,
-				FailureReason: "workflow service restarted during process admission",
-				CompletedAt:   time.Now().UTC(),
-			})
-			if completeErr != nil {
-				return fmt.Errorf("reconcile workflow script run %s: %w", run.ID, completeErr)
-			}
-			if !completed {
-				continue
-			}
-			fresh, getErr := r.runs.GetWorkflowScriptRun(ctx, run.ID)
-			if getErr != nil {
-				return fmt.Errorf("reload reconciled workflow script run %s: %w", run.ID, getErr)
-			}
-			if updateErr := r.updateRunMessage(ctx, fresh, nil, fresh.Status, fresh.FailureReason); updateErr != nil {
-				return fmt.Errorf("project reconciled workflow script run %s: %w", run.ID, updateErr)
-			}
-			r.logCompletion(fresh)
-		case taskmodels.WorkflowScriptRunRunning:
-			go r.resumeDetachedRun(run)
+		case taskmodels.WorkflowScriptRunPending, taskmodels.WorkflowScriptRunStarting, taskmodels.WorkflowScriptRunRunning:
+			r.launchDetachedRun(run)
 		}
 	}
 	return nil
 }
 
-func (r *workflowScriptRunner) resumeDetachedRun(run *taskmodels.WorkflowScriptRun) {
-	ctx := context.Background()
-	_ = r.withRunLock(ctx, run, func() error {
+func (r *workflowScriptRunner) resumeDetachedRun(ctx context.Context, run *taskmodels.WorkflowScriptRun) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return r.withRunLock(ctx, run, func() error {
 		fresh, err := r.runs.GetWorkflowScriptRun(ctx, run.ID)
 		if err != nil {
 			return err
 		}
-		return r.executeClaimed(ctx, fresh)
+		switch fresh.Status {
+		case taskmodels.WorkflowScriptRunStarting:
+			return r.reconcileStartingRun(ctx, fresh)
+		case taskmodels.WorkflowScriptRunPending, taskmodels.WorkflowScriptRunRunning:
+			return r.executeClaimed(ctx, fresh)
+		default:
+			return workflowScriptPolicyOutcome(fresh)
+		}
 	})
+}
+
+func (r *workflowScriptRunner) interruptRunForShutdown(ctx context.Context, run *taskmodels.WorkflowScriptRun, process *agentruntime.WorkspaceProcessInfo, reason error) error {
+	if reason == nil {
+		reason = errWorkflowScriptInterrupted
+	}
+	var stopErr error
+	if r.processes != nil {
+		processID := run.ProcessID
+		if process != nil {
+			processID = process.ID
+		}
+		if processID != "" && (process == nil || !isTerminalWorkspaceProcess(process.Status)) {
+			stopErr = r.processes.Stop(context.Background(), run.ExecutionID, processID)
+		}
+	}
+	completionErr := r.completeProcess(ctx, run, process, taskmodels.WorkflowScriptRunInterrupted, reason.Error())
+	var blocked *WorkflowScriptBlockedError
+	if errors.As(completionErr, &blocked) {
+		completionErr = nil
+	}
+	return errors.Join(stopErr, completionErr)
 }

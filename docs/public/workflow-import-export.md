@@ -188,9 +188,9 @@ on_enter:
       failure_policy: block
 ```
 
-The command is stored in the portable workflow and executes only when its lifecycle trigger occurs. The destination session owns `on_enter`; the source session owns `on_turn_complete` and `on_exit`. Output is persisted in the task chat. Import and export do not execute commands, and a synchronized workflow remains read-only in the settings editor.
+The command is stored in the portable workflow and executes only when its lifecycle trigger occurs. The destination session owns `on_enter`; the source session owns `on_turn_complete` and `on_exit`. A command runs in the bound task session's executor workspace with that executor's filesystem, network, and credential permissions. Output is persisted in the task chat. Import and export do not execute commands, and a synchronized workflow remains read-only in the settings editor. Treat synchronized workflow files as executable code and review them before use.
 
-Portable validation is deliberately narrow. Beyond `set_session_mode` and position references, it does not currently reject every unknown action string or malformed action config. An accepted file can therefore contain an inert action. Use the action names and shapes documented here and exercise the workflow after import.
+Portable validation is deliberately narrow. `run_script` validates its command, timeout, and failure policy, while other action types may still accept unknown or incomplete configuration. Use the action names and shapes documented here and exercise the workflow after import.
 
 ### Office / Phase-2 triggers
 

@@ -172,12 +172,13 @@ function useWorkflowEditorSaveCoordinator(state: WorkflowEditorDraftState) {
     canSave: !state.readOnly && !state.sessionConfigPending && state.model.issues.length === 0,
     invalidReason: state.invalidIssue ? t(state.invalidIssue.messageKey) : undefined,
     save: async (submittedRevision) => {
+      const submittedDeletedStepIds = [...state.deletedStepIdsRef.current];
       const result = await persistWorkflowDraft({
         workflow: state.workflow,
         draftSteps: state.steps,
         savedSteps: state.savedSteps,
         progress: state.saveProgressRef.current,
-        deletedStepIds: state.deletedStepIdsRef.current,
+        deletedStepIds: submittedDeletedStepIds,
       });
       const unchanged = submittedRevision === state.latestRevisionRef.current;
       const currentSteps = unchanged
@@ -193,7 +194,10 @@ function useWorkflowEditorSaveCoordinator(state: WorkflowEditorDraftState) {
         unchanged ? result.workflow : { ...current, id: result.workflow.id },
       );
       state.setSteps(currentSteps);
-      state.deletedStepIdsRef.current = [];
+      state.deletedStepIdsRef.current = acknowledgePersistedDeletedStepIds(
+        state.deletedStepIdsRef.current,
+        submittedDeletedStepIds,
+      );
       if (unchanged && result.workflow.id !== state.initialWorkflow.id) {
         router.replace(workflowEditorPath(state.workspace.id, result.workflow.id));
       }
@@ -208,6 +212,14 @@ function useWorkflowEditorSaveCoordinator(state: WorkflowEditorDraftState) {
       state.deletedStepIdsRef.current = [];
     },
   });
+}
+
+export function acknowledgePersistedDeletedStepIds(
+  currentDeletedStepIds: string[],
+  submittedDeletedStepIds: string[],
+) {
+  const submitted = new Set(submittedDeletedStepIds);
+  return currentDeletedStepIds.filter((stepId) => !submitted.has(stepId));
 }
 
 function workflowDraftFields(workflow: Workflow) {
