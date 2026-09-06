@@ -69,6 +69,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
@@ -693,6 +694,7 @@ type routeParams struct {
 	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
+	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -982,6 +984,16 @@ func readyHandler(p routeParams) gin.HandlerFunc {
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,
 				versionFieldKey: version,
+			})
+			return
+		}
+		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+				"reason":        "persistence",
+				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
 			})
 			return
 		}

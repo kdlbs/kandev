@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"go.uber.org/zap"
-
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
@@ -127,16 +125,11 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 	svc.SetPluginsDir(dir)
 
 	if err := attachMarketplace(svc, dbPool, log); err != nil {
-		// Non-fatal: the rest of the plugin system still works without the
-		// discovery catalog (install-by-URL/upload is unaffected).
-		log.Warn("plugins: marketplace init failed (non-fatal)", zap.Error(err))
+		return nil, nil, fmt.Errorf("plugins: marketplace persistence: %w", err)
 	}
 
 	if settingsStore, err := newSettingsStore(dbPool); err != nil {
-		// Non-fatal: without the settings store the auto-update default reads as
-		// off and per-plugin toggles are rejected, but install/enable/etc. all
-		// still work.
-		log.Warn("plugins: settings store init failed (non-fatal)", zap.Error(err))
+		return nil, nil, fmt.Errorf("plugins: settings persistence: %w", err)
 	} else {
 		svc.SetSettings(settingsStore)
 	}

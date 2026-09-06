@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/disk"
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
+	systempersistence "github.com/kandev/kandev/internal/system/persistence"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -60,6 +62,9 @@ type Wiring struct {
 	OrchestratorShutdown func()
 	DatabaseQuiesce      func() error
 	RestoreQuiesce       func() error
+	SystemSettings       *systemsettings.Store
+	RequiredStores       *requiredstores.Tracker
+	PersistenceHealth    *requiredstores.Health
 	MessageQueue         queuesettings.Target
 	MessageQueueConfig   queuesettings.Configuration
 	TaskSessions         sleepinhibition.SessionReader
@@ -85,6 +90,7 @@ type Service struct {
 	Storage         *storage.Handler
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
+	Persistence    *systempersistence.Handler
 }
 
 // Provide constructs the composed Service. The HTTP routes are
@@ -115,9 +121,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 	backupsSvc.RestoreQuiesce = wiring.RestoreQuiesce
 
-	settingsStore, err := systemsettings.NewStore(pool)
-	if err != nil {
-		log.Error("Failed to initialize system settings store", zap.Error(err))
+	settingsStore := wiring.SystemSettings
+	if settingsStore == nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
+		if err != nil {
+			log.Error("Failed to initialize system settings store", zap.Error(err))
+		}
 	}
 	var metricsSvc *metrics.Service
 	var queueSettingsSvc *queuesettings.Service
@@ -149,6 +159,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		updatesSvc.SetNightlyURL(registryURL)
 	}
 
+	var persistenceHandler *systempersistence.Handler
+	if wiring.RequiredStores != nil {
+		persistenceHandler = systempersistence.NewHandler(
+			wiring.RequiredStores, wiring.PersistenceHealth, pool.Writer().DriverName(),
+		)
+	}
+
 	return &Service{
 		logger:   log,
 		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
@@ -166,6 +183,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		SleepInhibition: sleepInhibitionSvc,
 		Updates:         updatesSvc,
 		Restart:         restart.NewManagerFromEnv(),
+		Persistence:     persistenceHandler,
 	}
 }
 
@@ -190,6 +208,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	if s.Storage != nil {
 		storage.RegisterRoutes(g, admin, s.Storage)
 	}
+	systempersistence.RegisterRoutes(g, s.Persistence)
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
 	g.POST("/disk-usage/refresh", disk.HandleRefresh(s.Disk))

@@ -242,3 +242,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-03-separate-system-data-storage-pages | [Separate System Data and Storage Pages](2026-09-03-separate-system-data-storage-pages.md) | accepted | frontend | 2026-09-03 |
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
 | 2026-09-04-use-repository-token-for-runtime-pin-prs | [Use the built-in Actions token for runtime pin PRs](2026-09-04-use-repository-token-for-runtime-pin-prs.md) | accepted | workflow, security | 2026-09-04 |
+| 2026-09-05-required-internal-persistence | [Required internal persistence fails startup](2026-09-05-required-internal-persistence.md) | accepted | backend | 2026-09-05 |

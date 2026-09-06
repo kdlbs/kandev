@@ -1,0 +1,33 @@
+{
+  "tag": "v0.93.0",
+  "source_commit": "866bd324855fda1f71e13b8863d2c71d4a11237e",
+  "fixtures": [
+    {
+      "engine": "sqlite3",
+      "file": "sqlite.sql",
+      "sha256": "953a22dafbed7499800d003d5c99acfd2e50021489571e86b947cc9663bec8a3",
+      "sentinels": {
+        "fixture.sentinel": "v0.93.0-sqlite-sentinel"
+      }
+    },
+    {
+      "engine": "pgx",
+      "file": "postgres.sql",
+      "sha256": "ba0cf0815947dba6fd0913edbfc6ba661be095409dc2650d88d970e400dcbd7f",
+      "sentinels": {
+        "fixture.sentinel": "v0.93.0-postgres-sentinel"
+      }
+    }
+  ],
+  "known_missing_required_stores": [
+    "github",
+    "gitlab",
+    "jira",
+    "linear",
+    "sentry",
+    "azure-devops",
+    "workflow-sync",
+    "office-config-sync",
+    "automation"
+  ]
+}

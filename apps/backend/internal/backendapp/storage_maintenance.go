@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -36,6 +37,18 @@ type storageComposition struct {
 	tempArtifacts     *tempartifacts.Registry
 }
 
+type storageDependencies struct {
+	settings         *storagepkg.SettingsStore
+	store            *storagepkg.Store
+	tempArtifacts    *tempartifacts.Registry
+	coordinator      *activity.Coordinator
+	goCache          *gocache.Provider
+	workspaceFactory workspaceFactory
+	cachedOverview   *storagepkg.OverviewCache
+	quarantine       *workspaceQuarantineController
+	providers        []storagepkg.CleanupProvider
+}
+
 func provideStorageComposition(
 	cfg *config.Config,
 	pool *db.Pool,
@@ -46,18 +59,98 @@ func provideStorageComposition(
 	log *logger.Logger,
 	logError func(string, error),
 ) (*storageComposition, error) {
-	rawSettings, err := systemsettings.NewStore(pool)
+	return provideStorageCompositionWithDependencies(
+		cfg, pool, tracker, lifecycleMgr, worktreeMgr, taskSvc, log, logError, nil, nil,
+	)
+}
+
+func provideStorageCompositionWithDependencies(
+	cfg *config.Config,
+	pool *db.Pool,
+	tracker *jobs.Tracker,
+	lifecycleMgr *lifecycle.Manager,
+	worktreeMgr *worktree.Manager,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	logError func(string, error),
+	requiredTracker *requiredstores.Tracker,
+	providedSettings *systemsettings.Store,
+) (*storageComposition, error) {
+	dependencies, err := prepareStorageDependencies(
+		cfg, pool, requiredTracker, lifecycleMgr, worktreeMgr, taskSvc, logError, providedSettings,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachPromptAttachmentStorage(taskSvc, cfg, lifecycleMgr, log, &dependencies.providers); err != nil {
+		return nil, err
+	}
+	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
+		Activity: dependencies.coordinator, Store: dependencies.store,
+		Providers: dependencies.providers, Overview: dependencies.cachedOverview,
+	})
+	scheduler := storagepkg.NewScheduler(dependencies.settings, runner, storagepkg.SchedulerOptions{})
+	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{
+		Scheduler: scheduler, Settings: dependencies.settings, Worker: taskSvc,
+		Reconciler: &workspaceReconciler{settings: dependencies.settings, factory: dependencies.workspaceFactory},
+	})
+	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
+		Settings: dependencies.settings, Store: dependencies.store, Jobs: tracker,
+		Activity: dependencies.coordinator, Providers: dependencies.providers,
+		Overview: dependencies.cachedOverview, GoCache: dependencies.goCache,
+		Quarantine: dependencies.quarantine,
+	})
+	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
+		Settings: dependencies.settings, Runs: dependencies.store,
+		Quarantine: dependencies.store, Overview: dependencies.cachedOverview,
+		DiskCapacity: func(ctx context.Context, path string) (storagepkg.DiskCapacity, error) {
+			capacity, err := systemmetrics.DiskUsage(ctx, path)
+			if err != nil {
+				return storagepkg.DiskCapacity{}, err
+			}
+			return storagepkg.DiskCapacity{
+				TotalBytes: capacity.TotalBytes, UsedBytes: capacity.UsedBytes,
+				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
+			}, nil
+		},
+		DiskPath:  cfg.ResolvedHomeDir(),
+		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
+	})
+	return &storageComposition{
+		handler: handler, runtime: runtime, workspaceRestorer: dependencies.quarantine,
+		tempArtifacts: dependencies.tempArtifacts,
+	}, nil
+}
+
+func prepareStorageDependencies(
+	cfg *config.Config,
+	pool *db.Pool,
+	requiredTracker *requiredstores.Tracker,
+	lifecycleMgr *lifecycle.Manager,
+	worktreeMgr *worktree.Manager,
+	taskSvc *taskservice.Service,
+	logError func(string, error),
+	providedSettings *systemsettings.Store,
+) (*storageDependencies, error) {
+	rawSettings := providedSettings
+	var err error
+	if rawSettings == nil {
+		rawSettings, err = systemsettings.NewStore(pool)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage settings: %w", err)
 	}
 	settings := storagepkg.NewSettingsStore(rawSettings)
 	store, err := storagepkg.NewStore(pool)
+	if requiredTracker != nil {
+		if recordErr := recordRequiredStore(requiredTracker, "storage", err); recordErr != nil {
+			return nil, fmt.Errorf("initialize storage store: %w", recordErr)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage store: %w", err)
 	}
-	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{
-		Store: store, TempRoot: os.TempDir(),
-	})
+	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{Store: store, TempRoot: os.TempDir()})
 	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact registry", err)
 	}
@@ -79,13 +172,10 @@ func provideStorageComposition(
 	if worktreeMgr != nil {
 		worktreeMgr.SetScriptEnvironmentProvider(goCache)
 	}
-
 	inventory := &storageInventory{reader: pool.Reader(), worktrees: worktreeMgr, lifecycle: lifecycleMgr}
 	workspaceFactory := newWorkspaceFactory(cfg, store, inventory, worktreeMgr)
 	dockerClient := &lazyStorageDocker{provider: lifecycleMgr.DockerClientProvider(), activity: coordinator}
-	dockerProvider := dockerstore.NewProvider(
-		dockerClient, &containerInventory{reader: pool.Reader()}, settings,
-	)
+	dockerProvider := dockerstore.NewProvider(dockerClient, &containerInventory{reader: pool.Reader()}, settings)
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
@@ -96,13 +186,28 @@ func provideStorageComposition(
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
 		activity: coordinator, temporary: tempProvider,
 	}
-	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider)
+	return &storageDependencies{
+		settings: settings, store: store, tempArtifacts: tempArtifacts,
+		coordinator: coordinator, goCache: goCache, workspaceFactory: workspaceFactory,
+		cachedOverview: cachedOverview,
+		quarantine:     quarantine,
+		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider),
+	}, nil
+}
+
+func attachPromptAttachmentStorage(
+	taskSvc *taskservice.Service,
+	cfg *config.Config,
+	lifecycleMgr *lifecycle.Manager,
+	log *logger.Logger,
+	providers *[]storagepkg.CleanupProvider,
+) error {
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
-		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
+		attachmentSvc, err := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
 		)
-		if attachmentErr != nil {
-			return nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+		if err != nil {
+			return fmt.Errorf("initialize prompt attachment storage: %w", err)
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
@@ -110,38 +215,9 @@ func provideStorageComposition(
 		if lifecycleMgr != nil {
 			lifecycleMgr.SetAttachmentReader(attachmentSvc)
 		}
-		providers = append(providers, attachmentCleanupProvider{service: attachmentSvc})
+		*providers = append(*providers, attachmentCleanupProvider{service: attachmentSvc})
 	}
-	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
-		Activity: coordinator, Store: store, Providers: providers, Overview: cachedOverview,
-	})
-	scheduler := storagepkg.NewScheduler(settings, runner, storagepkg.SchedulerOptions{})
-	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{
-		Scheduler: scheduler, Settings: settings, Worker: taskSvc,
-		Reconciler: &workspaceReconciler{settings: settings, factory: workspaceFactory},
-	})
-	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
-		Settings: settings, Store: store, Jobs: tracker, Activity: coordinator,
-		Providers: providers, Overview: cachedOverview, GoCache: goCache, Quarantine: quarantine,
-	})
-	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
-		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
-		DiskCapacity: func(ctx context.Context, path string) (storagepkg.DiskCapacity, error) {
-			capacity, err := systemmetrics.DiskUsage(ctx, path)
-			if err != nil {
-				return storagepkg.DiskCapacity{}, err
-			}
-			return storagepkg.DiskCapacity{
-				TotalBytes: capacity.TotalBytes, UsedBytes: capacity.UsedBytes,
-				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
-			}, nil
-		},
-		DiskPath:  cfg.ResolvedHomeDir(),
-		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
-	})
-	return &storageComposition{
-		handler: handler, runtime: runtime, workspaceRestorer: quarantine, tempArtifacts: tempArtifacts,
-	}, nil
+	return nil
 }
 
 type taskCleanupActivityGate struct {

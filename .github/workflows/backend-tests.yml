@@ -148,6 +148,15 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
+      - name: Check required-store SQL portability
+        run: go run ./cmd/sqlguard ./internal
+
+      - name: Run catalog and SQLite conformance gates
+        run: |
+          set -euo pipefail
+          go test -v -race ./internal/persistence/storeconformance \
+            -run '^(TestStoreCatalogCompleteness|TestStoreConformance|TestUpgradeFixtureManifest|TestPreviousStableUpgrade)$'
+
       # Assert the run/dev/start-debug targets expand to the right per-shell
       # command line (native Windows / Git Bash / Unix). The windows-latest job
       # below compiles Go but never exercises this Make-target dispatch, so a
@@ -407,6 +416,7 @@ jobs:
       - test_shards
       - test_ambient_env
       - postgres-boot
+      - postgres-18
       - test-windows
     if: ${{ always() }}
     steps:
@@ -417,6 +427,7 @@ jobs:
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
           TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
           POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
+          POSTGRES_18_RESULT: ${{ needs['postgres-18'].result }}
           TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}
         run: |
           set -euo pipefail
@@ -426,6 +437,7 @@ jobs:
           echo "Test shards: ${TEST_SHARDS_RESULT}"
           echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
           echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
+          echo "Postgres 18: ${POSTGRES_18_RESULT}"
           echo "Windows tests: ${TEST_WINDOWS_RESULT}"
 
           # Change detection itself must succeed: if it errored we do not know
@@ -448,6 +460,7 @@ jobs:
             "test_shards:${TEST_SHARDS_RESULT}" \
             "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
             "postgres-boot:${POSTGRES_BOOT_RESULT}" \
+            "postgres-18:${POSTGRES_18_RESULT}" \
             "test-windows:${TEST_WINDOWS_RESULT}"; do
             name="${entry%%:*}"
             result="${entry#*:}"
@@ -501,31 +514,81 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run env-gated Postgres tests
+      - name: Run fixed PostgreSQL 16 persistence gates
         run: |
           set -euo pipefail
-
-          mapfile -t postgres_packages < <(
-            grep -RIl 'PostgresDSNFromEnv' . --include='*_test.go' \
-              | xargs -r dirname \
-              | sort -u
-          )
-
-          if [[ "${#postgres_packages[@]}" -eq 0 ]]; then
-            echo "::error::No Postgres test packages found"
-            exit 1
-          fi
-
-          printf 'Running Postgres tests in:\n'
-          printf '  %s\n' "${postgres_packages[@]}"
-
           output_file="$(mktemp)"
-          go test -v -race "${postgres_packages[@]}" 2>&1 | tee "${output_file}"
+          go test -v -race \
+            ./internal/persistence/storeconformance ./internal/backendapp \
+            -run '^(TestStoreCatalogCompleteness|TestStoreConformance|TestPreviousStableUpgrade|TestPostgresBootInitializesRepositories)$' \
+            2>&1 | tee "${output_file}"
 
-          if ! grep -q '^=== RUN   TestPostgresBootInitializesRepositories$' "${output_file}"; then
-            echo "::error::Postgres boot smoke test matched no tests"
-            exit 1
-          fi
+          for test_name in \
+            '=== RUN   TestStoreCatalogCompleteness' \
+            '=== RUN   TestStoreConformance' \
+            '=== RUN   TestPreviousStableUpgrade' \
+            '=== RUN   TestPostgresBootInitializesRepositories'; do
+            if ! grep -q "^${test_name}$" "${output_file}"; then
+              echo "::error::PostgreSQL 16 gate matched no ${test_name#*   } test"
+              exit 1
+            fi
+          done
+
+  postgres-18:
+    name: Backend Postgres 18
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 20
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    services:
+      postgres:
+        image: ghcr.io/kdlbs/kandev-ci:postgres-18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: kandev
+          POSTGRES_PASSWORD: kandev
+          POSTGRES_DB: kandev_admin
+        options: >-
+          --health-cmd "pg_isready -U kandev -d kandev_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+    env:
+      KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run PostgreSQL 18 boot and upgrade gates
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          go test -v -race \
+            ./internal/persistence/storeconformance ./internal/backendapp \
+            -run '^(TestPreviousStableUpgrade|TestPostgresBootInitializesRepositories)$' \
+            2>&1 | tee "${output_file}"
+
+          for test_name in \
+            '=== RUN   TestPreviousStableUpgrade' \
+            '=== RUN   TestPostgresBootInitializesRepositories'; do
+            if ! grep -q "^${test_name}$" "${output_file}"; then
+              echo "::error::PostgreSQL 18 gate matched no ${test_name#*   } test"
+              exit 1
+            fi
+          done
 
   test-windows:
     name: Backend (windows)

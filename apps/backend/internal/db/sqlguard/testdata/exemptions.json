@@ -1,0 +1,10 @@
+{
+  "exemptions": [
+    {
+      "file": "internal/db/schema.go",
+      "symbol": "sqlite",
+      "rule": "sqlite-catalog",
+      "reason": "the central schema probe is the dialect boundary"
+    }
+  ]
+}

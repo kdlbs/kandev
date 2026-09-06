@@ -44,6 +44,15 @@ func newSettingsStore(pool *db.Pool) (*settingsStore, error) {
 	return s, nil
 }
 
+// InitializeSettingsStore initializes the plugin settings schema without
+// exposing the package-private store implementation. It is used by the
+// catalog conformance suite, which must exercise schema owners without
+// constructing the full plugin service.
+func InitializeSettingsStore(pool *db.Pool) error {
+	_, err := newSettingsStore(pool)
+	return err
+}
+
 func (s *settingsStore) initSchema() error {
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS plugin_settings (

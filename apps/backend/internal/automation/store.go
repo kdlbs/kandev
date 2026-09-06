@@ -1825,14 +1825,7 @@ func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID st
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
-	if dialect.IsPostgres(driver) {
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-	}
-	return schema
+	return dialect.MustRenderSchema(driver, schema)
 }
 
 // generateSecret creates a random hex string for webhook authentication.
