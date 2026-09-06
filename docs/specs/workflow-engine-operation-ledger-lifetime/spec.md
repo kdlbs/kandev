@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-09-05
-updated: 2026-09-05
+updated: 2026-09-06
 owner: Kandev
 ---
 
@@ -16,30 +16,24 @@ Decisions:
 Related spec (states the contract this card makes true):
 
 - [`docs/specs/workflow-on-agent-error-dispatch/spec.md`](../workflow-on-agent-error-dispatch/spec.md)
-  — **AC-C5**: "The exactly-once guarantee is scoped to one backend process lifetime, because
-  `workflowStore.appliedOps` is an in-memory `sync.Map`." That sentence is the contract; the code does
-  not honour it. Its **AC-E13** placed the fix here rather than there.
+  — **AC-C5**: exactly-once lasts one process. The service ledger now survives engine rebuilds.
 
 ## Why
 
 `Engine.HandleTrigger`'s idempotency check is the only thing between a redelivered workflow trigger
 and a second execution of its actions — a second `queue_run`, a second step transition, a second
-`clear_decisions`. The ledger it consults is `orchestrator.workflowStore.appliedOps`, an in-memory
-`sync.Map` (`apps/backend/internal/orchestrator/workflow_store.go:104`, read at `:886`, written at
-`:894`).
+`clear_decisions`. The ledger it consults is `Service.operationLedger`, an in-memory `sync.Map`.
 
-`Service.initWorkflowEngine` (`service.go:1860`) builds a **brand-new** `workflowStore` on every
-call (`store := newWorkflowStore(...)` at `service.go:1864`, assigned to `s.workflowStore` at
-`:1867`). `newWorkflowStore` returns a fresh struct literal (`workflow_store.go:140`) in which
-`appliedOps` is zero-valued and never copied from the previous store; no branch reuses one.
-**Every call therefore discards the ledger.**
+`Service.initWorkflowEngine` builds a **brand-new** `workflowStore` on every call and assigns it to
+`s.workflowStore`. The new store receives `&s.operationLedger`, so rebuilding the store does not
+discard the ledger.
 
 Thirteen `Service` methods reach `initWorkflowEngine` — two directly (`SetWorkflowStepGetter`
 `service.go:1813`, `SetStepHistoryRecorder` `:1823`) and eleven through `reinitWorkflowEngine` (every
 `Set*` between `:1888` and `:1971`, `SetReviewRunner` among them).
 
-So the guarantee's real scope is not "one backend process lifetime". It is **"since the last `Set*`
-call"**.
+The previous implementation scoped the guarantee to **"since the last `Set*` call"**. It now lasts
+**one backend process lifetime**, as the related specification requires.
 
 ### The reachable window, measured
 
@@ -98,7 +92,7 @@ The brief states the ledger backs "every trigger (`on_enter`, `on_turn_start`, `
   (`phase8_callbacks.go:111,133`, via `workflow_callbacks.go:104`) uses the in-memory ledger for
   `on_enter`.
 
-The operations that **do** depend on `appliedOps` today, with their key shapes:
+The operations that **do** depend on the in-memory operation ledger, with their key shapes:
 
 | Operation id shape | Producer | Consumer |
 |---|---|---|
@@ -129,7 +123,10 @@ The ledger is a **field of `Service` whose zero value is usable**. It needs no c
 so it exists and works for every `Service` however that `Service` was built; it is never replaced;
 and its address is handed to every `workflowStore` that `initWorkflowEngine` builds.
 `workflowStore.IsOperationApplied` / `MarkOperationApplied` delegate to it, so
-`engine.TransitionStore` is unchanged and the engine needs no modification.
+`engine.TransitionStore` is unchanged. For operation-bearing triggers, the engine validates every
+non-transition action before execution. A missing callback returns `ErrActionNotYetWired` and leaves
+the id retryable. `processOnChildrenCompleted` sets `HandleInput.DeferOperationMark` and marks only
+after its outer transition lifecycle commits.
 
 The zero value is the load-bearing choice, not an implementation detail: a constructed ledger only
 exists on a `Service` some constructor initialised, making correctness depend on how each `Service`
@@ -152,7 +149,7 @@ Three alternatives were considered and rejected:
   store then never dedups — indistinguishable from a correct one until a duplicate arrives. A
   fail-open branch turns a wiring mistake into silence, worse than the boot-window bug this card
   fixes, which at least ends when boot ends.
-- **Copy `appliedOps` forward inside `initWorkflowEngine`.** Rejected: `sync.Map` has no atomic
+- **Copy the old `appliedOps` map forward inside `initWorkflowEngine`.** Rejected: `sync.Map` has no atomic
   snapshot, so a copy racing a concurrent `Store` drops entries — a partial wipe is no better than a
   full one, only harder to reproduce. It also leaves a store captured before the reinit (the
   `agentErrorDeps` snapshot at `service.go:1875`) writing into a map nothing reads afterwards.
@@ -163,7 +160,7 @@ Three alternatives were considered and rejected:
 
 - **AC-L1** WHEN an operation id has been marked applied, THEN `IsOperationApplied` shall report it
   applied for the remainder of the process, across any number of `initWorkflowEngine` and
-  `reinitWorkflowEngine` calls. This is the criterion the current code fails.
+  `reinitWorkflowEngine` calls. The service-owned ledger and its store delegates implement this.
 - **AC-L2** A `Service` shall hold exactly one ledger — the field AC-L3 describes. Every
   `workflowStore` that `initWorkflowEngine` constructs shall resolve to that same instance; a store
   built before a reinit and a store built after it shall observe each other's writes in both
@@ -246,10 +243,11 @@ Three alternatives were considered and rejected:
   tests shall keep passing with **unchanged deduping behaviour**, not merely green: every store they
   construct still has a working ledger (AC-S3a). Making one pass by removing its deduping would
   violate this criterion.
-- **AC-S5** Ordering shall be unchanged: the engine marks an operation only after `processActions`
-  returns without error (`engine.go:275`), and marks it when no actions are declared (`engine.go:267`).
-  A ledger that marked earlier would swallow the retry `workflow-on-agent-error-dispatch` AC-C6
-  requires.
+- **AC-S5** The normal engine path shall mark an operation only after `processActions` returns
+  without error, and shall mark it when no actions are declared. A caller that sets
+  `HandleInput.DeferOperationMark` owns the later mark and shall use it only when an outer side
+  effect must commit first. A ledger that marks earlier would swallow the retry
+  `workflow-on-agent-error-dispatch` AC-C6 requires.
 - **AC-S6** The ledger shall not be a mutual-exclusion primitive. WHEN two goroutines check the same
   unmarked id concurrently, THEN both may observe "not applied" and both may proceed; serialization
   remains the caller's job through the mechanisms that already do it —
@@ -338,9 +336,9 @@ Three alternatives were considered and rejected:
   the same ledger (AC-R3), so a reinit cannot split one dispatch across two ledgers. The dispatch may
   still use a *pre-reinit* engine and registry — pre-existing behaviour, and the `agentErrorDeps`
   snapshot's stated design.
-- **Mark-to-commit ordering is unchanged** (AC-S5): the engine marks after actions succeed, and
-  `applyEngineTransition` may still decline a transition the engine already marked —
-  `workflow-on-agent-error-dispatch` AC-C7 covers that and is not reopened here.
+- **Mark-to-commit ordering is unchanged** (AC-S5): the normal engine path marks after actions
+  succeed. `processOnChildrenCompleted` defers its mark until `applyEngineTransitionWithMode`
+  commits, so a failed outer transition remains retryable.
 - **No ordering is defined between two distinct operation ids.** The ledger is an unordered set: no
   iteration order, no observable insertion sequence, nothing may be derived from one.
 
@@ -450,7 +448,7 @@ Criteria and their observation points:
 | AC-S1, AC-S2, AC-S3, AC-S7 | direct ledger unit tests |
 | AC-S3a | bare `&Service{}` literal wired via `SetWorkflowStepGetter` yields a store resolving to that `Service`'s ledger, both directions (AC-T3(b)) |
 | AC-S4 | unchanged producers; existing operation-id tests keep passing with unchanged deduping behaviour, not merely green |
-| AC-S5 | existing engine tests (`engine_test.go`, `idempotency_key_test.go`) |
+| AC-S5 | engine idempotency and deferred-mark tests (`engine_test.go`) |
 | AC-S6 | the same `-race` mark/check test as AC-L6, asserting both goroutines may observe "not applied" and proceed; the ledger exposes no check-and-set, compare-and-swap or `LoadOrStore`-style method usable as a mutex |
 | AC-R1, AC-R4 | mark via engine, check via `switchWorkflowDispatcher`'s path |
 | AC-R2 | `on_children_completed` dedup across a reinit (AC-T2) |
