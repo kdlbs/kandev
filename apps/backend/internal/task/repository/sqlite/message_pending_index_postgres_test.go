@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -51,14 +50,7 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 		t.Fatalf("analyze messages: %v", err)
 	}
 
-	expr := dialect.JSONExtract(repo.db.DriverName(), "metadata", "pending_id")
-	query := fmt.Sprintf(`
-		EXPLAIN (COSTS OFF)
-		SELECT id
-		FROM task_session_messages
-		WHERE %s = ?
-		ORDER BY created_at ASC, id ASC
-	`, expr)
+	query := "EXPLAIN (COSTS OFF)\n" + findMessagesByPendingIDQuery(repo.db.DriverName())
 	rows, err := repo.db.QueryxContext(ctx, repo.db.Rebind(query), "target-pending-pg")
 	if err != nil {
 		t.Fatalf("explain postgres pending lookup: %v", err)
@@ -77,6 +69,43 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(plan, "\n"), pendingIDLookupIndexName) {
 		t.Fatalf("postgres pending lookup plan = %v, want %s", plan, pendingIDLookupIndexName)
+	}
+
+	// Use the production claim statement, including its malformed-bundle guard,
+	// so this witness covers the write path rather than a simplified lookup.
+	claimQuery := "EXPLAIN (COSTS OFF)\n" + clarificationClaimQuery(repo.db.DriverName())
+	claimRows, err := repo.db.QueryxContext(
+		ctx,
+		repo.db.Rebind(claimQuery),
+		base,
+		"target-pending-pg",
+		"target-pending-pg",
+	)
+	if err != nil {
+		t.Fatalf("explain postgres clarification claim: %v", err)
+	}
+	var claimPlan []string
+	for claimRows.Next() {
+		var line string
+		if err := claimRows.Scan(&line); err != nil {
+			_ = claimRows.Close()
+			t.Fatalf("scan postgres clarification claim plan: %v", err)
+		}
+		claimPlan = append(claimPlan, line)
+	}
+	if err := claimRows.Err(); err != nil {
+		_ = claimRows.Close()
+		t.Fatalf("read postgres clarification claim plan: %v", err)
+	}
+	if err := claimRows.Close(); err != nil {
+		t.Fatalf("close postgres clarification claim plan: %v", err)
+	}
+	claimPlanText := strings.ToUpper(strings.Join(claimPlan, "\n"))
+	if strings.Contains(claimPlanText, "SEQ SCAN ON TASK_SESSION_MESSAGES") {
+		t.Fatalf("postgres clarification claim plan scans message history:\n%s", strings.Join(claimPlan, "\n"))
+	}
+	if !strings.Contains(claimPlanText, "IDX_MESSAGES_METADATA_PENDING_ID_LOOKUP") {
+		t.Fatalf("postgres clarification claim plan does not use a pending-ID-leading index:\n%s", strings.Join(claimPlan, "\n"))
 	}
 
 	var before int

@@ -99,7 +99,8 @@ explicitly authorizes implementation sessions.
 - SQLite schema and query-plan tests prove fresh creation, replay, upgrade, and
   index use with substantial unrelated message history.
 - Environment-gated real PostgreSQL tests prove the native expression index,
-  replay, pending-ID query eligibility, and response semantics.
+  replay, pending-ID read eligibility, and the exact clarification claim
+  statement, including its malformed-bundle guard.
 - Resolver and handler tests use controlled blocking repositories and fake
   clocks/channels rather than wall-clock sleeps. They prove the internal
   timeout classification, no-delivery boundary, 503 envelope, and unchanged

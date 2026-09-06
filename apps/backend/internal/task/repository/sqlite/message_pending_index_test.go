@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -100,14 +99,7 @@ func TestPendingIDLookupUsesLeadingIndexForBundleRead(t *testing.T) {
 		t.Fatalf("analyze messages: %v", err)
 	}
 
-	expr := dialect.JSONExtract(repo.db.DriverName(), "metadata", "pending_id")
-	query := fmt.Sprintf(`
-		EXPLAIN QUERY PLAN
-		SELECT id
-		FROM task_session_messages
-		WHERE %s = ?
-		ORDER BY created_at ASC, id ASC
-	`, expr)
+	query := "EXPLAIN QUERY PLAN\n" + findMessagesByPendingIDQuery(repo.db.DriverName())
 	rows, err := repo.db.QueryxContext(ctx, repo.db.Rebind(query), "target-pending")
 	if err != nil {
 		t.Fatalf("explain pending lookup: %v", err)
@@ -127,6 +119,30 @@ func TestPendingIDLookupUsesLeadingIndexForBundleRead(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(details, "\n"), pendingIDLookupIndexName) {
 		t.Fatalf("pending lookup plan = %v, want %s", details, pendingIDLookupIndexName)
+	}
+}
+
+func TestFindMessagesByPendingIDOrdersEqualTimestampsByID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-pending-order", "session-pending-order", "turn-pending-order")
+	if _, err := repo.db.Exec("DROP INDEX " + pendingIDLookupIndexName); err != nil {
+		t.Fatalf("drop ordered pending-ID index: %v", err)
+	}
+	if _, err := repo.db.Exec("DROP INDEX idx_messages_metadata_pending_id"); err != nil {
+		t.Fatalf("drop bare pending-ID index: %v", err)
+	}
+
+	createdAt := time.Date(2026, 9, 5, 21, 30, 0, 0, time.UTC)
+	insertPendingIndexMessage(t, repo, "message-z", "session-pending-order", "task-pending-order", "turn-pending-order", "same-time", createdAt)
+	insertPendingIndexMessage(t, repo, "message-a", "session-pending-order", "task-pending-order", "turn-pending-order", "same-time", createdAt)
+
+	messages, err := repo.FindMessagesByPendingID(ctx, "same-time")
+	if err != nil {
+		t.Fatalf("find same-time pending messages: %v", err)
+	}
+	if got := messageIDs(messages); strings.Join(got, ",") != "message-a,message-z" {
+		t.Fatalf("same-time pending messages = %v, want [message-a message-z]", got)
 	}
 }
 

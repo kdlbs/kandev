@@ -91,7 +91,7 @@ function renderOverlay(
 beforeEach(() => {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
@@ -366,7 +366,9 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
 
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
     fireEvent.click(screen.getByTestId("clarification-retry"));
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -512,7 +514,10 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
 describe("ClarificationInputOverlay — lightweight Markdown", () => {
   it("renders question fields without changing the selected option payload", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
     const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
     const metadata = message.metadata as ClarificationRequestMetadata;

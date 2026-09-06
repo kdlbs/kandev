@@ -25,8 +25,8 @@ on fresh and existing SQLite and PostgreSQL databases.
 - Keep the existing session-first pending-ID index and the bare pending-ID
   lookup index already present on the current main branch.
 - Add SQLite fresh-schema, replay, existing-schema, and query-plan coverage.
-- Add environment-gated real PostgreSQL index-definition, replay, and planner
-  eligibility coverage.
+- Add environment-gated real PostgreSQL index-definition, replay, pending-ID
+  read-plan, and exact clarification-claim-plan coverage.
 - Confirm pending-ID bundle reads and the atomic claim use the exact dialect
   expression indexed by the new DDL.
 
@@ -50,7 +50,8 @@ on fresh and existing SQLite and PostgreSQL databases.
   without altering existing messages or dropping the session-first index.
 - A pending-ID-only bundle lookup with substantial unrelated history uses the
   new index instead of a full message-table scan in SQLite, and the real
-  PostgreSQL suite proves native index eligibility.
+  PostgreSQL suite proves native read and claim eligibility. The claim witness
+  uses the production statement, including its malformed-bundle guard.
 - Index creation failure propagates from repository initialization and blocks
   startup.
 
@@ -97,3 +98,7 @@ Verification:
 - `cd apps/backend && go test ./internal/db/dialect -run 'PendingIDIndex' -count=1`
 - `cd apps/backend && go test ./internal/task/repository/sqlite -run 'PendingID.*Index|Index.*PendingID' -count=1`
 - `cd apps/backend && KANDEV_TEST_POSTGRES_DSN="$KANDEV_TEST_POSTGRES_DSN" go test ./internal/task/repository/sqlite -run 'Postgres.*PendingID.*Index' -count=1`
+
+The PostgreSQL planner witness also runs `clarificationClaimQuery` directly,
+so the claim's pending-ID and malformed-bundle paths remain covered by real
+`EXPLAIN` output.

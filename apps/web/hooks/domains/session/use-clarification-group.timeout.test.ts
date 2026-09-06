@@ -40,7 +40,7 @@ const fetchMock = vi.fn();
 function setupFetchMock() {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
 
@@ -134,4 +134,46 @@ describe("useClarificationGroup — bounded submission", () => {
       selected_options: ["o1"],
     });
   });
+});
+
+const malformed200Bodies: Array<[string, unknown]> = [
+  ["empty object", {}],
+  ["array", []],
+  ["explicit failure", { success: false }],
+  ["invalid claimed type", { success: true, claimed: "yes" }],
+  ["invalid status type", { success: true, status: "pending" }],
+  ["invalid response type", { success: true, response: [] }],
+  [
+    "incomplete claimed false winner without status",
+    { success: true, claimed: false, response: { answers: [] } },
+  ],
+  [
+    "incomplete claimed false winner without response",
+    { success: true, claimed: false, status: "answered" },
+  ],
+];
+
+describe("useClarificationGroup — malformed successful response envelopes", () => {
+  beforeEach(setupFetchMock);
+
+  it.each(malformed200Bodies)(
+    "treats a structurally malformed 200 body (%s) as retryable without optimistic success",
+    async (_label, body) => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }));
+      const { result } = renderHook(() => useClarificationGroup([clarMessage()]));
+
+      await act(async () => {
+        await result.current.submitCollected({
+          q1: { question_id: "q1", selected_options: ["o1"] },
+        });
+      });
+
+      expect(result.current.submitState).toBe("error");
+      expect(mockUpdateMessage).not.toHaveBeenCalled();
+      expect(result.current.answers.q1).toEqual({
+        question_id: "q1",
+        selected_options: ["o1"],
+      });
+    },
+  );
 });

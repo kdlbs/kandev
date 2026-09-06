@@ -37,6 +37,77 @@ type ClarificationRespondResult = {
   answers?: ClarificationAnswer[];
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isResolvedStatus(value: unknown): value is ResolvedStatus {
+  return value === "answered" || value === "rejected";
+}
+
+function isClarificationAnswer(value: unknown): value is ClarificationAnswer {
+  if (!isRecord(value) || typeof value.question_id !== "string") return false;
+  const selectedOptions = value.selected_options;
+  if (
+    selectedOptions !== undefined &&
+    (!Array.isArray(selectedOptions) ||
+      !selectedOptions.every((option) => typeof option === "string"))
+  ) {
+    return false;
+  }
+  const customText = value.custom_text;
+  return customText === undefined || typeof customText === "string";
+}
+
+function parseClarificationAnswers(value: unknown): ClarificationAnswer[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isClarificationAnswer)) return null;
+  return value;
+}
+
+function parseOptionalClaimed(value: unknown): boolean | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseOptionalStatus(value: unknown): ResolvedStatus | null | undefined {
+  if (value === undefined) return undefined;
+  return isResolvedStatus(value) ? value : null;
+}
+
+type ParsedResponseFields = {
+  response?: Record<string, unknown>;
+  answers?: ClarificationAnswer[];
+};
+
+function parseResponseFields(value: unknown): ParsedResponseFields | null {
+  if (value === undefined || value === null) return {};
+  if (!isRecord(value)) return null;
+  const answers = parseClarificationAnswers(value.answers);
+  if (answers === null) return null;
+  return { response: value, answers };
+}
+
+// A 200 is authoritative only when it has the response envelope introduced by
+// the clarification resolver. Older backends may omit claimed, but they must
+// still identify a successful response explicitly.
+function parseClarificationResponseBody(value: unknown): ClarificationRespondResult | null {
+  if (!isRecord(value) || value.success !== true) return null;
+  const claimed = parseOptionalClaimed(value.claimed);
+  const status = parseOptionalStatus(value.status);
+  const responseFields = parseResponseFields(value.response);
+  if (claimed === null || status === null || responseFields === null) return null;
+  if (
+    claimed === false &&
+    (status === undefined ||
+      responseFields.response === undefined ||
+      responseFields.answers === undefined)
+  ) {
+    return null;
+  }
+  return { state: "ok", claimed, status, ...responseFields };
+}
+
 export type ClarificationGroupApi = {
   pendingId: string | null;
   total: number;
@@ -126,17 +197,12 @@ async function postClarification(
       return { state: "error" };
     }
     try {
-      const parsed = (await res.json()) as {
-        claimed?: boolean;
-        status?: ResolvedStatus;
-        response?: { answers?: ClarificationAnswer[] } | null;
-      };
-      return {
-        state: "ok",
-        claimed: parsed.claimed,
-        status: parsed.status,
-        answers: parsed.response?.answers,
-      };
+      const parsed = parseClarificationResponseBody(await res.json());
+      if (!parsed) {
+        console.error("Clarification response body failed envelope validation");
+        return { state: "error" };
+      }
+      return parsed;
     } catch (err) {
       console.error("Clarification response body parse failed:", err);
       return { state: "error" };

@@ -6,9 +6,10 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
 }));
 
+const mockUpdateMessage = vi.fn();
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ updateMessage: vi.fn() }),
+    getState: () => ({ updateMessage: mockUpdateMessage }),
   }),
 }));
 
@@ -44,7 +45,8 @@ const fetchMock = vi.fn();
 
 function setupFetchMock() {
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+  mockUpdateMessage.mockReset();
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
 
@@ -71,7 +73,9 @@ describe("useClarificationGroup — live retry answers", () => {
 
   it("retry uses answers edited after the failed submit", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
     const msgs = [
       clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 2 }),
       clarMessage({ id: "m2", pendingId: "p1", questionId: "q2", index: 1, total: 2 }),
@@ -99,6 +103,28 @@ describe("useClarificationGroup — live retry answers", () => {
       ],
       rejected: false,
     });
+  });
+});
+
+describe("useClarificationGroup — legacy success envelope", () => {
+  beforeEach(setupFetchMock);
+
+  it("applies its own answers when a valid success envelope omits claimed", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+    const ownAnswer = { question_id: "q1", selected_options: ["my-own-option"] };
+
+    await act(async () => {
+      await result.current.submitCollected({ q1: ownAnswer });
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    const call = mockUpdateMessage.mock.calls[0][0];
+    expect(call.metadata.status).toBe("answered");
+    expect(call.metadata.response).toEqual(ownAnswer);
   });
 });
 
@@ -152,7 +178,7 @@ describe("useClarificationGroup — request generation guard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      resolveSecond?.(new Response("{}", { status: 200 }));
+      resolveSecond?.(new Response(JSON.stringify({ success: true }), { status: 200 }));
       await secondSubmit;
     });
     expect(result.current.submitState).toBe("ok");
