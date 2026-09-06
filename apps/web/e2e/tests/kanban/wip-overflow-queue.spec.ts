@@ -36,10 +36,10 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceCard = kanban.taskCard(task.id);
   const feederColumn = kanban.columnByStepId(feederStep.id);
   const sourceBox = await sourceCard.boundingBox();
-  const feederBox = await feederColumn.boundingBox();
   expect(sourceBox).not.toBeNull();
-  expect(feederBox).not.toBeNull();
 
+  // Press the card and cross the 8px pointer-sensor activation distance to start
+  // the drag.
   await testPage.mouse.move(
     sourceBox!.x + sourceBox!.width / 2,
     sourceBox!.y + sourceBox!.height / 2,
@@ -48,14 +48,26 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   await testPage.mouse.move(
     sourceBox!.x + sourceBox!.width / 2 + 20,
     sourceBox!.y + sourceBox!.height / 2,
+    { steps: 6 },
   );
-  await testPage.mouse.move(
-    feederBox!.x + feederBox!.width / 2,
-    feederBox!.y + feederBox!.height / 2,
-    {
-      steps: 12,
-    },
-  );
+
+  // Starting the drag can swap in the move-target columns (getDragDisplaySteps),
+  // shifting the feeder's on-screen position. Measure the feeder against its live
+  // box, then re-read and correct: the first move settles any relayout and the
+  // second lands the pointer on the feeder's true center, so the drop cannot miss
+  // on stale coordinates under load. The trailing +1px keeps pointerWithin's
+  // `over` resolved to the feeder at the moment of release.
+  const moveOntoFeeder = async (settleOffsetY: number) => {
+    const feederBox = await feederColumn.boundingBox();
+    expect(feederBox).not.toBeNull();
+    await testPage.mouse.move(
+      feederBox!.x + feederBox!.width / 2,
+      feederBox!.y + feederBox!.height / 2 + settleOffsetY,
+      { steps: 10 },
+    );
+  };
+  await moveOntoFeeder(0);
+  await moveOntoFeeder(1);
   await testPage.mouse.up();
 
   await expect(pullColumn).toContainText("1/1");
