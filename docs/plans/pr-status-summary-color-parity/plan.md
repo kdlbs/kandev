@@ -40,6 +40,10 @@ fallback icon state at all.
 ### In scope
 
 - Make pending CI outrank blocked mergeability in the compact PR aggregate.
+- Keep failure, pending, and review signals ahead of dirty mergeability.
+- Keep multi-PR aggregate ranking aligned with the single-PR precedence.
+- Treat a pending review without a passed CI signal as yellow, matching the
+  full PR renderer.
 - Preserve terminal, queued, draft, failure, review, ready, and passing rules.
 - Add focused backend regression coverage for combined PR states.
 - Pass the persisted compact summary to the Kanban PR icon while full PR data
@@ -65,10 +69,13 @@ cannot hide a stronger failure signal.
 
 Update `pullRequestAggregateState` in
 `apps/backend/internal/task/statussummary/projector_pr.go`. Evaluate the
-stronger check and review signals before the general blocked-mergeability
-fallback. Keep terminal and queued states first. Pass the compact task summary
-through the Kanban card's existing `PRTaskIcon` fallback input. Do not change
-the aggregate schema or the frontend color map.
+stronger check and review signals before the general blocked- or
+dirty-mergeability fallback. Require passed checks before classifying a PR as
+awaiting review, and classify a pending review without a passed CI signal as
+yellow. Align the multi-PR rank table with the same order. Keep terminal and
+queued states first. Pass the compact task summary through the Kanban card's
+existing `PRTaskIcon` fallback input. Do not change the aggregate schema or the
+frontend color map.
 
 ### Desktop browser behavior
 
@@ -121,8 +128,8 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-statu
 
 Completed results:
 
-- Focused projector precedence: 5 tests passed.
-- Full status summary package: 85 tests passed.
+- Focused projector precedence and multi-PR ranking: 10 tests passed.
+- Full status summary package: 90 tests passed.
 - Kanban component suite: 14 tests passed.
 - Desktop reload regressions: 2 tests passed.
 - Mobile task-switcher regression: 1 test passed.

@@ -20,6 +20,11 @@ system_design:
 - An open PR with pending CI and blocked mergeability has a `pending` compact
   aggregate and a yellow icon.
 - A stronger failure signal is not hidden by blocked mergeability.
+- A stronger failure, pending, or review signal is not hidden by dirty
+  mergeability.
+- A pending review without a passed CI signal remains yellow.
+- Pending and awaiting-review PRs outrank blocked PRs when a task has multiple
+  open PRs.
 - Terminal, queued, draft, review, ready, and passing behavior remains
   unchanged.
 - An inactive task shows the same yellow icon in the desktop sidebar, Kanban
@@ -34,7 +39,8 @@ system_design:
 2. RED: extend the existing desktop and mobile Playwright specs with the
    combined PR state. Confirm that the compact desktop state fails on gray.
 3. GREEN: reorder only the compact aggregate checks needed to match the
-   existing full PR attention precedence.
+   existing full PR attention precedence, including dirty mergeability,
+   no-signal pending review, and multi-PR ranking.
 4. REFACTOR: name the precedence cases clearly and keep the projector branch
    order readable.
 5. GREEN: rebuild the production web and backend artifacts through the managed
@@ -96,13 +102,15 @@ mobile switcher consequently rendered the compact icon gray. The Kanban reload
 case additionally showed that the card did not pass its compact task summary to
 the PR icon while full PR hydration was pending.
 
-The projector now preserves dirty mergeability as an early hard block, then
-orders failed checks, pending checks, and pending review ahead of general
-blocked mergeability. Kanban cards pass their persisted task summary through
-the existing PR icon fallback. The icon is yellow before reload, after reload,
-and after full-record hydration on the covered desktop and mobile surfaces.
+The projector now orders failed checks, pending checks, and pending review
+ahead of general blocked or dirty mergeability. Awaiting-review requires passed
+checks, while a pending review without a passed CI signal remains yellow. The
+multi-PR rank table follows the same ordering. Kanban cards pass their
+persisted task summary through the existing PR icon fallback. The icon is
+yellow before reload, after reload, and after full-record hydration on the
+covered desktop and mobile surfaces.
 
-Verification completed with 5 focused projector cases, all 85 status summary
+Verification completed with 10 focused projector cases, all 90 status summary
 package tests, 14 Kanban component tests, 2 desktop browser regressions, and 1
 mobile browser regression passing. Backend and web production builds,
-frontend typecheck, and `git diff --check` also passed.
+frontend typecheck, and `git diff --check` also passed before this remediation.
