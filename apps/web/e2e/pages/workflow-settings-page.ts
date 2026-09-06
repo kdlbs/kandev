@@ -5,6 +5,19 @@ type StepProfileSessionLifecycle = {
   endPolicy: "complete" | "park";
 };
 
+type WorkflowEditorActionType =
+  | "auto_start_agent"
+  | "move_to_next"
+  | "move_to_previous"
+  | "run_script";
+
+const WORKFLOW_EDITOR_ACTION_LABELS: Record<WorkflowEditorActionType, string> = {
+  auto_start_agent: "Auto-start agent",
+  move_to_next: "Move to next step",
+  move_to_previous: "Move to previous step",
+  run_script: "Run script",
+};
+
 export class WorkflowSettingsPage {
   readonly page: Page;
   readonly addWorkflowButton: Locator;
@@ -53,6 +66,15 @@ export class WorkflowSettingsPage {
     );
   }
 
+  /** A focused-editor step node by its rendered name. */
+  editorStepByName(name: string, mobile = false): Locator {
+    return this.page
+      .locator(
+        `[data-testid^="${mobile ? "workflow-editor-mobile-step" : "workflow-editor-step"}-"]`,
+      )
+      .filter({ hasText: name });
+  }
+
   /** A lifecycle action list within the focused editor. */
   editorActionList(trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit") {
     return this.page.getByTestId(`workflow-action-list-${trigger}`);
@@ -69,6 +91,49 @@ export class WorkflowSettingsPage {
     index: number,
   ): Locator {
     return this.page.getByTestId(`workflow-action-editor-${trigger}-${index}`);
+  }
+
+  /** Select a step in the focused editor's pipeline. */
+  async selectEditorStep(name: string, touch = false): Promise<void> {
+    await this.activate(this.editorStepByName(name, touch), touch);
+  }
+
+  /** Add one action to a focused editor lifecycle recipe. */
+  async addEditorAction(
+    trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit",
+    type: WorkflowEditorActionType,
+    touch = false,
+  ): Promise<void> {
+    const list = this.editorActionList(trigger);
+    if (touch) {
+      await this.activate(list.getByRole("button", { name: "Add action" }), true);
+      await this.activate(
+        this.page
+          .getByTestId("workflow-mobile-action-picker")
+          .getByRole("button", { name: WORKFLOW_EDITOR_ACTION_LABELS[type], exact: true }),
+        true,
+      );
+    } else {
+      await list.locator("select").selectOption(type);
+    }
+    await expect(
+      this.page.locator(
+        '[data-testid="workflow-focused-action-editor"], [data-testid="workflow-editor-mobile-action-screen"]',
+      ),
+    ).toBeVisible();
+  }
+
+  /** Return from the focused action editor to its recipe or step screen. */
+  async backFromEditorAction(touch = false): Promise<void> {
+    await this.activate(
+      this.page.getByRole("button", { name: touch ? "Back to step" : "Back to automation" }),
+      touch,
+    );
+  }
+
+  /** Return from the mobile step screen to the vertical workflow journey. */
+  async backToEditorJourney(): Promise<void> {
+    await this.page.getByRole("button", { name: "Back to workflow journey" }).tap();
   }
 
   /** Find a workflow card by the name shown in its input field using its current value. */
@@ -256,7 +321,7 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-drag-handle-${workflowId}`);
   }
 
-  /** Open the "Add Workflow" dialog and create a workflow. */
+  /** Open the "Add Workflow" dialog and enter the client-only focused editor. */
   async createWorkflow(name: string, templateName?: string, touch = false) {
     await this.activate(this.addWorkflowButton, touch);
     await expect(this.createDialog).toBeVisible();
@@ -277,6 +342,10 @@ export class WorkflowSettingsPage {
 
     await this.activate(this.confirmCreateButton, touch);
     await expect(this.createDialog).not.toBeVisible();
+    await expect(this.page).toHaveURL(/\/workflows\/new(?:\?|$)/);
+    await expect(
+      this.page.locator('[data-testid="workflow-editor"], [data-testid="workflow-editor-mobile"]'),
+    ).toBeVisible();
   }
 
   /** The workflow-level agent profile select trigger within a workflow card. */

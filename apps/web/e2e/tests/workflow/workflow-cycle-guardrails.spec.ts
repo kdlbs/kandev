@@ -91,12 +91,18 @@ test.describe("Workflow cycle guardrails", () => {
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await settings.createWorkflow("Blocked automatic draft", "Custom");
-    const card = await settings.findWorkflowCard("Blocked automatic draft");
-
-    await settings.setAutoStart(card, "Todo", true);
-    await settings.setTurnCompleteTransition(card, "Todo", "Move to next step");
-    await settings.setAutoStart(card, "In Progress", true);
-    await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step");
+    await settings.selectEditorStep("Todo");
+    await testPage.getByTestId("workflow-editor-tab-automation").click();
+    await settings.addEditorAction("on_enter", "auto_start_agent");
+    await settings.backFromEditorAction();
+    await settings.addEditorAction("on_turn_complete", "move_to_next");
+    await settings.backFromEditorAction();
+    await settings.selectEditorStep("In Progress");
+    await testPage.getByTestId("workflow-editor-tab-automation").click();
+    await settings.addEditorAction("on_enter", "auto_start_agent");
+    await settings.backFromEditorAction();
+    await settings.addEditorAction("on_turn_complete", "move_to_previous");
+    await settings.backFromEditorAction();
     await settings.submitSaveChanges();
 
     const dialog = settings.cycleGuardDialog;
@@ -118,11 +124,14 @@ test.describe("Workflow cycle guardrails", () => {
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await settings.createWorkflow(workflowName, "Custom");
-    const card = await settings.findWorkflowCard(workflowName);
-
-    await settings.setTurnCompleteTransition(card, "Todo", "Move to next step");
-    await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step");
-    await expect(card.locator('[data-testid^="workflow-cycle-diagnostic-"]')).toHaveCount(0);
+    await settings.selectEditorStep("Todo");
+    await testPage.getByTestId("workflow-editor-tab-automation").click();
+    await settings.addEditorAction("on_turn_complete", "move_to_next");
+    await settings.backFromEditorAction();
+    await settings.selectEditorStep("In Progress");
+    await testPage.getByTestId("workflow-editor-tab-automation").click();
+    await settings.addEditorAction("on_turn_complete", "move_to_previous");
+    await settings.backFromEditorAction();
     await settings.submitSaveChanges();
 
     await expect(settings.cycleGuardDialog).not.toBeVisible();

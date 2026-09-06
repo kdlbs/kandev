@@ -4,7 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Workflow, WorkflowStep, Workspace } from "@/lib/types/http";
 import { useRouter } from "@/lib/routing/client-router";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveCoordinator,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
+import { useToast } from "@/components/toast-provider";
 import {
   areStepDraftsEqual,
   createWorkflowDraftSaveProgress,
@@ -22,6 +27,7 @@ import {
   buildWorkflowEditorViewModel,
   repairWorkflowEditorSelection,
 } from "@/lib/workflows/workflow-editor-view-model";
+import { useWorkflowMutationGuard } from "@/components/settings/workflow-mutation-guard";
 import { workflowEditorPath } from "./workflow-editor-paths";
 
 export type WorkflowEditorDraftInput = {
@@ -43,6 +49,7 @@ type WorkflowEditorDraftState = {
   selectedStep: WorkflowStep | null;
   savedSelectedStep?: WorkflowStep;
   model: ReturnType<typeof buildWorkflowEditorViewModel>;
+  mutationGuard: ReturnType<typeof useWorkflowMutationGuard>;
   readOnly: boolean;
   revision: string;
   isDirty: boolean;
@@ -57,6 +64,7 @@ type WorkflowEditorDraftState = {
   latestRevisionRef: React.MutableRefObject<string>;
   latestStepsRef: React.MutableRefObject<WorkflowStep[]>;
   deletedStepIdsRef: React.MutableRefObject<string[]>;
+  pendingRouteWorkflowIdRef: React.MutableRefObject<string | null>;
   saveProgressRef: React.MutableRefObject<ReturnType<typeof createWorkflowDraftSaveProgress>>;
   setWorkflow: React.Dispatch<React.SetStateAction<Workflow>>;
   setSavedWorkflow: React.Dispatch<React.SetStateAction<Workflow | undefined>>;
@@ -89,6 +97,8 @@ function useWorkflowEditorDraftState({
   const latestRevisionRef = useRef("");
   const latestStepsRef = useRef(steps);
   const saveProgressRef = useRef(createWorkflowDraftSaveProgress());
+  const pendingRouteWorkflowIdRef = useRef<string | null>(null);
+  const mutationGuard = useWorkflowMutationGuard(steps);
   latestStepsRef.current = steps;
 
   const model = useMemo(
@@ -139,6 +149,7 @@ function useWorkflowEditorDraftState({
     selectedStep,
     savedSelectedStep,
     model,
+    mutationGuard,
     readOnly,
     revision,
     isDirty,
@@ -153,6 +164,7 @@ function useWorkflowEditorDraftState({
     latestRevisionRef,
     latestStepsRef,
     deletedStepIdsRef,
+    pendingRouteWorkflowIdRef,
     saveProgressRef,
     setWorkflow,
     setSavedWorkflow,
@@ -164,6 +176,48 @@ function useWorkflowEditorDraftState({
 function useWorkflowEditorSaveCoordinator(state: WorkflowEditorDraftState) {
   const { t } = useTranslation();
   const router = useRouter();
+  const coordinator = useSettingsSaveCoordinator();
+  const { toast } = useToast();
+  const { pendingRouteWorkflowIdRef, workspace } = state;
+
+  useEffect(() => {
+    const workflowId = pendingRouteWorkflowIdRef.current;
+    if (!workflowId || coordinator.status !== "saved") return;
+    pendingRouteWorkflowIdRef.current = null;
+    router.replace(workflowEditorPath(workspace.id, workflowId));
+  }, [coordinator.status, pendingRouteWorkflowIdRef, router, workspace.id]);
+
+  const persistSubmittedDraft = async (submittedRevision: string | number) => {
+    const submittedDeletedStepIds = [...state.deletedStepIdsRef.current];
+    const result = await persistWorkflowDraft({
+      workflow: state.workflow,
+      draftSteps: state.steps,
+      savedSteps: state.savedSteps,
+      progress: state.saveProgressRef.current,
+      deletedStepIds: submittedDeletedStepIds,
+    });
+    const unchanged = submittedRevision === state.latestRevisionRef.current;
+    const currentSteps = unchanged
+      ? result.steps
+      : remapWorkflowDraftSteps(
+          state.latestStepsRef.current,
+          result.workflow.id,
+          state.saveProgressRef.current.stepIds,
+        );
+    state.setSavedWorkflow(result.workflow);
+    state.setSavedSteps(result.steps);
+    state.setWorkflow((current) =>
+      unchanged ? result.workflow : { ...current, id: result.workflow.id },
+    );
+    state.setSteps(currentSteps);
+    state.deletedStepIdsRef.current = acknowledgePersistedDeletedStepIds(
+      state.deletedStepIdsRef.current,
+      submittedDeletedStepIds,
+    );
+    if (unchanged && result.workflow.id !== state.initialWorkflow.id)
+      state.pendingRouteWorkflowIdRef.current = result.workflow.id;
+  };
+
   useSettingsSaveContributor({
     id: `workflow-editor:${state.workspace.id}:${state.initialWorkflow.id}`,
     order: 100,
@@ -172,35 +226,28 @@ function useWorkflowEditorSaveCoordinator(state: WorkflowEditorDraftState) {
     canSave: !state.readOnly && !state.sessionConfigPending && state.model.issues.length === 0,
     invalidReason: state.invalidIssue ? t(state.invalidIssue.messageKey) : undefined,
     save: async (submittedRevision) => {
-      const submittedDeletedStepIds = [...state.deletedStepIdsRef.current];
-      const result = await persistWorkflowDraft({
-        workflow: state.workflow,
-        draftSteps: state.steps,
-        savedSteps: state.savedSteps,
-        progress: state.saveProgressRef.current,
-        deletedStepIds: submittedDeletedStepIds,
+      let guardReturned = false;
+      let operationStarted = false;
+      await state.mutationGuard.guardMutation({
+        baselineSteps: state.isNewWorkflow ? [] : state.savedSteps,
+        proposedSteps: state.steps,
+        intent: state.isNewWorkflow ? "create" : "apply",
+        operation: async () => {
+          operationStarted = true;
+          try {
+            await persistSubmittedDraft(submittedRevision);
+          } catch (error) {
+            if (!guardReturned) throw error;
+            toast({
+              title: t("workflows:failedToSaveWorkflowChanges"),
+              description: error instanceof Error ? error.message : t("common:requestFailed"),
+              variant: "error",
+            });
+          }
+        },
       });
-      const unchanged = submittedRevision === state.latestRevisionRef.current;
-      const currentSteps = unchanged
-        ? result.steps
-        : remapWorkflowDraftSteps(
-            state.latestStepsRef.current,
-            result.workflow.id,
-            state.saveProgressRef.current.stepIds,
-          );
-      state.setSavedWorkflow(result.workflow);
-      state.setSavedSteps(result.steps);
-      state.setWorkflow((current) =>
-        unchanged ? result.workflow : { ...current, id: result.workflow.id },
-      );
-      state.setSteps(currentSteps);
-      state.deletedStepIdsRef.current = acknowledgePersistedDeletedStepIds(
-        state.deletedStepIdsRef.current,
-        submittedDeletedStepIds,
-      );
-      if (unchanged && result.workflow.id !== state.initialWorkflow.id) {
-        router.replace(workflowEditorPath(state.workspace.id, result.workflow.id));
-      }
+      guardReturned = true;
+      if (!operationStarted) throw new SettingsSaveCancelledError();
     },
     discard: async (submittedRevision) => {
       const persistedDraft = state.saveProgressRef.current.workflow;

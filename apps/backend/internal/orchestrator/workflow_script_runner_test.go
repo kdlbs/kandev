@@ -189,6 +189,12 @@ func (f *workflowScriptMessageFake) UpdateWorkflowScriptMessage(_ context.Contex
 	return nil
 }
 
+func (f *workflowScriptMessageFake) snapshot(messageID string) ([]string, map[string]interface{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.updated...), cloneWorkflowScriptMetadata(f.metadata[messageID])
+}
+
 type workflowScriptProcessFake struct {
 	mu      sync.Mutex
 	starts  []agentruntime.WorkspaceProcessRequest
@@ -406,10 +412,10 @@ func TestWorkflowScriptRunnerReconcileProjectsInterruptedAdmission(t *testing.T)
 	if run.Status != taskmodels.WorkflowScriptRunInterrupted {
 		t.Fatalf("run status = %s, want interrupted", run.Status)
 	}
-	if len(messages.updated) != 1 || messages.updated[0] != "message-1" {
-		t.Fatalf("message updates = %#v, want one update for message-1", messages.updated)
+	updates, metadata := messages.snapshot("message-1")
+	if len(updates) != 1 || updates[0] != "message-1" {
+		t.Fatalf("message updates = %#v, want one update for message-1", updates)
 	}
-	metadata := messages.metadata["message-1"]
 	if metadata["status"] != string(taskmodels.WorkflowScriptRunInterrupted) {
 		t.Fatalf("message status = %#v, want interrupted", metadata["status"])
 	}

@@ -18,6 +18,7 @@ import { WorkflowEditorPipeline } from "./pipeline";
 import { WorkflowInspector, type WorkflowInspectorTab } from "./inspector";
 import { IssueSummary } from "./issue-summary";
 import { MobileWorkflowEditor } from "./mobile-editor";
+import { WorkflowCycleGuardDialog } from "@/components/settings/workflow-cycle-diagnostic";
 import { useWorkflowEditorNavigation } from "./workflow-editor-navigation";
 import { workflowsPath } from "./workflow-editor-paths";
 import { useWorkflowEditorDraft, type WorkflowEditorDraftInput } from "./workflow-editor-draft";
@@ -46,23 +47,26 @@ export function WorkflowEditorPage({
 
   if (!navigation.selectedStep) {
     return (
-      <div className="space-y-4" data-testid="workflow-editor">
-        <EditorHeader
-          workflow={draft.workflow}
-          workspaceId={workspace.id}
-          readOnly={draft.readOnly}
-          onUpdate={draft.onUpdateWorkflow}
-        />
-        <WorkflowEditorPipeline
-          steps={draft.steps}
-          model={draft.model}
-          selectedStepId={null}
-          onSelectStep={navigation.handleSelectStep}
-          onAddStep={draft.onAddStep}
-          readOnly={draft.readOnly}
-        />
-        <EmptyStepNotice onAddStep={draft.onAddStep} readOnly={draft.readOnly} />
-      </div>
+      <>
+        <div className="space-y-4" data-testid="workflow-editor">
+          <EditorHeader
+            workflow={draft.workflow}
+            workspaceId={workspace.id}
+            readOnly={draft.readOnly}
+            onUpdate={draft.onUpdateWorkflow}
+          />
+          <WorkflowEditorPipeline
+            steps={draft.steps}
+            model={draft.model}
+            selectedStepId={null}
+            onSelectStep={navigation.handleSelectStep}
+            onAddStep={draft.onAddStep}
+            readOnly={draft.readOnly}
+          />
+          <EmptyStepNotice onAddStep={draft.onAddStep} readOnly={draft.readOnly} />
+        </div>
+        <WorkflowEditorCycleGuard draft={draft} />
+      </>
     );
   }
 
@@ -91,13 +95,32 @@ export function WorkflowEditorPage({
     onBackToStep: navigation.onBackToStep,
     onSessionConfigResolutionPendingChange: draft.onSessionConfigResolutionPendingChange,
   };
-  return isMobile ? (
-    <MobileWorkflowEditor {...editorProps} workspaceId={workspace.id} />
-  ) : (
-    <DesktopWorkflowEditor
-      {...editorProps}
-      workspaceId={workspace.id}
-      onIssue={navigation.handleIssue}
+  return (
+    <>
+      {isMobile ? (
+        <MobileWorkflowEditor {...editorProps} workspaceId={workspace.id} />
+      ) : (
+        <DesktopWorkflowEditor
+          {...editorProps}
+          workspaceId={workspace.id}
+          onIssue={navigation.handleIssue}
+        />
+      )}
+      <WorkflowEditorCycleGuard draft={draft} />
+    </>
+  );
+}
+
+function WorkflowEditorCycleGuard({
+  draft,
+}: {
+  draft: Pick<ReturnType<typeof useWorkflowEditorDraft>, "mutationGuard">;
+}) {
+  return (
+    <WorkflowCycleGuardDialog
+      proposal={draft.mutationGuard.proposal}
+      onCancel={draft.mutationGuard.cancelProposal}
+      onConfirm={draft.mutationGuard.confirmProposal}
     />
   );
 }
