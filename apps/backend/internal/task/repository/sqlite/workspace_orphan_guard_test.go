@@ -185,6 +185,165 @@ func TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentID_LosesGuardAfterRepa
 	}
 }
 
+// The CAS itself, not just the Require* clauses, must reject a losing
+// writer: a guard built from a stale (pre-mark) observation must not land
+// over an already-marked row, and the stored marker must survive untouched.
+// Every other "loses guard" test in this file loses on a Require* clause —
+// this is the only one that isolates the CAS comparison, which a guard
+// missing every Require* clause (an already-marked row's first-time-mark
+// stamp arriving late) would still have to reject on its own.
+func TestSetTaskWorkspaceMetadataIfUnchanged_StaleClaimLosesGuardAndLeavesMarkerUntouched(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const parentID, childID = "owg-staleclaim-parent", "owg-staleclaim-child"
+	seedOrphanGuardParentAndChild(t, repo, parentID, childID, true)
+
+	markGuard := models.OrphanWriteGuard{
+		ExpectedMode: "inherit_parent", RequireParentArchivedID: parentID,
+		RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+	marked := map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": parentID, "orphaned_at": "2026-09-05T00:00:00Z",
+	}
+	if landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, markGuard, marked); err != nil {
+		t.Fatalf("setup mark: %v", err)
+	} else if !landed {
+		t.Fatal("setup failure: initial mark did not land")
+	}
+
+	// A second writer that read the child before the mark above landed
+	// builds its guard from a stale, unmarked observation (ExpectedOrphanedParentID
+	// == ""). Every Require* clause it carries independently holds (same
+	// archived parent, same parent_id, child not archived), so only the CAS
+	// comparison itself can stop this write from overwriting the marker
+	// above with a different orphaned_parent_id.
+	staleGuard := models.OrphanWriteGuard{
+		ExpectedOrphanedParentID: "", ExpectedMode: "inherit_parent",
+		RequireParentArchivedID: parentID, RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, staleGuard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": "late-writer-race", "orphaned_at": "2026-09-05T00:00:01Z",
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("stale-claim write landed over an existing marker, want the CAS to reject it")
+	}
+
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	ws, _ := child.Metadata["workspace"].(map[string]interface{})
+	if got, _ := ws["orphaned_parent_id"].(string); got != parentID {
+		t.Fatalf("orphaned_parent_id = %q after a losing writer, want untouched %q", got, parentID)
+	}
+}
+
+// AC-005.2: a concurrent mode change must not be lost. The guard is built
+// from the workspace map as read; if a second writer changes mode before
+// this write lands, the CAS must reject it and the concurrently written
+// mode must survive rather than being silently reverted.
+func TestSetTaskWorkspaceMetadataIfUnchanged_ConcurrentModeChangeLosesGuardAndModeSurvives(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const parentID, childID = "owg-modechange-parent", "owg-modechange-child"
+	seedOrphanGuardParentAndChild(t, repo, parentID, childID, true)
+
+	// Guard captured from the workspace map as read, before any concurrent
+	// writer touches it — mirrors models.ObservedWorkspaceGuard's contract.
+	guard := models.OrphanWriteGuard{
+		ExpectedMode: "inherit_parent", RequireParentArchivedID: parentID,
+		RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+
+	// A concurrent writer (standing in for the delete path's normalize, or
+	// the generic metadata PATCH surface) flips mode off inherit_parent
+	// between this caller's read and its write.
+	if err := repo.SetTaskMetadataKey(ctx, childID, "workspace", map[string]interface{}{"mode": "shared_group"}); err != nil {
+		t.Fatalf("simulate concurrent mode change: %v", err)
+	}
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": parentID, "orphaned_at": "2026-09-05T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("mark landed after a concurrent mode change, want the CAS to reject it")
+	}
+
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	ws, _ := child.Metadata["workspace"].(map[string]interface{})
+	if mode, _ := ws["mode"].(string); mode != "shared_group" {
+		t.Fatalf("workspace.mode = %q after a losing writer, want the concurrently written %q preserved", mode, "shared_group")
+	}
+	if _, ok := ws["orphaned"]; ok {
+		t.Fatalf("workspace.orphaned present after a write that should have lost its guard: %v", ws)
+	}
+}
+
+// RequireParentArchivedID must not match a task that exists and is
+// archived, but lives in a DIFFERENT workspace — the mark-side mirror of
+// RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces below, closing the
+// same class of gap on the EXISTS clause RVW-F2's fix added to the stamping
+// side. RequireParentID is deliberately omitted here so the archived-branch
+// EXISTS clause is the only thing that can reject the write, isolating it
+// from the plain parent_id column check.
+func TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentArchivedID_DoesNotMatchAcrossWorkspaces(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const childID, otherTaskID = "owg-archcrossws-child", "owg-archcrossws-other-ws-task"
+
+	seedWorkspace(t, repo, "ws-owg-archcrossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-owg-archcrossws-child", WorkspaceID: "ws-owg-archcrossws-child", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childID, WorkspaceID: "ws-owg-archcrossws-child", WorkflowID: "wf-owg-archcrossws-child", WorkflowStepID: "step",
+		Title: "Child", Priority: "medium",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+
+	// Exists and archived, but in a different workspace.
+	seedWorkspace(t, repo, "ws-owg-archcrossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-owg-archcrossws-other", WorkspaceID: "ws-owg-archcrossws-other", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: otherTaskID, WorkspaceID: "ws-owg-archcrossws-other", WorkflowID: "wf-owg-archcrossws-other", WorkflowStepID: "step",
+		Title: "Archived task in another workspace", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(other-workspace task): %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, otherTaskID); err != nil {
+		t.Fatalf("ArchiveTask(other-workspace task): %v", err)
+	}
+
+	guard := models.ObservedWorkspaceGuard(map[string]interface{}{"mode": "inherit_parent"})
+	guard.RequireParentArchivedID = otherTaskID
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("mark landed against a parent that exists and is archived only in a different workspace, want zero rows matched")
+	}
+}
+
 // RequireParentUnarchivedID protects the clearing side: a parent re-archived
 // after selection must not have a fresh, valid marker stripped.
 func TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_LosesGuardAfterReArchive(t *testing.T) {

@@ -190,6 +190,142 @@ func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_GuardLossesHold(t *testing.
 	}
 }
 
+// Mirrors TestSetTaskWorkspaceMetadataIfUnchanged_StaleClaimLosesGuardAndLeavesMarkerUntouched
+// against the Postgres jsonb statement: the CAS itself, not just the
+// Require* clauses, must reject a losing writer and leave the stored
+// marker untouched.
+func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_StaleClaimLosesGuardAndLeavesMarkerUntouched(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	const parentID, childID = "pg-owg-staleclaim-parent", "pg-owg-staleclaim-child"
+	seedOrphanGuardParentAndChildPG(t, repo, ctx, parentID, childID, true)
+
+	markGuard := models.OrphanWriteGuard{
+		ExpectedMode: "inherit_parent", RequireParentArchivedID: parentID,
+		RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+	marked := map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": parentID, "orphaned_at": "2026-09-05T00:00:00Z",
+	}
+	if landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, markGuard, marked); err != nil {
+		t.Fatalf("setup mark: %v", err)
+	} else if !landed {
+		t.Fatal("setup failure: initial mark did not land")
+	}
+
+	staleGuard := models.OrphanWriteGuard{
+		ExpectedOrphanedParentID: "", ExpectedMode: "inherit_parent",
+		RequireParentArchivedID: parentID, RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, staleGuard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": "late-writer-race", "orphaned_at": "2026-09-05T00:00:01Z",
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("stale-claim write landed over an existing marker, want the CAS to reject it")
+	}
+
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	ws, _ := child.Metadata["workspace"].(map[string]interface{})
+	if got, _ := ws["orphaned_parent_id"].(string); got != parentID {
+		t.Fatalf("orphaned_parent_id = %q after a losing writer, want untouched %q", got, parentID)
+	}
+}
+
+// Mirrors TestSetTaskWorkspaceMetadataIfUnchanged_ConcurrentModeChangeLosesGuardAndModeSurvives
+// against the Postgres jsonb statement (AC-005.2).
+func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_ConcurrentModeChangeLosesGuardAndModeSurvives(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	const parentID, childID = "pg-owg-modechange-parent", "pg-owg-modechange-child"
+	seedOrphanGuardParentAndChildPG(t, repo, ctx, parentID, childID, true)
+
+	guard := models.OrphanWriteGuard{
+		ExpectedMode: "inherit_parent", RequireParentArchivedID: parentID,
+		RequireParentID: parentID, RequireTaskNotArchived: true,
+	}
+
+	if err := repo.SetTaskMetadataKey(ctx, childID, "workspace", map[string]interface{}{"mode": "shared_group"}); err != nil {
+		t.Fatalf("simulate concurrent mode change: %v", err)
+	}
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true,
+		"orphaned_reason": "parent_archived", "orphaned_parent_id": parentID, "orphaned_at": "2026-09-05T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("mark landed after a concurrent mode change, want the CAS to reject it")
+	}
+
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	ws, _ := child.Metadata["workspace"].(map[string]interface{})
+	if mode, _ := ws["mode"].(string); mode != "shared_group" {
+		t.Fatalf("workspace.mode = %q after a losing writer, want the concurrently written %q preserved", mode, "shared_group")
+	}
+	if _, ok := ws["orphaned"]; ok {
+		t.Fatalf("workspace.orphaned present after a write that should have lost its guard: %v", ws)
+	}
+}
+
+// Mirrors TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentArchivedID_DoesNotMatchAcrossWorkspaces
+// against the Postgres jsonb statement — the mark-side twin of the
+// cross-workspace scoping test below.
+func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_RequireParentArchivedID_DoesNotMatchAcrossWorkspaces(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	const childID, otherTaskID = "pg-owg-archcrossws-child", "pg-owg-archcrossws-other-ws-task"
+
+	seedWorkspace(t, repo, "pg-ws-owg-archcrossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-owg-archcrossws-child", WorkspaceID: "pg-ws-owg-archcrossws-child", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childID, WorkspaceID: "pg-ws-owg-archcrossws-child", WorkflowID: "pg-wf-owg-archcrossws-child", WorkflowStepID: "step",
+		Title: "Child", Priority: "medium",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+
+	seedWorkspace(t, repo, "pg-ws-owg-archcrossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-owg-archcrossws-other", WorkspaceID: "pg-ws-owg-archcrossws-other", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: otherTaskID, WorkspaceID: "pg-ws-owg-archcrossws-other", WorkflowID: "pg-wf-owg-archcrossws-other", WorkflowStepID: "step",
+		Title: "Archived task in another workspace", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(other-workspace task): %v", err)
+	}
+	archiveTaskDirect(t, repo, ctx, otherTaskID)
+
+	guard := models.ObservedWorkspaceGuard(map[string]interface{}{"mode": "inherit_parent"})
+	guard.RequireParentArchivedID = otherTaskID
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+	})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("mark landed against a parent that exists and is archived only in a different workspace, want zero rows matched")
+	}
+}
+
 // Mirrors TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces
 // against the Postgres jsonb statement.
 func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces(t *testing.T) {
