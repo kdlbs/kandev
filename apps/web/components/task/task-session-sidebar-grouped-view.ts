@@ -69,7 +69,8 @@ function shareTaskArray(
 ): TaskSwitcherItem[] {
   const shared = next.map((task) => {
     const prior = priorById.get(task.id);
-    return prior && taskItemEqual(prior, task) ? prior : task;
+    if (!prior || prior === task) return task;
+    return taskItemEqual(prior, task) ? prior : task;
   });
   return previous &&
     previous.length === shared.length &&
