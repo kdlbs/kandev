@@ -244,6 +244,34 @@ describe("renderTaskStatusIcon — workspace orphaned", () => {
     expect(iconType(node)).toBe(IconCheck);
   });
 
+  // The real shape a stranded child leaves behind: it was mid-flight (or
+  // queued to start) when its parent's workspace vanished, so the task state
+  // is still SCHEDULING/IN_PROGRESS with no session ever attached — exactly
+  // what shouldShowTaskRunningSpinner reads as "still launching"
+  // (showRunningSpinner true). The marker must not be masked by the launch
+  // spinner short-circuit, the same way the auto-start-failed triangle isn't.
+  it("shows the marker over the launch spinner for a session-less IN_PROGRESS task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", workspaceOrphaned: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(WorkspaceOrphanedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("shows the marker over the launch spinner for a session-less SCHEDULING task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "SCHEDULING", workspaceOrphaned: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(WorkspaceOrphanedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
   it("prefers auto-start-failed over workspace-orphaned when both are set", () => {
     const node = renderTaskStatusIcon(
       task({ state: "IN_PROGRESS", autoStartFailed: true, workspaceOrphaned: true }),
