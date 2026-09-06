@@ -23,7 +23,7 @@ def workflow_job(workflow: str, name: str) -> str:
 class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
     def test_safe_to_review_and_allowlists_authorize_fork_preview_deployment(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        _, separator, deploy_job = workflow.partition("  deploy-fork:")
+        _, separator, deploy_job = workflow.partition("  build-fork-preview:")
 
         self.assertTrue(separator, "Fork preview deploy job is missing")
         self.assertIn("github.event_name == 'pull_request_target'", deploy_job)
@@ -41,11 +41,11 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
             deploy_job,
         )
-        self.assertEqual(workflow.count("persist-credentials: false"), 7)
+        self.assertEqual(workflow.count("persist-credentials: false"), 8)
 
     def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        _, separator, deploy_job = workflow.partition("  deploy-fork:")
+        _, separator, deploy_job = workflow.partition("  build-fork-preview:")
 
         self.assertTrue(separator, "Fork preview deploy job is missing")
         self.assertIn(
@@ -82,26 +82,44 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             self.assertIn("preview_url=", job)
         self.assertIn("--skip-description", workflow_job(workflow, "cleanup-preview"))
 
-    def test_fork_deploy_uses_the_trusted_preview_command(self) -> None:
+    def test_fork_build_is_tokenless_and_deploy_uses_only_a_validated_artifact(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        build_job = workflow_job(workflow, "build-fork-preview")
         deploy_job = workflow_job(workflow, "deploy-fork")
 
+        self.assertIn("permissions: {}", build_job)
+        self.assertIn('token: ""', build_job)
+        self.assertIn("github.event.pull_request.head.repo.full_name", build_job)
+        self.assertIn("pnpm -C apps install --frozen-lockfile", build_job)
+        self.assertIn("package --artifact", build_job)
+        self.assertIn("actions/upload-artifact", build_job)
+        self.assertNotIn("secrets.", build_job)
+        for credential in (
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "SPRITES_API_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+            "ACTIONS_RUNTIME_TOKEN",
+        ):
+            self.assertIn(f'{credential}: ""', build_job)
+
+        self.assertIn("needs: build-fork-preview", deploy_job)
+        self.assertIn("actions/download-artifact", deploy_job)
+        self.assertIn("sha256sum --check", deploy_job)
         self.assertRegex(
             deploy_job,
             re.compile(
-                r"repository: \$\{\{ github\.repository \}\}\n"
-                r"\s+ref: \$\{\{ github\.workflow_sha \}\}\n"
-                r"\s+path: \.preview-cli\n"
+                r"ref: \$\{\{ github\.workflow_sha \}\}\n"
+                r"\s+fetch-depth: 1\n"
                 r"\s+persist-credentials: false"
             ),
         )
-        self.assertIn('GOWORK: "off"', deploy_job)
-        self.assertIn("go build -o \"$RUNNER_TEMP/kandev-preview-deploy\" ./cmd/preview", deploy_job)
+        self.assertNotIn("github.event.pull_request.head.repo.full_name", deploy_job)
         self.assertIn(
-            'deploy_output="$(\"$RUNNER_TEMP/kandev-preview-deploy\" deploy',
+            'go run ./cmd/preview deploy --artifact "$ARTIFACT"',
             deploy_job,
         )
-        self.assertNotIn("go run ./cmd/preview deploy", deploy_job)
+        self.assertIn("SPRITES_API_TOKEN", deploy_job)
 
     def test_fork_build_subprocesses_cannot_inherit_deployment_credentials(self) -> None:
         build_source = PREVIEW_BUILD.read_text(encoding="utf-8")

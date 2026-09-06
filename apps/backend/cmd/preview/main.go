@@ -2,6 +2,7 @@
 //
 // Usage:
 //
+//	preview package            --artifact PATH [--skip-web-install]
 //	preview deploy             --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
 //	preview update-description --pr N --sha S --url URL [--repo owner/repo]
 //	preview cleanup            --pr N [--repo owner/repo] [--skip-description]
@@ -34,6 +35,8 @@ func run() int {
 	defer cancel()
 
 	switch os.Args[1] {
+	case "package":
+		return runPackage(ctx, os.Args[2:])
 	case "deploy":
 		return runDeploy(ctx, os.Args[2:])
 	case "update-description":
@@ -56,6 +59,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `preview — deploy and manage PR preview environments on Sprites.dev
 
 Usage:
+  preview package            --artifact PATH [--skip-web-install]
   preview deploy             --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
   preview update-description --pr N --sha S --url URL [--repo owner/repo]
   preview cleanup            --pr N [--repo owner/repo] [--skip-description]

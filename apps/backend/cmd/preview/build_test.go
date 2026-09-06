@@ -1,9 +1,33 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestPreviewArtifactExists(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	missing := filepath.Join(tempDir, "missing.tar.gz")
+	if exists, err := previewArtifactExists(missing); err != nil || exists {
+		t.Fatalf("previewArtifactExists(missing) = (%v, %v), want (false, nil)", exists, err)
+	}
+
+	if exists, err := previewArtifactExists(tempDir); err == nil || exists {
+		t.Fatalf("previewArtifactExists(directory) = (%v, %v), want (false, error)", exists, err)
+	}
+
+	artifact := filepath.Join(tempDir, "preview.tar.gz")
+	if err := os.WriteFile(artifact, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := previewArtifactExists(artifact); err != nil || !exists {
+		t.Fatalf("previewArtifactExists(file) = (%v, %v), want (true, nil)", exists, err)
+	}
+}
 
 func TestUntrustedBuildEnvRemovesCredentials(t *testing.T) {
 	t.Parallel()

@@ -73,8 +73,8 @@ jobs:
           SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
 
   # -----------------------------------------------------------------------
-  # Deploy / update preview (fork PRs, gated by allowlist)
-  # Uses pull_request_target so secrets are available.
+  # Build a fork preview bundle without credentials. This is intentionally a
+  # separate job: the fork controls install/build/package scripts.
   # Three approval paths:
   #   - PREVIEW_ENV_ALLOWLIST repo variable (trusted login list, all events;
   #     JSON array of logins)
@@ -88,7 +88,7 @@ jobs:
   # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
   # which throws (and skips the whole job) if the repo variable is
   # non-empty but unparseable JSON.
-  deploy-fork:
+  build-fork-preview:
     if: >
       github.event.action != 'closed' &&
       github.event_name == 'pull_request_target' &&
@@ -97,23 +97,16 @@ jobs:
        (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)) ||
        (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
-    outputs:
-      preview_url: ${{ steps.deploy.outputs.preview_url }}
-    permissions:
-      contents: read
+    permissions: {}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          # pull_request_target checks out base by default; explicitly use PR head.
-          # Safe: the preview CLI only reads files to build artifacts.
-          # NOTE: The allowlist gate (safe-to-review, PREVIEW_ENV_ALLOWLIST,
-          # CLAUDE_REVIEW_ALLOWLIST)
-          # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN.
-          # The safe-to-review label remains an explicit maintainer approval for
-          # follow-up pushes until the maintainer removes it.
+          # The fork controls its product source and build hooks. This job has no
+          # repository or deployment credentials.
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
+          token: ""
           persist-credentials: false
 
       # The fork supplies the product being built, but deploy control-plane
@@ -123,6 +116,7 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
           path: .preview-cli
+          token: ""
           persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -139,6 +133,12 @@ jobs:
           node-version: "24"
 
       - name: Install frontend dependencies
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          SPRITES_API_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
         run: pnpm -C apps install --frozen-lockfile
 
       - name: Build trusted preview command
@@ -147,12 +147,75 @@ jobs:
           GOWORK: "off"
         run: go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview
 
+      - name: Package fork preview artifact
+        working-directory: apps/backend
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          SPRITES_API_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/kandev-preview-deploy" package --artifact "$RUNNER_TEMP/kandev-preview.tar.gz" --skip-web-install
+          sha256sum "$RUNNER_TEMP/kandev-preview.tar.gz" > "$RUNNER_TEMP/kandev-preview.tar.gz.sha256"
+
+      - name: Upload fork preview artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fork-preview-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/kandev-preview.tar.gz
+            ${{ runner.temp }}/kandev-preview.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  # -----------------------------------------------------------------------
+  # Deploy a completed fork bundle. This fresh job checks out only the
+  # immutable workflow revision and never runs the fork checkout or its hooks.
+  # -----------------------------------------------------------------------
+  deploy-fork:
+    needs: build-fork-preview
+    if: needs.build-fork-preview.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Download and validate fork preview artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fork-preview-${{ github.run_id }}
+          path: ${{ runner.temp }}/fork-preview
+
+      - name: Validate fork preview artifact
+        env:
+          ARTIFACT: ${{ runner.temp }}/fork-preview/kandev-preview.tar.gz
+        run: |
+          set -euo pipefail
+          cd "$(dirname "$ARTIFACT")"
+          sha256sum --check kandev-preview.tar.gz.sha256
+          tar -tzf "$ARTIFACT" > /dev/null
+
       - name: Deploy preview environment
         id: deploy
         working-directory: apps/backend
         run: |
           set -euo pipefail
-          deploy_output="$("$RUNNER_TEMP/kandev-preview-deploy" deploy --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-web-install --skip-description)"
+          deploy_output="$(go run ./cmd/preview deploy --artifact "$ARTIFACT" --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-description)"
           printf '%s\n' "$deploy_output"
           preview_url="$(printf '%s\n' "$deploy_output" | sed -n 's/^preview URL: //p' | tail -n 1)"
           test -n "$preview_url"
@@ -161,6 +224,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
+          ARTIFACT: ${{ runner.temp }}/fork-preview/kandev-preview.tar.gz
           SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
 
   # -----------------------------------------------------------------------
