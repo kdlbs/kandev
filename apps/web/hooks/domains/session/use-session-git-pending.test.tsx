@@ -136,6 +136,37 @@ describe("useSessionGit pending target-state reconciliation", () => {
       });
     },
   );
+
+  it("clears an unstage after the refreshed status removes a clean file", async () => {
+    const path = "clean-after-unstage.txt";
+    const pending = deferredResult();
+    mocks.gitOps.unstage.mockReturnValueOnce(pending.promise);
+    mocks.statuses = [{ repository_name: "", status: status(path, true) }];
+
+    const hook = renderHook(() => useSessionGit("session-1"));
+
+    act(() => {
+      void hook.result.current.unstageFile([path], "");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+    });
+
+    mocks.statuses = [];
+    hook.rerender();
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+    });
+
+    await act(async () => {
+      pending.resolve({ success: true, operation: "unstage", output: "" });
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+    });
+  });
 });
 
 describe("useSessionGit failed request cleanup", () => {
