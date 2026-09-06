@@ -44,11 +44,12 @@ time so the same row can retry only after that instant. A rate-limited read
 after provider start retains the marker and resumes read-only reconciliation
 after the reset. Mutation timeouts, connection loss, and HTTP 5xx responses
 remain ambiguous and reconciliation-only.
-Rerun reconciliation accepts only the exact next attempt; dispatch
-reconciliation accepts only one new first attempt created after the provider
-call began. Receipts and audit records contain only stable identities and
-classified error metadata; terminal request state and its audit row commit in
-one transaction.
+Rerun reconciliation accepts only the exact next attempt. GitHub workflow
+dispatch is not an available recovery strategy: its branch/tag-only ref API
+cannot atomically bind a request to the reviewed commit SHA, so the server
+returns `dispatch_ref_unavailable` before mutation. Receipts and audit records
+contain only stable identities and classified error metadata; terminal request
+state and its audit row commit in one transaction.
 
 ## Consequences
 
@@ -56,7 +57,8 @@ one transaction.
 - Existing App installations must approve Actions write before the feature can
   succeed; insufficient installations return an explicit permission class.
 - Fork PRs are supported by rerunning a verified source attempt but never by
-  dispatching an arbitrary fork ref.
+  dispatching an arbitrary ref; same-repository dispatch is also unavailable
+  until GitHub provides an immutable conditional-ref operation.
 - Merge-ref evidence remains unavailable until GitHub exposes enough runtime
   identity to verify it.
 - Ambiguous provider results may require reconciliation instead of immediate

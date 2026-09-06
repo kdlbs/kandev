@@ -589,10 +589,10 @@ exact PR head. A non-empty run association list must include that exact PR and
 cannot fall back to another identity. When GitHub omits the run's
 `pull_requests` array, the base repository, head repository, head ref, and head
 SHA must all match instead. The server first asks GitHub to rerun failed jobs
-from the named attempt. If GitHub says the run is not rerunnable, Kandev can
-dispatch only a reviewed same-repository PR-head workflow with server-fixed
-inputs. The workflow file at the live PR ref must byte-match its trusted
-base-branch copy. It never dispatches a fork ref.
+from the named attempt. If GitHub says the run is not rerunnable, Kandev fails
+closed with `dispatch_ref_unavailable`: GitHub workflow dispatch accepts a
+mutable branch or tag ref and cannot bind the call to the reviewed commit SHA.
+Kandev never dispatches a branch, tag, or fork ref as a substitute.
 
 `current_merge` requests currently return `merge_evidence_unavailable` because
 GitHub's REST run record does not expose enough runtime merge-SHA evidence to
@@ -614,9 +614,8 @@ GitHub's reset time and retries the same request only after that time. If a
 reconciliation read is rate-limited after the write may have happened, Kandev
 keeps the provider-start marker and performs only read-only reconciliation
 after the reset. When
-GitHub definitively rejects a rerun as ineligible, Kandev persists the fallback
-dispatch phase first; crash recovery resumes that phase without rerunning the
-rejected attempt. Receipts contain the canonical repository and PR, expected
+GitHub definitively rejects a rerun as ineligible, Kandev records the typed
+immutable-ref denial without retrying the rejected attempt. Receipts contain the canonical repository and PR, expected
 and observed PR head, source and result run attempts, workflow and provider
 head/event identities, evidence verdict, non-secret App principal, provider
 request ID/URL, retry reset, and timestamps. Typed errors include the same

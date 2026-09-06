@@ -77,22 +77,6 @@ func rerunFailedCIRunJobs(
 	return GitHubRequestMetadata{}, client.RerunFailedActionsJobs(ctx, owner, repo, runID)
 }
 
-func dispatchCIRunWorkflow(
-	ctx context.Context,
-	client ciRunActionsClient,
-	owner, repo string,
-	workflowID int64,
-	ref string,
-	inputs map[string]string,
-) (GitHubRequestMetadata, error) {
-	if metadataClient, ok := client.(ciRunActionsMetadataClient); ok {
-		return metadataClient.DispatchActionsWorkflowWithMetadata(
-			ctx, owner, repo, workflowID, ref, inputs,
-		)
-	}
-	return GitHubRequestMetadata{}, client.DispatchActionsWorkflow(ctx, owner, repo, workflowID, ref, inputs)
-}
-
 func applyCIRunProviderMetadata(request *CIRunRequest, metadata GitHubRequestMetadata, err error) {
 	if metadata.RequestID != "" {
 		request.ProviderRequestID = metadata.RequestID
@@ -112,8 +96,4 @@ func applyCIRunProviderMetadata(request *CIRunRequest, metadata GitHubRequestMet
 
 func ciRunRerunProviderURL(owner, repo string, runID int64) string {
 	return fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/rerun-failed-jobs", githubAPIBase, owner, repo, runID)
-}
-
-func ciRunDispatchProviderURL(owner, repo string, workflowID int64) string {
-	return fmt.Sprintf("%s/repos/%s/%s/actions/workflows/%d/dispatches", githubAPIBase, owner, repo, workflowID)
 }

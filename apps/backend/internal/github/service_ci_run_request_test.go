@@ -311,199 +311,6 @@ func TestRequestFreshCIRunDoesNotClaimALaterRerunAttempt(t *testing.T) {
 	}
 }
 
-func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("name: E2E\non:\n  workflow_dispatch:\n    inputs:\n      fail_on_flaky:\n        type: boolean\n        default: false\n")
-	client.runs = []GitHubActionsRun{{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
-	}}
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Operation != CIRunOperationWorkflowDispatch || receipt.RunID != 101 {
-		t.Fatalf("receipt = %+v", receipt)
-	}
-	if client.dispatchRef != input.ExpectedHeadSHA || client.dispatchInputs["fail_on_flaky"] != "false" {
-		t.Fatalf("dispatch ref/inputs = %q %#v", client.dispatchRef, client.dispatchInputs)
-	}
-	if len(client.workflowRefs) != 2 || client.workflowRefs[0] != "main" ||
-		client.workflowRefs[1] != "feature/x" {
-		t.Fatalf("workflow source refs = %#v, want trusted base then live PR head", client.workflowRefs)
-	}
-	persisted, err := service.store.GetCIRunRequest(context.Background(), receipt.RequestID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.Operation != CIRunOperationWorkflowDispatch {
-		t.Fatalf("persisted operation = %q, want workflow_dispatch", persisted.Operation)
-	}
-}
-
-func TestRequestFreshCIRunRejectsAmbiguousDispatchMatches(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	matching := GitHubActionsRun{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-	}
-	client.runs = []GitHubActionsRun{matching, matching}
-	client.runs[1].ID = 102
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
-		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
-	}
-	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
-		t.Fatalf("ambiguous receipt = %+v", receipt)
-	}
-	if client.dispatches != 1 {
-		t.Fatalf("provider dispatches = %d, want one", client.dispatches)
-	}
-}
-
-func TestRequestFreshCIRunRejectsDispatchRunCreatedBeforeProviderCall(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	client.runs = []GitHubActionsRun{{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: time.Date(2026, 8, 30, 11, 59, 59, 0, time.UTC),
-	}}
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
-		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
-	}
-	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
-		t.Fatalf("stale-match receipt = %+v", receipt)
-	}
-}
-
-func TestRequestFreshCIRunDoesNotAttributeOlderSameSecondDispatch(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	service.ciRunNow = func() time.Time {
-		return time.Date(2026, 8, 30, 12, 0, 0, 900_000_000, time.UTC)
-	}
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	older := GitHubActionsRun{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
-	}
-	client.preDispatchRuns = []GitHubActionsRun{older}
-	client.runs = []GitHubActionsRun{older}
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
-		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
-	}
-	if receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
-		t.Fatalf("older run was attributed: %+v", receipt)
-	}
-
-	actual := older
-	actual.ID = 102
-	client.runs = append(client.runs, actual)
-	receipt, err = service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != CIRunRequestSucceeded || receipt.RunID != actual.ID || client.dispatches != 1 {
-		t.Fatalf("receipt = %+v, dispatches = %d", receipt, client.dispatches)
-	}
-}
-
-func TestRequestFreshCIRunResumesPreparedDispatchWithoutRepeatingRerun(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	client.runs = []GitHubActionsRun{{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: reviewedDispatchWorkflow, HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: service.ciRunClock()().UTC(),
-	}}
-
-	binding, err := service.loadCIRunBinding(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, _, err := service.store.ClaimCIRunRequest(
-		context.Background(), newCIRunRequest(binding, input, service.ciRunClock()()),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := service.ciRunClock()().UTC()
-	if acquired, err := service.store.AcquireCIRunExecution(
-		context.Background(), request, "crashed-after-422", now, time.Minute,
-	); err != nil || !acquired {
-		t.Fatalf("acquire rerun worker = %v, %v", acquired, err)
-	}
-	request.Operation = CIRunOperationRerunFailedJobs
-	request.ProviderWorkflowID = client.workflow.ID
-	request.ProviderWorkflowName = client.workflow.Name
-	request.ProviderWorkflowPath = client.workflow.Path
-	request.ProviderHeadRepo = client.run.HeadRepository
-	request.ProviderHeadRef = client.run.HeadBranch
-	request.ProviderHeadSHA = client.run.HeadSHA
-	if err := service.store.MarkCIRunProviderCallStarted(context.Background(), request, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.store.PrepareCIRunDispatchFallback(context.Background(), request, now); err != nil {
-		t.Fatal(err)
-	}
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != CIRunRequestSucceeded || receipt.Operation != CIRunOperationWorkflowDispatch ||
-		client.reruns != 0 || client.dispatches != 1 {
-		t.Fatalf("receipt = %+v, reruns=%d dispatches=%d", receipt, client.reruns, client.dispatches)
-	}
-}
-
-func TestRequestFreshCIRunDoesNotClaimARerunOfAnOlderDispatch(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	client.runs = []GitHubActionsRun{{
-		ID: 101, Attempt: 2, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
-	}}
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
-		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
-	}
-	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
-		t.Fatalf("misattributed receipt = %+v", receipt)
-	}
-}
-
 func TestRequestFreshCIRunFailsClosedBeforeProviderMutation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -640,33 +447,26 @@ func TestRequestFreshCIRunRechecksHeadImmediatelyBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestRequestFreshCIRunDoesNotDispatchMutableBranchAfterValidation(t *testing.T) {
+func TestRequestFreshCIRunFailsClosedWhenDispatchOnlyHasMutableBranchRef(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
 	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	client.runs = []GitHubActionsRun{{
-		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
-		WorkflowPath: reviewedDispatchWorkflow, HeadSHA: input.ExpectedHeadSHA,
-		HeadBranch: "feature/x", Event: "workflow_dispatch",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-		CreatedAt: service.ciRunClock()().UTC(),
-	}}
-	client.dispatchHook = func() {
-		client.pr.HeadSHA = strings.Repeat("b", 40)
-	}
 
-	_, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchRefUnavailable {
+		t.Fatalf("error = %#v, want dispatch_ref_unavailable", err)
 	}
-	if client.dispatches != 1 {
-		t.Fatalf("provider dispatches = %d, want one immutable dispatch", client.dispatches)
+	if client.dispatches != 0 {
+		t.Fatalf("provider dispatches = %d, want none", client.dispatches)
 	}
-	if client.dispatchRef != input.ExpectedHeadSHA {
-		t.Fatalf("dispatch ref = %q, want validated immutable SHA %q", client.dispatchRef, input.ExpectedHeadSHA)
+	if client.dispatchRef != "" {
+		t.Fatalf("dispatch ref = %q, want no mutable provider ref", client.dispatchRef)
 	}
-	if client.pr.HeadSHA != strings.Repeat("b", 40) {
-		t.Fatalf("dispatch hook did not move mutable branch head: %q", client.pr.HeadSHA)
+	request, loadErr := service.store.GetCIRunRequest(context.Background(), receipt.RequestID)
+	if loadErr != nil || request.Status != CIRunRequestFailed ||
+		request.FailureClass != string(CIRunFailureDispatchRefUnavailable) {
+		t.Fatalf("durable denial = %+v, error = %v", request, loadErr)
 	}
 }
 

@@ -3,8 +3,6 @@ package github
 import (
 	"bytes"
 	"context"
-	"database/sql"
-	"errors"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,7 +32,7 @@ func (s *Service) executeCIRunDispatchFallback(
 	if strings.TrimSpace(verified.PR.HeadBranch) == "" {
 		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
 	}
-	inputs, ok := reviewedWorkflowDispatchInputs(verified.Workflow.Path)
+	_, ok := reviewedWorkflowDispatchInputs(verified.Workflow.Path)
 	if !ok {
 		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
 	}
@@ -65,48 +63,18 @@ func (s *Service) executeCIRunDispatchFallback(
 		return s.handleCIRunPreflightError(ctx, request, err)
 	}
 	request.ProviderRunWatermark = maxCIRunID(baseline)
-	// Re-read the PR after all workflow and watermark reads. Dispatch accepts
-	// only a mutable branch ref, so no earlier head check is sufficient.
-	latestBinding, latestPR, err = s.revalidateCIRunAdmission(ctx, client, request)
-	if err != nil || latestPR.HeadBranch != verified.PR.HeadBranch {
+	_, finalPR, err := s.revalidateCIRunAdmission(ctx, client, request)
+	if err != nil || finalPR.HeadBranch != verified.PR.HeadBranch {
 		if err != nil {
 			return s.failCIRunAdmission(ctx, request, err)
 		}
 		return s.failCIRunRequest(ctx, request, CIRunFailureHeadDrift)
 	}
-	return s.sendCIRunDispatch(ctx, client, latestBinding, request, verified, inputs)
-}
+	// GitHub accepts only mutable branch or tag names for workflow dispatch. It
+	// provides no conditional-ref form that binds the mutation to ExpectedHeadSHA.
+	// A preflight branch read cannot close the interval before the provider call.
+	return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
 
-func (s *Service) sendCIRunDispatch(
-	ctx context.Context,
-	client ciRunActionsClient,
-	binding *ciRunBinding,
-	request *CIRunRequest,
-	verified *verifiedCIRun,
-	inputs map[string]string,
-) (*CIRunReceipt, error) {
-	dispatchStartedAt := s.ciRunClock()().UTC()
-	request.ProviderURL = ciRunDispatchProviderURL(binding.Owner, binding.Repo, verified.Workflow.ID)
-	if err := s.store.MarkCIRunProviderCallStartedWithAudit(ctx, request, dispatchStartedAt,
-		s.newCIRunAuditEvent(request, "provider_started", "")); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return s.handleCIRunProviderStartConflict(ctx, client, request)
-		}
-		return nil, err
-	}
-	request.ProviderCallStartedAt = &dispatchStartedAt
-	// A commit SHA is immutable, so a branch move after the final admission read
-	// cannot change the workflow or revision GitHub dispatches.
-	metadata, err := dispatchCIRunWorkflow(ctx, client, binding.Owner, binding.Repo,
-		verified.Workflow.ID, request.ExpectedHeadSHA, inputs)
-	applyCIRunProviderMetadata(request, metadata, err)
-	if err != nil {
-		return s.handleCIRunMutationError(ctx, request, err)
-	}
-	if metadata.RunID > 0 {
-		return s.reconcileReturnedCIRun(ctx, client, binding, request, verified, metadata.RunID)
-	}
-	return s.reconcileCIRunRequest(ctx, client, binding, request, verified)
 }
 
 func maxCIRunID(runs []GitHubActionsRun) int64 {

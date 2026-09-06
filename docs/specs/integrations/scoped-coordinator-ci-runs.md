@@ -40,12 +40,10 @@ Its repository-scoped installation token must report Actions write permission;
 PAT, CLI, App-user, legacy, and raw credential paths are forbidden.
 
 The backend reruns failed jobs of the named source attempt first. If GitHub says
-that run cannot be rerun, `workflow_dispatch` is allowed only for a same-repo
-`pr_head` request whose trusted source workflow has `workflow_dispatch` and
-whose workflow belongs to the base repository. Kandev supplies the verified
-head branch and reviewed fixed inputs, and requires the workflow file at that
-mutable head ref to byte-match the trusted base-branch copy. Fork dispatch is
-denied. `current_merge`
+that run cannot be rerun, it fails closed with `dispatch_ref_unavailable`.
+GitHub workflow dispatch accepts only mutable branch or tag refs and exposes no
+conditional immutable-ref operation, so Kandev cannot bind a dispatch to the
+reviewed PR head safely. Fork dispatch is denied. `current_merge`
 fails with `merge_evidence_unavailable` until the provider exposes verifiable
 runtime merge-SHA evidence; Kandev never fabricates a merge-ref check.
 
@@ -107,9 +105,10 @@ coordinators, and other workspaces cannot use it.
 
 ## Acceptance fixtures
 
-- Linked unchanged same-repository PR: rerun eligible and rerun ineligible with
-  reviewed `workflow_dispatch` fallback.
-- Linked unchanged fork PR: rerun eligible; dispatch fallback denied.
+- Linked unchanged same-repository PR: rerun eligible; rerun-ineligible returns
+  `dispatch_ref_unavailable` without provider dispatch.
+- Linked unchanged fork PR: rerun eligible; rerun-ineligible returns
+  `fork_dispatch_disallowed`.
 - Empty Actions `pull_requests` association: exact base/head tuple succeeds.
 - Head drift, unlinked PR, stale source attempt, cross-workspace target,
   disallowed workflow/input, wrong step, and missing grant fail before a write.

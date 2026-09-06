@@ -575,25 +575,6 @@ func (s *Service) reconcileCIRunRequest(
 	return s.completeCIRunAmbiguous(ctx, request)
 }
 
-func (s *Service) reconcileReturnedCIRun(
-	ctx context.Context,
-	client ciRunActionsClient,
-	binding *ciRunBinding,
-	request *CIRunRequest,
-	verified *verifiedCIRun,
-	runID int64,
-) (*CIRunReceipt, error) {
-	run, err := client.GetActionsRun(ctx, binding.Owner, binding.Repo, runID)
-	if err != nil {
-		return s.handleCIRunReconciliationReadError(ctx, request, err)
-	}
-	if !reconciledCIRunMatches(run, request.ProviderWorkflowID, request) {
-		return s.completeCIRunAmbiguous(ctx, request)
-	}
-	verified.Run = run
-	return s.completeCIRunSuccess(ctx, request, verified, run.ID, run.Attempt, request.Operation)
-}
-
 func (s *Service) completeCIRunAmbiguous(
 	ctx context.Context, request *CIRunRequest,
 ) (*CIRunReceipt, error) {
