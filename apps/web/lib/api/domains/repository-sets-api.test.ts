@@ -76,6 +76,25 @@ describe("repository set API client", () => {
     });
   });
 
+  it("posts ordered repository members with their saved bases", async () => {
+    await createRepositorySet("ws-1", {
+      name: "Release",
+      repositories: [
+        { repositoryId: REPO_GATEWAY, baseBranch: "develop" },
+        { repositoryId: REPO_WEB },
+      ],
+    });
+
+    expect(bodyOf(calls[0])).toEqual({
+      name: "Release",
+      description: "",
+      repositories: [
+        { repository_id: REPO_GATEWAY, base_branch: "develop" },
+        { repository_id: REPO_WEB, base_branch: "" },
+      ],
+    });
+  });
+
   it("patches the flat item route and omits fields the caller left out", async () => {
     await updateRepositorySet(SET_ID, { name: "Renamed" });
 
@@ -96,6 +115,16 @@ describe("repository set API client", () => {
     await updateRepositorySet(SET_ID, { description: "" });
 
     expect(bodyOf(calls[0])).toEqual({ description: "" });
+  });
+
+  it("patches ordered repository members with their saved bases", async () => {
+    await updateRepositorySet(SET_ID, {
+      repositories: [{ repositoryId: REPO_WEB, baseBranch: "develop" }],
+    });
+
+    expect(bodyOf(calls[0])).toEqual({
+      repositories: [{ repository_id: REPO_WEB, base_branch: "develop" }],
+    });
   });
 
   it("deletes the flat item route", async () => {

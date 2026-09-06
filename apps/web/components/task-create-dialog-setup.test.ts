@@ -2,6 +2,7 @@ import { renderHook } from "@testing-library/react";
 import type { FormEvent } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
+import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
@@ -146,7 +147,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useSessionRepoName: () => null,
 }));
 
-import { useTaskCreateDialogSetup } from "./task-create-dialog-setup";
+import { hasUnavailableSavedBase, useTaskCreateDialogSetup } from "./task-create-dialog-setup";
 
 const props: TaskCreateDialogProps = {
   open: true,
@@ -206,4 +207,26 @@ describe("compatibility submit guard", () => {
       expect(mocks.submit).not.toHaveBeenCalled();
     },
   );
+});
+
+it("validates saved bases against qualified branch option values", () => {
+  const repositoryBranches = {
+    itemsByRepositoryId: {
+      "repo-1": [{ name: "main", type: "remote", remote: "origin" }],
+    },
+    loadedByRepositoryId: { "repo-1": true },
+  } as unknown as RepositoryBranchesState;
+
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "main" }],
+      repositoryBranches,
+    ),
+  ).toBe(true);
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "origin/main" }],
+      repositoryBranches,
+    ),
+  ).toBe(false);
 });

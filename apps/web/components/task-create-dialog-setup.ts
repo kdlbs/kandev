@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { Repository } from "@/lib/types/http";
+import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
+import { branchOptionValue } from "@/components/branch-picker-options";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
@@ -126,10 +128,6 @@ function useEditDialogDependencies(
   });
 }
 
-function isFreshBranchAvailable(fs: DialogFormState, isLocalExecutor: boolean): boolean {
-  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
-}
-
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
@@ -230,6 +228,65 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
   return "";
 }
 
+function resolveDialogMode(
+  mode: TaskCreateDialogProps["mode"],
+  editingTask: TaskCreateDialogProps["editingTask"],
+) {
+  const isSessionMode = mode === "session";
+  const isEditMode = mode === "edit";
+  return {
+    isSessionMode,
+    isEditMode,
+    isTaskStarted: computeIsTaskStarted(isEditMode, editingTask),
+  };
+}
+
+function canUseFreshBranch(fs: DialogFormState, isLocalExecutor: boolean): boolean {
+  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+}
+
+export function hasUnavailableSavedBase(
+  rows: DialogFormState["repositories"],
+  repositoryBranches: RepositoryBranchesState,
+): boolean {
+  return rows.some((row) => {
+    if (!row.repositoryId || !row.baseBranch) return false;
+    if (!repositoryBranches.loadedByRepositoryId[row.repositoryId]) return false;
+    const branches = repositoryBranches.itemsByRepositoryId[row.repositoryId] ?? [];
+    return !branches.some((branch) => branchOptionValue(branch) === row.baseBranch);
+  });
+}
+
+function hasPendingSavedBaseValidation(
+  rows: DialogFormState["repositories"],
+  repositoryBranches: RepositoryBranchesState,
+): boolean {
+  return rows.some(
+    (row) =>
+      Boolean(row.repositoryId && row.baseBranch) &&
+      !repositoryBranches.loadedByRepositoryId[row.repositoryId as string],
+  );
+}
+
+function savedBaseSubmitBlockedReason(
+  hasPendingValidation: boolean,
+  hasUnavailableBase: boolean,
+): string | null {
+  if (hasPendingValidation) return t("task:loadingBranches2");
+  if (hasUnavailableBase) return t("task:repositorySetBaseUnavailable");
+  return null;
+}
+
+function savedBaseSubmitBlockedReasonForRows(
+  rows: DialogFormState["repositories"],
+  repositoryBranches: RepositoryBranchesState,
+): string | null {
+  return savedBaseSubmitBlockedReason(
+    hasPendingSavedBaseValidation(rows, repositoryBranches),
+    hasUnavailableSavedBase(rows, repositoryBranches),
+  );
+}
+
 function useDialogSetupData(
   props: TaskCreateDialogProps,
   fs: ReturnType<typeof useDialogFormState>,
@@ -238,6 +295,7 @@ function useDialogSetupData(
   const { toast } = useToast();
   const storeApi = useAppStoreApi();
   const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
+  const repositoryBranches = useAppStore((state) => state.repositoryBranches);
   const setRepositoryBranchPolicies = useAppStore((state) => state.setRepositoryBranchPolicies);
   const setRepositoryBranchPoliciesLoading = useAppStore(
     (state) => state.setRepositoryBranchPoliciesLoading,
@@ -290,6 +348,10 @@ function useDialogSetupData(
     executors,
     upsertWorkspaceRepository,
   });
+  const savedBaseSubmitBlockedReasonValue = savedBaseSubmitBlockedReasonForRows(
+    fs.repositories,
+    repositoryBranches,
+  );
   const refreshBranchPolicies = useCallback(async () => {
     const repositoryIds = [
       ...new Set(
@@ -323,6 +385,7 @@ function useDialogSetupData(
     handlers,
     refreshBranchPolicies,
     repositoryLocalPath: resolveSingleRowLocalPath(fs, repositories),
+    savedBaseSubmitBlockedReason: savedBaseSubmitBlockedReasonValue,
   };
 }
 
@@ -339,9 +402,7 @@ export function useTaskCreateDialogSetup(
     editingTask,
     initialValues,
   } = resolvedProps;
-  const isSessionMode = mode === "session";
-  const isEditMode = mode === "edit";
-  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
+  const { isSessionMode, isEditMode, isTaskStarted } = resolveDialogMode(mode, editingTask);
   const agentGeneratedTaskTitles = useAppStore(
     (state) => state.userSettings.agentGeneratedTaskTitles,
   );
@@ -361,7 +422,14 @@ export function useTaskCreateDialogSetup(
   );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const { computed, handlers, repositoryLocalPath, refreshBranchPolicies } = data;
+  const {
+    repositories,
+    userSettingsLoaded,
+    computed,
+    repositoryLocalPath,
+    refreshBranchPolicies,
+    savedBaseSubmitBlockedReason,
+  } = data;
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -377,7 +445,7 @@ export function useTaskCreateDialogSetup(
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
-    resolvedProps.submitBlockedReason,
+    resolvedProps.submitBlockedReason ?? savedBaseSubmitBlockedReason,
     !isTaskStarted && computed.noCompatibleAgent,
   );
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
@@ -386,16 +454,14 @@ export function useTaskCreateDialogSetup(
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
-  const freshBranchAvailable = isFreshBranchAvailable(fs, computed.isLocalExecutor);
-  const repositorySets = useRepositorySetsForDialog({
-    workspaceId: resolvedProps.workspaceId ?? null,
-    open: resolvedProps.open,
-    rows: fs.repositories,
-    repositories: data.repositories,
-    setRepositories: fs.setRepositories,
-    setRepositoriesDirty: fs.setRepositoriesDirty,
-    userSettingsLoaded: data.userSettingsLoaded,
-  });
+  const freshBranchAvailable = canUseFreshBranch(fs, computed.isLocalExecutor);
+  const repositorySets = useDialogRepositorySets(
+    resolvedProps,
+    fs,
+    repositories,
+    computed,
+    userSettingsLoaded,
+  );
   return {
     ...data,
     fs,
@@ -406,7 +472,6 @@ export function useTaskCreateDialogSetup(
     isTaskStarted,
     sessionRepoName,
     computed,
-    handlers,
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
@@ -416,7 +481,28 @@ export function useTaskCreateDialogSetup(
     handleJiraImport,
     handleLinearImport,
     editDependencies,
+    savedBaseSubmitBlockedReason,
   };
+}
+
+function useDialogRepositorySets(
+  resolvedProps: TaskCreateDialogProps,
+  fs: DialogFormState,
+  repositories: Repository[],
+  computed: ReturnType<typeof useTaskCreateDialogData>["computed"],
+  userSettingsLoaded: boolean,
+) {
+  return useRepositorySetsForDialog({
+    workspaceId: resolvedProps.workspaceId ?? null,
+    open: resolvedProps.open,
+    rows: fs.repositories,
+    repositories,
+    setRepositories: fs.setRepositories,
+    setRepositoriesDirty: fs.setRepositoriesDirty,
+    userSettingsLoaded,
+    isLocalExecutor: computed.isLocalExecutor,
+    freshBranchEnabled: fs.freshBranchEnabled,
+  });
 }
 
 type RepositorySetsForDialogArgs = {
@@ -427,6 +513,8 @@ type RepositorySetsForDialogArgs = {
   setRepositories: DialogFormState["setRepositories"];
   setRepositoriesDirty: DialogFormState["setRepositoriesDirty"];
   userSettingsLoaded: boolean;
+  isLocalExecutor: boolean;
+  freshBranchEnabled: boolean;
 };
 
 /**
@@ -445,6 +533,8 @@ function useRepositorySetsForDialog({
   setRepositories,
   setRepositoriesDirty,
   userSettingsLoaded,
+  isLocalExecutor,
+  freshBranchEnabled,
 }: RepositorySetsForDialogArgs) {
   const { sets } = useRepositorySets(workspaceId, open);
   const onApply = useApplyRepositorySet({
@@ -462,7 +552,17 @@ function useRepositorySetsForDialog({
     sets,
     onApply,
     save:
-      canSave && workspaceId ? { workspaceId, rows, open: saveOpen, setOpen: setSaveOpen } : null,
+      canSave && workspaceId
+        ? {
+            workspaceId,
+            rows,
+            repositories,
+            isLocalExecutor,
+            freshBranchEnabled,
+            open: saveOpen,
+            setOpen: setSaveOpen,
+          }
+        : null,
   };
 }
 

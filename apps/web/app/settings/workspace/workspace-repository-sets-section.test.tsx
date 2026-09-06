@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
@@ -9,6 +10,7 @@ const REPO_GATEWAY = "repo-gateway";
 const FULL_STACK = "Full-stack";
 const BACKEND = "Backend";
 const NAME_INPUT = "repository-set-editor-name";
+const ADD_REPOSITORY = "repository-set-add-repository";
 const SAVE = "repository-set-editor-save";
 const SET_ROW = "repository-set-row";
 const CREATE = "repository-set-create";
@@ -38,7 +40,19 @@ vi.mock("@/hooks/domains/workspace/use-repository-sets", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer, isMobile: !finePointer }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
+  useBranches: () => ({
+    branches: [
+      { name: "main", type: "local", remote: "" },
+      { name: "develop", type: "local", remote: "" },
+    ],
+    isLoaded: true,
+    isLoading: false,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -55,7 +69,12 @@ function repository(id: string): Repository {
 
 const AVAILABLE = [repository(REPO_WEB), repository(REPO_GATEWAY)];
 
-function repositorySet(id: string, name: string, ids: string[]): RepositorySet {
+function repositorySet(
+  id: string,
+  name: string,
+  ids: string[],
+  bases: string[] = [],
+): RepositorySet {
   return {
     id,
     workspace_id: workspaceId("ws-1"),
@@ -64,6 +83,7 @@ function repositorySet(id: string, name: string, ids: string[]): RepositorySet {
     repositories: ids.map((member, position) => ({
       repository_id: repositoryId(member),
       position,
+      ...(bases[position] ? { base_branch: bases[position] } : {}),
     })),
     created_at: "2026-08-17T09:00:00Z",
     updated_at: "2026-08-17T09:00:00Z",
@@ -72,11 +92,13 @@ function repositorySet(id: string, name: string, ids: string[]): RepositorySet {
 
 function renderSection(options: { readOnly?: boolean } = {}) {
   render(
-    <WorkspaceRepositorySetsSection
-      workspaceId="ws-1"
-      repositories={AVAILABLE}
-      readOnly={options.readOnly ?? false}
-    />,
+    <TooltipProvider>
+      <WorkspaceRepositorySetsSection
+        workspaceId="ws-1"
+        repositories={AVAILABLE}
+        readOnly={options.readOnly ?? false}
+      />
+    </TooltipProvider>,
   );
 }
 
@@ -102,6 +124,15 @@ describe("WorkspaceRepositorySetsSection", () => {
     expect(rows[0].textContent).toContain(REPO_GATEWAY);
   });
 
+  it("shows a saved base branch in the set summary", () => {
+    mockSets = [repositorySet("set-1", FULL_STACK, [REPO_WEB], ["develop"])];
+    renderSection();
+
+    expect(screen.getByTestId(`repository-set-member-base-${REPO_WEB}`).textContent).toContain(
+      "develop",
+    );
+  });
+
   it("says so when the workspace has no sets yet", () => {
     mockSets = [];
     renderSection();
@@ -115,14 +146,15 @@ describe("WorkspaceRepositorySetsSection", () => {
 
     fireEvent.click(screen.getByTestId(CREATE));
     fireEvent.change(screen.getByTestId(NAME_INPUT), { target: { value: "Backend" } });
-    fireEvent.click(screen.getByTestId(`repository-set-member-${REPO_GATEWAY}`));
+    fireEvent.click(screen.getByTestId(ADD_REPOSITORY));
+    fireEvent.click(screen.getByRole("option", { name: REPO_GATEWAY }));
     fireEvent.click(screen.getByTestId(SAVE));
 
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
     expect(mockCreate).toHaveBeenCalledWith("ws-1", {
       name: "Backend",
       description: "",
-      repositoryIds: [REPO_GATEWAY],
+      repositories: [{ repositoryId: REPO_GATEWAY, baseBranch: "" }],
     });
     expect(mockUpsert).toHaveBeenCalledWith(
       "ws-1",
@@ -140,23 +172,64 @@ describe("WorkspaceRepositorySetsSection", () => {
     // A named set with no member is still not saveable: the API requires one.
     expect((screen.getByTestId(SAVE) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByTestId(`repository-set-member-${REPO_GATEWAY}`));
+    fireEvent.click(screen.getByTestId(ADD_REPOSITORY));
+    fireEvent.click(screen.getByRole("option", { name: REPO_GATEWAY }));
     expect((screen.getByTestId(SAVE) as HTMLButtonElement).disabled).toBe(false);
   });
+});
 
+describe("WorkspaceRepositorySetsSection member editing", () => {
   it("edits an existing set, replacing its whole membership", async () => {
     renderSection();
 
     fireEvent.click(screen.getByTestId("repository-set-edit-set-1"));
     // Deselect one member, leaving repo-web.
-    fireEvent.click(screen.getByTestId(`repository-set-member-${REPO_GATEWAY}`));
+    fireEvent.click(screen.getByTestId(`repository-set-remove-${REPO_GATEWAY}`));
     fireEvent.click(screen.getByTestId(SAVE));
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     expect(mockUpdate).toHaveBeenCalledWith("set-1", {
       name: FULL_STACK,
       description: "",
-      repositoryIds: [REPO_WEB],
+      repositories: [{ repositoryId: REPO_WEB, baseBranch: "" }],
+    });
+  });
+
+  it("saves a selected base branch and can reset it to the task default", async () => {
+    renderSection();
+
+    fireEvent.click(screen.getByTestId(CREATE));
+    fireEvent.change(screen.getByTestId(NAME_INPUT), { target: { value: BACKEND } });
+    fireEvent.click(screen.getByTestId(ADD_REPOSITORY));
+    fireEvent.click(screen.getByRole("option", { name: REPO_GATEWAY }));
+    fireEvent.click(screen.getByTestId(`repository-set-base-${REPO_GATEWAY}`));
+    const develop = screen
+      .getAllByRole("option")
+      .find((option) => option.textContent?.includes("develop"));
+    expect(develop).toBeDefined();
+    fireEvent.click(develop!);
+
+    expect((screen.getByTestId("repository-set-reset-bases") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByTestId("repository-set-reset-bases"));
+    expect((screen.getByTestId("repository-set-reset-bases") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByTestId(`repository-set-base-${REPO_GATEWAY}`));
+    const developAgain = screen
+      .getAllByRole("option")
+      .find((option) => option.textContent?.includes("develop"));
+    expect(developAgain).toBeDefined();
+    fireEvent.click(developAgain!);
+    fireEvent.click(screen.getByTestId(SAVE));
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    expect(mockCreate).toHaveBeenCalledWith("ws-1", {
+      name: BACKEND,
+      description: "",
+      repositories: [{ repositoryId: REPO_GATEWAY, baseBranch: "develop" }],
     });
   });
 
@@ -169,7 +242,8 @@ describe("WorkspaceRepositorySetsSection", () => {
 
     fireEvent.click(screen.getByTestId(CREATE));
     fireEvent.change(screen.getByTestId(NAME_INPUT), { target: { value: FULL_STACK } });
-    fireEvent.click(screen.getByTestId(`repository-set-member-${REPO_WEB}`));
+    fireEvent.click(screen.getByTestId(ADD_REPOSITORY));
+    fireEvent.click(screen.getByRole("option", { name: REPO_WEB }));
     fireEvent.click(screen.getByTestId(SAVE));
 
     await waitFor(() => expect(screen.queryByTestId("repository-set-editor-error")).not.toBeNull());

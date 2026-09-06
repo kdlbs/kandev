@@ -867,19 +867,30 @@ export class ApiClient {
   }
 
   /**
-   * Creates a repository set. `repositoryIds` is ordered and is the order the set
-   * fills the task-creation picker.
+   * Creates a repository set. The member list is ordered and is the order the
+   * set fills the task-creation picker. String ids keep the compatibility
+   * payload available for older scenarios; member objects exercise saved bases.
    */
   async createRepositorySet(
     workspaceId: string,
     name: string,
-    repositoryIds: string[],
+    repositoryIds: string[] | Array<{ repositoryId: string; baseBranch?: string }>,
     description = "",
   ): Promise<{ id: string; name: string }> {
+    const members = repositoryIds.filter(
+      (entry): entry is { repositoryId: string; baseBranch?: string } => typeof entry !== "string",
+    );
     return this.request("POST", `/api/v1/workspaces/${workspaceId}/repository-sets`, {
       name,
       description,
-      repository_ids: repositoryIds,
+      ...(members.length === repositoryIds.length
+        ? {
+            repositories: members.map((member) => ({
+              repository_id: member.repositoryId,
+              base_branch: member.baseBranch ?? "",
+            })),
+          }
+        : { repository_ids: repositoryIds }),
     });
   }
 
@@ -938,7 +949,7 @@ export class ApiClient {
       id: string;
       name: string;
       description: string;
-      repositories: Array<{ repository_id: string; position: number }>;
+      repositories: Array<{ repository_id: string; position: number; base_branch?: string }>;
     }>;
     total: number;
   }> {

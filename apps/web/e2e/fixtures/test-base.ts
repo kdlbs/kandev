@@ -513,14 +513,14 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   });
 }
 
-/** Restores the shared seed checkout to its clean main branch. */
+/** Restores the shared seed checkout to the immutable fixture origin/main baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
   const env = makeGitEnv(tmpDir);
   execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
     env,
     stdio: "ignore",
   });
-  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
+  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "origin/main"], {
     env,
     stdio: "ignore",
   });

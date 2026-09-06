@@ -21,7 +21,7 @@ function payload(overrides: Record<string, unknown> = {}) {
     description: "web + gateway",
     repositories: [
       { repository_id: "repo-web", position: 0 },
-      { repository_id: "repo-gateway", position: 1 },
+      { repository_id: "repo-gateway", position: 1, base_branch: "develop" },
     ],
     created_at: "2026-08-17T09:00:00Z",
     updated_at: "2026-08-17T09:00:00Z",
@@ -63,6 +63,7 @@ describe("repository_set WebSocket handlers", () => {
       "repo-web",
       "repo-gateway",
     ]);
+    expect(sets[0].repositories[1].base_branch).toBe("develop");
   });
 
   it("updated replaces the existing set rather than adding a second copy", () => {
