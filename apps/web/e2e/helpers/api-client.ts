@@ -259,6 +259,7 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "priority", options.priority);
   setIf(body, "agent_profile_id", options.agent_profile_id);
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
@@ -529,6 +530,12 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { title });
   }
 
+  /** Change a task's priority via the same PATCH path the priority-picker
+   *  uses, so the update travels over `task.updated` WS to an open board. */
+  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
+  }
+
   /** Replace a task's metadata via the same PATCH path a real orchestrator
    *  mutation would use, so the update travels over `task.updated` WS to any
    *  page that already has the task open, instead of only landing in the next
@@ -536,11 +543,6 @@ export class ApiClient {
    *  desired object. */
   async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
-  }
-
-  /** Simulates a REST API caller (or another browser client) setting priority. */
-  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
-    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
@@ -1207,6 +1209,8 @@ export class ApiClient {
     workflow_ids_with_auto_hide_empty_steps?: string[];
     sidebar_task_color_automation?: SidebarTaskColorAutomation;
     sidebar_task_color_patch?: SidebarTaskColorPatchApi;
+    kanban_sort?: string;
+    kanban_priority_filter_tokens?: string[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }

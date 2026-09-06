@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -450,6 +451,73 @@ func TestUpdateUserSettingsSameValuePatchIsNoop(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRejectsInvalidKanbanSort verifies an invalid kanban_sort is rejected
+// without an upsert, and that a valid sibling field in the same request is not applied either
+// (whole-request rejection, distinguishing this enum field from the priority-filter list field).
+func TestUpdateUserSettingsRejectsInvalidKanbanSort(t *testing.T) {
+	repo := &recordingUserRepository{getSettings: &models.UserSettings{UserID: store.DefaultUserID}}
+	eventBus := &recordingEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	_, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		KanbanSort:    ptr("bogus"),
+		RepositoryIDs: ptr([]string{"repo-1"}),
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 0 {
+		t.Fatalf("expected no upsert on validation failure, got %d", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+}
+
+// TestUpdateUserSettingsAppliesKanbanSortAndDropsInvalidPriorityFilterMember is an end-to-end
+// (service-layer) version of the R5-F1 regression test: an invalid priority-filter member does
+// not block the rest of the request, and the published event carries the normalized values.
+func TestUpdateUserSettingsAppliesKanbanSortAndDropsInvalidPriorityFilterMember(t *testing.T) {
+	updated := &models.UserSettings{
+		UserID:                     store.DefaultUserID,
+		KanbanSort:                 "priority_desc",
+		KanbanPriorityFilterTokens: []string{"critical", "low"},
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updated,
+	}
+	eventBus := &recordingEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	got, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		KanbanSort:                 ptr("priority_desc"),
+		KanbanPriorityFilterTokens: ptr([]string{"low", "urgent", "critical"}),
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if got.KanbanSort != "priority_desc" {
+		t.Fatalf("KanbanSort = %q, want priority_desc", got.KanbanSort)
+	}
+	if !reflect.DeepEqual(got.KanbanPriorityFilterTokens, []string{"critical", "low"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical low]", got.KanbanPriorityFilterTokens)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("upserts = %d, want 1", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["kanban_sort"]; got != "priority_desc" {
+		t.Fatalf("event kanban_sort = %#v, want priority_desc", got)
+	}
+	if got := eventData["kanban_priority_filter_tokens"]; !reflect.DeepEqual(got, []string{"critical", "low"}) {
+		t.Fatalf("event kanban_priority_filter_tokens = %#v, want [critical low]", got)
+	}
+}
+
 // TestUpdateUserSettingsCASExhaustionWrapsConflict verifies callers can
 // distinguish a bounded retry exhaustion from an unexpected storage failure.
 func TestUpdateUserSettingsCASExhaustionWrapsConflict(t *testing.T) {
@@ -514,6 +582,64 @@ func TestConcurrentPatchMergesLastSeenDisplay(t *testing.T) {
 	}
 	if !row.AppStatusBarEnabled {
 		t.Fatal("final AppStatusBarEnabled = false, want true")
+	}
+	if row.Revision != 2 {
+		t.Fatalf("final revision = %d, want 2", row.Revision)
+	}
+	if got := eventBus.count(); got != 2 {
+		t.Fatalf("events = %d, want 2", got)
+	}
+	assertOneStaleConflictAndRetry(t, repo)
+}
+
+// TestConcurrentKanbanSortAndPriorityFilterTokensPatchMerge verifies AC-004.5's convergence-by-
+// commit-order requirement for the two new fields: two concurrent PATCHes, one to kanban_sort and
+// one to kanban_priority_filter_tokens, both commit via a single CAS retry, and a third settings
+// field (tasks_list_sort) outside either payload survives the concurrent write untouched.
+func TestConcurrentKanbanSortAndPriorityFilterTokensPatchMerge(t *testing.T) {
+	repo := newCASFakeRepo(&models.UserSettings{
+		UserID:                     store.DefaultUserID,
+		KanbanSort:                 models.KanbanSortCreatedDesc,
+		KanbanPriorityFilterTokens: []string{},
+		TasksListSort:              "title_asc",
+	})
+	repo.readDone = make(chan struct{}, 4)
+	repo.blockUpsert = make(chan struct{})
+	eventBus := &casEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := svc.UpdateUserSettings(ctx, &UpdateUserSettingsRequest{KanbanSort: ptr(models.KanbanSortPriorityDesc)}); err != nil {
+			t.Errorf("kanban_sort patch: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := svc.UpdateUserSettings(ctx, &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr([]string{"critical", "high"})}); err != nil {
+			t.Errorf("kanban_priority_filter_tokens patch: %v", err)
+		}
+	}()
+
+	// Barrier: both initial reads must observe the same revision before either
+	// write commits, so one stale upsert is forced to conflict and retry.
+	<-repo.readDone
+	<-repo.readDone
+	close(repo.blockUpsert)
+	wg.Wait()
+
+	row := repo.snapshot()
+	if row.KanbanSort != models.KanbanSortPriorityDesc {
+		t.Fatalf("final KanbanSort = %q, want %q", row.KanbanSort, models.KanbanSortPriorityDesc)
+	}
+	if !reflect.DeepEqual(row.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+		t.Fatalf("final KanbanPriorityFilterTokens = %#v, want [critical high]", row.KanbanPriorityFilterTokens)
+	}
+	if row.TasksListSort != "title_asc" {
+		t.Fatalf("final TasksListSort = %q, want unchanged title_asc (outside either concurrent payload)", row.TasksListSort)
 	}
 	if row.Revision != 2 {
 		t.Fatalf("final revision = %d, want 2", row.Revision)

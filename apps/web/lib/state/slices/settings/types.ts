@@ -22,6 +22,8 @@ import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import type {
@@ -460,6 +462,8 @@ export type UserSettingsState = {
   quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps: string[];
+  kanbanSort: KanbanSort;
+  kanbanPriorityFilterTokens: TaskPriority[];
   loaded: boolean;
 };
 

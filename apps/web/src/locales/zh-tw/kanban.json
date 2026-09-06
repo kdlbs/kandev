@@ -115,5 +115,9 @@
   "noWorkflowsAvailableYet": "暫無可用的工作流程。",
   "pullToRefreshPull": "下拉重新整理",
   "pullToRefreshRefreshing": "正在重新整理任務",
-  "pullToRefreshRelease": "鬆開即可重新整理"
+  "pullToRefreshRelease": "鬆開即可重新整理",
+  "boardSort": "看板排序",
+  "boardSortCreatedDesc": "最新優先",
+  "boardSortPriorityDesc": "優先順序",
+  "priorityFilter": "優先順序篩選"
 }
