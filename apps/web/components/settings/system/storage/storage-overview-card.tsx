@@ -5,7 +5,12 @@ import { Spinner } from "@kandev/ui/spinner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { formatDateTime, formatRelative, formatRelativeTime } from "@/lib/i18n/formats";
+import {
+  formatDateTime,
+  formatNumber,
+  formatRelative,
+  formatRelativeTime,
+} from "@/lib/i18n/formats";
 import type {
   StorageMaintenanceSettings,
   StorageOverviewResponse,
@@ -137,7 +142,12 @@ function formatScanDuration(t: Translate, milliseconds: number): string {
     return t("system:storageAnalysisDurationMinutes", { value: Math.round(value / 60_000) });
   }
   if (value >= 1_000) {
-    return t("system:storageAnalysisDurationSeconds", { value: (value / 1_000).toFixed(1) });
+    return t("system:storageAnalysisDurationSeconds", {
+      value: formatNumber(value / 1_000, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }),
+    });
   }
   return t("system:storageAnalysisDurationMilliseconds", { value });
 }

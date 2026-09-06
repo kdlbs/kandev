@@ -308,13 +308,33 @@ func (o *storageOverview) summary(
 		reporter.complete(storagepkg.StorageSourceTemporaryArtifacts, tempSummary, nil)
 	}
 	measurements.Wait()
+	if err := ctx.Err(); err != nil {
+		return storagepkg.Summary{}, err
+	}
+	return summaryFromMeasurements(
+		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
+		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
+	), nil
+}
+
+func summaryFromMeasurements(
+	workspaceSummary workspaces.Analysis,
+	workspaceErr error,
+	goCacheSummary gocache.Analysis,
+	goCacheErr error,
+	quarantineSummary storagepkg.QuarantineSummary,
+	quarantineErr error,
+	tempSummary tempartifacts.Analysis,
+	tempErr error,
+	dockerSummary dockerstore.Analysis,
+) storagepkg.Summary {
 	return storagepkg.Summary{
 		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
 		GoCache:            summaryValue(goCacheSummary, goCacheErr),
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
-	}, nil
+	}
 }
 
 type workspaceProgressAnalyzer interface {

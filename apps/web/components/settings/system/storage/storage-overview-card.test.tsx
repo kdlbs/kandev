@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDateTime } from "@/lib/i18n/formats";
+import { activateLocale } from "@/lib/i18n";
 import type { StorageAnalysisState, StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
 
@@ -309,5 +310,32 @@ describe("StorageOverviewCard refresh and policy state", () => {
     expect(tooltip.textContent).toContain("Scan duration: 1 min");
     expect(tooltip.textContent).toContain("Cache lifetime: 15 min");
     expect(tooltip.textContent).toContain("Analyze refreshes this data immediately");
+  });
+});
+
+describe("StorageOverviewCard localized timing", () => {
+  it("uses the active locale's decimal separator for fractional seconds", async () => {
+    await activateLocale("pt-pt");
+    try {
+      const overview = {
+        ...degradedOverview,
+        analysis: { ...degradedOverview.analysis, duration_ms: 1_234 },
+      } satisfies StorageOverviewResponse;
+
+      render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />, {
+        wrapper: TooltipProvider,
+      });
+
+      fireEvent.click(screen.getByTestId("storage-analysis-timing-help"));
+      const tooltip = screen.getByRole("tooltip");
+      const localizedSeconds = new Intl.NumberFormat("pt-pt", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }).format(1.234);
+      expect(tooltip.textContent).toContain(localizedSeconds);
+      expect(tooltip.textContent).not.toContain("1.2");
+    } finally {
+      await activateLocale("en");
+    }
   });
 });
