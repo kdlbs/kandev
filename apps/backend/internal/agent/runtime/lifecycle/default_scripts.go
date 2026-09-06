@@ -1,6 +1,16 @@
 package lifecycle
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 const executorTypeSSH = "ssh"
+
+// This hash identifies the built-in Sprites script that shipped before the
+// in-place, full-history materialization flow. Upgrade only that exact value;
+// user-authored prepare scripts must remain unchanged.
+const legacySpritesPrepareScriptSHA256 = "e656f9e51496e1bb1e5cee205058bbeaa7fe1ab37073f600e6c94310ead7be4d"
 
 // DefaultPrepareScript returns the default prepare script for a given executor type string.
 func DefaultPrepareScript(executorType string) string {
@@ -20,6 +30,11 @@ func DefaultPrepareScript(executorType string) string {
 	default:
 		return ""
 	}
+}
+
+func isLegacySpritesPrepareScript(script string) bool {
+	digest := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(digest[:]) == legacySpritesPrepareScriptSHA256
 }
 
 // KandevBranchCheckoutPostlude returns a kandev-managed shell snippet that
@@ -57,17 +72,25 @@ func KandevBranchCheckoutPostlude() string {
 # quoted literal that cannot inject commands. Do NOT wrap these in double
 # quotes — double quotes would re-expose $(...) command substitution. Do NOT
 # assume they are unquoted data either; the value carries its own quoting.
+#
+# Keep the complete commit graph so diff and rebase operations have a common
+# ancestor.
+worktree_branch={{worktree.branch}}
+repository_branch={{repository.branch}}
 (
   if [ -d {{workspace.path}}/.git ] \
-     && [ -n {{worktree.branch}} ] \
-     && [ {{worktree.branch}} != {{repository.branch}} ]; then
+     && [ -n "$worktree_branch" ] \
+     && [ "$worktree_branch" != "$repository_branch" ]; then
     cd {{workspace.path}} || exit 0
-    if git rev-parse --verify {{worktree.branch}} >/dev/null 2>&1; then
-      git checkout {{worktree.branch}}
-    elif git fetch --depth=1 origin {{worktree.branch}} 2>/dev/null; then
-      git checkout -b {{worktree.branch}} origin/{{worktree.branch}}
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" = true ]; then
+      git fetch --unshallow --no-tags origin
+    fi
+    if git rev-parse --verify "$worktree_branch" >/dev/null 2>&1; then
+      git checkout "$worktree_branch"
+    elif git fetch --no-tags origin "+refs/heads/${worktree_branch}:refs/remotes/origin/${worktree_branch}" 2>/dev/null; then
+      git checkout -b "$worktree_branch" "origin/$worktree_branch"
     else
-      git checkout -b {{worktree.branch}}
+      git checkout -b "$worktree_branch"
     fi
   fi
 ) || true
@@ -204,40 +227,106 @@ const defaultSpritesPrepareScript = `#!/bin/bash
 
 set -euo pipefail
 
-# ---- Add SSH host keys (prevent "Host key verification failed") ----
-mkdir -p ~/.ssh
-ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
+# SECURITY: the providers substitute a fully single-quoted, self-contained
+# shell token (scriptengine.shellQuote) for every DATA placeholder. Each one is
+# dereferenced BARE exactly once, into a shell variable, and used as "$var"
+# afterwards. Never write "{{...}}" — double quotes re-expose $(...) inside a
+# hostile branch name or clone URL, which is the injection the quoting exists
+# to prevent.
+workspace={{workspace.path}}
+repository_url={{repository.clone_url}}
+repository_branch={{repository.branch}}
 
 # ---- Configure git/gh for HTTPS auth (token-based, no SSH keys needed) ----
 # Rewrite SSH URLs to HTTPS so git clone git@github.com:... works via token auth
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
+# Kandev can write into the workspace before this script runs, so the checkout
+# is not guaranteed to be owned by the user running the prepare script.
+git config --global --add safe.directory '*'
+
 # Configure GitHub token for gh CLI and git operations
 # GH_TOKEN is the primary env var for gh CLI authentication
 {{github.auth_setup}}
 
-# ---- Install pnpm globally ----
-curl -fsSL https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-linux-x64 -o /usr/local/bin/pnpm
-chmod +x /usr/local/bin/pnpm
+# ---- Install pnpm (best effort, never fatal) ----
+# Use corepack so the repository packageManager value controls the pnpm version.
+# Package-manager setup errors must not stop sandbox preparation.
+if ! command -v pnpm >/dev/null 2>&1; then
+  corepack enable pnpm >/dev/null 2>&1 || true
+fi
+if ! pnpm --version >/dev/null 2>&1; then
+  npm install -g pnpm >/dev/null 2>&1 || true
+fi
 
 # ---- Git identity ----
 {{git.identity_setup}}
 
-# ---- Clone repository ----
+# ---- Materialize the primary repository ----
+# Initialize in place because Office files can exist before preparation starts.
+# Fetch a blobless commit graph so later diff and rebase operations retain history.
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
-# SECURITY: the providers substitute fully single-quoted tokens (shellQuote) for
-# these placeholders. printf takes them as separate arguments, NOT inside a
-# double-quoted string (which would re-expand a hostile URL/branch). Do not
-# reintroduce an echo of these placeholders inside a double-quoted string.
-printf 'Cloning %s (branch: %s)...\n' {{repository.clone_url}} {{repository.branch}}
-git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
-cd {{workspace.path}}
+# Never print $repository_url because it can contain a credential.
+mkdir -p "$workspace"
+if [ -n "$repository_url" ]; then
+  scrub_origin() {
+    origin_url=$(git -C "$workspace" remote get-url origin 2>/dev/null || true)
+    if [ -n "$origin_url" ]; then
+      clean_origin_url=$(printf '%s' "$origin_url" | sed 's|https://[^@]*@github.com/|https://github.com/|')
+      git -C "$workspace" remote set-url origin "$clean_origin_url" 2>/dev/null || true
+    fi
+  }
+  trap scrub_origin EXIT HUP INT TERM
+  if git -C "$workspace" rev-parse --git-dir >/dev/null 2>&1; then
+    configured_url=$(git -C "$workspace" config --get remote.origin.url 2>/dev/null || true)
+    if [ -z "$configured_url" ]; then
+      git -C "$workspace" remote add origin "$repository_url"
+    else
+      configured_id=$(printf '%s' "$configured_url" | sed 's|://[^/@]*@|://|')
+      expected_id=$(printf '%s' "$repository_url" | sed 's|://[^/@]*@|://|')
+      if [ "$configured_id" != "$expected_id" ]; then
+        echo 'kandev: target origin identity conflict' >&2
+        exit 1
+      fi
+      git -C "$workspace" remote set-url origin "$repository_url"
+    fi
+  else
+    git init -q "$workspace"
+    git -C "$workspace" remote add origin "$repository_url"
+  fi
+  git_dir=$(git -C "$workspace" rev-parse --absolute-git-dir)
+  exclude_file="$git_dir/info/exclude"
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+  grep -Fqx '/.kandev/' "$exclude_file" || printf '%s\n' '/.kandev/' >>"$exclude_file"
 
-# Strip embedded token from remote URL to avoid persisting credentials in .git/config
-git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+  if [ -z "$repository_branch" ]; then
+    echo 'kandev: target repository has no base branch' >&2
+    exit 1
+  fi
+
+  git -C "$workspace" config remote.origin.promisor true
+  git -C "$workspace" config remote.origin.partialclonefilter blob:none
+  echo "Fetching $repository_branch..."
+  if ! git -C "$workspace" fetch --filter=blob:none --no-tags origin \
+      "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}"; then
+    echo 'kandev: target base branch is unavailable' >&2
+    exit 1
+  fi
+  # A reused checkout keeps its current branch, local commits, and untracked
+  # files. Only an empty repository needs its initial branch created.
+  if ! git -C "$workspace" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$workspace" checkout -q -b "$repository_branch" "refs/remotes/origin/$repository_branch"
+  fi
+
+  scrub_origin
+  trap - EXIT HUP INT TERM
+fi
+
+cd "$workspace"
 
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
@@ -298,7 +387,7 @@ if [ -n "$repository_url" ]; then
     echo 'kandev: target repository has no base branch' >&2
     exit 1
   fi
-  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch" >/dev/null 2>&1; then
+  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}" >/dev/null 2>&1; then
     echo 'kandev: target base branch is unavailable' >&2
     exit 1
   fi

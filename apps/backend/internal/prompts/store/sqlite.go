@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/prompts/models"
 )
 
@@ -22,6 +23,11 @@ const (
 	changesWalkthroughV1SHA256 = "23a82694ef3b6d0220da2879c1c351cf5ee4926c2bc54a52fa4f7d5182bcb111"
 	changesWalkthroughV2SHA256 = "7a28dc81df4bff75b4fb8d66d6b9118febe5daf7f4b570e3b8ef8c74ac3e3146"
 )
+const maxPromptListItems = 2000
+
+var ErrPromptListLimit = errors.New("prompt list limit exceeded")
+
+var ErrPromptReferenceCandidateLimit = errors.New("prompt reference candidate limit exceeded")
 
 type sqliteRepository struct {
 	db     *sqlx.DB // writer
@@ -77,11 +83,12 @@ func (r *sqliteRepository) Close() error {
 }
 
 func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, error) {
-	rows, err := r.ro.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		ORDER BY builtin DESC, name ASC
-	`)
+		LIMIT ?
+	`), maxPromptListItems+1)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +109,68 @@ func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(prompts) > maxPromptListItems {
+		return nil, ErrPromptListLimit
+	}
 	return prompts, nil
+}
+
+// ListPromptsForReferenceExpansion bounds rows and aggregate bytes materialized
+// for inline reference resolution while reporting whether additional
+// candidates exist.
+func (r *sqliteRepository) ListPromptsForReferenceExpansion(
+	ctx context.Context,
+	limit, maxNameBytes, maxContentBytes, maxTotalNameBytes, maxTotalContentBytes int,
+) ([]*models.Prompt, bool, error) {
+	if limit < 1 {
+		return nil, false, nil
+	}
+	nameLength := dialect.ByteLength(r.ro.DriverName(), "name")
+	contentLength := dialect.ByteLength(r.ro.DriverName(), "content")
+	query := fmt.Sprintf(`
+		SELECT id, name, content, builtin, created_at, updated_at
+		FROM custom_prompts
+		WHERE %s > 0
+			AND %s <= ?
+			AND %s <= ?
+		ORDER BY builtin DESC, name ASC
+		LIMIT ?
+	`, nameLength, nameLength, contentLength)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), maxNameBytes, maxContentBytes, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	prompts := make([]*models.Prompt, 0, limit)
+	totalNameBytes := 0
+	totalContentBytes := 0
+	truncated := false
+	for rows.Next() {
+		prompt := &models.Prompt{}
+		var builtinInt int
+		if err := rows.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
+			return nil, false, err
+		}
+		if len(prompts) >= limit {
+			truncated = true
+			break
+		}
+		if totalNameBytes+len(prompt.Name) > maxTotalNameBytes ||
+			totalContentBytes+len(prompt.Content) > maxTotalContentBytes {
+			return nil, false, ErrPromptReferenceCandidateLimit
+		}
+		totalNameBytes += len(prompt.Name)
+		totalContentBytes += len(prompt.Content)
+		prompt.Builtin = builtinInt == 1
+		prompts = append(prompts, prompt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	return prompts, truncated, nil
 }
 
 func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
@@ -151,10 +219,29 @@ func (r *sqliteRepository) CreatePrompt(ctx context.Context, prompt *models.Prom
 		builtinInt = 1
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`), prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt)
+	`
+	args := []any{prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt}
+	if !prompt.Builtin {
+		query = `
+			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+			SELECT ?, ?, ?, ?, ?, ?
+			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
+		`
+		args = append(args, maxPromptListItems)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err == nil && !prompt.Builtin {
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if rows == 0 {
+			return ErrPromptListLimit
+		}
+	}
 	return err
 }
 

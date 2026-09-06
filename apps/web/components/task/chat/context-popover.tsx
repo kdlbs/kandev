@@ -70,23 +70,25 @@ function FileResultsList({
         return (
           <div
             key={filePath}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer"
+            className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50"
             onClick={() => onToggle(filePath)}
           >
             <Checkbox
               checked={isFileSelected(filePath)}
+              aria-label={filePath}
               onCheckedChange={() => onToggle(filePath)}
+              onClick={(event) => event.stopPropagation()}
               className="h-3.5 w-3.5"
             />
             {isDir ? (
-              <IconFolder className="h-4 w-4 text-muted-foreground shrink-0" />
+              <IconFolder className="h-4 w-4 shrink-0 text-muted-foreground" />
             ) : (
-              <IconFile className="h-4 w-4 text-muted-foreground shrink-0" />
+              <IconFile className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
-            <div className="flex-1 min-w-0">
-              <span className="text-xs truncate block">{name}</span>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-xs">{name}</span>
               {parent && (
-                <span className="text-[10px] text-muted-foreground truncate block">{parent}</span>
+                <span className="block truncate text-[10px] text-muted-foreground">{parent}</span>
               )}
             </div>
           </div>
@@ -127,14 +129,16 @@ function PromptsSection({ query, prompts, contextFiles, onToggleFile }: PromptsS
         return (
           <div
             key={prompt.id}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer"
+            className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50"
             onClick={() => onToggleFile({ path: promptPath, name: prompt.name, pinned: true })}
           >
             <Checkbox
               checked={contextFiles.some((f) => f.path === promptPath)}
+              aria-label={prompt.name}
               onCheckedChange={() =>
                 onToggleFile({ path: promptPath, name: prompt.name, pinned: true })
               }
+              onClick={(event) => event.stopPropagation()}
               className="h-3.5 w-3.5"
             />
             <IconAt className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -161,22 +165,25 @@ function useContextPopoverState(open: boolean, sessionId: string | null) {
   const [isLoading, setIsLoading] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- resetting state on open/close is intentional */
   useEffect(() => {
     if (open) {
+      setQuery("");
+      setFileResults([]);
+      setIsLoading(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       setQuery("");
       setFileResults([]);
+      setIsLoading(false);
     }
-  }, [open]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [open, sessionId]);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- loading state sync is intentional for UX */
   useEffect(() => {
-    if (!open || !sessionId) return;
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (!open || !sessionId) {
+      setIsLoading(false);
+      return;
+    }
+    clearTimeout(searchTimeoutRef.current ?? undefined);
     const delay = query === "" ? 0 : FILE_SEARCH_DEBOUNCE;
     setIsLoading(true);
     let cancelled = false;
@@ -199,7 +206,7 @@ function useContextPopoverState(open: boolean, sessionId: string | null) {
     }, delay);
     return () => {
       cancelled = true;
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      clearTimeout(searchTimeoutRef.current ?? undefined);
     };
   }, [open, sessionId, query]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -233,18 +240,20 @@ function ContextPopoverList({
     <div className="max-h-60 overflow-y-auto border-t border-border">
       {!query && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer"
+          className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50"
           onClick={() => onToggleFile(planContextFile())}
         >
           <Checkbox
             checked={planContextEnabled}
+            aria-label={t("task:plan")}
             onCheckedChange={() => onToggleFile(planContextFile())}
+            onClick={(event) => event.stopPropagation()}
             className="h-3.5 w-3.5"
           />
-          <IconListCheck className="h-4 w-4 text-muted-foreground shrink-0" />
-          <span className="text-xs flex-1 truncate">{t("task:plan")}</span>
+          <IconListCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate text-xs">{t("task:plan")}</span>
           {planContextEnabled && (
-            <span className="text-[9px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
               {t("task:activeBadge")}
             </span>
           )}

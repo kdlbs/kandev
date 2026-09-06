@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"unicode/utf8"
+)
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
 const MaxRawExcerptBytes = 4096
@@ -37,15 +40,31 @@ var redactions = []redaction{
 	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
 }
 
-// Sanitize redacts likely credentials, normalizes home paths, and truncates
-// to MaxRawExcerptBytes. The function is idempotent: applying it twice
-// equals applying it once.
-func Sanitize(s string) string {
+// Redact applies the same credential and home-path rules as Sanitize but
+// performs no truncation, so a caller that needs to bound the result by a
+// different rule (e.g. keeping the newest bytes of a longer budget cut) sees
+// every credential intact and redacted rather than racing a head-truncation
+// that runs before it can see the whole input. Redact is idempotent:
+// applying it twice equals applying it once.
+func Redact(s string) string {
 	for _, r := range redactions {
 		s = r.pattern.ReplaceAllString(s, r.replace)
 	}
+	return s
+}
+
+// Sanitize redacts likely credentials, normalizes home paths, and truncates
+// to MaxRawExcerptBytes on a rune boundary so a multi-byte character (e.g.
+// Vietnamese, CJK) is never split into invalid UTF-8. The function is
+// idempotent: applying it twice equals applying it once.
+func Sanitize(s string) string {
+	s = Redact(s)
 	if len(s) > MaxRawExcerptBytes {
-		s = s[:MaxRawExcerptBytes]
+		cut := MaxRawExcerptBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
 	}
 	return s
 }

@@ -51,7 +51,10 @@ The authenticated browser submits:
 }
 ```
 
-- `source` is `sonner` or `toast-provider`.
+- `source` is `sonner`, `toast-provider`, or `backend-reload`.
+- For `backend-reload`, `title` is `boot_id_changed` or
+  `settings_interlock_rejected`. The report omits `description`, `stack`, and
+  `error`.
 - `title` and `description` are optional individually, but at least one must
   contain visible text.
 - `client_timestamp` is RFC 3339 when supplied. The backend log timestamp
@@ -73,8 +76,12 @@ The authenticated browser submits:
 - An exhausted identity or process-wide report bucket returns
   `429 Too Many Requests` with `Retry-After`.
 
-The endpoint logs one structured `error` entry. Client fields remain fields;
-they cannot replace the fixed `frontend error toast` message.
+For `sonner` and `toast-provider`, the endpoint logs one structured error entry
+with the fixed message `frontend error toast`.
+
+For `backend-reload`, the endpoint logs one structured info entry with the
+fixed message `frontend backend reload required`. Client fields cannot replace
+the fixed message or select a log level.
 
 ### Diagnostic bundle jobs
 
@@ -307,8 +314,8 @@ with the same task/session rules and excludes message bodies and user identity.
   the caller's equivalent active job. It does not create unbounded concurrent
   archive or capture work.
 - If the browser report endpoint receives a network, authentication,
-  validation, or server failure, the original error toast remains unchanged
-  and the reporting promise is discarded without retry.
+  validation, or server failure, the original UI state remains unchanged. The
+  reporting promise is discarded without retry.
 - Unsupported or non-text toast content is omitted from the corresponding text
   field; reporting proceeds only when visible text can be extracted.
 - Daily rollover uses UTC calendar boundaries and never uses client timestamps
@@ -339,7 +346,8 @@ with the same task/session rules and excludes message bodies and user identity.
   after becoming downloadable. They are not durable product data.
 - Improve Kandev's task-context ZIP is a separate internal lease on the shared
   archive builder and remains available for up to 24 hours.
-- No toast report is stored in SQLite or queued in browser storage for retry.
+- No toast or backend-reload report is stored in SQLite or queued in browser
+  storage for retry.
 - Concurrent backend processes sharing one Kandev home are unsupported.
 
 ## Scenarios
@@ -367,6 +375,9 @@ with the same task/session rules and excludes message bodies and user identity.
 - **GIVEN** an error toast on a recognized task route, **WHEN** its report is
   accepted, **THEN** one backend error entry includes its visible text,
   browser context, and `task_id`.
+- **GIVEN** a page detects a changed backend generation, **WHEN** its report is
+  accepted, **THEN** one backend info entry includes the recovery signal and
+  browser context. No error-toast entry is emitted.
 - **GIVEN** console activity over three days, **WHEN** browser retention runs,
   **THEN** expired and oldest-over-cap entries are removed without uploading
   retained entries.

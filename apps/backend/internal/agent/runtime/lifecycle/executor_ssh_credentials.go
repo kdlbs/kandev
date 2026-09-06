@@ -119,14 +119,14 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 			zap.Error(err))
 		return
 	}
-	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
+	// `sshStdinEnvImport` evaluates the env lines fed via session.Stdin; `set -a`
 	// makes those assignments automatically exported so the user's setup
 	// script sees them in env without a per-key `export`. The script body
 	// itself runs in the same shell after stdin EOF, which means scripts
 	// that need their own stdin are unsupported here — none of the
 	// env-type SetupScripts in the catalog (gh_cli_env etc.) consume
 	// stdin, so this is fine in practice.
-	wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+method.SetupScript)
+	wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+method.SetupScript)
 	out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if err != nil {
 		r.logger.Warn("auth setup script failed",

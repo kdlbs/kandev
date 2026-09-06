@@ -176,6 +176,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Task surface](system-design/task-surface-render-isolation.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
 - [Threads Deck](system-design/threads-conversation-deck.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
