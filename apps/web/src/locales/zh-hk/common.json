@@ -78,7 +78,7 @@
   "commandGoToStats": "前往統計",
   "commandGoToStatsKeywords": "統計, 數據分析, 分析, 指標",
   "commandGoToThreads": "前往對話流",
-  "commandGoToThreadsKeywords": "對話流, 代理程式, 即時, 欄",
+  "commandGoToThreadsKeywords": "對話流, 代理程式, 實時, 列",
   "commandGroupActions": "操作",
   "commandGroupAgent": "代理程式",
   "commandGroupCommands": "命令",

@@ -200,6 +200,7 @@ type TaskDTO struct {
 	SessionCount                *int                     `json:"session_count,omitempty"`
 	ReviewStatus                models.ReviewStatus      `json:"review_status,omitempty"`
 	PrimaryExecutorID           *string                  `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorProfileID    *string                  `json:"primary_executor_profile_id,omitempty"`
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
@@ -884,7 +885,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -894,6 +895,7 @@ func FromTaskWithSessionInfo(
 	sessionCount *int,
 	reviewStatus models.ReviewStatus,
 	primaryExecutorID *string,
+	primaryExecutorProfileID *string,
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
@@ -902,6 +904,11 @@ func FromTaskWithSessionInfo(
 	primarySessionState *string,
 	primarySessionPendingAction *string,
 ) TaskDTO {
+	if primaryExecutorProfileID == nil {
+		if value, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && value != "" {
+			primaryExecutorProfileID = &value
+		}
+	}
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -954,6 +961,7 @@ func FromTaskWithSessionInfo(
 		SessionCount:                sessionCount,
 		ReviewStatus:                reviewStatus,
 		PrimaryExecutorID:           primaryExecutorID,
+		PrimaryExecutorProfileID:    primaryExecutorProfileID,
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,

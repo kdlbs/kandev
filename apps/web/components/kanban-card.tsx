@@ -18,6 +18,7 @@ import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-con
 import { type ExternalLinkProvider } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
@@ -111,6 +112,7 @@ export interface Task {
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
+  statusSummary?: TaskStatusSummary | null;
 }
 
 export type RepositoryChip = {

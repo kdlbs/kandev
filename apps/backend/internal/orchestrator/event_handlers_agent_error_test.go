@@ -728,7 +728,7 @@ func (r *agentErrorListSessionsErrorRepo) ListTaskSessions(_ context.Context, _ 
 func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("unregistered action warns with all six fields, dispatch still proceeds", func(t *testing.T) {
+	t.Run("unregistered action warns and leaves operation unmarked", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		stepGetter := newMockStepGetter()
@@ -755,14 +755,18 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 				t.Errorf("field %q = %v, want %v", key, fields[key], want)
 			}
 		}
-		// Since queue_run has no adapter, HandleTrigger reports it as an
-		// action with no effect: ActionCount > 0 but nothing executed, so
-		// this is the AC-A6 INFO dispatch record, not AC-E2's DEBUG. Both the
-		// walk WARNING above and this INFO must be present together — the
-		// pair is what AC-E4/AC-A6's "does not count against at most one"
-		// carve-out actually requires proving.
-		if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-			t.Errorf("got %d %q INFO record(s), want 1 (dispatch must still proceed alongside the walk WARNING)", len(got), msgAgentErrorDispatched)
+		if got := filterLogs(logs, msgAgentErrorDispatchFailed); len(got) != 1 {
+			t.Errorf("got %d %q ERROR record(s), want 1", len(got), msgAgentErrorDispatchFailed)
+		}
+		if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
+			t.Errorf("got %d %q INFO record(s), want 0", len(got), msgAgentErrorDispatched)
+		}
+		applied, err := svc.workflowStore.IsOperationApplied(ctx, agentErrorOperationID("s1", "exec-1"))
+		if err != nil {
+			t.Fatalf("check operation ledger: %v", err)
+		}
+		if applied {
+			t.Fatal("unregistered action was recorded as applied")
 		}
 	})
 
@@ -795,7 +799,7 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 		}
 	})
 
-	t.Run("idempotent redelivery still warns but emits no dispatch record", func(t *testing.T) {
+	t.Run("unregistered action remains retryable on redelivery", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		stepGetter := newMockStepGetter()
@@ -811,8 +815,11 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 
 		data := watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"}
 		svc.handleRecoverableFailureLocked(ctx, data)
-		if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-			t.Fatalf("first delivery: got %d INFO records, want 1", len(got))
+		if decisions.clearCalls != 0 {
+			t.Fatalf("first delivery clearCalls = %d, want 0", decisions.clearCalls)
+		}
+		if got := filterLogs(logs, msgAgentErrorDispatchFailed); len(got) != 1 {
+			t.Fatalf("first delivery: got %d ERROR records, want 1", len(got))
 		}
 
 		logs.TakeAll()
@@ -821,7 +828,10 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 			t.Errorf("redelivery: got %d WARNINGs, want 1 (walk runs before the idempotency short-circuit)", len(got))
 		}
 		if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
-			t.Errorf("redelivery: got a dispatch record, want none (idempotent)")
+			t.Errorf("redelivery: got a dispatch record, want none while callback is unregistered")
+		}
+		if got := filterLogs(logs, msgAgentErrorDispatchFailed); len(got) != 1 {
+			t.Errorf("redelivery: got %d ERROR records, want 1", len(got))
 		}
 	})
 
@@ -843,16 +853,31 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 		if decisions.clearCalls != 0 {
 			t.Fatalf("before wiring: clearCalls = %d, want 0", decisions.clearCalls)
 		}
+		operationID := agentErrorOperationID("s1", "exec-1")
+		applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+		if err != nil {
+			t.Fatalf("before wiring: check operation ledger: %v", err)
+		}
+		if applied {
+			t.Fatal("before wiring: operation was marked applied")
+		}
 
 		logs.TakeAll()
 		svc.SetEngineDecisionStore(decisions) // triggers reinitWorkflowEngine
 
-		svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-2"})
+		svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"})
 		if got := filterLogs(logs, msgAgentErrorActionUnregistered); len(got) != 0 {
 			t.Errorf("after wiring: got %d WARNINGs, want 0 (clear_decisions is now registered)", len(got))
 		}
 		if decisions.clearCalls != 1 {
 			t.Errorf("after wiring: clearCalls = %d, want 1", decisions.clearCalls)
+		}
+		applied, err = svc.workflowStore.IsOperationApplied(ctx, operationID)
+		if err != nil {
+			t.Fatalf("after wiring: check operation ledger: %v", err)
+		}
+		if !applied {
+			t.Fatal("after wiring: successful operation was not marked applied")
 		}
 	})
 

@@ -43,6 +43,7 @@ The following specifications were added after this migration and remain in the l
 - [Waiting Attribution](disambiguate-waiting/spec.md) (implemented)
 - [ACP Form Elicitation](acp-elicitation/spec.md) (draft)
 - [Parked-Session Notification Deferral](parked-notification-deferral/spec.md) (draft)
+- [Workflow Engine Operation Ledger Lifetime](workflow-engine-operation-ledger-lifetime/spec.md) (draft)
 
 ## Authoring rule
 
