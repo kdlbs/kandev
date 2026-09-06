@@ -148,6 +148,8 @@ func withAdoptionRetry[T any](ctx context.Context, timeout time.Duration, retrie
 type AdoptionControlClient interface {
 	SetAuthToken(token string)
 	GetIdentity(ctx context.Context) (*agentctl.IdentityInfo, error)
+	ProveOwnership(ctx context.Context, challenge string) ([]string, error)
+	GetServerDetails(ctx context.Context) (*agentctl.ServerDetails, error)
 	RotateCredential(ctx context.Context) (*agentctl.CredentialRotationResult, error)
 	ConfirmCredentialRotation(ctx context.Context, rotationID int64) error
 	ShutdownControlServer(ctx context.Context) error
@@ -183,10 +185,12 @@ const (
 	// these is a refusal, so none carries a refusal reason, and all three
 	// result in the same action, spawn fresh and report nothing recovered.
 	AdoptionReasonNoServer AdoptionReason = "no_server"
-	// AdoptionReasonIdentityMismatch covers a home-directory mismatch and a
-	// server that advertises no identity or no capability set at all
-	// (AC-001.4, AC-001.5) -- refused, left running untouched, never
-	// contacted again by this adoption attempt.
+	// AdoptionReasonIdentityMismatch covers a server that advertises no
+	// identity or no capability set, one whose identity differs from the
+	// recorded one, and one that cannot prove it holds the recorded
+	// credential (AC-001.4, AC-001.5) -- refused, left running untouched,
+	// never contacted again by this adoption attempt, and never sent the
+	// credential.
 	AdoptionReasonIdentityMismatch AdoptionReason = "identity_mismatch"
 	// AdoptionReasonCredentialUnavailable is the stored credential could not
 	// be retrieved (AC-001.9): refused before any authentication was
@@ -280,13 +284,17 @@ func AttemptAdoptControlServer(
 		return AdoptionOutcome{Reason: AdoptionReasonNoServer}
 	}
 
-	if !identityMatchesRecordedServer(identity, record, homeDir) || len(identity.Capabilities) == 0 {
+	if !identityMatchesRecordedServer(identity, record) || len(identity.Capabilities) == 0 {
 		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
 	credential, err := revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialUnavailable, ContactedAt: contactedAt}
+	}
+
+	if !controlServerHoldsCredential(ctx, client, credential, homeDir, recoveryReadTimeout, recoveryReadRetries) {
+		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
 	client.SetAuthToken(credential)
@@ -301,21 +309,58 @@ func AttemptAdoptControlServer(
 	}
 
 	client.SetAuthToken(rotated.Credential)
-	secretID, err := storeControlServerCredential(ctx, secretStore, record.CredentialSecretID, rotated.Credential)
+	return finalizeControlServerAdoption(ctx, finalizeAdoptionArgs{
+		store:               store,
+		secretStore:         secretStore,
+		client:              client,
+		record:              record,
+		identity:            identity,
+		rotated:             rotated,
+		contactedAt:         contactedAt,
+		recoveryReadTimeout: recoveryReadTimeout,
+		recoveryReadRetries: recoveryReadRetries,
+		log:                 log,
+	})
+}
+
+// finalizeAdoptionArgs carries the state the two durable writes and the
+// confirmation call need, so the adoption gates above stay readable as a
+// sequence of refusals.
+type finalizeAdoptionArgs struct {
+	store               AdoptionRecordStore
+	secretStore         secrets.SecretStore
+	client              AdoptionControlClient
+	record              *models.ControlServerRecord
+	identity            *agentctl.IdentityInfo
+	rotated             *agentctl.CredentialRotationResult
+	contactedAt         time.Time
+	recoveryReadTimeout time.Duration
+	recoveryReadRetries int
+	log                 *logger.Logger
+}
+
+// finalizeControlServerAdoption performs the two durable writes adoption
+// depends on -- the rotated credential and the updated record -- and only
+// then tells the server the rotation is confirmed. Either write failing
+// leaves adoption incomplete, because confirming a credential this backend
+// did not durably record would tell the server to drop the one credential
+// still recoverable from durable state.
+func finalizeControlServerAdoption(ctx context.Context, a finalizeAdoptionArgs) AdoptionOutcome {
+	secretID, err := storeControlServerCredential(ctx, a.secretStore, a.record.CredentialSecretID, a.rotated.Credential)
 	if err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
+		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: a.contactedAt}
 	}
 
 	updated := &models.ControlServerRecord{
-		Endpoint:           record.Endpoint,
-		ServerIdentity:     identity.ServerIdentity,
+		Endpoint:           a.record.Endpoint,
+		ServerIdentity:     a.identity.ServerIdentity,
 		CredentialSecretID: secretID,
-		Capabilities:       identity.Capabilities,
-		DiagnosticLogPath:  identity.DiagnosticLogPath,
-		CreatedAt:          record.CreatedAt,
+		Capabilities:       a.identity.Capabilities,
+		DiagnosticLogPath:  recordedDiagnosticLogPath(ctx, a.client, a.recoveryReadTimeout, a.recoveryReadRetries),
+		CreatedAt:          a.record.CreatedAt,
 	}
-	if err := store.UpsertControlServerRecord(ctx, updated); err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
+	if err := a.store.UpsertControlServerRecord(ctx, updated); err != nil {
+		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: a.contactedAt}
 	}
 
 	// Sent only after both durable writes above completed
@@ -325,19 +370,19 @@ func AttemptAdoptControlServer(
 	// idempotent replay (AC-002.10) recovers it, and the superseded
 	// credential merely stays adoption-only-acceptable a little longer than
 	// necessary in the meantime.
-	if _, err := withAdoptionRetry(ctx, recoveryReadTimeout, recoveryReadRetries, func(c context.Context) (struct{}, error) {
-		return struct{}{}, client.ConfirmCredentialRotation(c, rotated.RotationID)
+	if _, err := withAdoptionRetry(ctx, a.recoveryReadTimeout, a.recoveryReadRetries, func(c context.Context) (struct{}, error) {
+		return struct{}{}, a.client.ConfirmCredentialRotation(c, a.rotated.RotationID)
 	}); err != nil {
-		log.Warn("control server credential rotation stored durably but confirmation call failed",
-			zap.String("endpoint", record.Endpoint), zap.Error(err))
+		a.log.Warn("control server credential rotation stored durably but confirmation call failed",
+			zap.String("endpoint", a.record.Endpoint), zap.Error(err))
 	}
 
 	return AdoptionOutcome{
 		Adopted:       true,
-		Endpoint:      record.Endpoint,
-		Credential:    rotated.Credential,
-		ContactedAt:   contactedAt,
-		UnownedPeriod: time.Duration(identity.UnownedPeriodMS) * time.Millisecond,
+		Endpoint:      a.record.Endpoint,
+		Credential:    a.rotated.Credential,
+		ContactedAt:   a.contactedAt,
+		UnownedPeriod: time.Duration(a.identity.UnownedPeriodMS) * time.Millisecond,
 	}
 }
 
@@ -378,7 +423,7 @@ func RecordFreshControlServer(
 		ServerIdentity:     identity.ServerIdentity,
 		CredentialSecretID: secretID,
 		Capabilities:       identity.Capabilities,
-		DiagnosticLogPath:  identity.DiagnosticLogPath,
+		DiagnosticLogPath:  recordedDiagnosticLogPath(ctx, client, defaultRecoveryReadTimeout, defaultRecoveryReadRetries),
 	}
 	return store.UpsertControlServerRecord(ctx, record)
 }
@@ -424,7 +469,7 @@ func ReclaimUnneededControlServer(
 	if err != nil {
 		return
 	}
-	if !identityMatchesRecordedServer(identity, record, homeDir) {
+	if !identityMatchesRecordedServer(identity, record) {
 		return
 	}
 
@@ -432,6 +477,12 @@ func ReclaimUnneededControlServer(
 	if err != nil {
 		log.Warn("cannot reclaim detached control server: stored credential unavailable",
 			zap.String("endpoint", record.Endpoint), zap.Error(err))
+		return
+	}
+
+	if !controlServerHoldsCredential(ctx, client, credential, homeDir, recoveryReadTimeout, recoveryReadRetries) {
+		log.Warn("cannot reclaim detached control server: it could not prove it holds this installation's credential",
+			zap.String("endpoint", record.Endpoint))
 		return
 	}
 
@@ -488,10 +539,7 @@ func stopIncompatibleControlServer(
 // proves the live server shares an installation with the recorded one, not
 // that it IS that recorded process, so an identity neither side can produce
 // leaves the match unprovable and is refused rather than assumed.
-func identityMatchesRecordedServer(identity *agentctl.IdentityInfo, record *models.ControlServerRecord, homeDir string) bool {
-	if identity.HomeDir == "" || identity.HomeDir != homeDir {
-		return false
-	}
+func identityMatchesRecordedServer(identity *agentctl.IdentityInfo, record *models.ControlServerRecord) bool {
 	if record.ServerIdentity == "" || identity.ServerIdentity != record.ServerIdentity {
 		return false
 	}

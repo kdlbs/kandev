@@ -79,10 +79,17 @@ func (m *Manager) NewStandaloneLivenessScope(ctx context.Context) interface{} {
 //   - absent, and this backend created the row during its own process
 //     lifetime: Dead -- this exact server is the only authority for it, so
 //     "not present" is determinate.
-//   - absent, and the row was inherited from an earlier launch: Unknown --
-//     the current server may simply never have known about it (e.g. this
-//     backend spawned a fresh server after a refused adoption), so absence
-//     is not determinate the way it is for an own record.
+//   - absent, and the row was inherited from an earlier launch while this
+//     backend adopted the recorded server: Unknown.
+//
+// A record inherited from an earlier launch is not judged against the
+// enumeration at all unless this backend adopted the recorded server, since
+// a server this backend started never launched that instance. What happens
+// instead turns on what answered at the recorded endpoint: nothing answered
+// means no server holds it, so the process-identifier probe applies and a
+// genuinely dead record is still repaired; a server that answered and was
+// left running means the instance may still be alive on a server this
+// backend does not drive, so the record is Unknown and is left alone.
 func (m *Manager) classifyStandaloneLiveness(row *models.ExecutorRunning, scope *standaloneLivenessScope) models.ProcessLiveness {
 	if row == nil {
 		return models.ProcessLivenessUnknown
@@ -97,13 +104,23 @@ func (m *Manager) classifyStandaloneLiveness(row *models.ExecutorRunning, scope 
 		return RowProcessLiveness(row)
 	}
 	sessionID := row.SessionID
+	createdHere := m.wasCreatedThisLifetime(sessionID)
+	if !createdHere && m.inheritedRecordScope != InheritedRecordScopeAdopted {
+		// An inherited record is judged only against a server this backend
+		// adopted. A freshly started server never launched this instance, so
+		// its enumeration is not evidence either way and is not consulted.
+		if m.inheritedRecordScope == InheritedRecordScopeNoServer {
+			return RowProcessLiveness(row)
+		}
+		return models.ProcessLivenessUnknown
+	}
 	if _, present := scope.liveBySession[sessionID]; present {
 		if m.recoveryGuard.IsStopInFlight(sessionID) {
 			return models.ProcessLivenessUnknown
 		}
 		return models.ProcessLivenessAlive
 	}
-	if m.wasCreatedThisLifetime(sessionID) {
+	if createdHere {
 		return models.ProcessLivenessDead
 	}
 	return models.ProcessLivenessUnknown

@@ -11,11 +11,15 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/ownershipproof"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const gateTestHomeDir = "/home/kandev-gate-test"
+const (
+	gateTestHomeDir    = "/home/kandev-gate-test"
+	gateSeedCredential = "bootstrap-credential"
+)
 
 // recordingControlServer stands in for a control server left running by a
 // prior launch and records which ownership operation this launch performed
@@ -24,10 +28,11 @@ const gateTestHomeDir = "/home/kandev-gate-test"
 // observation.
 type recordingControlServer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	rotated  bool
-	shutDown bool
-	identity string
+	mu         sync.Mutex
+	rotated    bool
+	shutDown   bool
+	identity   string
+	challenges []string
 }
 
 func newRecordingControlServer(t *testing.T) *recordingControlServer {
@@ -37,10 +42,22 @@ func newRecordingControlServer(t *testing.T) *recordingControlServer {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
-				HomeDir:        gateTestHomeDir,
 				ServerIdentity: rec.identity,
 				Capabilities:   lifecycle.RequiredSurvivalCapabilities,
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
+			var req struct {
+				Challenge string `json:"challenge"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			rec.mu.Lock()
+			rec.challenges = append(rec.challenges, req.Challenge)
+			rec.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"proofs": {ownershipproof.Derive(gateSeedCredential, req.Challenge, gateTestHomeDir)},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ownership/details":
+			_ = json.NewEncoder(w).Encode(agentctlclient.ServerDetails{HomeDir: gateTestHomeDir})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/rotate":
 			rec.mu.Lock()
 			rec.rotated = true
@@ -79,7 +96,7 @@ func newGateFixture(t *testing.T) (*recordingControlServer, *fakeControlServerSt
 	secretStore := newIDGeneratingSecretStore()
 	seed := secrets.SecretWithValue{}
 	seed.Name = "gate-seed"
-	seed.Value = "bootstrap-credential"
+	seed.Value = gateSeedCredential
 	if err := secretStore.Create(context.Background(), &seed); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
@@ -103,7 +120,7 @@ func TestResolveSurvivingAgentctlAdoptsWhenSurvivalEnabled(t *testing.T) {
 	server, store, secretStore, cfg := newGateFixture(t)
 	cfg.Features.AgentSurvival = true
 
-	result := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 	if result == nil {
 		t.Fatal("result = nil, want the recorded server to be adopted")
 	}
@@ -130,7 +147,7 @@ func TestResolveSurvivingAgentctlReclaimsDetachedServerWhenSurvivalDisabled(t *t
 	server, store, secretStore, cfg := newGateFixture(t)
 	cfg.Features.AgentSurvival = false
 
-	result := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 	if result != nil {
 		t.Fatalf("result = %+v, want nil: nothing may be adopted with the capability disabled", result)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
+	"github.com/kandev/kandev/internal/common/ownershipproof"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -140,7 +141,7 @@ func TestAdoptSurvivingAgentctlReturnsNilWhenNoRecord(t *testing.T) {
 	cfg := &config.Config{}
 	store := &fakeControlServerStore{}
 
-	result := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, nil)
+	result, _ := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, nil)
 
 	if result != nil {
 		t.Fatalf("result = %+v, want nil", result)
@@ -161,9 +162,20 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
+				ServerIdentity: "survivor-identity",
+				Capabilities:   lifecycle.RequiredSurvivalCapabilities,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
+			var req struct {
+				Challenge string `json:"challenge"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"proofs": {ownershipproof.Derive("bootstrap-credential", req.Challenge, homeDir)},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ownership/details":
+			_ = json.NewEncoder(w).Encode(agentctlclient.ServerDetails{
 				HomeDir:           homeDir,
-				ServerIdentity:    "survivor-identity",
-				Capabilities:      lifecycle.RequiredSurvivalCapabilities,
 				DiagnosticLogPath: "/home/kandev-test/logs/agentctl-diagnostic.log",
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/rotate":
@@ -196,7 +208,7 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.HomeDir = homeDir
 
-	result := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 
 	if result == nil {
 		t.Fatal("result = nil, want a non-nil adopted result")

@@ -81,7 +81,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	cs.decideUnownedShutdown = cs.ownership.TryBeginShutdownIfUnownedFor
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
-	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity"))
+	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity", "/ownership/prove"))
 
 	cs.setupRoutes()
 	return cs
@@ -126,6 +126,10 @@ func (m *ControlServer) setupRoutes() {
 	// Identity/capability — unauthenticated, decides adoption compatibility
 	m.router.GET("/identity", m.handleIdentity)
 
+	// Ownership proof — unauthenticated, establishes to an adopting backend
+	// that this process holds the credential before that backend sends it
+	m.router.POST("/ownership/prove", m.handleOwnershipProve)
+
 	// Instance management API - same endpoints regardless of mode
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
@@ -135,6 +139,7 @@ func (m *ControlServer) setupRoutes() {
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
+	api.GET("/ownership/details", m.handleOwnershipDetails)
 	api.POST("/ownership/claim", m.handleOwnershipClaim)
 	api.POST("/ownership/rotate", m.handleCredentialRotate)
 	api.POST("/ownership/confirm", m.handleCredentialConfirm)

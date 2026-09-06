@@ -50,17 +50,6 @@ func main() {
 }
 
 func runMain() int {
-	// The launcher always pipes this process's stdout/stderr back to the
-	// spawning backend for logging (internal/agent/runtime/agentctl/launcher's
-	// pipeOutput), regardless of AgentSurvivalEnabled. When that backend
-	// exits -- exactly the case a graceful restart under agent-survival is
-	// meant to be outlived -- the kernel closes its end of those pipes, and
-	// Go's default SIGPIPE disposition kills a process outright the next
-	// time it writes to fd 1 or 2, which every subsequent log line does.
-	// Ignoring SIGPIPE turns that into an ordinary write error instead,
-	// which the logger already tolerates.
-	signal.Ignore(syscall.SIGPIPE)
-
 	if code, handled := runGitHubUtilityCommand(); handled {
 		return code
 	}
@@ -119,6 +108,8 @@ func runMain() int {
 	if *portFlag != 0 {
 		cfg.Port = *portFlag
 	}
+
+	applySIGPIPEDisposition(cfg, signal.Ignore)
 
 	// Initialize logger
 	log, err := logger.NewLogger(resolveRunLoggingConfig(cfg))

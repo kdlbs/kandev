@@ -27,6 +27,11 @@ type agentctlLauncherResult struct {
 	// (adoption disabled, no record, or a fresh spawn) -- the lifecycle
 	// manager falls back to its own Start-time default in that case.
 	recoveryDeadlineStart time.Time
+	// inheritedRecordScope is what this launch found at the recorded control
+	// endpoint. It governs how recovery classifies recovery-inventory records
+	// left by an earlier launch, which cannot be judged against a server this
+	// backend started itself.
+	inheritedRecordScope lifecycle.InheritedRecordScope
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -47,11 +52,19 @@ func provideAgentctlLauncher(
 	store lifecycle.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, error) {
-	if result := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore); result != nil {
+	result, scope := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore)
+	if result != nil {
 		availability.MarkAvailable()
 		return result, nil
 	}
-	return spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
+	fresh, err := spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
+	if fresh != nil {
+		// The server this launch just started never launched the instances a
+		// prior launch recorded, so recovery needs to know what was found at
+		// the recorded endpoint rather than judging them against it.
+		fresh.inheritedRecordScope = scope
+	}
+	return fresh, err
 }
 
 // resolveSurvivingAgentctl applies the agent-survival capability gate to a
@@ -67,13 +80,27 @@ func resolveSurvivingAgentctl(
 	log *logger.Logger,
 	store lifecycle.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
-) *agentctlLauncherResult {
+) (*agentctlLauncherResult, lifecycle.InheritedRecordScope) {
 	if !cfg.Features.AgentSurvival {
 		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
 			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
-		return nil
+		return nil, lifecycle.InheritedRecordScopeNoServer
 	}
 	return adoptSurvivingAgentctl(ctx, cfg, log, store, secretStore)
+}
+
+// refusedAdoptionScope maps a refused adoption to what recovery may conclude
+// about records an earlier launch left behind. A refusal that never reached
+// the server -- nothing answered at the recorded endpoint, or no endpoint was
+// recorded -- means no control server holds those instances, so they can be
+// probed and repaired. Every refusal that did reach a reachable server leaves
+// that server running, and an instance may still be alive on it, so nothing
+// may be concluded from its absence from a server this launch started.
+func refusedAdoptionScope(outcome lifecycle.AdoptionOutcome) lifecycle.InheritedRecordScope {
+	if outcome.ContactedAt.IsZero() {
+		return lifecycle.InheritedRecordScopeNoServer
+	}
+	return lifecycle.InheritedRecordScopeForeignServer
 }
 
 // adoptSurvivingAgentctl attempts to adopt a control server recorded by a
@@ -86,20 +113,20 @@ func adoptSurvivingAgentctl(
 	log *logger.Logger,
 	store lifecycle.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
-) *agentctlLauncherResult {
+) (*agentctlLauncherResult, lifecycle.InheritedRecordScope) {
 	outcome := lifecycle.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
 		cfg.ResolvedHomeDir(), lifecycle.RequiredSurvivalCapabilities,
 		cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	if !outcome.Adopted {
 		log.Info("control server adoption did not complete; spawning a fresh one",
 			zap.String("reason", string(outcome.Reason)))
-		return nil
+		return nil, refusedAdoptionScope(outcome)
 	}
 
 	host, port, err := splitEndpoint(outcome.Endpoint)
 	if err != nil {
 		log.Warn("adopted control server endpoint is malformed; spawning fresh instead", zap.Error(err))
-		return nil
+		return nil, refusedAdoptionScope(outcome)
 	}
 
 	log.Info("adopted a surviving control server", zap.String("endpoint", outcome.Endpoint))
@@ -138,7 +165,8 @@ func adoptSurvivingAgentctl(
 		},
 		binaryPath:            launcher.FindAgentctlBinary(),
 		recoveryDeadlineStart: outcome.ContactedAt,
-	}
+		inheritedRecordScope:  lifecycle.InheritedRecordScopeAdopted,
+	}, lifecycle.InheritedRecordScopeAdopted
 }
 
 // spawnFreshAgentctl is today's unconditional launch path. If the

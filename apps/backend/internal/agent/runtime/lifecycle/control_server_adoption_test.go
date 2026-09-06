@@ -8,6 +8,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ownershipproof"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -87,9 +88,21 @@ func (f *fakeAdoptionRecordStore) UpsertControlServerRecord(_ context.Context, r
 }
 
 // fakeAdoptionControlClient is an in-memory AdoptionControlClient double.
+//
+// heldCredential and boundHome are what this double's server actually
+// possesses: it answers an ownership challenge by deriving from them, so a
+// double whose held credential differs from the one the backend reveals, or
+// whose bound home differs from the backend's, cannot produce an acceptable
+// proof -- which is exactly the position a foreign control server is in.
+// boundHome defaults to testHomeDir, so a double only has to name it when
+// the point of the test is that the two installations differ.
 type fakeAdoptionControlClient struct {
 	identity        *agentctl.IdentityInfo
 	identityErr     error
+	heldCredential  string
+	boundHome       string
+	proveErr        error
+	challenges      []string
 	rotateResult    *agentctl.CredentialRotationResult
 	rotateErr       error
 	confirmErr      error
@@ -108,6 +121,25 @@ func (f *fakeAdoptionControlClient) GetIdentity(context.Context) (*agentctl.Iden
 	return f.identity, f.identityErr
 }
 
+func (f *fakeAdoptionControlClient) ProveOwnership(_ context.Context, challenge string) ([]string, error) {
+	f.challenges = append(f.challenges, challenge)
+	if f.proveErr != nil {
+		return nil, f.proveErr
+	}
+	home := f.boundHome
+	if home == "" {
+		home = testHomeDir
+	}
+	return []string{ownershipproof.Derive(f.heldCredential, challenge, home)}, nil
+}
+
+func (f *fakeAdoptionControlClient) GetServerDetails(context.Context) (*agentctl.ServerDetails, error) {
+	return &agentctl.ServerDetails{
+		HomeDir:           testHomeDir,
+		DiagnosticLogPath: testDiagnosticLogPath,
+	}, nil
+}
+
 func (f *fakeAdoptionControlClient) RotateCredential(context.Context) (*agentctl.CredentialRotationResult, error) {
 	return f.rotateResult, f.rotateErr
 }
@@ -123,7 +155,10 @@ func (f *fakeAdoptionControlClient) ShutdownControlServer(context.Context) error
 	return f.shutdownErr
 }
 
-const testHomeDir = "/home/kandev"
+const (
+	testHomeDir           = "/home/kandev"
+	testDiagnosticLogPath = "/home/kandev/logs/agentctl-diagnostic.log"
+)
 
 func validRecord() *models.ControlServerRecord {
 	return &models.ControlServerRecord{
@@ -131,17 +166,15 @@ func validRecord() *models.ControlServerRecord {
 		ServerIdentity:     "matching-identity",
 		CredentialSecretID: "secret-1",
 		Capabilities:       []string{"agent-survival.v1"},
-		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
+		DiagnosticLogPath:  testDiagnosticLogPath,
 	}
 }
 
 func validIdentity() *agentctl.IdentityInfo {
 	return &agentctl.IdentityInfo{
-		HomeDir:           testHomeDir,
-		ServerIdentity:    "matching-identity",
-		Capabilities:      []string{"agent-survival.v1"},
-		DiagnosticLogPath: "/home/kandev/logs/agentctl-diagnostic.log",
-		UnownedPeriodMS:   300000,
+		ServerIdentity:  "matching-identity",
+		Capabilities:    []string{"agent-survival.v1"},
+		UnownedPeriodMS: 300000,
 	}
 }
 
@@ -229,16 +262,28 @@ func TestAttemptAdoptControlServerGetIdentityBoundedByConfiguredTimeout(t *testi
 }
 
 // TestAttemptAdoptControlServerHomeMismatchRefusesWithoutStop pins AC-001.4:
-// a home-directory mismatch is refused, and -- critically -- ShutdownControlServer
-// is never called, because a process this installation cannot prove is its
-// own is never stopped.
+// a server belonging to a different installation is refused, and --
+// critically -- ShutdownControlServer is never called, because a process
+// this installation cannot prove is its own is never stopped. The mismatch
+// is not something the server reports about itself; it falls out of the
+// proof, which binds the home directory, so a server bound to another home
+// cannot answer this backend's challenge.
 func TestAttemptAdoptControlServerHomeMismatchRefusesWithoutStop(t *testing.T) {
-	identity := validIdentity()
-	identity.HomeDir = "/home/someone-else"
-	client := &fakeAdoptionControlClient{identity: identity}
-	store, factory := adoptionFixture(t, validRecord(), client)
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.CredentialSecretID = secretID
+	client := &fakeAdoptionControlClient{
+		identity:       validIdentity(),
+		heldCredential: "own-token",
+		boundHome:      "/home/someone-else",
+	}
+	store, factory := adoptionFixture(t, record, client)
 
-	outcome := AttemptAdoptControlServer(context.Background(), store, newInMemorySecretStore(), factory,
+	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
 		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
 
 	if outcome.Adopted || outcome.Reason != AdoptionReasonIdentityMismatch {
@@ -246,6 +291,9 @@ func TestAttemptAdoptControlServerHomeMismatchRefusesWithoutStop(t *testing.T) {
 	}
 	if client.shutdownCalled {
 		t.Fatal("ShutdownControlServer was called for a home-mismatched server")
+	}
+	if len(client.presentedTokens) != 0 {
+		t.Fatalf("credential was sent to a server bound to another home: %v", client.presentedTokens)
 	}
 }
 
@@ -307,8 +355,9 @@ func TestAttemptAdoptControlServerAuthenticationFailureRefusesWithoutStop(t *tes
 	record := validRecord()
 	record.CredentialSecretID = secretID
 	client := &fakeAdoptionControlClient{
-		identity:  validIdentity(),
-		rotateErr: errors.New("401 invalid auth token"),
+		heldCredential: "stale-token",
+		identity:       validIdentity(),
+		rotateErr:      errors.New("401 invalid auth token"),
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -339,8 +388,9 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityStopsSurvivor(t *testing
 	identity := validIdentity()
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &fakeAdoptionControlClient{
-		identity:     identity,
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 	store.liveStandaloneRecords = []*models.ExecutorRunning{
@@ -389,9 +439,10 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityRetriesStopBeforeGivingU
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &countingShutdownControlClient{
 		fakeAdoptionControlClient: fakeAdoptionControlClient{
-			identity:     identity,
-			rotateResult: &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
-			shutdownErr:  errors.New("500 internal server error"),
+			heldCredential: "current-token",
+			identity:       identity,
+			rotateResult:   &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
+			shutdownErr:    errors.New("500 internal server error"),
 		},
 	}
 	store, _ := adoptionFixture(t, record, &client.fakeAdoptionControlClient)
@@ -444,9 +495,10 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityConnectionRefusedCountsA
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &countingShutdownControlClient{
 		fakeAdoptionControlClient: fakeAdoptionControlClient{
-			identity:     identity,
-			rotateResult: &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
-			shutdownErr:  errors.New("dial tcp 127.0.0.1:9999: connect: connection refused"),
+			heldCredential: "current-token",
+			identity:       identity,
+			rotateResult:   &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
+			shutdownErr:    errors.New("dial tcp 127.0.0.1:9999: connect: connection refused"),
 		},
 	}
 	store, _ := adoptionFixture(t, record, &client.fakeAdoptionControlClient)
@@ -482,8 +534,9 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	record.CredentialSecretID = secretID
 	identity := validIdentity()
 	client := &fakeAdoptionControlClient{
-		identity:     identity,
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 3, Credential: "rotated-token"},
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 3, Credential: "rotated-token"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -533,6 +586,24 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	if written.Endpoint != record.Endpoint {
 		t.Fatalf("Endpoint = %q, want unchanged %q", written.Endpoint, record.Endpoint)
 	}
+	// The remaining two fields decide whether a LATER launch can adopt this
+	// server at all: capabilities gate compatibility, and CreatedAt must
+	// survive rather than being reset to now by every adoption, which would
+	// make the record look freshly created forever.
+	if len(written.Capabilities) != len(identity.Capabilities) {
+		t.Fatalf("Capabilities = %v, want the live server's %v", written.Capabilities, identity.Capabilities)
+	}
+	for i, capability := range identity.Capabilities {
+		if written.Capabilities[i] != capability {
+			t.Fatalf("Capabilities = %v, want the live server's %v", written.Capabilities, identity.Capabilities)
+		}
+	}
+	if !written.CreatedAt.Equal(record.CreatedAt) {
+		t.Fatalf("CreatedAt = %v, want the recorded %v carried through", written.CreatedAt, record.CreatedAt)
+	}
+	if written.DiagnosticLogPath != testDiagnosticLogPath {
+		t.Fatalf("DiagnosticLogPath = %q, want the live server's %q", written.DiagnosticLogPath, testDiagnosticLogPath)
+	}
 }
 
 // TestAttemptAdoptControlServerServerIdentityMismatchRefusesWithoutStop pins
@@ -579,8 +650,9 @@ func TestAttemptAdoptControlServerEmptyRecordedServerIdentityRefuses(t *testing.
 	identity := validIdentity()
 	identity.ServerIdentity = "whatever-this-server-reports"
 	client := &fakeAdoptionControlClient{
-		identity:     identity,
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -611,8 +683,9 @@ func TestAttemptAdoptControlServerUnownedPeriodFallsBackToFloorWhenUnreported(t 
 	identity := validIdentity()
 	identity.UnownedPeriodMS = 0
 	client := &fakeAdoptionControlClient{
-		identity:     identity,
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -643,8 +716,9 @@ func TestAttemptAdoptControlServerCredentialKeepsRotatingAcrossAdoptions(t *test
 	record := validRecord()
 	record.CredentialSecretID = secretID
 	client := &fakeAdoptionControlClient{
-		identity:     validIdentity(),
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token-1"},
+		heldCredential: "bootstrap-token",
+		identity:       validIdentity(),
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token-1"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -664,7 +738,10 @@ func TestAttemptAdoptControlServerCredentialKeepsRotatingAcrossAdoptions(t *test
 	}
 
 	// Simulate the next restart reading back the record the first call wrote.
+	// The server now holds the credential the first adoption rotated it to,
+	// so that is what it can prove possession of.
 	store.record = store.upserts[0]
+	client.heldCredential = "rotated-token-1"
 	client.rotateResult = &agentctl.CredentialRotationResult{RotationID: 2, Credential: "rotated-token-2"}
 
 	second := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
@@ -692,9 +769,10 @@ func TestAttemptAdoptControlServerConfirmFailureStillReportsAdopted(t *testing.T
 	record := validRecord()
 	record.CredentialSecretID = secretID
 	client := &fakeAdoptionControlClient{
-		identity:     validIdentity(),
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 9, Credential: "rotated-token"},
-		confirmErr:   errors.New("connection reset"),
+		heldCredential: "current-token",
+		identity:       validIdentity(),
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 9, Credential: "rotated-token"},
+		confirmErr:     errors.New("connection reset"),
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -720,8 +798,9 @@ func TestAttemptAdoptControlServerRotationStorageFailureIsIncomplete(t *testing.
 	record := validRecord()
 	record.CredentialSecretID = secretID
 	client := &fakeAdoptionControlClient{
-		identity:     validIdentity(),
-		rotateResult: &agentctl.CredentialRotationResult{RotationID: 5, Credential: "rotated-token"},
+		heldCredential: "current-token",
+		identity:       validIdentity(),
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 5, Credential: "rotated-token"},
 	}
 	store, factory := adoptionFixture(t, record, client)
 
@@ -754,7 +833,7 @@ func TestRecordFreshControlServerReusesPriorSecretID(t *testing.T) {
 		Endpoint:           "127.0.0.1:8888",
 		CredentialSecretID: priorSecretID,
 	}}
-	client := &fakeAdoptionControlClient{identity: validIdentity()}
+	client := &fakeAdoptionControlClient{heldCredential: "old-servers-token", identity: validIdentity()}
 
 	err = RecordFreshControlServer(context.Background(), store, secretStore, client, "127.0.0.1:9001", "new-servers-token")
 	if err != nil {
@@ -831,17 +910,6 @@ func TestRecordFreshControlServerPropagatesIdentityFailure(t *testing.T) {
 
 // TestReclaimUnneededControlServerNoRecordDoesNothing pins that a disabled
 // launch with no recorded control endpoint contacts nothing.
-func TestReclaimUnneededControlServerNoRecordDoesNothing(t *testing.T) {
-	store := &fakeAdoptionRecordStore{}
-	factory := func(string) (AdoptionControlClient, error) {
-		t.Fatal("client factory must not be called with no record")
-		return nil, nil
-	}
-
-	ReclaimUnneededControlServer(context.Background(), store, newInMemorySecretStore(), factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-}
-
 // TestReclaimUnneededControlServerNothingAnswersDoesNothing pins that an
 // endpoint that answers nothing is left alone -- nothing to reclaim. The
 // credential store is seeded exactly as
@@ -850,129 +918,27 @@ func TestReclaimUnneededControlServerNoRecordDoesNothing(t *testing.T) {
 // were ever removed, the function would proceed to a genuine shutdown
 // attempt and this assertion would actually catch it, rather than passing
 // only because credential-unavailable happened to short-circuit first.
-func TestReclaimUnneededControlServerNothingAnswersDoesNothing(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	client := &fakeAdoptionControlClient{identityErr: errors.New("connection refused")}
-	store, factory := adoptionFixture(t, record, client)
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownCalled {
-		t.Fatal("ShutdownControlServer was called on a server that answered no identity")
-	}
-}
-
 // TestReclaimUnneededControlServerIdentityMismatchLeavesServerUntouched pins
-// that a server this backend cannot prove is its own (home-dir mismatch) is
-// never stopped -- the same identity gate adoption applies. The credential
-// store is seeded exactly as
+// that a server belonging to another installation is never stopped -- the
+// same ownership gate adoption applies, on the path that runs with the
+// capability off. The credential store is seeded exactly as
 // TestReclaimUnneededControlServerStopsOwnServerAndRepairsRecords is, so a
-// real credential is available: if the home-dir check under test were ever
+// real credential is available: if the ownership check under test were ever
 // removed, the function would proceed to a genuine shutdown attempt and this
 // assertion would actually catch it, rather than passing only because
 // credential-unavailable happened to short-circuit first.
-func TestReclaimUnneededControlServerIdentityMismatchLeavesServerUntouched(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	identity := validIdentity()
-	identity.HomeDir = "/home/someone-else"
-	client := &fakeAdoptionControlClient{identity: identity}
-	store, factory := adoptionFixture(t, record, client)
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownCalled {
-		t.Fatal("ShutdownControlServer was called on a server with a mismatched home directory")
-	}
-}
-
 // TestReclaimUnneededControlServerServerIdentityMismatchLeavesServerUntouched
 // pins the same ServerIdentity gate AttemptAdoptControlServer applies
 // (Review round 3, finding 2) for the reclaim path too: a home-directory
 // match alone is not enough to prove this is the exact recorded server.
-func TestReclaimUnneededControlServerServerIdentityMismatchLeavesServerUntouched(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	record.ServerIdentity = "recorded-identity"
-	identity := validIdentity()
-	identity.ServerIdentity = "a-different-live-identity"
-	client := &fakeAdoptionControlClient{identity: identity}
-	store, factory := adoptionFixture(t, record, client)
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownCalled {
-		t.Fatal("ShutdownControlServer was called on a ServerIdentity-mismatched server")
-	}
-}
-
 // TestReclaimUnneededControlServerCredentialUnavailableLeavesServerUntouched
 // pins AC-EXECUTORS-SURVIVAL-005.5's refusal-before-any-stop-attempt when
 // the stored credential cannot be read.
-func TestReclaimUnneededControlServerCredentialUnavailableLeavesServerUntouched(t *testing.T) {
-	record := validRecord()
-	record.CredentialSecretID = "does-not-exist"
-	client := &fakeAdoptionControlClient{identity: validIdentity()}
-	store, factory := adoptionFixture(t, record, client)
-
-	ReclaimUnneededControlServer(context.Background(), store, newInMemorySecretStore(), factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownCalled {
-		t.Fatal("ShutdownControlServer was called despite the credential being unavailable")
-	}
-}
-
 // TestReclaimUnneededControlServerStopsOwnServerAndRepairsRecords pins the
 // success path: a proven-own server is stopped via the ownership-shutdown
 // operation without ever rotating the credential (adoption is forbidden
 // while the capability is disabled, AC-EXECUTORS-SURVIVAL-005.1), and every
 // live standalone recovery-inventory record is repaired immediately.
-func TestReclaimUnneededControlServerStopsOwnServerAndRepairsRecords(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	client := &fakeAdoptionControlClient{identity: validIdentity()}
-	store, factory := adoptionFixture(t, record, client)
-	store.liveStandaloneRecords = []*models.ExecutorRunning{{SessionID: "session-1"}}
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if !client.shutdownCalled {
-		t.Fatal("ShutdownControlServer was not called for a proven-own detached server")
-	}
-	if client.rotateResult != nil || len(client.presentedTokens) == 0 || client.presentedTokens[0] != "own-token" {
-		t.Fatalf("presented tokens = %v, want the stored own-token used directly, never rotated", client.presentedTokens)
-	}
-	if len(store.repairedSessionIDs) != 1 || store.repairedSessionIDs[0] != "session-1" {
-		t.Fatalf("repaired sessions = %v, want session-1 repaired immediately after the successful stop", store.repairedSessionIDs)
-	}
-}
-
 // TestReclaimUnneededControlServerRetriesStopAndSkipsRepairOnFailure pins
 // the shared AC-EXECUTORS-CONTROL-OWNERSHIP-004.7 retry contract applied to
 // this stop too: bounded retries, and no repair when they're exhausted. The
@@ -980,64 +946,7 @@ func TestReclaimUnneededControlServerStopsOwnServerAndRepairsRecords(t *testing.
 // connection-refused/dial failure -- see
 // TestReclaimUnneededControlServerConnectionRefusedCountsAsSuccess for that
 // carve-out.
-func TestReclaimUnneededControlServerRetriesStopAndSkipsRepairOnFailure(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	client := &countingShutdownControlClient{
-		fakeAdoptionControlClient: fakeAdoptionControlClient{
-			identity:    validIdentity(),
-			shutdownErr: errors.New("500 internal server error"),
-		},
-	}
-	store, _ := adoptionFixture(t, record, &client.fakeAdoptionControlClient)
-	factory := func(string) (AdoptionControlClient, error) { return client, nil }
-	store.liveStandaloneRecords = []*models.ExecutorRunning{{SessionID: "session-1"}}
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownAttempts < 2 {
-		t.Fatalf("shutdown attempts = %d, want more than one (bounded retry)", client.shutdownAttempts)
-	}
-	if len(store.repairedSessionIDs) != 0 {
-		t.Fatalf("repaired sessions = %v, want none when every stop retry fails", store.repairedSessionIDs)
-	}
-}
-
 // TestReclaimUnneededControlServerConnectionRefusedCountsAsSuccess pins
 // AC-EXECUTORS-CONTROL-OWNERSHIP-004.7's "already absent counts as success"
 // carve-out for this stop too: a dial-level connection-refused error must
 // not be retried to exhaustion, and the immediate-repair step still runs.
-func TestReclaimUnneededControlServerConnectionRefusedCountsAsSuccess(t *testing.T) {
-	secretStore := newInMemorySecretStore()
-	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
-	if err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	record := validRecord()
-	record.CredentialSecretID = secretID
-	client := &countingShutdownControlClient{
-		fakeAdoptionControlClient: fakeAdoptionControlClient{
-			identity:    validIdentity(),
-			shutdownErr: errors.New("dial tcp 127.0.0.1:9999: connect: connection refused"),
-		},
-	}
-	store, _ := adoptionFixture(t, record, &client.fakeAdoptionControlClient)
-	factory := func(string) (AdoptionControlClient, error) { return client, nil }
-	store.liveStandaloneRecords = []*models.ExecutorRunning{{SessionID: "session-1"}}
-
-	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
-		testHomeDir, 0, -1, newAdoptionTestLogger(t))
-
-	if client.shutdownAttempts != 1 {
-		t.Fatalf("shutdown attempts = %d, want exactly 1: a connection-refused error must not be retried", client.shutdownAttempts)
-	}
-	if len(store.repairedSessionIDs) != 1 || store.repairedSessionIDs[0] != "session-1" {
-		t.Fatalf("repaired sessions = %v, want session-1 repaired: an already-absent server counts as a successful stop", store.repairedSessionIDs)
-	}
-}

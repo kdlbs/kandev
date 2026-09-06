@@ -70,16 +70,20 @@ func TestCredentialStateRotateIsIdempotentUnderRetryWithSupersededCredential(t *
 }
 
 // TestCredentialStateRotateConcurrentCallersConvergeOnOneRotation pins
-// AC-EXECUTORS-CONTROL-OWNERSHIP-002.4/002.10 under genuine concurrency, not
-// just sequential retry: two backends racing AttemptAdoptControlServer
-// against the same agentctl both present the recorded server's current
-// credential to Rotate at effectively the same time. The mutex serializes
-// them, so exactly one becomes the real rotation and the other -- now
-// presenting what has become the superseded credential -- takes the
-// idempotent-retry branch and converges on the identical (rotationID,
-// replacement) pair rather than either erroring, allocating a second
-// rotation, or corrupting the shared state. Neither racer is left believing
-// it owns a distinct credential from the other.
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.10 under genuine concurrency, not just
+// sequential retry: two callers present the same current credential to
+// Rotate at effectively the same time. The mutex serializes them, so exactly
+// one becomes the real rotation and the other -- now presenting what has
+// become the superseded credential -- takes the idempotent-retry branch and
+// converges on the identical (rotationID, replacement) pair rather than
+// erroring, allocating a second rotation, or corrupting the shared state.
+// Neither caller is left believing it owns a distinct credential.
+//
+// This is a property of the state machine, not a claim that two backends can
+// reach it: AC-EXECUTORS-CONTROL-OWNERSHIP-002.4 excludes a second backend at
+// startup through the runtime-state ownership lock. The two racers here stand
+// in for one backend retrying across a crash, and for the ownership lock
+// being wrong.
 func TestCredentialStateRotateConcurrentCallersConvergeOnOneRotation(t *testing.T) {
 	c := newCredentialState("initial-token")
 

@@ -38,6 +38,7 @@ func provideLifecycleManager(
 	mcpIdentityScoper lifecycle.MCPIdentityScoper,
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
+	inheritedRecordScope lifecycle.InheritedRecordScope,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
@@ -146,6 +147,7 @@ func provideLifecycleManager(
 	// none -- Start then falls back to its own invocation time).
 	lifecycleMgr.SetRecoveryDeadline(cfg.Agentctl.RecoveryDeadline)
 	lifecycleMgr.SetRecoveryDeadlineStart(recoveryDeadlineStart)
+	lifecycleMgr.SetInheritedRecordScope(inheritedRecordScope)
 
 	// Register environment preparers (keyed by ExecutorType — the
 	// "local"/"worktree"/"local_docker"/"sprites" taxonomy, not Runtime).

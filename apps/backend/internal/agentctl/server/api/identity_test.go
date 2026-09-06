@@ -12,13 +12,13 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabilities
+// TestHandleIdentityIsReachableWithoutAuthAndReportsIdentityAndCapabilities
 // pins design 01's "Identity retrieval ... is what decides compatibility, so
 // it cannot itself be gated on the answer": /identity must answer even when
 // AuthToken is configured and the caller presents no bearer token at all,
-// and must report the resolved Kandev home directory, this launch's opaque
-// server identity, and the advertised capability set.
-func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabilities(t *testing.T) {
+// and must report this launch's opaque server identity and the advertised
+// capability set.
+func TestHandleIdentityIsReachableWithoutAuthAndReportsIdentityAndCapabilities(t *testing.T) {
 	log := logger.Default()
 	cfg := &config.Config{
 		AuthToken:         "some-configured-token",
@@ -44,26 +44,18 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 	}
 
 	var body struct {
-		HomeDir           string   `json:"home_dir"`
-		ServerIdentity    string   `json:"server_identity"`
-		Capabilities      []string `json:"capabilities"`
-		DiagnosticLogPath string   `json:"diagnostic_log_path"`
-		UnownedPeriodMS   int64    `json:"unowned_period_ms"`
+		ServerIdentity  string   `json:"server_identity"`
+		Capabilities    []string `json:"capabilities"`
+		UnownedPeriodMS int64    `json:"unowned_period_ms"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
-	}
-	if body.HomeDir != cfg.HomeDir {
-		t.Errorf("HomeDir = %q, want %q", body.HomeDir, cfg.HomeDir)
 	}
 	if body.ServerIdentity != cfg.ServerIdentity {
 		t.Errorf("ServerIdentity = %q, want %q", body.ServerIdentity, cfg.ServerIdentity)
 	}
 	if len(body.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")
-	}
-	if body.DiagnosticLogPath != cfg.DiagnosticLogPath {
-		t.Errorf("DiagnosticLogPath = %q, want %q", body.DiagnosticLogPath, cfg.DiagnosticLogPath)
 	}
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-003.2 (Review round 3, finding 5): an
 	// adopting backend must be able to renew ownership on the cadence this
@@ -100,19 +92,58 @@ func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIdentity: %v", err)
 	}
-	if identity.HomeDir != cfg.HomeDir {
-		t.Errorf("HomeDir = %q, want %q", identity.HomeDir, cfg.HomeDir)
-	}
 	if identity.ServerIdentity != cfg.ServerIdentity {
 		t.Errorf("ServerIdentity = %q, want %q", identity.ServerIdentity, cfg.ServerIdentity)
 	}
 	if len(identity.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")
 	}
-	if identity.DiagnosticLogPath != cfg.DiagnosticLogPath {
-		t.Errorf("DiagnosticLogPath = %q, want %q", identity.DiagnosticLogPath, cfg.DiagnosticLogPath)
-	}
 	if identity.UnownedPeriodMS != cs.unownedPeriod.Milliseconds() {
 		t.Errorf("UnownedPeriodMS = %d, want %d", identity.UnownedPeriodMS, cs.unownedPeriod.Milliseconds())
+	}
+}
+
+// TestGetServerDetailsRoundTripsThroughTheRealClientAndRequiresAuth pins the
+// endpoint the paths moved to. The filesystem values an adopting backend
+// records are still reachable, but only once it has authenticated, so a
+// caller that never proved possession of the credential learns nothing about
+// this machine's layout.
+func TestGetServerDetailsRoundTripsThroughTheRealClientAndRequiresAuth(t *testing.T) {
+	log := logger.Default()
+	cfg := &config.Config{
+		AuthToken:         "details-credential",
+		HomeDir:           "/home/kandev-test/.kandev",
+		ServerIdentity:    "server-identity-details",
+		DiagnosticLogPath: "/home/kandev-test/.kandev/logs/agentctl-diagnostic.log",
+	}
+	mgr := instance.NewManager(cfg, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(t.Context()) })
+
+	cs := NewControlServer(cfg, mgr, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+
+	unauthenticated, err := http.Get(server.URL + "/api/v1/ownership/details") //nolint:noctx // test-only, hits an ephemeral httptest server
+	if err != nil {
+		t.Fatalf("GET /api/v1/ownership/details: %v", err)
+	}
+	defer func() { _ = unauthenticated.Body.Close() }()
+	if unauthenticated.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want %d", unauthenticated.StatusCode, http.StatusUnauthorized)
+	}
+
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log)
+	client.SetAuthToken(cfg.AuthToken)
+
+	details, err := client.GetServerDetails(t.Context())
+	if err != nil {
+		t.Fatalf("GetServerDetails: %v", err)
+	}
+	if details.HomeDir != cfg.HomeDir {
+		t.Errorf("HomeDir = %q, want %q", details.HomeDir, cfg.HomeDir)
+	}
+	if details.DiagnosticLogPath != cfg.DiagnosticLogPath {
+		t.Errorf("DiagnosticLogPath = %q, want %q", details.DiagnosticLogPath, cfg.DiagnosticLogPath)
 	}
 }

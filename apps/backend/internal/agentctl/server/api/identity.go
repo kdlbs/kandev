@@ -14,16 +14,17 @@ import (
 // can be correctly refused by a newer backend that requires one it lacks.
 var SurvivalCapabilities = []string{"agent-survival.v1"}
 
-// handleIdentity reports installation identity and capability scope. It is
-// deliberately exempt from bearer-token auth (see NewControlServer): design
-// 01's "Capability compatibility" requires identity retrieval to sit below
-// auth and capability negotiation, since it is what decides both.
+// handleIdentity reports this launch's opaque identity and capability
+// scope. It is deliberately exempt from bearer-token auth (see
+// NewControlServer): identity retrieval decides adoption compatibility, so
+// it cannot itself be gated on the answer. Because it sits below
+// authentication it carries nothing beyond what that decision needs, and in
+// particular no filesystem path; adoption reads those from
+// /api/v1/ownership/details once authenticated.
 func (m *ControlServer) handleIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"home_dir":            m.cfg.HomeDir,
-		"server_identity":     m.cfg.ServerIdentity,
-		"capabilities":        SurvivalCapabilities,
-		"diagnostic_log_path": m.cfg.DiagnosticLogPath,
+		"server_identity": m.cfg.ServerIdentity,
+		"capabilities":    SurvivalCapabilities,
 		// unowned_period_ms is this server's own resolved unowned period
 		// (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7), not the caller's config:
 		// an adopting backend's local config can disagree with what this

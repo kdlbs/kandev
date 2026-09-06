@@ -521,6 +521,7 @@ func startServices( //nolint:cyclop
 	}
 	var agentctlBinaryPath string
 	var recoveryDeadlineStart time.Time
+	var inheritedRecordScope lifecycle.InheritedRecordScope
 	if agentctlResult != nil {
 		addCleanup(agentctlResult.cleanup)
 		defer func() {
@@ -537,10 +538,11 @@ func startServices( //nolint:cyclop
 		// ServiceOptions when constructing the office service.
 		agentctlBinaryPath = agentctlResult.binaryPath
 		recoveryDeadlineStart = agentctlResult.recoveryDeadlineStart
+		inheritedRecordScope = agentctlResult.inheritedRecordScope
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart,
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, inheritedRecordScope,
 		startupRecoveryGuard, runCleanups, cancelContext)
 }
 
@@ -562,6 +564,7 @@ func startAgentInfrastructure(
 	agentRegistry *registry.Registry,
 	agentctlBinaryPath string,
 	recoveryDeadlineStart time.Time,
+	inheritedRecordScope lifecycle.InheritedRecordScope,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
 	runCleanups func(),
 	cancelContext context.CancelFunc,
@@ -606,6 +609,7 @@ func startAgentInfrastructure(
 		mcpScopeResolver.Scope,
 		mcpScopeResolver.ScopePrincipal,
 		recoveryDeadlineStart,
+		inheritedRecordScope,
 		services.Task,
 		services.Task,
 		repos.Task,

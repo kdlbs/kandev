@@ -367,7 +367,6 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 // IdentityInfo is the response from GET /identity: installation identity and
 // the capability set this control server advertises.
 type IdentityInfo struct {
-	HomeDir        string   `json:"home_dir"`
 	ServerIdentity string   `json:"server_identity"`
 	Capabilities   []string `json:"capabilities"`
 	// UnownedPeriodMS is the reporting server's own resolved unowned period
@@ -375,7 +374,13 @@ type IdentityInfo struct {
 	// that server itself enforces, which an adopting backend's local config
 	// can disagree with across a restart. Use this, not local config, to
 	// compute an adopted server's ownership-renewal cadence.
-	UnownedPeriodMS   int64  `json:"unowned_period_ms"`
+	UnownedPeriodMS int64 `json:"unowned_period_ms"`
+}
+
+// ServerDetails carries the control-server values an adopting backend
+// records but that are withheld from the unauthenticated identity endpoint.
+type ServerDetails struct {
+	HomeDir           string `json:"home_dir"`
 	DiagnosticLogPath string `json:"diagnostic_log_path"`
 }
 
@@ -449,6 +454,68 @@ func (c *ControlClient) ClaimOwnership(ctx context.Context) error {
 type CredentialRotationResult struct {
 	RotationID int64  `json:"rotation_id"`
 	Credential string `json:"credential"`
+}
+
+// ProveOwnership asks the control server to demonstrate it already holds
+// the credential this backend has stored for it, over a challenge generated
+// for this attempt. It carries no auth token, because it is what
+// establishes that the server is worth sending one to: the answer is a
+// keyed digest the server can only produce from the credential, and it
+// never carries the credential itself.
+func (c *ControlClient) ProveOwnership(ctx context.Context, challenge string) ([]string, error) {
+	payload, err := json.Marshal(map[string]string{"challenge": challenge})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/ownership/prove", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request ownership proof: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to request ownership proof: status %d", resp.StatusCode)
+	}
+
+	var decoded struct {
+		Proofs []string `json:"proofs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return decoded.Proofs, nil
+}
+
+// GetServerDetails reads the control-server values withheld from the
+// unauthenticated identity endpoint. Requires a valid credential.
+func (c *ControlClient) GetServerDetails(ctx context.Context) (*ServerDetails, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/ownership/details", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get server details: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get server details: status %d", resp.StatusCode)
+	}
+
+	var details ServerDetails
+	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &details, nil
 }
 
 // RotateCredential presents this client's current auth token (via the

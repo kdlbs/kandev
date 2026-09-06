@@ -158,6 +158,13 @@ type Manager struct {
 	// unconditional terminating stop) is the correct zero value.
 	agentSurvivalEnabled bool
 
+	// inheritedRecordScope records what this launch found at the recorded
+	// control endpoint, so classifyStandaloneLiveness can judge records
+	// inherited from an earlier launch correctly. Set once during startup
+	// wiring via SetInheritedRecordScope; the zero value (no server
+	// answered) is correct for a launch that never attempted adoption.
+	inheritedRecordScope InheritedRecordScope
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.

@@ -97,6 +97,7 @@ func TestManagerClassifyStandaloneLivenessNothingAnsweredFallsBackToProcessProbe
 
 func TestManagerClassifyStandaloneLivenessPresentNoStopInFlightIsAlive(t *testing.T) {
 	mgr := newLivenessTestManager(t, newStandaloneControlServer(t, true))
+	mgr.SetInheritedRecordScope(InheritedRecordScopeAdopted)
 	row := &models.ExecutorRunning{SessionID: "session-present", Runtime: agentruntime.RuntimeStandalone}
 	scope := &standaloneLivenessScope{reachable: true, liveBySession: map[string]struct{}{"session-present": {}}}
 
@@ -108,6 +109,7 @@ func TestManagerClassifyStandaloneLivenessPresentNoStopInFlightIsAlive(t *testin
 
 func TestManagerClassifyStandaloneLivenessPresentWithStopInFlightIsUnknown(t *testing.T) {
 	mgr := newLivenessTestManager(t, newStandaloneControlServer(t, true))
+	mgr.SetInheritedRecordScope(InheritedRecordScopeAdopted)
 	row := &models.ExecutorRunning{SessionID: "session-stopping", Runtime: agentruntime.RuntimeStandalone}
 	scope := &standaloneLivenessScope{reachable: true, liveBySession: map[string]struct{}{"session-stopping": {}}}
 	mgr.recoveryGuard.AcquireOrObserve("session-stopping")
@@ -156,6 +158,9 @@ func TestManagerClassifyStandaloneLivenessCapabilityDisabledFallsBackToProcessPr
 
 func TestManagerClassifyStandaloneLivenessAbsentInheritedRecordIsUnknown(t *testing.T) {
 	mgr := newLivenessTestManager(t, newStandaloneControlServer(t, true))
+	// This backend adopted the recorded server, so its enumeration is
+	// authoritative for a record an earlier launch left behind.
+	mgr.SetInheritedRecordScope(InheritedRecordScopeAdopted)
 	row := &models.ExecutorRunning{SessionID: "session-inherited", Runtime: agentruntime.RuntimeStandalone}
 	scope := &standaloneLivenessScope{reachable: true, liveBySession: map[string]struct{}{}}
 	// Deliberately NOT marked via markSessionCreatedThisLifetime: this is an

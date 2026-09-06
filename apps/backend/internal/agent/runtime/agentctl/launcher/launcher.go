@@ -22,6 +22,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/netprobe"
 	"go.uber.org/zap"
 )
 
@@ -426,14 +427,20 @@ func (l *Launcher) closeParentPipeLocked() {
 	}
 }
 
-// checkPortAvailable verifies the given port is not in use.
-// It checks by attempting a wildcard bind (matching what agentctl does with ":port").
+// checkPortAvailable reports whether the given port is free, using the same
+// probe contract the process launcher uses (internal/common/netprobe): a
+// dual-stack loopback connect must find nothing listening AND a fresh
+// loopback bind must succeed.
+//
+// A bind alone is not enough. A surviving agentctl holds the wildcard
+// address, and on macOS/BSD a bind against an active wildcard listener can
+// still succeed, which would report the occupied control port as free and
+// send this launch to a second server on a port the record does not name.
 func checkPortAvailable(port int) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return err
+	if !netprobe.PortAvailable(port) {
+		return fmt.Errorf("port %d is already in use", port)
 	}
-	return ln.Close()
+	return nil
 }
 
 // findFreePort asks the OS for an available port by binding to :0.
