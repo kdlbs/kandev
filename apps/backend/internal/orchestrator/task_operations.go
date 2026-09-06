@@ -2494,7 +2494,14 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
 	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
 
-	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
+	// effectivePrompt is already fully composed for this step entry (handoff
+	// included): if promptTask's own internal ErrExecutionNotFound recovery
+	// fires, it must reuse this composed prompt rather than recomposing from
+	// the destination step's own template and discarding the handoff.
+	_, err = s.promptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false, promptTaskOptions{
+		promptAlreadyComposed: true,
+		fallbackRetryPrompt:   effectivePrompt,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}

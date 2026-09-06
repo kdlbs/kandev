@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -344,6 +348,84 @@ func TestStartSessionForWorkflowStep_DeliversHandoff(t *testing.T) {
 	if _, present := carryToken(t, fixture.repo, fixture.taskID); present {
 		t.Fatal("the claimed token must be removed")
 	}
+}
+
+// TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback
+// covers the same ErrExecutionNotFound-after-lazy-resume race
+// autoStartStepPrompt and promptTask's own internal recovery were already
+// fixed for, at the one remaining composed-prompt caller: StartSessionForWorkflowStep
+// appends a claimed handoff to effectivePrompt before dispatch, but used to
+// call the public PromptTask (promptAlreadyComposed defaults to false), so a
+// missing-execution race hitting promptTask's internal recovery would
+// recompose the prompt from the destination step's own template and silently
+// drop the handoff.
+func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-workflow-step-lazy-resume"
+		sessionID = "session-workflow-step-lazy-resume"
+		stepID    = "step-workflow-step-lazy-resume"
+		handoff   = "watch out for the flaky test"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.AgentExecutionID = "exec-before-restart"
+	session.AgentProfileID = "profile-lazy-resume"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-before-restart")
+	seedHandoffCarryToken(t, repo, taskID, stepID, handoff, "stamp-lazy-resume")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Next",
+		Prompt: "Recomposed step instructions.",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, Title: "Test Task", State: v1.TaskStateInProgress}
+
+	// IsAgentRunningForSession reports "running" for every call except the
+	// second: StartSessionForWorkflowStep's own ensureSessionRunning (call 1)
+	// sees the session as already running and skips resuming it, then
+	// promptTask's internal hadExecutionBeforeEnsure check (call 2) hits a
+	// momentary "not running" blip — the exact lazy-resume race
+	// promptTask's own internal ErrExecutionNotFound recovery exists for —
+	// before promptTask's own ensureSessionRunning call (call 3) sees it
+	// running again and does not attempt a second resume. No cold-resume
+	// launch is needed to reach this state; the only launch in this test is
+	// the fresh-launch fallback after PromptAgent reports ErrExecutionNotFound.
+	var runningChecks atomic.Int32
+	var launchCalls atomic.Int32
+	launchPrompts := make(chan string, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		promptErr:              executor.ErrExecutionNotFound,
+		isAgentRunningFn: func(_ context.Context, _ string) bool {
+			return runningChecks.Add(1) != 2
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool { return true },
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			call := launchCalls.Add(1)
+			launchPrompts <- req.TaskDescription
+			return &executor.LaunchAgentResponse{AgentExecutionID: fmt.Sprintf("exec-fresh-%d", call)}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
+	svc.messageCreator = &mockMessageCreator{}
+
+	err = svc.StartSessionForWorkflowStep(ctx, taskID, sessionID, stepID)
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), launchCalls.Load(), "expected exactly the fresh-launch fallback, no cold-resume launch")
+	freshPrompt := <-launchPrompts
+	require.Contains(t, freshPrompt, handoff,
+		"the already-composed prompt (with the claimed handoff) must survive the fresh-launch fallback")
+	require.NotEqual(t, "Recomposed step instructions.", strings.TrimSpace(freshPrompt),
+		"promptAlreadyComposed must skip StartCreatedSession's own step-template recomposition")
 }
 
 // TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata covers
