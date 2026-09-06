@@ -7,6 +7,7 @@ import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const BACKLOG_ICON_TEST_ID = "task-state-backlog";
+const READY_ICON_TEST_ID = "task-state-ready";
 const CURRENT_STEP_ID = "step-current";
 const LIVE_UPDATED_AT = "2026-08-24T09:01:00Z";
 
@@ -231,7 +232,7 @@ describe("command panel task activity icon edge cases", () => {
 
     render(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));
 
-    expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(READY_ICON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });
 

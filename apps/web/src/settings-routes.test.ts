@@ -568,12 +568,13 @@ describe("settings breadcrumb coverage", () => {
 });
 
 describe("workflow settings route", () => {
-  it("passes the seeded workspace id to the workflow settings loader", () => {
-    const route = renderSettingsRoute("/settings/workspace/demo-workspace/workflows");
+  it("redirects the legacy workflow URL to the scoped workspace route", () => {
+    const route = renderSettingsRoute(
+      "/settings/workspace/demo-workspace/workflows",
+    ) as ReactElement<{ to: string }>;
 
     expect(isValidElement(route)).toBe(true);
-    expect((route as ReactElement<{ workspaceId: string }>).props.workspaceId).toBe(
-      "demo-workspace",
-    );
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/workspaces/demo-workspace/workflows");
   });
 });
