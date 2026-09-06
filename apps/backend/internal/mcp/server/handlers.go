@@ -1042,14 +1042,14 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		// Checked before RequireString ("content"), so a mode argument is
-		// rejected even when content is also present but empty
-		// (AC-TASKS-PLAN-APPEND-005.2). content is schema-required, so a
+		// Checked before RequireString ("content"), so a non-empty mode argument is
+		// rejected even when content is also present but empty. content is
+		// schema-required, so a
 		// call missing content entirely never reaches this handler at all -
 		// the server's generic MCP argument-schema validator rejects it
 		// first; that generic message is acceptable here because create has
 		// no ordering requirement between mode and content the way
-		// AC-TASKS-PLAN-APPEND-001.7 imposes on update. This tool has no
+		// update. This tool has no
 		// mode of its own — wrongType is folded into the reject rather than
 		// silently treated as absent, since a non-empty-but-wrongly-typed
 		// mode is not "absent or empty" either; in practice the schema's own
@@ -1118,11 +1118,11 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		}
 
 		// Mode is checked before content, mirroring
-		// AC-TASKS-PLAN-APPEND-001.7's precedence: mode validity is decided
+		// precedence: mode validity is decided
 		// entirely from the request itself, so it is resolved before a
 		// round trip. GetString would silently read a non-string mode as
 		// absent and default to the destructive replace behavior
-		// (AC-TASKS-PLAN-APPEND-001.3), so the type is checked explicitly -
+		// so the type is checked explicitly -
 		// though in practice the schema's own type constraint on "mode"
 		// already rejects a non-string value before this handler runs, so
 		// this is defense-in-depth against a future schema change, not the
@@ -1131,7 +1131,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		// here rather than with RequireString: "content is required" is
 		// PlanService.UpdatePlan's call to make, after authorization, so
 		// that a denied caller never learns content validity for a task it
-		// cannot reach (AC-TASKS-PLAN-APPEND-001.7).
+		// cannot reach.
 		mode, _, wrongType := planModeArg(req)
 		if wrongType {
 			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", service.PlanWriteModeReplace, service.PlanWriteModeAppend)), nil
@@ -1168,8 +1168,8 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 // planModeArg reads the optional "mode" tool argument. It distinguishes a
 // value present but not a string from one genuinely absent: silently
 // treating the former as absent (as GetString would) defaults a malformed
-// request to the destructive replace behavior AC-TASKS-PLAN-APPEND-001.3
-// exists to prevent. value is "" whenever wrongType is true.
+// request to destructive replace behavior. value is "" whenever wrongType is
+// true.
 func planModeArg(req mcp.CallToolRequest) (value string, present, wrongType bool) {
 	raw, ok := req.GetArguments()["mode"]
 	if !ok {

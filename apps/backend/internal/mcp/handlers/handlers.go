@@ -4088,7 +4088,7 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 // handleUpdateTaskPlan updates an existing task plan.
 //
 // Mode validity is checked before anything else, ahead of PlanService's own
-// task-reach authorization (AC-TASKS-PLAN-APPEND-001.7): the tool's schema
+// task-reach authorization: the tool's schema
 // already publishes the two accepted values, so rejecting an unrecognized
 // one discloses nothing about the target task. Both modes' content checks —
 // replace's "empty content" rejection and append's fragment validation — run

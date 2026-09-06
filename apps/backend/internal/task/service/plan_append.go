@@ -7,12 +7,12 @@ import (
 )
 
 // ErrPlanAppendFragmentWhitespaceOnly rejects an append fragment consisting
-// only of whitespace (AC-TASKS-PLAN-APPEND-001.5): such a fragment can only
+// only of whitespace: such a fragment can only
 // add separator noise to a document from which it cannot be removed.
 var ErrPlanAppendFragmentWhitespaceOnly = errors.New("append fragment must contain a non-whitespace character")
 
 // ErrPlanContentReadFailed reports that an append could not read the stored
-// plan content it needed to compose against (AC-TASKS-PLAN-APPEND-003.5).
+// plan content it needed to compose against.
 // Deliberately distinct from ErrTaskPlanNotFound: reporting a read failure
 // as "not found" would send the caller to create_task_plan_kandev, which
 // upserts and commits the fragment as the entire plan — the destruction
@@ -20,9 +20,8 @@ var ErrPlanAppendFragmentWhitespaceOnly = errors.New("append fragment must conta
 // message carries no storage detail.
 var ErrPlanContentReadFailed = errors.New("could not read the current plan content; the append was not applied")
 
-// validateAppendFragment applies AC-TASKS-PLAN-APPEND-001.4 (content
-// required, in either mode) and AC-TASKS-PLAN-APPEND-001.5 (no
-// whitespace-only fragment) to an append request's content.
+// validateAppendFragment requires content and rejects a whitespace-only
+// fragment in an append request.
 func validateAppendFragment(content string) error {
 	if content == "" {
 		return ErrContentRequired

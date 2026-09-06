@@ -31,9 +31,10 @@ pattern follows `external-id-idempotency-operations.md` in this same directory.
 
 ## Agent-facing description and acknowledgement
 
-`REQ-TASKS-PLAN-APPEND-006` is satisfied in the tool registration in
-`internal/mcp/server/server.go`, not any runtime path. The description an agent reads is
-the only place the choice between modes is explained, so it is contract, not commentary.
+`REQ-TASKS-PLAN-APPEND-006` covers the tool registration in
+`internal/mcp/server/server.go` and the existing runtime warning and acknowledgement
+paths. The description an agent reads is the place where the choice between modes is
+explained, so it is contract, not commentary.
 
 **`AC-TASKS-PLAN-APPEND-006.9` binds a CLASS of strings, not a list.** No agent-facing
 text describing a plan write may claim that no append mode exists or prescribe

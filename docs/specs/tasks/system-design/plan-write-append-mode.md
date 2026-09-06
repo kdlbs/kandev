@@ -46,8 +46,8 @@ warning text. `plan-content-size-limit` has also landed, which
 
 ## Prior art
 
-**Our own prior reasoning.** Searched the `henry` vault
-(`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`) through QMD, collection
+**Our own prior reasoning.** Searched the `henry` vault (local path redacted)
+through QMD, collection
 `wiki`, with lexical, semantic and hypothetical-document sub-queries on
 append-versus-replace write APIs, the context cost of read-modify-write, and durable agent
 memory across context resets. Eight candidates, three read; each position is argued where
@@ -191,10 +191,10 @@ it is not re-derived.
 
 ## Mode parameter and validation
 
-The mode is an optional string with the enum `replace` and `append`, matching
-`message_task_kandev`'s `delivery_mode`: declared with `mcp.Enum` at registration and
-re-validated in the handler, because a tool-schema enum is advisory and a client can
-send anything.
+The mode is an optional string. Its description names `replace` and `append`. The
+registration does not use `mcp.Enum`, because the generic argument validator would
+intercept an invalid value before the handler can return the required error. The
+handler performs exact, case-sensitive validation and names both accepted values.
 
 Validation is an exact, case-sensitive match against the two values. An empty or absent
 value means `replace`. Any other is a validation error naming both accepted values, and
@@ -266,8 +266,8 @@ one blank line between the two bodies.
 
 "Whitespace" here is the requirements' normative definition: a character whose Unicode
 `White_Space` property is true. In Go that is `unicode.IsSpace`, and so
-`strings.TrimSpace` and `strings.TrimLeft`/`TrimRight` with a `unicode.IsSpace`
-predicate. A hand-rolled `" \t\r\n"` cutset does **not** satisfy the contract: it
+`strings.TrimSpace` plus `strings.TrimLeftFunc`/`TrimRightFunc` with a
+`unicode.IsSpace` predicate. A hand-rolled `" \t\r\n"` cutset does **not** satisfy the contract: it
 misses U+0085 NEL and U+00A0 no-break space, so it would classify the same fragment
 differently from `AC-TASKS-PLAN-APPEND-001.5`'s validation, which uses this definition.
 Use one helper for both so they cannot drift.

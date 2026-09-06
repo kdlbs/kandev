@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -54,10 +53,11 @@ func TestConcurrentAppendsBothSurvive(t *testing.T) {
 		secondDone <- err
 	}()
 
+	waitForPlanLockWaiters(t, svc.locks, "task-append-gate", 2)
 	select {
 	case err := <-secondDone:
 		t.Fatalf("second append returned (err=%v) before the gated first write released the per-task lock", err)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 
 	release()
@@ -123,10 +123,11 @@ func TestAppendConcurrentWithReplaceNeverLosesEitherWrite(t *testing.T) {
 		replaceDone <- err
 	}()
 
+	waitForPlanLockWaiters(t, svc.locks, "task-append-replace-race", 2)
 	select {
 	case err := <-replaceDone:
 		t.Fatalf("replace returned (err=%v) before the gated append released the per-task lock - the two modes are not sharing one lock", err)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 
 	release()

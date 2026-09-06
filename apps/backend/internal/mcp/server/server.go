@@ -1828,7 +1828,7 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool always replaces the plan's entire content and has no append mode; it rejects a mode argument. If a plan already exists and you only want to add a section, use update_task_plan_kandev with mode=\"append\" instead — it composes your addition onto the stored plan without you reading and resending it. To replace the whole document here, read it first with get_task_plan_kandev if you need to preserve any of it."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool always replaces the plan's entire content and has no append mode; it rejects any non-empty mode argument. If a plan already exists and you only want to add a section, use update_task_plan_kandev with mode=\"append\" instead — it composes your addition onto the stored plan without you reading and resending it. To replace the whole document here, read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole. To add a section to an existing plan without resending it, use update_task_plan_kandev with mode=\"append\" instead. To replace the whole document here, call get_task_plan_kandev first and include its content plus your additions in this call. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
@@ -1838,8 +1838,8 @@ func (s *Server) registerPlanTools() {
 			// runs - lets a string mode value through to
 			// createTaskPlanHandler's own rejection instead of shadowing it
 			// with a generic "additionalProperties" error that never names
-			// update_task_plan_kandev (AC-TASKS-PLAN-APPEND-005.2).
-			mcp.WithString("mode", mcp.Description("Not supported by this tool; any value is rejected. Use update_task_plan_kandev with mode=\"append\" to add a section to an existing plan without resending it.")),
+			// update_task_plan_kandev.
+			mcp.WithString("mode", mcp.Description("Not supported by this tool; any non-empty value is rejected. An empty value is treated as absent. Use update_task_plan_kandev with mode=\"append\" to add a section to an existing plan without resending it.")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
 	)
@@ -1854,8 +1854,8 @@ func (s *Server) registerPlanTools() {
 		mcp.NewTool("update_task_plan_kandev",
 			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. In replace mode this call OVERWRITES THE ENTIRE PLAN: sending only a new section instead of the whole document will silently delete everything else, so call get_task_plan_kandev first and send the full document (prior content plus your changes), never just the new section. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again.`),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			// Deliberately not mcp.Required(): AC-TASKS-PLAN-APPEND-001.7
-			// orders mode validity, then task-reach authorization, ahead of
+			// Deliberately not mcp.Required(): mode validity is checked before
+			// task-reach authorization, ahead of
 			// content validity. A schema-required property's absence is
 			// rejected by the server's generic MCP argument-schema
 			// validator itself, before updateTaskPlanHandler's own mode
@@ -1870,8 +1870,8 @@ func (s *Server) registerPlanTools() {
 			// (compiled with additionalProperties:false) and would then
 			// reject an out-of-enum value itself, with a generic message
 			// that never names either accepted value - before
-			// service.ParsePlanWriteMode ever runs. AC-TASKS-PLAN-APPEND-001.3
-			// requires the rejection to name both, so the two accepted
+			// service.ParsePlanWriteMode ever runs. The rejection must name both,
+			// so the two accepted
 			// values are documented in the description text (advisory to
 			// well-behaved clients) and enforced, with that exact message,
 			// by the handler instead.

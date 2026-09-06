@@ -275,19 +275,17 @@ type UpdatePlanRequest struct {
 
 // UpdatePlan updates an existing plan (errors if missing).
 //
-// Authorization runs once, before either mode's content check, satisfying
-// AC-TASKS-PLAN-APPEND-001.7's order for both: append's content validity is
-// validateAppendFragment; an explicit replace's is the empty-content check
-// below. A request with no mode at all (the browser write path, which never
-// sets this field) keeps its pre-existing behavior of accepting empty
-// content — that check is scoped to an explicit PlanWriteModeReplace, which
-// only the agent write path ever sends, so this does not extend
-// AC-TASKS-PLAN-APPEND-001.4's "agent plan update" requirement onto a
-// surface it was never meant to reach.
+// Authorization runs once, before either mode's content check: append's
+// content validity is validateAppendFragment; an explicit replace's is the
+// empty-content check below. A request with no mode at all (the browser write
+// path, which never sets this field) keeps its pre-existing behavior of
+// accepting empty content. That check is scoped to an explicit
+// PlanWriteModeReplace, which only the agent write path ever sends, so this
+// does not extend the agent-only requirement onto another surface.
 //
 // The size limit for an append is measured against the composed content
-// inside upsertPlan's lock, not the submitted fragment (AC-TASKS-PLAN-APPEND-
-// 007.1), so it is not part of this admission step for that mode.
+// inside upsertPlan's lock, not the submitted fragment, so it is not part of
+// this admission step for that mode.
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
@@ -347,8 +345,8 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	}
 
 	// Compose from this same read rather than reading HEAD again: a second
-	// read would reopen the window AC-TASKS-PLAN-APPEND-003.1 closes between
-	// an append's read and its commit. requireExistingHead is false for
+	// read would reopen the window this read closes between an append's read
+	// and its commit. requireExistingHead is false for
 	// CreatePlan, so this never runs there even if a caller set Mode anyway.
 	if requireExistingHead && req.Mode == PlanWriteModeAppend {
 		if headState == planHeadUnknown {
@@ -362,9 +360,8 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 		}
 		// The truncation guard cannot fire on an append by construction (the
 		// composed content always contains the stored content in full), and
-		// must not force a revision split on its account either
-		// (AC-TASKS-PLAN-APPEND-004.1/004.2) — skip it at the source rather
-		// than trust every caller to leave this unset.
+		// must not force a revision split on its account either. Skip it at the
+		// source rather than trust every caller to leave this unset.
 		req.EvaluateTruncation = false
 	}
 

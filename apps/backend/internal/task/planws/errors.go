@@ -44,15 +44,15 @@ var (
 	revisionNotFound     = mapping{service.ErrRevisionNotFound, ws.ErrorCodeNotFound, "Revision not found"}
 	revisionTaskMismatch = mapping{service.ErrRevisionTaskMismatch, ws.ErrorCodeValidation, "Revision does not belong to task"}
 	contentRequired      = mapping{service.ErrContentRequired, ws.ErrorCodeValidation, "content is required"}
-	// appendFragmentWhitespaceOnly maps AC-TASKS-PLAN-APPEND-001.5.
+	// appendFragmentWhitespaceOnly maps the whitespace-only fragment error.
 	appendFragmentWhitespaceOnly = mapping{
 		service.ErrPlanAppendFragmentWhitespaceOnly, ws.ErrorCodeValidation,
 		"append fragment must contain a non-whitespace character",
 	}
-	// planContentUnreadable maps AC-TASKS-PLAN-APPEND-003.5. The message is
-	// fixed rather than derived from err.Error(), so it never leaks the
-	// underlying storage failure, and its code and text are both distinct
-	// from planNotFound so a caller cannot mistake one for the other.
+	// planContentUnreadable reports a stored-plan read failure as a distinct
+	// code from planNotFound so the caller cannot mistake one for the other.
+	// The message is fixed rather than derived from err.Error(), so it never
+	// leaks the underlying storage failure.
 	planContentUnreadable = mapping{
 		service.ErrPlanContentReadFailed, ws.ErrorCodeInternalError,
 		"Could not read the current plan content; the append was not applied",
