@@ -1687,40 +1687,15 @@ func (s *Store) addPRScopeMigrationColumn() error {
 
 // tableColumns returns the set of column names declared on `table`.
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	var rows *sqlx.Rows
-	var err error
-	postgres := dialect.IsPostgres(s.db.DriverName())
-	if postgres {
-		rows, err = s.db.Queryx(`
-			SELECT ordinal_position, column_name, data_type, column_default
-			FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name = $1
-			ORDER BY ordinal_position`, table)
-	} else {
-		rows, err = s.db.Queryx(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	}
+	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	cols := make(map[string]struct{})
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var dflt sql.NullString
-		if postgres {
-			if err := rows.Scan(&cid, &name, &ctype, &dflt); err != nil {
-				return nil, err
-			}
-		} else {
-			var notnull, pk int
-			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-				return nil, err
-			}
-		}
-		cols[name] = struct{}{}
+	result := make(map[string]struct{}, len(columns))
+	for column := range columns {
+		result[column] = struct{}{}
 	}
-	return cols, rows.Err()
+	return result, nil
 }
 
 // tableExists returns true when the named table is present in the active schema.
