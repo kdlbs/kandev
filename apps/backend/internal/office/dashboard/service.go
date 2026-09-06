@@ -100,6 +100,7 @@ type Repository interface {
 	// fan-out queued for agentProfileID at (taskID, stepID). Used after a
 	// claim displaces an agent from a role.
 	CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error)
+	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by

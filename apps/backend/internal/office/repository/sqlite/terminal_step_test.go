@@ -1,0 +1,91 @@
+package sqlite_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+)
+
+// seedStep inserts a workflow_steps row with the given workflow, position,
+// and name — the three columns IsTaskWorkflowStepTerminal reads.
+func seedStep(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, workflowID string, position int, name string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, position, name)
+		VALUES (?, ?, ?, ?)
+	`, id, workflowID, position, name); err != nil {
+		t.Fatalf("insert workflow_step %s: %v", id, err)
+	}
+}
+
+func TestIsTaskWorkflowStepTerminal(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	// office-default shape: Backlog(0) -> Work(1) -> Review(2) -> Approval(3) -> Done(4).
+	seedStep(t, repo, ctx, "step-backlog", "wf-office", 0, "Backlog")
+	seedStep(t, repo, ctx, "step-work", "wf-office", 1, "Work")
+	seedStep(t, repo, ctx, "step-review", "wf-office", 2, "Review")
+	seedStep(t, repo, ctx, "step-approval", "wf-office", 3, "Approval")
+	seedStep(t, repo, ctx, "step-done", "wf-office", 4, "Done")
+
+	// A workflow whose last step is misleadingly named "Done" but is not
+	// last-by-position — exercises that position, not name, decides
+	// terminality. step-mixed-last carries a name that would fail
+	// models.IsTerminalStepName (e.g. "PR", matching improve-kandev.yml's
+	// real last step) to prove the name is no longer consulted at all.
+	seedStep(t, repo, ctx, "step-early-done", "wf-mixed", 0, "Done")
+	seedStep(t, repo, ctx, "step-mixed-last", "wf-mixed", 1, "PR")
+
+	seedParticipantTask(t, repo, "task-backlog", "step-backlog")
+	seedParticipantTask(t, repo, "task-work", "step-work")
+	seedParticipantTask(t, repo, "task-review", "step-review")
+	seedParticipantTask(t, repo, "task-approval", "step-approval")
+	seedParticipantTask(t, repo, "task-done", "step-done")
+	seedParticipantTask(t, repo, "task-early-done", "step-early-done")
+	seedParticipantTask(t, repo, "task-mixed-last", "step-mixed-last")
+	seedParticipantTask(t, repo, "task-no-step", "")
+	// step-deleted-xyz is never seeded into workflow_steps: this reproduces a
+	// task left behind by DeleteStep, which clears queued_for_step_id but not
+	// workflow_step_id for a task actually sitting on the deleted step.
+	seedParticipantTask(t, repo, "task-dangling-step", "step-deleted-xyz")
+
+	cases := []struct {
+		name        string
+		taskID      string
+		want        bool
+		wantHasStep bool
+	}{
+		{"backlog: not last position", "task-backlog", false, true},
+		{"work: not last position", "task-work", false, true},
+		{"review: not last position (this is the live bug's step)", "task-review", false, true},
+		{"approval: not last position", "task-approval", false, true},
+		{"done: last position and terminal name", "task-done", true, true},
+		{"named Done but not last position", "task-early-done", false, true},
+		{"last position with non-terminal name is still terminal", "task-mixed-last", true, true},
+		{"no workflow_step_id", "task-no-step", false, false},
+		{"missing task", "task-missing", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hasStep, err := repo.IsTaskWorkflowStepTerminal(ctx, tc.taskID)
+			if err != nil {
+				t.Fatalf("IsTaskWorkflowStepTerminal: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("terminal = %v, want %v", got, tc.want)
+			}
+			if hasStep != tc.wantHasStep {
+				t.Errorf("hasStep = %v, want %v", hasStep, tc.wantHasStep)
+			}
+		})
+	}
+
+	t.Run("dangling workflow_step_id fails closed with an error, not hasStep=false", func(t *testing.T) {
+		_, _, err := repo.IsTaskWorkflowStepTerminal(ctx, "task-dangling-step")
+		if err == nil {
+			t.Fatal("IsTaskWorkflowStepTerminal: want error for a dangling workflow_step_id, got nil")
+		}
+	})
+}
