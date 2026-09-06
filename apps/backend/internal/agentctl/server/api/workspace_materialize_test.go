@@ -99,6 +99,15 @@ func TestAttestRegularGitMetadataRejectsUnsafeGitReferenceMetadata(t *testing.T)
 			},
 		},
 		{
+			name: "invalid symbolic HEAD ref without separator space",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(checkout, ".git", "HEAD"), []byte("ref:refs/tags/release\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
 			name: "symlinked active ref component",
 			prepare: func(t *testing.T, checkout string) {
 				t.Helper()
