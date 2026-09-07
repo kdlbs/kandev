@@ -381,6 +381,37 @@ func TestPrepareRestartedKubernetesAgentctl_RejectsUnadvertisedExactModel(t *tes
 	require.Empty(t, mock.getSetModelIDs(), "an unadvertised exact model must never be sent to ACP")
 }
 
+func TestPrepareRestartedKubernetesAgentctl_RestoresPersistedRuntimeModel(t *testing.T) {
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = &streams.SessionModelState{
+		CurrentModelID: "gpt-5.6-luna",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-luna"}},
+	}
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	require.NoError(t, client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.6-terra"}}
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-1": {RuntimeModel: "gpt-5.6-luna"},
+	}}
+	mgr.sessionManager = NewSessionManager(newTestLogger(), newTestStopCh(t))
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	require.True(t, ok)
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1", AgentProfileID: "profile-1",
+		WorkspacePath: "/workspace", AgentCommand: "agent", agentctl: client,
+	}
+	refresh := &RemoteInstanceRefresh{
+		Instance: &ExecutorInstance{Client: client}, ProcessRestarted: true, AgentConfig: agentConfig,
+	}
+
+	_, err := mgr.prepareRestartedKubernetesAgentctl(context.Background(), execution, refresh)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5.6-luna"}, mock.getSetModelIDs())
+}
+
 func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *testing.T) {
 	var configureCalls atomic.Int32
 	var startCalls atomic.Int32

@@ -219,11 +219,16 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 		return "", fmt.Errorf("resume ACP session after Kubernetes restart: %w", err)
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
-	if policy.Model != "" {
+	runtimeModel, _, _ := m.sessionRuntimeOverrides(ctx, execution)
+	modelID := policy.Model
+	if runtimeModel != "" {
+		modelID = runtimeModel
+	}
+	if modelID != "" {
 		if !cacheFreshSessionModelState(execution) {
 			waitForFreshSessionModelState(ctx, m.logger, execution)
 		}
-		if err := m.reapplySessionModelAfterReset(ctx, execution, result.SessionID, policy.Model); err != nil {
+		if err := m.reapplySessionModelAfterReset(ctx, execution, result.SessionID, modelID); err != nil {
 			return "", fmt.Errorf("apply start model after Kubernetes restart: %w", err)
 		}
 	}
