@@ -40,6 +40,7 @@ func TestWorkspaceReuseAllowed_EmptyWorktreeInventoryStillReachesFailClosedGuard
 		ID:           "env-1",
 		TaskID:       "task-1",
 		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
 	}
 	req := &LaunchAgentRequest{
 		TaskID:       "task-1",

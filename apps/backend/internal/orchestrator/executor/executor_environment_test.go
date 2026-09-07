@@ -174,13 +174,24 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if !workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
+	if !workspaceReuseAllowed(&models.TaskEnvironment{Status: models.TaskEnvironmentStatusReady}, string(models.ExecutorTypeWorktree), true, true) {
 		t.Fatal("empty Worktree inventory should remain attach-only until the guarded validator refuses or repairs it")
 	}
 	if !workspaceReuseAllowed(&models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
 	}, string(models.ExecutorTypeWorktree), true, true) {
 		t.Fatal("legacy environments with a physical worktree should remain reusable")
+	}
+}
+
+func TestWorkspaceReuseAllowedDoesNotAttachFailedEmptyWorktreeEnvironment(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusFailed,
+	}
+
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("failed empty worktree environment authorized attach-only reuse")
 	}
 }
 

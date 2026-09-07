@@ -1851,6 +1851,9 @@ func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecuto
 		return false
 	}
 	if repoBacked && len(existingEnv.Repos) == 0 {
+		if existingEnv.Status != models.TaskEnvironmentStatusReady && existingEnv.Status != models.TaskEnvironmentStatusStopped {
+			return false
+		}
 		// A Worktree environment can recover a missing canonical row from its
 		// reciprocal worktree/runtime records. Keep it on the attach-only path so
 		// the inventory validator either proves that repair or fails closed; false
