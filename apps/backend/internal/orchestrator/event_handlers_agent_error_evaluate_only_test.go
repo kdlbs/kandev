@@ -787,9 +787,9 @@ func TestDispatchKanbanAgentErrorTrigger_MarkerLostAfterCommitRedeliveryEvaluate
 	}
 
 	// Simulate the marker being lost (a process restart clears the
-	// process-local appliedOps map) without touching persisted task/step
+	// process-local operation ledger) without touching persisted task/step
 	// state.
-	svc.workflowStore.appliedOps.Delete(operationID)
+	svc.workflowStore.ledger.applied.Delete(operationID)
 	logs.TakeAll()
 
 	svc.dispatchKanbanAgentErrorTrigger(ctx, data)

@@ -5,12 +5,14 @@ package orchestrator
 // it walks the whole backend source tree (go/parser, rooted at apps/backend)
 // for engine.HandleInput composite literals that pair EvaluateOnly: true with
 // a non-empty OperationID — the exact shape this spec's contract governs.
-// Every such call site must capture HandleResult.OperationMarkDeferred and
-// mark the operation applied itself only after its own commit succeeds
-// (AC-EO-10, AC-EO-13); the closed set here is the only place that
-// responsibility currently lives. A new call site pairing the two fields is
-// not automatically wrong, but it must take on that same responsibility
-// before being added to the registered set. Mirrors the design of
+// Every such call site must defer the mark to its own caller and complete it
+// itself only after its own commit succeeds (AC-EO-10, AC-EO-13), whether by
+// capturing HandleResult.OperationMarkDeferred (this spec's mechanism) or by
+// setting HandleInput.DeferOperationMark (the generic caller-owned-mark flag
+// added by #3447); the closed set here is the only place that responsibility
+// currently lives. A new call site pairing the two fields is not
+// automatically wrong, but it must take on that same responsibility before
+// being added to the registered set. Mirrors the design of
 // agent_error_fire_site_pin_test.go, reusing its shared AST-walk helpers.
 
 import (
@@ -27,6 +29,14 @@ import (
 
 var registeredEvaluateOnlyOperationMarkingSites = []string{
 	"internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger",
+	// evaluateChildrenCompleted sets DeferOperationMark: true (added by
+	// #3447), not this spec's OperationMarkDeferred output flag. Its caller,
+	// processOnChildrenCompleted, marks the operation itself via
+	// markChildCompletionApplied after applyEngineTransitionWithMode commits
+	// (transition case) or immediately (non-transition case) — the same
+	// commit-then-mark discipline this spec requires, on the newer
+	// caller-owned mechanism.
+	"internal/orchestrator/Service.evaluateChildrenCompleted",
 }
 
 func TestEvaluateOnlyOperationMarkingCallSitesArePinned(t *testing.T) {
