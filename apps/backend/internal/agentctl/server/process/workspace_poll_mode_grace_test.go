@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // waitForPollMode polls GetPollMode until it matches want or the deadline
@@ -186,17 +187,20 @@ func TestPollModeGrace_StopDisarmsTimer(t *testing.T) {
 // it to return, and prevent the callback from changing the mode afterward.
 func TestPollModeGrace_StopJoinsFinalScan(t *testing.T) {
 	wt := newGraceTestTracker(t, graceFiresQuickly)
-	var scanCount atomic.Int32
 	finalScanStarted := make(chan struct{})
 	finalScanFinished := make(chan struct{})
 	wt.gitStatusObserver = func(ctx context.Context) (types.GitStatusUpdate, error) {
-		if scanCount.Add(1) == 2 {
-			close(finalScanStarted)
-			<-ctx.Done()
-			close(finalScanFinished)
-			return types.GitStatusUpdate{}, ctx.Err()
+		// The monitor and git-poll loops can overlap their background
+		// observations on Windows. The shared observer preserves the Git work
+		// class, so identify the interactive grace scan instead of assuming it
+		// is the second observation globally.
+		if gitWorkClass(ctx) != subproc.GitInteractive {
+			return types.GitStatusUpdate{Timestamp: time.Now()}, nil
 		}
-		return types.GitStatusUpdate{Timestamp: time.Now()}, nil
+		close(finalScanStarted)
+		<-ctx.Done()
+		close(finalScanFinished)
+		return types.GitStatusUpdate{}, ctx.Err()
 	}
 
 	wt.Start(context.Background())
