@@ -41,7 +41,7 @@ export function InlineConfirmActions({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [confirmed, setConfirmed] = useState(false);
   const touch = density === "touch";
-  const actionClass = touch ? "h-11 min-w-11 px-2" : "h-10 min-w-10 px-2 text-xs";
+  const actionClass = touch ? "h-12 min-w-12 px-2" : "h-10 min-w-10 px-2 text-xs";
   const confirmIsDisabled = disabled || confirmDisabled;
 
   useEffect(() => {
@@ -71,7 +71,7 @@ export function InlineConfirmActions({
       className={
         description
           ? "flex min-w-0 flex-1 basis-full flex-col items-stretch gap-2"
-          : `flex shrink-0 items-center justify-end gap-1 ${touch ? "min-h-11" : "w-full min-h-10"}`
+          : `flex shrink-0 items-center justify-end gap-1 ${touch ? "min-h-12" : "w-full min-h-10"}`
       }
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}

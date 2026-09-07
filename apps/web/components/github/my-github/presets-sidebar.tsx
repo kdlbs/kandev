@@ -8,6 +8,11 @@ import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "
 import type { SavedPreset } from "./saved-preset-model";
 import { useTranslation } from "react-i18next";
 import { SavedQueryDefaultButton } from "@/components/integrations/saved-query-default-button";
+import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
+import {
+  useSavedTaskViewDeleteConfirmation,
+  type SavedTaskViewDeleteTarget,
+} from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
 export type SidebarSelection = {
   kind: "pr" | "issue";
@@ -157,6 +162,7 @@ function SavedSection({
   defaultMutationPendingId: string | null;
 }) {
   const { t } = useTranslation();
+  const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(saved);
   const defaultMutationPending = defaultMutationPendingId !== null;
   return (
     <>
@@ -166,43 +172,19 @@ function SavedSection({
           {t("github:noSavedQueriesYet")}
         </div>
       )}
-      {saved.map((s) => {
-        const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
-        const accessibleDeleteLabel = defaultMutationPending
-          ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
-          : deleteLabel;
-        return (
-          <PresetItem
-            key={s.id}
-            label={s.label}
-            Icon={IconBookmark}
-            active={selected.source === "saved" && selected.id === s.id}
-            onClick={() => onSelect({ kind, source: "saved", id: s.id })}
-            trailing={
-              <div className="flex shrink-0 items-center">
-                <SavedQueryDefaultButton
-                  label={s.label}
-                  isDefault={s.isDefault}
-                  disabled={defaultMutationPending}
-                  pending={defaultMutationPendingId === s.id}
-                  testId={`github-saved-query-default-${s.id}`}
-                  onToggle={() => void onToggleSavedDefault(s)}
-                />
-                <button
-                  type="button"
-                  disabled={defaultMutationPending}
-                  onClick={() => onDelete(s.id)}
-                  className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50"
-                  title={accessibleDeleteLabel}
-                  aria-label={accessibleDeleteLabel}
-                >
-                  <IconX className="h-4 w-4" />
-                </button>
-              </div>
-            }
-          />
-        );
-      })}
+      {saved.map((preset) => (
+        <GitHubSavedPresetEntry
+          key={preset.id}
+          preset={preset}
+          active={selected.source === "saved" && selected.id === preset.id}
+          deletion={deletion}
+          defaultMutationPending={defaultMutationPending}
+          defaultMutationPendingForPreset={defaultMutationPendingId === preset.id}
+          onSelect={() => onSelect({ kind, source: "saved", id: preset.id })}
+          onDelete={onDelete}
+          onToggleDefault={() => void onToggleSavedDefault(preset)}
+        />
+      ))}
       <button
         type="button"
         onClick={onSaveCurrent}
@@ -219,6 +201,88 @@ function SavedSection({
         <span>{t("github:saveCurrentQuery")}</span>
       </button>
     </>
+  );
+}
+
+type GitHubSavedDeletion = {
+  target: SavedTaskViewDeleteTarget | null;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  close: () => void;
+  registerAnchor: (id: string, element: HTMLButtonElement | null) => void;
+  request: (target: SavedTaskViewDeleteTarget) => void;
+};
+
+function GitHubSavedPresetEntry({
+  preset,
+  active,
+  deletion,
+  defaultMutationPending,
+  defaultMutationPendingForPreset,
+  onSelect,
+  onDelete,
+  onToggleDefault,
+}: {
+  preset: SavedPreset;
+  active: boolean;
+  deletion: GitHubSavedDeletion;
+  defaultMutationPending: boolean;
+  defaultMutationPendingForPreset: boolean;
+  onSelect: () => void;
+  onDelete: (id: string) => void;
+  onToggleDefault: () => void;
+}) {
+  const { t } = useTranslation();
+  if (deletion.target?.id === preset.id) {
+    return (
+      <div className="mx-1 min-w-0 p-1">
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="inline"
+          open
+          anchorRef={deletion.anchorRef}
+          confirmDisabled={defaultMutationPending}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDelete}
+        />
+      </div>
+    );
+  }
+  const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: preset.label });
+  const accessibleDeleteLabel = defaultMutationPending
+    ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
+    : deleteLabel;
+  return (
+    <PresetItem
+      label={preset.label}
+      Icon={IconBookmark}
+      active={active}
+      onClick={onSelect}
+      trailing={
+        <div className="flex shrink-0 items-center">
+          <SavedQueryDefaultButton
+            label={preset.label}
+            isDefault={preset.isDefault}
+            disabled={defaultMutationPending}
+            pending={defaultMutationPendingForPreset}
+            testId={`github-saved-query-default-${preset.id}`}
+            onToggle={onToggleDefault}
+          />
+          <button
+            ref={(element) => deletion.registerAnchor(preset.id, element)}
+            type="button"
+            disabled={defaultMutationPending}
+            onClick={() => deletion.request({ id: preset.id, label: preset.label })}
+            className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50"
+            title={accessibleDeleteLabel}
+            aria-label={accessibleDeleteLabel}
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </div>
+      }
+    />
   );
 }
 

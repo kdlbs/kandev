@@ -240,7 +240,23 @@ export class SidebarFilterPopoverPage {
     await this.popover.getByTestId("view-discard-button").click();
   }
 
-  async deleteActiveView(): Promise<void> {
+  get deleteConfirmation(): Locator {
+    return this.page.getByTestId("saved-task-view-delete-confirmation");
+  }
+
+  async beginDeleteActiveView(name: string): Promise<void> {
     await this.popover.getByTestId("view-delete-button").click();
+    await expect(this.deleteConfirmation).toBeVisible();
+    await expect(this.deleteConfirmation).toHaveAccessibleName(`Delete ${name}?`);
+  }
+
+  async cancelDeleteActiveView(): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
+  }
+
+  async confirmDeleteActiveView(name: string): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: `Delete ${name}` }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
   }
 }

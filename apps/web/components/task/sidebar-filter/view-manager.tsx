@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
@@ -18,6 +25,8 @@ type HeaderProps = {
   onRename: (id: string, name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteConfirmation?: ReactNode;
   renameRequestedViewId?: string | null;
   onRenameRequestHandled?: (viewId: string) => void;
 };
@@ -70,6 +79,10 @@ export function ViewHeaderRow(props: HeaderProps) {
     setNameDraft("");
     setEditingViewId(null);
   }, [activeViewId, editingViewId, mode]);
+
+  if (props.deleteConfirmation) {
+    return <div className="min-w-0 p-1">{props.deleteConfirmation}</div>;
+  }
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -222,6 +235,7 @@ function ViewActions({
   onRename,
   onDiscard,
   onDelete,
+  deleteAnchorRef,
 }: {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
@@ -231,6 +245,7 @@ function ViewActions({
   onRename: () => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const { t } = useTranslation();
   const canOverwrite = hasDraft && !!activeView;
@@ -286,6 +301,7 @@ function ViewActions({
       )}
       {!hasDraft && activeView && canDelete && (
         <Button
+          ref={deleteAnchorRef}
           type="button"
           size="sm"
           variant="ghost"

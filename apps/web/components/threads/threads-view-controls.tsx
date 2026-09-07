@@ -20,6 +20,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/dra
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   DEFAULT_THREAD_VIEW,
@@ -65,6 +66,7 @@ export function ThreadsViewControls({
   const clearSyncError = useAppStore((state) => state.clearThreadViewSyncError);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openSettingsAfterPickerClose = useRef(false);
+  const settingsContentRef = useRef<HTMLDivElement>(null);
   const activeView = useMemo(
     () => views.find((view) => view.id === activeViewId) ?? DEFAULT_THREAD_VIEW,
     [activeViewId, views],
@@ -105,7 +107,7 @@ export function ThreadsViewControls({
         onSaveAs={saveAs}
         onDiscard={discard}
         onRename={(name) => renameView(activeView.id, name)}
-        onDelete={() => deleteView(activeView.id)}
+        onDelete={deleteView}
         onDuplicate={() => duplicateView(activeView.id, "")}
         onReapplySort={reapplySort}
         onRetrySync={retrySync}
@@ -192,9 +194,16 @@ export function ThreadsViewControls({
           </Button>
         </PopoverTrigger>
         <PopoverContent
+          ref={settingsContentRef}
           align="start"
           className="max-h-[calc(100dvh-1rem)] w-[min(42rem,calc(100vw-1rem))] overflow-y-auto border border-border/80 p-0 shadow-xl ring-1 ring-foreground/20"
           data-testid="threads-view-settings-popover"
+          onFocusOutside={(event) => {
+            if (isActionConfirmationTarget(event.target)) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (isActionConfirmationTarget(event.target)) event.preventDefault();
+          }}
         >
           <ThreadsViewEditor
             activeView={activeView}
@@ -208,8 +217,9 @@ export function ThreadsViewControls({
             onSaveAs={saveAs}
             onDiscard={discard}
             onRename={(name) => renameView(activeView.id, name)}
-            onDelete={() => {
-              deleteView(activeView.id);
+            deleteFocusBoundaryRef={settingsContentRef}
+            onDelete={(viewId) => {
+              deleteView(viewId);
               setSettingsOpen(false);
             }}
             onDuplicate={() => duplicateView(activeView.id, "")}
@@ -254,7 +264,7 @@ type MobileThreadsViewControlsProps = {
   onSaveAs: (name: string) => void;
   onDiscard: () => void;
   onRename: (name: string) => void;
-  onDelete: () => void;
+  onDelete: (viewId: string) => void;
   onDuplicate: () => void;
   onReapplySort: () => void;
   onRetrySync: () => void;
@@ -407,8 +417,8 @@ function MobileThreadsViewControls({
                 onSaveAs={onSaveAs}
                 onDiscard={onDiscard}
                 onRename={onRename}
-                onDelete={() => {
-                  onDelete();
+                onDelete={(viewId) => {
+                  onDelete(viewId);
                   closeDrawer();
                 }}
                 onDuplicate={onDuplicate}

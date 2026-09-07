@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconX } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import {
@@ -14,6 +14,13 @@ import { cn } from "@/lib/utils";
 import { IntegrationIcon, type IntegrationIconName } from "./integration-icon";
 import { useTranslation } from "react-i18next";
 import { SavedQueryDefaultDropdownItem } from "./saved-query-default-button";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
+import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
+import {
+  useSavedTaskViewDeleteConfirmation,
+  type SavedTaskViewDeleteTarget,
+} from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
 /**
  * Shared, domain-agnostic scope bar for the integration dashboards (/github,
@@ -113,6 +120,31 @@ function PresetPill({
   );
 }
 
+function SavedMenuTrigger({
+  testId,
+  active,
+  label,
+}: {
+  testId: string;
+  active: boolean;
+  label: string | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuTrigger asChild>
+      <button
+        type="button"
+        data-testid={testId}
+        className={cn(PILL_BASE, active ? PILL_ACTIVE : PILL_IDLE)}
+      >
+        <IconBookmark className="h-3.5 w-3.5 shrink-0" />
+        <span className="max-w-[140px] truncate">{label ?? t("integrations:savedQueries")}</span>
+        <IconChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+      </button>
+    </DropdownMenuTrigger>
+  );
+}
+
 function SavedMenu<K extends string>({
   testId,
   selected,
@@ -135,69 +167,51 @@ function SavedMenu<K extends string>({
   defaultMutationPendingId: string | null;
 }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const deletion = useSavedTaskViewDeleteConfirmation(saved);
+  const menuContentRef = useRef<HTMLDivElement>(null);
   const defaultMutationPending = defaultMutationPendingId !== null;
   const activeSaved = selected.source === "saved";
-  const activeLabel = activeSaved ? saved.find((s) => s.id === selected.id)?.label : null;
+  const activeLabel = activeSaved ? (saved.find((s) => s.id === selected.id)?.label ?? null) : null;
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-testid={testId}
-          className={cn(PILL_BASE, activeSaved ? PILL_ACTIVE : PILL_IDLE)}
-        >
-          <IconBookmark className="h-3.5 w-3.5 shrink-0" />
-          <span className="max-w-[140px] truncate">
-            {activeLabel ?? t("integrations:savedQueries")}
-          </span>
-          <IconChevronDown className="h-3 w-3 shrink-0 opacity-60" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+    <DropdownMenu
+      open={menuOpen}
+      onOpenChange={(open) => {
+        setMenuOpen(open);
+        if (!open) deletion.close();
+      }}
+    >
+      <SavedMenuTrigger testId={testId} active={activeSaved} label={activeLabel} />
+      <DropdownMenuContent
+        ref={menuContentRef}
+        align="end"
+        className="w-56"
+        onFocusOutside={(event) => {
+          if (isActionConfirmationTarget(event.target)) event.preventDefault();
+        }}
+        onInteractOutside={(event) => {
+          if (isActionConfirmationTarget(event.target)) event.preventDefault();
+        }}
+      >
         {saved.length === 0 ? (
           <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
         ) : (
-          saved.map((s) => {
-            const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
-            const accessibleDeleteLabel = defaultMutationPending
-              ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
-              : deleteLabel;
-            return (
-              <div key={s.id} role="none" className="group/saved flex items-center gap-0.5">
-                <DropdownMenuItem
-                  onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
-                  className="min-w-0 flex-1 cursor-pointer gap-2"
-                >
-                  <IconBookmark className="h-3.5 w-3.5 shrink-0" />
-                  <span className="flex-1 truncate">{s.label}</span>
-                </DropdownMenuItem>
-                {onToggleSavedDefault && (
-                  <SavedQueryDefaultDropdownItem
-                    label={s.label}
-                    isDefault={s.isDefault === true}
-                    disabled={defaultMutationPending}
-                    pending={defaultMutationPendingId === s.id}
-                    testId={`saved-query-default-${s.id}`}
-                    onToggle={() => onToggleSavedDefault(s.id)}
-                  />
-                )}
-                {/* A peer Radix item is intentional: arrow navigation reaches delete,
-                  and focus opacity reveals it without pointer hover. */}
-                <DropdownMenuItem
-                  disabled={defaultMutationPending}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    onDeleteSaved(s.id);
-                  }}
-                  className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
-                  title={accessibleDeleteLabel}
-                  aria-label={accessibleDeleteLabel}
-                >
-                  <IconX className="h-3.5 w-3.5" />
-                </DropdownMenuItem>
-              </div>
-            );
-          })
+          saved.map((preset) => (
+            <SavedMenuEntry
+              key={preset.id}
+              preset={preset}
+              isFinePointer={isFinePointer}
+              deletion={deletion}
+              defaultMutationPending={defaultMutationPending}
+              defaultMutationPendingForPreset={defaultMutationPendingId === preset.id}
+              onSelect={() => onSelect({ kind: preset.kind, source: "saved", id: preset.id })}
+              onToggleDefault={
+                onToggleSavedDefault ? () => onToggleSavedDefault(preset.id) : undefined
+              }
+              onDeleteSaved={onDeleteSaved}
+            />
+          ))
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -209,7 +223,109 @@ function SavedMenu<K extends string>({
           <span>{t("integrations:saveCurrentQuery")}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
+      {isFinePointer && deletion.target ? (
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="popover"
+          open
+          anchorRef={deletion.anchorRef}
+          focusBoundaryRef={menuContentRef}
+          confirmDisabled={defaultMutationPending}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDeleteSaved}
+        />
+      ) : null}
     </DropdownMenu>
+  );
+}
+
+type SavedMenuDeletion = {
+  target: SavedTaskViewDeleteTarget | null;
+  anchorRef: RefObject<HTMLElement | null>;
+  close: () => void;
+  registerAnchor: (id: string, element: HTMLElement | null) => void;
+  request: (target: SavedTaskViewDeleteTarget) => void;
+};
+
+function SavedMenuEntry({
+  preset,
+  isFinePointer,
+  deletion,
+  defaultMutationPending,
+  defaultMutationPendingForPreset,
+  onSelect,
+  onToggleDefault,
+  onDeleteSaved,
+}: {
+  preset: ScopeSavedPreset<string>;
+  isFinePointer: boolean;
+  deletion: SavedMenuDeletion;
+  defaultMutationPending: boolean;
+  defaultMutationPendingForPreset: boolean;
+  onSelect: () => void;
+  onToggleDefault?: () => void;
+  onDeleteSaved: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!isFinePointer && deletion.target?.id === preset.id) {
+    return (
+      <div role="none" className="min-w-0 p-1">
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="inline"
+          open
+          anchorRef={deletion.anchorRef}
+          confirmDisabled={defaultMutationPending}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDeleteSaved}
+        />
+      </div>
+    );
+  }
+  const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: preset.label });
+  const accessibleDeleteLabel = defaultMutationPending
+    ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
+    : deleteLabel;
+  return (
+    <div role="none" className="group/saved flex items-center gap-0.5">
+      <DropdownMenuItem onSelect={onSelect} className="min-w-0 flex-1 cursor-pointer gap-2">
+        <IconBookmark className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1 truncate">{preset.label}</span>
+      </DropdownMenuItem>
+      {onToggleDefault && (
+        <SavedQueryDefaultDropdownItem
+          label={preset.label}
+          isDefault={preset.isDefault === true}
+          disabled={defaultMutationPending}
+          pending={defaultMutationPendingForPreset}
+          testId={`saved-query-default-${preset.id}`}
+          onToggle={onToggleDefault}
+        />
+      )}
+      {/* A peer Radix item keeps delete keyboard-reachable without selecting the preset. */}
+      <DropdownMenuItem
+        ref={(element) => deletion.registerAnchor(preset.id, element)}
+        disabled={defaultMutationPending}
+        onSelect={(event) => {
+          event.preventDefault();
+          deletion.request({ id: preset.id, label: preset.label });
+        }}
+        className={cn(
+          "shrink-0 cursor-pointer justify-center p-0 text-muted-foreground transition-opacity hover:text-foreground data-[disabled]:cursor-wait data-[disabled]:opacity-50",
+          isFinePointer
+            ? "h-7 min-h-7 w-7 opacity-0 focus:opacity-100 group-hover/saved:opacity-100 group-hover/saved:data-[disabled]:opacity-50"
+            : "min-h-12 min-w-12 opacity-100",
+        )}
+        title={accessibleDeleteLabel}
+        aria-label={accessibleDeleteLabel}
+      >
+        <IconX className="h-3.5 w-3.5" />
+      </DropdownMenuItem>
+    </div>
   );
 }
 

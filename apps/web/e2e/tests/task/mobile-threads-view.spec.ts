@@ -269,4 +269,60 @@ test.describe("Mobile Threads view", () => {
     await expect(geometryDrawer).toBeHidden();
     await expect(reloadedTrigger).toBeFocused();
   });
+
+  test("confirms deletion of a saved view inside the native drawer", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const baseView = {
+      task_scope: { mode: "all", task_ids: [] },
+      filters: [],
+      sort: { key: "attention", direction: "asc" },
+      max_columns: null,
+    };
+    const seedResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      thread_views: [
+        { ...baseView, id: "view-all-threads", name: "All threads" },
+        { ...baseView, id: "view-release", name: "Release threads" },
+      ],
+      thread_active_view_id: "view-release",
+      thread_view_draft: null,
+    });
+    expect(seedResponse.ok).toBe(true);
+    await testPage.goto("/threads");
+
+    const trigger = testPage.getByTestId("threads-mobile-view-trigger");
+    await expect(trigger).toContainText("Release threads");
+    await trigger.tap();
+    const drawer = testPage.getByTestId("threads-mobile-view-drawer");
+    await drawer.getByTestId("threads-mobile-view-settings").tap();
+    const editor = drawer.getByTestId("threads-view-editor");
+    await editor.getByTestId("threads-view-delete").tap();
+    const confirmation = editor.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Release threads?");
+    await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    for (const action of await confirmation.getByRole("button").all()) {
+      const box = await action.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(drawer).toBeVisible();
+    await expect(editor.getByTestId("threads-view-delete")).toBeFocused();
+
+    await editor.getByTestId("threads-view-delete").tap();
+    const deletedViewResponse = testPage.waitForResponse(
+      (response) =>
+        response.ok() &&
+        response.request().method() === "PATCH" &&
+        response.url().includes("/api/v1/user/settings"),
+    );
+    await editor
+      .getByTestId("saved-task-view-delete-confirmation")
+      .getByRole("button", { name: "Delete Release threads" })
+      .tap();
+    await deletedViewResponse;
+    await expect(drawer).toBeHidden();
+    await expect(trigger).toContainText("All threads");
+    await expect(trigger).toBeFocused();
+  });
 });

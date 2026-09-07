@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IconInbox } from "@tabler/icons-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -207,7 +207,9 @@ describe("IntegrationScopeBar saved defaults", () => {
         .getAttribute(ARIA_DISABLED_ATTRIBUTE),
     ).toBe("true");
   });
+});
 
+describe("IntegrationScopeBar saved-query actions", () => {
   it("renders no default actions when an integration omits the optional contract", () => {
     renderBar({ onToggleSavedDefault: undefined });
 
@@ -227,13 +229,22 @@ describe("IntegrationScopeBar saved defaults", () => {
     );
   });
 
-  it("prevents the menu from closing when a saved query is deleted", () => {
+  it("keeps the menu open and waits for named confirmation before deletion", async () => {
     const { onDeleteSaved } = renderBar();
 
     fireEvent.click(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }));
 
-    expect(onDeleteSaved).toHaveBeenCalledWith("saved-b");
+    expect(onDeleteSaved).not.toHaveBeenCalled();
     expect(lastMenuItemSelectEvent?.defaultPrevented).toBe(true);
+    const confirmation = await screen.findByRole("dialog", { name: "Delete Future default?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(onDeleteSaved).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Future default" }));
+
+    await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith("saved-b"));
+    expect(onDeleteSaved).toHaveBeenCalledOnce();
   });
 
   it("uses a host icon when a plugin preset does not provide one", () => {

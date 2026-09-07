@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { MR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./presets";
 import type { SavedPreset } from "./use-saved-presets";
 import { useTranslation } from "react-i18next";
+import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
+import { useSavedTaskViewDeleteConfirmation } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
 export type SidebarSelection = {
   kind: "mr" | "issue";
@@ -171,6 +173,7 @@ function SavedSection({
   onSaveCurrent: () => void;
 }) {
   const { t } = useTranslation();
+  const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(saved);
   return (
     <>
       <SectionHeader id="saved" title={t("gitlab:saved")} />
@@ -179,36 +182,58 @@ function SavedSection({
           {t("gitlab:noSavedQueriesYet")}
         </div>
       )}
-      {saved.map((s) => (
-        <PresetItem
-          key={s.id}
-          label={s.label}
-          Icon={IconBookmark}
-          active={selected.source === "saved" && selected.id === s.id}
-          onClick={() => onSelect({ kind, source: "saved", id: s.id })}
-          trailing={
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(s.id);
-              }}
-              className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
-              title={t("gitlab:deleteSavedQuery")}
-              aria-label={t("gitlab:deleteSavedQuery2", { label: s.label })}
-              data-testid={`gitlab-saved-delete-${s.id}`}
-            >
-              <IconX className="h-3.5 w-3.5" />
-            </button>
-          }
-        />
-      ))}
+      {saved.map((s) => {
+        if (deletion.target?.id === s.id) {
+          return (
+            <div key={s.id} className="mx-1 min-w-0 p-1">
+              <SavedTaskViewDeleteConfirmation
+                target={deletion.target}
+                presentation="inline"
+                open
+                anchorRef={deletion.anchorRef}
+                onOpenChange={(open) => {
+                  if (!open) deletion.close();
+                }}
+                onConfirm={onDelete}
+              />
+            </div>
+          );
+        }
+        const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
+        return (
+          <PresetItem
+            key={s.id}
+            label={s.label}
+            Icon={IconBookmark}
+            active={selected.source === "saved" && selected.id === s.id}
+            onClick={() => onSelect({ kind, source: "saved", id: s.id })}
+            trailing={
+              <button
+                ref={(element) => {
+                  deletion.registerAnchor(s.id, element);
+                }}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deletion.request({ id: s.id, label: s.label });
+                }}
+                className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={deleteLabel}
+                aria-label={deleteLabel}
+                data-testid={`gitlab-saved-delete-${s.id}`}
+              >
+                <IconX className="h-4 w-4" />
+              </button>
+            }
+          />
+        );
+      })}
       <button
         type="button"
         onClick={onSaveCurrent}
         disabled={!canSaveCurrent}
         className={cn(
-          "mx-1 mt-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+          "mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
           canSaveCurrent
             ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
             : "text-muted-foreground/50 cursor-not-allowed",
@@ -240,7 +265,7 @@ export function PresetsSidebar({
     onSelect({ kind, source: "preset", id: fallback });
   };
   return (
-    <nav className="flex flex-col py-3">
+    <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">
       <KindToggle kind={selected.kind} onChange={onKindChange} />
       <PresetGroupList
         presets={presets}
