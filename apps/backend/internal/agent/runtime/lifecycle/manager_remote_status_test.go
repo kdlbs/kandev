@@ -382,14 +382,17 @@ func TestPrepareRestartedKubernetesAgentctl_RejectsUnadvertisedExactModel(t *tes
 }
 
 func TestPrepareRestartedKubernetesAgentctl_RestoresPersistedRuntimeModel(t *testing.T) {
-	mock := newRestartMockAgentctlServer(t, false, false)
-	mock.newModelState = &streams.SessionModelState{
+	oldMock := newRestartMockAgentctlServer(t, false, false)
+	refreshedMock := newRestartMockAgentctlServer(t, false, false)
+	refreshedMock.newModelState = &streams.SessionModelState{
 		CurrentModelID: "gpt-5.6-luna",
 		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-luna"}},
 	}
-	client := createTestClient(t, mock.server.URL)
-	t.Cleanup(client.Close)
-	require.NoError(t, client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
+	oldClient := createTestClient(t, oldMock.server.URL)
+	t.Cleanup(oldClient.Close)
+	refreshedClient := createTestClient(t, refreshedMock.server.URL)
+	t.Cleanup(refreshedClient.Close)
+	require.NoError(t, refreshedClient.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
 	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
 	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.6-terra"}}
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
@@ -400,16 +403,21 @@ func TestPrepareRestartedKubernetesAgentctl_RestoresPersistedRuntimeModel(t *tes
 	require.True(t, ok)
 	execution := &AgentExecution{
 		ID: "exec-1", TaskID: "task-1", SessionID: "session-1", AgentProfileID: "profile-1",
-		WorkspacePath: "/workspace", AgentCommand: "agent", agentctl: client,
+		WorkspacePath: "/workspace", AgentCommand: "agent", agentctl: oldClient,
 	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "gpt-5.6-luna",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-luna"}},
+	})
 	refresh := &RemoteInstanceRefresh{
-		Instance: &ExecutorInstance{Client: client}, ProcessRestarted: true, AgentConfig: agentConfig,
+		Instance: &ExecutorInstance{Client: refreshedClient}, ProcessRestarted: true, AgentConfig: agentConfig,
 	}
 
 	_, err := mgr.prepareRestartedKubernetesAgentctl(context.Background(), execution, refresh)
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"gpt-5.6-luna"}, mock.getSetModelIDs())
+	require.Empty(t, oldMock.getSetModelIDs(), "the stale agentctl must not receive a model restore")
+	require.Equal(t, []string{"gpt-5.6-luna"}, refreshedMock.getSetModelIDs())
 }
 
 func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *testing.T) {

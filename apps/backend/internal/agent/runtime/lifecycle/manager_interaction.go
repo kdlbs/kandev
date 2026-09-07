@@ -524,6 +524,15 @@ func (m *Manager) reapplySessionModelAfterReset(
 ) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
+	return m.reapplySessionModelAfterResetWithClient(ctx, execution, client, newSessionID, modelID)
+}
+
+func (m *Manager) reapplySessionModelAfterResetWithClient(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctlclient.Client,
+	newSessionID, modelID string,
+) error {
 	if client == nil || modelID == "" {
 		return nil
 	}
