@@ -103,6 +103,13 @@ func (r *KubernetesExecutor) Name() executor.Name { return executor.NameKubernet
 
 func (r *KubernetesExecutor) HealthCheck(context.Context) error { return nil }
 
+// PrepareGitMetadataProjection verifies the remote child can receive an
+// enforceable policy before Kubernetes pod provisioning. The actual checkout
+// paths are resolved after the pod's workspace has been materialized.
+func (r *KubernetesExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	return validateRemoteGitMetadataRequest(req)
+}
+
 func (r *KubernetesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	if req == nil || req.InstanceID == "" {
 		return nil, errKubernetesLifecycleRequestIncomplete

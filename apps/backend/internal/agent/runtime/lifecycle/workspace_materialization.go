@@ -334,7 +334,7 @@ func isMutableCloneWorkspaceExecution(execution *AgentExecution) bool {
 		return false
 	}
 	switch execution.RuntimeName {
-	case executor.NameDocker, executor.NameRemoteDocker, executor.NameSSH, executor.NameSprites:
+	case executor.NameDocker, executor.NameRemoteDocker, executor.NameSSH, executor.NameSprites, executor.NameKubernetes:
 		return true
 	default:
 		return false

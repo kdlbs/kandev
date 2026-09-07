@@ -154,6 +154,29 @@ func TestResolveGitMetadataForRepositoryRejectsCheckoutEqualToRepository(t *test
 	}
 }
 
+func TestResolveGitMetadataForRepositoryAcceptsTrustedSubmoduleSource(t *testing.T) {
+	source := initGitMetadataRepository(t)
+	superproject := initGitMetadataRepository(t)
+	submodulePath := filepath.Join(superproject, "vendor", "module")
+	runGitMetadata(t, superproject, "-c", "protocol.file.allow=always", "submodule", "add", source, submodulePath)
+	runGitMetadata(t, superproject, "commit", "-m", "add submodule")
+	taskCheckout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, submodulePath, "worktree", "add", "-b", "task-submodule", taskCheckout)
+
+	projection, err := ResolveGitMetadataForRepository(taskCheckout, submodulePath)
+	if err != nil {
+		t.Fatalf("ResolveGitMetadataForRepository for submodule source: %v", err)
+	}
+
+	trustedCommonDir := runGitMetadata(t, submodulePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if projection.CommonDir != trustedCommonDir || projection.TrustedCommonDir != trustedCommonDir {
+		t.Fatalf("trusted common dir = (%q, %q), want %q", projection.CommonDir, projection.TrustedCommonDir, trustedCommonDir)
+	}
+	if projection.CheckoutPath == submodulePath {
+		t.Fatal("submodule task projection must target the task checkout, not the source submodule checkout")
+	}
+}
+
 func TestGitMetadataProjectionRevalidateRejectsCommonDirectorySwap(t *testing.T) {
 	repositoryA := initGitMetadataRepository(t)
 	repositoryB := initGitMetadataRepository(t)

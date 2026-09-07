@@ -82,11 +82,15 @@ func ResolveGitMetadataForRepository(checkoutPath, repositoryPath string) (*GitM
 	if err != nil {
 		return nil, err
 	}
-	repository, err := ResolveGitMetadata(repositoryPath)
+	trustedCommonDir, err := resolveTrustedRepositoryCommonDir(repositoryPath)
 	if err != nil {
 		return nil, invalidGitMetadata(errors.New("trusted repository metadata is invalid"))
 	}
-	if projection.CommonDir != repository.CommonDir {
+	trustedCheckout, err := canonicalDirectory(repositoryPath)
+	if err != nil {
+		return nil, invalidGitMetadata(errors.New("trusted repository checkout is invalid"))
+	}
+	if projection.CommonDir != trustedCommonDir {
 		return nil, invalidGitMetadata(errors.New("checkout common directory does not match trusted repository"))
 	}
 	// A task checkout must be a distinct linked worktree, never the source
@@ -95,7 +99,7 @@ func ResolveGitMetadataForRepository(checkoutPath, repositoryPath string) (*GitM
 	// receive a projection over the source checkout itself, granting Git
 	// metadata write access and an ACP root to the repository the task was
 	// cloned from.
-	if projection.CheckoutPath == repository.CheckoutPath {
+	if projection.CheckoutPath == trustedCheckout {
 		return nil, invalidGitMetadata(errors.New("task checkout must not be the source repository"))
 	}
 	// A regular .git directory (not a linked worktree) here would otherwise
@@ -104,9 +108,60 @@ func ResolveGitMetadataForRepository(checkoutPath, repositoryPath string) (*GitM
 	if projection.GitDir == projection.CommonDir {
 		return nil, invalidGitMetadata(errors.New("task checkout is not a trusted linked worktree"))
 	}
-	projection.TrustedCommonDir = repository.CommonDir
+	projection.TrustedCommonDir = trustedCommonDir
 	projection.Hash = projectionHash(projection)
 	return projection, nil
+}
+
+func resolveTrustedRepositoryCommonDir(repositoryPath string) (string, error) {
+	repository, err := ResolveGitMetadata(repositoryPath)
+	if err == nil {
+		return repository.CommonDir, nil
+	}
+	commonDir, submoduleErr := resolveTrustedSubmoduleCommonDir(repositoryPath)
+	if submoduleErr == nil {
+		return commonDir, nil
+	}
+	return "", errors.Join(err, submoduleErr)
+}
+
+func resolveTrustedSubmoduleCommonDir(repositoryPath string) (string, error) {
+	checkout, err := canonicalDirectory(repositoryPath)
+	if err != nil {
+		return "", err
+	}
+	gitEntry := filepath.Join(checkout, ".git")
+	entryInfo, err := os.Lstat(gitEntry)
+	if err != nil {
+		return "", err
+	}
+	if entryInfo.Mode()&os.ModeSymlink != 0 || !entryInfo.Mode().IsRegular() {
+		return "", errors.New("trusted repository is not a submodule")
+	}
+	gitDir, err := readGitdirPointer(gitEntry, checkout)
+	if err != nil {
+		return "", err
+	}
+	if err := rejectSymlinkComponents(gitDir); err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(filepath.Join(gitDir, "commondir")); err == nil {
+		return "", errors.New("submodule metadata must not redirect common directory")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	projected, err := buildGitMetadataProjection(checkout, gitDir, gitDir, "")
+	if err != nil {
+		return "", err
+	}
+	worktreePath, err := readSubmoduleCoreWorktree(filepath.Join(gitDir, "config"), gitDir)
+	if err != nil {
+		return "", err
+	}
+	if worktreePath != checkout {
+		return "", errors.New("submodule metadata does not point back to trusted repository")
+	}
+	return projected.CommonDir, nil
 }
 
 // Revalidate detects replacement or redirection of any metadata used by this
@@ -287,6 +342,82 @@ func readMetadataPathStrict(path, relativeTo string) (string, error) {
 		value = filepath.Join(relativeTo, value)
 	}
 	return canonicalExistingPath(value)
+}
+
+func readSubmoduleCoreWorktree(configPath, relativeTo string) (string, error) {
+	info, err := os.Lstat(configPath)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", errors.New("submodule config is not a regular file")
+	}
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", err
+	}
+	worktree, err := parseSubmoduleCoreWorktree(string(content))
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(worktree) {
+		worktree = filepath.Join(relativeTo, worktree)
+	}
+	return canonicalExistingPath(worktree)
+}
+
+func parseSubmoduleCoreWorktree(config string) (string, error) {
+	section := ""
+	worktree := ""
+	for _, rawLine := range strings.Split(config, "\n") {
+		nextSection, nextWorktree, err := parseSubmoduleConfigLine(section, worktree, rawLine)
+		if err != nil {
+			return "", err
+		}
+		section = nextSection
+		worktree = nextWorktree
+	}
+	if worktree == "" {
+		return "", errors.New("core.worktree is missing")
+	}
+	return worktree, nil
+}
+
+func parseSubmoduleConfigLine(section, worktree, rawLine string) (string, string, error) {
+	line := strings.TrimSpace(rawLine)
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+		return section, worktree, nil
+	}
+	if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+		nextSection, err := parseSubmoduleConfigSection(line)
+		return nextSection, worktree, err
+	}
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		if strings.EqualFold(strings.TrimSpace(key), "worktreeConfig") {
+			return section, worktree, errors.New("git worktree configuration is not allowed")
+		}
+		return section, worktree, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(key), "worktreeConfig") && strings.TrimSpace(value) != "false" {
+		return section, worktree, errors.New("git worktree configuration is not allowed")
+	}
+	if strings.EqualFold(section, "core") && strings.EqualFold(strings.TrimSpace(key), "worktree") {
+		worktree = strings.TrimSpace(value)
+	}
+	return section, worktree, nil
+}
+
+func parseSubmoduleConfigSection(line string) (string, error) {
+	section := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+	fields := strings.Fields(section)
+	if len(fields) == 0 {
+		return "", errors.New("git config section is empty")
+	}
+	if sectionName := strings.ToLower(fields[0]); sectionName == "include" || sectionName == "includeif" {
+		return "", errors.New("submodule config includes are not allowed")
+	}
+	return section, nil
 }
 
 func canonicalExistingPath(path string) (string, error) {

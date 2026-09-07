@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
@@ -73,6 +74,21 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 		if !strings.Contains(policyEnv["CODEX_CONFIG"], gitDir) {
 			t.Fatalf("rendered clone policy lacks attested git dir %q: %s", gitDir, policyEnv["CODEX_CONFIG"])
 		}
+	}
+}
+
+func TestKubernetesCloneGitMetadataPolicyPreflightIsSupported(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+	}
+
+	if err := preflightGitMetadataProjection(context.Background(), NewKubernetesExecutor(nil, newTestLogger()), req); err != nil {
+		t.Fatalf("Kubernetes clone-policy preflight error = %v, want supported remote policy", err)
+	}
+	if !isMutableCloneWorkspaceExecution(&AgentExecution{RuntimeName: executor.NameKubernetes}) {
+		t.Fatal("Kubernetes clone workspace must refresh Git metadata policy on attachment")
 	}
 }
 
