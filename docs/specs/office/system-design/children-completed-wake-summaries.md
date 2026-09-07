@@ -135,7 +135,9 @@ change it has exactly one caller — the prompt path — because
 
 1. **Archived children are excluded**, in both the count and the select
    (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1, -003.6). The predicate is
-   `archived_at IS NULL`, matching `GetChildSetKey`.
+   `archived_at IS NULL`, matching `GetChildSetKey`. No state predicate is added:
+   the query already returns every child regardless of state, which is what
+   AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a requires.
 2. **Ordering gains a tiebreak**: `ORDER BY t.created_at ASC, t.id ASC`.
    `created_at` alone is not unique, so today's order is whatever the engine
    returns for a tie, which also makes the 20-row cap non-deterministic
@@ -190,7 +192,8 @@ One deliberate behaviour change follows from the reconciler edit. Today a
 `GetChildSummaries` failure inside `buildPayload` aborts that tick's dispatch;
 after the change there is no such read, so the reconciler will dispatch where it
 previously bailed. This strictly increases delivery of a wake that was already
-judged due. The identity and readiness guards that decide *whether* to dispatch —
+judged due, which is what AC-OFFICE-WAKE-CHILD-SUMMARIES-002.9 requires. The
+identity and readiness guards that decide *whether* to dispatch —
 `GetChildSetKey`, its revalidation against the candidate's key, and the
 transactional receipt — are unchanged, so the guard the parent capability relies
 on is not the one being removed.
@@ -217,9 +220,10 @@ Office run detail prompt panel.
 - **PR lookup fails or `TaskPRLister` is unwired.** `lookupChildPRLinks` already
   returns an empty map and warns internally; lines render without the PR segment
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.2).
-- **Parent gone.** The query returns no rows, so the section is omitted, exactly
-  as for a parent with no live children
-  (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3).
+- **Parent gone, or no parent id on the run.** `buildPromptContext` only calls
+  the enricher when it parsed a `task_id`, and a parent that no longer exists
+  returns no rows, so both cases omit the section exactly as for a parent with no
+  live children (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3, -004.3a).
 - **Retry.** The prompt is reassembled from scratch on each launch, so the
   section is re-derived rather than reused
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.6).

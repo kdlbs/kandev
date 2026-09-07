@@ -168,6 +168,12 @@ the content.
   written.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6:** The child list section shall render
   for both the current children-completed run reason and the legacy one.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-002.9:** Where a producer's decision to queue
+  a children-completed run previously depended on a successful child-summary
+  read, that dependency shall be removed. A child-summary read shall not be able
+  to prevent a wake from being queued. The reads that establish readiness and
+  wave identity are unaffected and shall keep gating dispatch exactly as they do
+  today.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-002.7:** Runs of every other reason shall
   render exactly the prompt they render today. No other wake shall gain or lose
   content, and no other wake shall gain a database read.
@@ -190,6 +196,11 @@ is named here rather than left to whichever row the database returns first.
 
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1:** The child list section shall include
   live direct children only. An archived child shall not appear in it.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a:** Membership shall not be filtered by
+  task state. Every live direct child shall appear, including one that is no
+  longer in a terminal state at prompt assembly time, so that a parent whose
+  child restarted between queue time and assembly is shown that fact rather than
+  a list silently missing a child.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-003.2:** Child summary lines shall be ordered
   ascending by the child's creation timestamp, tiebroken ascending by `tasks.id`.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-003.3:** A child's reported comment shall be
@@ -235,6 +246,9 @@ with a prompt that is honestly short rather than one that is wrong.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3:** When the parent task does not exist
   at prompt assembly time, the prompt shall render with no child list section and
   the run shall proceed to launch.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3a:** When a children-completed run
+  carries no parent task id, the prompt shall render with no child list section
+  and the run shall proceed to launch.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-004.4:** No failure of a read performed for
   the child list section shall fail the run, change the run's status, or schedule
   a retry.
