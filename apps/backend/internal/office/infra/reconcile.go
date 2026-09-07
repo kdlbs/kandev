@@ -1,3 +1,5 @@
+// Package infra provides infrastructure-level background jobs for the office
+// domain, including worktree/config reconciliation.
 package infra
 
 import (
