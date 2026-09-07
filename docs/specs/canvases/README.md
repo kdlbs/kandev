@@ -17,16 +17,6 @@ The Plugins system owns the isolated web-application runtime, permissions,
 Kandev data access, state, events, and package validation. The task system
 remains authoritative for task data and permissions.
 
-## Requirements
-
-- [Agent-authored web-app canvases](requirements/agent-authored-web-apps.md)
-- [Deprecated collaborative canvases](requirements/collaborative-canvases.md)
-
-## System design
-
-- [Agent-authored web-app canvases](system-design/agent-authored-web-apps.md)
-- [Superseded collaborative canvases](system-design/collaborative-canvases.md)
-
 ## Related context
 
 - [GitHub Copilot App Canvas reference](../../copilot-canvas-reference.md)

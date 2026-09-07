@@ -18,6 +18,13 @@ repos:
         language: system
         pass_filenames: true
 
+      - id: docs-catalog
+        name: Documentation catalog validation
+        entry: python3 scripts/list-docs.py validate
+        language: system
+        files: ^docs/(decisions|specs)/.*\.md$|^scripts/list-docs\.py$|^scripts/list-docs\.test\.py$
+        pass_filenames: false
+
       - id: architecture-lint
         name: Architecture lint and compatibility expiry
         entry: python3 scripts/lint-architecture.py --all
