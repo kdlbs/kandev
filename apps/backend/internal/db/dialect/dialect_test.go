@@ -162,6 +162,15 @@ func TestDateTimeOf(t *testing.T) {
 	}
 }
 
+func TestNullableTimestamp(t *testing.T) {
+	if got := NullableTimestamp(SQLite3, "?"); got != "?" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := NullableTimestamp(PGX, "?"); got != "(?)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestNaiveUTCTimestampOf(t *testing.T) {
 	got := NaiveUTCTimestampOf(SQLite3, "ts.started_at")
 	if got != "datetime(ts.started_at)" {

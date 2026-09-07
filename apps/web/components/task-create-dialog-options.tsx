@@ -32,6 +32,7 @@ import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
+import { findUniqueModelVariation } from "@/lib/model-variation";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { buildBranchKeywords } from "./branch-picker-options";
 import {
@@ -229,9 +230,18 @@ export function useAgentProfileOptions(
       const startModelGone = Boolean(
         profile.model && advertised.length > 0 && !advertised.includes(profile.model),
       );
-      const modelProbeNote = startModelGone
-        ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
-        : undefined;
+      const uniqueVariation = startModelGone
+        ? findUniqueModelVariation(profile.model ?? "", advertised)
+        : null;
+      let modelProbeNote: string | undefined;
+      if (startModelGone) {
+        modelProbeNote = uniqueVariation
+          ? t("settings:profileStartModelUniqueVariationOnHost", {
+              model: profile.model,
+              variation: uniqueVariation,
+            })
+          : t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model });
+      }
       const renderProfileLabel = (modelProbeWarning: React.ReactNode) => (
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="flex shrink-0 items-center justify-between gap-2">

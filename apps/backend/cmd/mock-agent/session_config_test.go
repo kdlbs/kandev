@@ -224,6 +224,26 @@ func TestMockSessionConfigOptionsForModelAdvertisesSlowModel(t *testing.T) {
 	}
 }
 
+func TestMockSessionConfigOptionsVariationCatalogs(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("MOCK_AGENT_MODEL_CATALOG", "")
+	unique := modelIDs(findModelOption(t))
+	if !containsString(unique, modelUnique) {
+		t.Fatalf("unique catalog = %v, missing %s", unique, modelUnique)
+	}
+	if containsString(unique, modelAmbiguousFirst) || containsString(unique, modelAmbiguousLast) {
+		t.Fatalf("unique catalog = %v, must not include ambiguous variations", unique)
+	}
+
+	t.Setenv("MOCK_AGENT_MODEL_CATALOG", "ambiguous")
+	ambiguous := modelIDs(findModelOption(t))
+	for _, want := range []string{modelAmbiguousFirst, modelAmbiguousLast} {
+		if !containsString(ambiguous, want) {
+			t.Errorf("ambiguous catalog = %v, missing %s", ambiguous, want)
+		}
+	}
+}
+
 func findModelOption(t *testing.T) acp.SessionConfigOption {
 	t.Helper()
 	for _, option := range mockSessionConfigOptionsForModel(modelFast) {
@@ -233,6 +253,17 @@ func findModelOption(t *testing.T) acp.SessionConfigOption {
 	}
 	t.Fatal("no model config option advertised")
 	return acp.SessionConfigOption{}
+}
+
+func modelIDs(option acp.SessionConfigOption) []string {
+	if option.Select == nil || option.Select.Options.Ungrouped == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(*option.Select.Options.Ungrouped))
+	for _, model := range *option.Select.Options.Ungrouped {
+		ids = append(ids, string(model.Value))
+	}
+	return ids
 }
 
 func containsString(values []string, want string) bool {

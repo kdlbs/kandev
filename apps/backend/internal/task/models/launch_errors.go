@@ -20,6 +20,7 @@ const (
 	LaunchErrorCategoryBaseBranchMissing       = "base_branch_missing"
 	LaunchErrorCategoryPRAlreadyClosed         = "pr_already_closed"
 	LaunchErrorCategoryDefaultBranchUnresolved = "default_branch_unresolved"
+	LaunchErrorCategoryWorkspaceCheckoutFailed = "workspace_checkout_failed"
 	LaunchErrorCategoryGenericLaunchFailure    = "generic_launch_failure"
 )
 
@@ -28,6 +29,7 @@ const (
 	RecoveryActionRetryDefault   = "retry_default"
 	RecoveryActionPickBaseBranch = "pick_base_branch"
 	RecoveryActionMarkReviewDone = "mark_review_done"
+	RecoveryActionRetryLaunch    = "retry_launch"
 )
 
 const (
@@ -74,9 +76,42 @@ func NormalizeRecoveryActions(actions []string) []string {
 	return result
 }
 
+// NormalizeRecoveryActionsForCategory retains only the actions that are
+// meaningful for a typed launch-failure category. Unknown categories keep the
+// legacy generic normalization so unrelated runtime errors remain compatible.
+func NormalizeRecoveryActionsForCategory(category string, actions []string) []string {
+	normalized := NormalizeRecoveryActions(actions)
+	var allowed map[string]struct{}
+	switch category {
+	case LaunchErrorCategoryBaseBranchMissing:
+		allowed = map[string]struct{}{
+			RecoveryActionRetryDefault: {}, RecoveryActionPickBaseBranch: {},
+		}
+	case LaunchErrorCategoryDefaultBranchUnresolved:
+		allowed = map[string]struct{}{RecoveryActionPickBaseBranch: {}}
+	case LaunchErrorCategoryWorkspaceCheckoutFailed, LaunchErrorCategoryGenericLaunchFailure:
+		if len(normalized) == 0 {
+			return nil
+		}
+		return []string{RecoveryActionRetryLaunch}
+	case LaunchErrorCategoryPRAlreadyClosed:
+		allowed = map[string]struct{}{RecoveryActionMarkReviewDone: {}}
+	default:
+		return normalized
+	}
+
+	result := make([]string, 0, len(normalized))
+	for _, action := range normalized {
+		if _, ok := allowed[action]; ok {
+			result = append(result, action)
+		}
+	}
+	return result
+}
+
 func isKnownRecoveryAction(action string) bool {
 	switch action {
-	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone:
+	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone, RecoveryActionRetryLaunch:
 		return true
 	default:
 		return false
@@ -85,7 +120,8 @@ func isKnownRecoveryAction(action string) bool {
 
 func normalizeLastAgentError(value LastAgentError) LastAgentError {
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
-	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
+	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
+	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
 	value.Details = truncateUTF8Bytes(value.Details, maxLaunchErrorDetailsBytes)
@@ -94,10 +130,10 @@ func normalizeLastAgentError(value LastAgentError) LastAgentError {
 
 func normalizeTaskLaunchError(value TaskLaunchError) TaskLaunchError {
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
-	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
+	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
+	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
-	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
 	value.Details = truncateUTF8Bytes(value.Details, maxLaunchErrorDetailsBytes)
 	return value
 }

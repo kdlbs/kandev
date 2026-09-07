@@ -12,6 +12,7 @@ package adapter
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -166,6 +167,16 @@ type AdditionalDirectoriesSessionResetter interface {
 // roots when an existing ACP session is loaded after a workspace rebind.
 type AdditionalDirectoriesSessionLoader interface {
 	LoadSessionWithAdditionalDirectories(context.Context, string, []types.McpServer, types.WorkspaceSourceRootsResolver) error
+}
+
+// TurnStartRecorder is an optional interface implemented by adapters that
+// record a wall-clock turn-start timestamp per session, covering both a
+// human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec
+// docs/specs/disambiguate-waiting/spec.md, D3). Only ACP adapters implement
+// this today. The background-workload liveness probe (agent.background.probe)
+// uses it to anchor the probe's start-time comparison.
+type TurnStartRecorder interface {
+	RecordedTurnStart(sessionID string) (time.Time, bool)
 }
 
 // AgentInfo contains information about the connected agent.
