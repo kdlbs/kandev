@@ -59,9 +59,23 @@ Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence over the default until you choose **Use Kandev default**. Kandev
-does not store the default as a user selection, so later Kandev releases can
-move unmodified installations to their reviewed defaults.
+precedence for the current default generation. **Use Kandev default** clears
+it, and a later shipped package or reviewed default resets it during startup.
+Kandev does not store the default as a user selection.
+
+When a Kandev upgrade changes the managed package or its reviewed default,
+Kandev removes the older selection during startup before the service becomes
+ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
+When the package and default stay the same, Kandev preserves your selection
+across restarts and unrelated upgrades. A process that is already running is
+not replaced, so the new default applies when Kandev starts a future process.
+
+After startup, open the update control to select any validated stable version,
+including an older version. This lets you roll back the new default when a
+provider or environment requires it. The selection remains active until you
+change it or a later Kandev release changes that agent's package or default.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest

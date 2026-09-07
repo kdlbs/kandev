@@ -122,6 +122,7 @@ type CommentPostedData struct {
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	EngineDispatched       string `json:"engine_dispatched"`
+	Source                 string `json:"source"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -275,11 +276,12 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 
 // AgentTurnMessageData is the payload of an agent.turn.message_saved event.
 type AgentTurnMessageData struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	TurnID    string `json:"turn_id"`
-	AgentText string `json:"agent_text"`
-	AgentID   string `json:"agent_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	TurnID         string `json:"turn_id"`
+	AgentText      string `json:"agent_text"`
+	AgentID        string `json:"agent_id"`
+	AgentProfileID string `json:"agent_profile_id"`
 }
 
 // handleAgentTurnMessageSaved auto-bridges an agent session response to a
@@ -331,10 +333,32 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
+	// Attribute to the agent that actually ran the turn, not the task's
+	// assignee — the two diverge for a reviewer/approver turn. The event
+	// carries the acting agent's own office identity directly
+	// (execution.officeProfileID(), captured at launch before step/routing
+	// overrides mutate the profile). The session-row lookup only reflects
+	// the acting agent when features.officeSessionIdentity is on — off by
+	// default in every shipped profile, it stores the assignee for every
+	// participant's session — so it is kept only as a fallback for events
+	// published before this field existed. Final fallback is the assignee,
+	// mirroring handlePromptUsage's log-and-continue fallback below.
+	authorID := fields.AssigneeAgentProfileID
+	if data.AgentProfileID != "" {
+		authorID = data.AgentProfileID
+	} else if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
+		s.logger.Warn("session agent profile lookup failed",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(lookupErr))
+	} else if id != "" {
+		authorID = id
+	}
+
 	comment := &models.TaskComment{
 		TaskID:     data.TaskID,
 		AuthorType: "agent",
-		AuthorID:   fields.AssigneeAgentProfileID,
+		AuthorID:   authorID,
 		Body:       agentText,
 		Source:     "session",
 	}
@@ -344,10 +368,10 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return cErr
 	}
 	s.publishCommentCreated(ctx, comment)
-	// Successful turn → reset the agent's consecutive-failure counter
-	// regardless of which task succeeded. A bridged comment is the
-	// only place we know a turn produced real output.
-	s.RecordAgentSuccess(ctx, fields.AssigneeAgentProfileID)
+	// Successful turn → reset the acting agent's consecutive-failure
+	// counter. A bridged comment is the only place we know a turn
+	// produced real output.
+	s.RecordAgentSuccess(ctx, authorID)
 	// Lifecycle: each successful turn under an in-flight run lands a
 	// "step" event so the run detail page's Events log gets a row per
 	// turn. Resolve the run from the currently-claimed run for this
@@ -1156,6 +1180,11 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		return nil
 	}
 	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
+	// A session-bridged comment mirrors a turn that already ran; it must
+	// never itself queue a new run, whichever agent it's attributed to.
+	if data.Source == "session" {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
