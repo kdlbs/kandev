@@ -52,6 +52,32 @@ describe("useHtmlPreviewPublisher", () => {
     expect(mocks.publishHtmlPreview).not.toHaveBeenCalled();
     expect(result.current.error).toBe("session-unavailable");
   });
+
+  it("discards a stale publish that completes after reset", async () => {
+    let resolveFirst!: (value: { port: number; path: string; version: number }) => void;
+    mocks.publishHtmlPreview.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFirst = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() => useHtmlPreviewPublisher("session-1"));
+    const firstPublish = result.current.publish({
+      path: "index.html",
+      content: "<h1>v1</h1>",
+    });
+
+    act(() => result.current.reset());
+    resolveFirst({ port: 43127, path: "/index.html", version: 1 });
+
+    await act(async () => {
+      await expect(firstPublish).resolves.toBeNull();
+    });
+
+    expect(result.current.status).toBe("idle");
+    expect(result.current.url).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
 });
 
 describe("HTML preview publish error mapping", () => {

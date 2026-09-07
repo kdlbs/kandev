@@ -13,13 +13,15 @@ import (
 	"strings"
 	"sync"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
 const (
-	// MaxWorkspacePreviewContentBytes bounds one current-buffer overlay.
-	MaxWorkspacePreviewContentBytes = 5 * 1024 * 1024
+	// MaxWorkspacePreviewContentBytes bounds one current-buffer overlay. The
+	// shared agentctl type is the source of truth for every layer.
+	MaxWorkspacePreviewContentBytes = agentctltypes.MaxWorkspacePreviewContentBytes
 	maxWorkspacePreviewOverlays     = 32
 )
 
@@ -231,17 +233,13 @@ func setWorkspacePreviewContentType(w http.ResponseWriter, path string) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 }
 
-func resolveWorkspacePreviewFile(root, relPath string) (string, error) {
-	rootPath, err := canonicalPreviewDirectory(root)
-	if err != nil {
-		return "", err
-	}
-	candidate := filepath.Join(rootPath, filepath.FromSlash(relPath))
+func resolveWorkspacePreviewFile(canonicalRoot, relPath string) (string, error) {
+	candidate := filepath.Join(canonicalRoot, filepath.FromSlash(relPath))
 	resolved, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
 		return "", err
 	}
-	if !previewPathWithinRoot(rootPath, resolved) {
+	if !previewPathWithinRoot(canonicalRoot, resolved) {
 		return "", ErrWorkspacePreviewPathInvalid
 	}
 	info, err := os.Stat(resolved)

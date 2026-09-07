@@ -34,7 +34,11 @@ export function buildHtmlPreviewProxyUrl(
   options?: ApiRequestOptions,
 ): string {
   const baseUrl = (options?.baseUrl ?? getBackendConfig().apiBaseUrl).replace(/\/+$/, "");
-  const path = response.path.startsWith("/") ? response.path : `/${response.path}`;
+  const rawPath = response.path.startsWith("/") ? response.path : `/${response.path}`;
+  const path = rawPath
+    .split("/")
+    .map((segment) => (segment ? encodeURIComponent(segment) : segment))
+    .join("/");
   const url = new URL(
     `${baseUrl}/port-proxy/${encodeURIComponent(sessionId)}/${response.port}${path}`,
   );

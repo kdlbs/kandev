@@ -59,4 +59,14 @@ describe("HTML preview process API", () => {
       }),
     ).toBe("http://api.test/port-proxy/session%2F1/43127/site/index.html?v=4");
   });
+
+  it("encodes reserved characters in each preview path segment", () => {
+    expect(
+      buildHtmlPreviewProxyUrl("session-1", {
+        port: 43127,
+        path: "/site/report#1.html",
+        version: 5,
+      }),
+    ).toBe("http://api.test/port-proxy/session-1/43127/site/report%231.html?v=5");
+  });
 });
