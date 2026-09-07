@@ -207,6 +207,7 @@ func buildTaskDTOsWithSessionInfo(
 	svc *service.Service,
 	log *logger.Logger,
 	activityProvider dto.ForegroundActivityProvider,
+	taskParkedProvider dto.TaskParkedProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -279,6 +280,7 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount,
 			si.reviewStatus,
 			si.executorID,
+			si.executorProfileID,
 			si.executorType,
 			si.executorName,
 			si.agentName,
@@ -291,6 +293,7 @@ func buildTaskDTOsWithSessionInfo(
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
+		dto.EnrichTaskParkedProjection(&taskDTO, taskParkedProvider)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -311,15 +314,16 @@ func buildTaskDTOsWithSessionInfo(
 }
 
 type sessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     models.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	agentProfileID   *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      models.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -339,6 +343,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	if info.ExecutorID != "" {
 		val := info.ExecutorID
 		si.executorID = &val
+	}
+	if info.ExecutorProfileID != "" {
+		val := info.ExecutorProfileID
+		si.executorProfileID = &val
 	}
 	if info.ExecutorSnapshot != nil {
 		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
@@ -417,6 +425,7 @@ func pendingActionRevisionPtr(
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
 		ctx,
 		[]string{session.ID},
@@ -434,7 +443,7 @@ func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskS
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -443,7 +452,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -962,6 +971,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ProjectID:                   body.ProjectID,
 		Labels:                      labels,
 		ExternalID:                  body.ExternalID,
+		WorkspacePolicy:             &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -997,21 +1007,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
 		}
 		return
-	}
-
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(c.Request.Context(), task.ID, body.ParentID, wsPolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to attach workspace policy: " + attachErr.Error(),
-			})
-			return
-		}
 	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
@@ -1581,6 +1576,8 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 type httpUpdateTaskPortForwardingRequest struct {
@@ -1655,14 +1652,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	}
 
 	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     body.Priority,
-		State:        body.State,
-		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
-		Position:     body.Position,
-		Metadata:     body.Metadata,
-		ParentID:     body.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       body.Priority,
+		State:          body.State,
+		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Position:       body.Position,
+		Metadata:       body.Metadata,
+		ParentID:       body.ParentID,
+		AssigneeUserID: body.AssigneeUserID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")
@@ -1773,18 +1771,25 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
+			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
+				DiscardWorktreeChanges: discardWorktreeChanges,
+			},
+		); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 		return
 	}
-	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
+		DiscardWorktreeChanges: discardWorktreeChanges,
+	}); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1819,6 +1824,10 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 // unless the client explicitly opts in via ?cascade=true.
 func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+func discardWorktreeChangesQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
 }
 
 // httpTaskSubtaskCount returns the count of direct, non-archived,
@@ -2134,6 +2143,7 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		})
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)

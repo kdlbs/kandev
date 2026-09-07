@@ -51,6 +51,14 @@ type AgentEventData struct {
 	EvidenceKnown       bool `json:"evidence_known,omitempty"`
 	OutputObserved      bool `json:"output_observed,omitempty"`
 	EffectObserved      bool `json:"effect_observed,omitempty"`
+	// UserInitiated marks a failure event raised by an explicit user action
+	// (cancelling the transient retry loop) rather than the agent itself
+	// failing. Set only at CancelTransientRetry's call site; every other
+	// route defaults to false. The on_agent_error dispatch must not fire for
+	// a user-initiated failure — a recovery trigger moving the card out from
+	// under someone who just asked the retries to stop would defeat the
+	// purpose of the cancel button.
+	UserInitiated bool `json:"user_initiated,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events

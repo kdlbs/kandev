@@ -76,6 +76,11 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc, webhookInvoker: svc}
 
 	api := router.Group("/api/plugins")
+	// Instance admin, not an org scope: plugins load into the shared host
+	// runtime, so an install is not confined to the installer's org. Every
+	// other mutating route here (uninstall, enable, disable, config) is
+	// already RequireAdmin; gating install any lower would let an org admin
+	// add a plugin they cannot remove.
 	api.POST("/install", authn.RequireAdmin(), ctrl.install)
 	api.POST("/sync", authn.RequireAdmin(), ctrl.sync)
 	// Register the static /marketplace and /settings routes before the /:id

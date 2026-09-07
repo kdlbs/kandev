@@ -14,6 +14,7 @@ import {
 } from "./user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
+import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
@@ -192,6 +193,24 @@ describe("quick-chat tab order hydration", () => {
       quickChatTabOrderByWorkspace: order,
     };
     expect(buildCoreFields({}, current).quickChatTabOrderByWorkspace).toEqual(order);
+  });
+});
+
+describe("session hostname resolution setting hydration", () => {
+  it("defaults to disabled, maps explicit values, and preserves omitted updates", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({ resolve_session_hostnames: true } as Parameters<
+      typeof buildCoreFields
+    >[0]) as Record<string, unknown>;
+    const current = {
+      ...mapUserSettingsResponse(null),
+      resolveSessionHostnames: true,
+    } as Parameters<typeof buildCoreFields>[1];
+    const omitted = buildCoreFields({}, current) as Record<string, unknown>;
+
+    expect(defaults.resolveSessionHostnames).toBe(false);
+    expect(enabled.resolveSessionHostnames).toBe(true);
+    expect(omitted.resolveSessionHostnames).toBe(true);
   });
 });
 
@@ -395,6 +414,34 @@ describe("Azure DevOps browse preference mapping", () => {
     });
 
     expect(result.azureDevOpsBrowsePreferences).toEqual(preferences);
+  });
+});
+
+describe("automatic task-color hydration", () => {
+  it("maps the portable automatic task-color rules", () => {
+    const automation: SidebarTaskColorAutomation = {
+      enabled: true,
+      rules: [
+        {
+          id: "blocked",
+          enabled: true,
+          condition: { dimension: "task_state", value: "BLOCKED", label: "Blocked" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        sidebar_task_color_automation: automation,
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.sidebarTaskColorAutomation).toEqual(automation);
   });
 });
 

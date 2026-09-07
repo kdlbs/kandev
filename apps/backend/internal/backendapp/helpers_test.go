@@ -1957,6 +1957,15 @@ type bootStateTestHarness struct {
 	userSvc     *userservice.Service
 }
 
+// testWorkspacePolicyAttacher keeps boot-state tests focused on route and
+// service composition while satisfying the service's required attachment
+// boundary. Production wiring installs HandoffService here.
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, taskservice.WorkspacePolicy) error {
+	return nil
+}
+
 func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowservice.Service) {
 	harness := newBootStateTestHarness(t)
 	return harness.taskSvc, harness.workflowSvc
@@ -2027,6 +2036,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+	taskSvc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
 		db:          sqlxDB,

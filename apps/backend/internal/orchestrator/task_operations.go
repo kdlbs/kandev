@@ -348,6 +348,22 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		go func() {
 			bgCtx := context.Background()
 			launchProfileID := agentProfileID
+			// This workspace-only launch (StartAgent unset) never starts the
+			// agent, so it never reaches "active" itself — the eventual
+			// StartCreatedSession call does that. But if a route was claimed
+			// below and this launch then fails, nothing else will ever move
+			// it off "starting" or "retrying"; the deferred guard covers both
+			// failure points uniformly. It only fires while the route is
+			// still "starting" or "retrying" (see Engine.MarkActionRequired),
+			// so it is a no-op if a concurrent real launch already marked it
+			// active.
+			var claimedRouteGeneration int64
+			launchOwned := false
+			defer func() {
+				if claimedRouteGeneration > 0 && !launchOwned {
+					s.markDynamicRouteActionRequired(bgCtx, sessionID, claimedRouteGeneration, "prepared_session_launch_failed")
+				}
+			}()
 			if s.profileExecutionResolver != nil {
 				launchSession, loadErr := s.repo.GetTaskSession(bgCtx, sessionID)
 				if loadErr != nil {
@@ -367,6 +383,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				if resolved.ExecutionProfileID != "" {
 					launchProfileID = resolved.ExecutionProfileID
 					if routeClaimed {
+						claimedRouteGeneration = resolved.Generation
 						applyResolvedExecution(launchSession, resolved)
 						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
 							s.logger.Warn("failed to persist dynamic route for prepared session",
@@ -389,6 +406,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 					zap.Error(launchErr))
 				return
 			}
+			launchOwned = true
 			if prepExec != nil {
 				s.ensureSessionPRWatch(bgCtx, taskID, prepExec.SessionID, prepExec.WorktreeBranch)
 			}
@@ -3440,6 +3458,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.deleteSessionAndPublishError(ctx, taskID, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
+	// The row is gone, so retire the detached-launch attestation and parked
+	// projection before any later session event can reuse this ID.
+	s.clearParkedProjectionOnSessionDeleted(ctx, taskID, sessionID)
 
 	// Drop the in-memory git snapshot throttle entries for an environment only
 	// after its session has been removed. The cache is environment-scoped, so a
@@ -4171,12 +4192,18 @@ type promptTaskOptions struct {
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
+	// onAccepted runs at the agentctl acceptance boundary, before PromptTask
+	// waits for the turn to finish. Automation callers use it to bind durable
+	// attempt identity to the exact turn.
+	onAccepted func(turnID string)
 }
 
 type promptDispatchOutcome struct {
 	mu             sync.Mutex
 	accepted       bool
 	publicationErr error
+	turnID         string
+	onAccepted     func(turnID string)
 }
 
 func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
@@ -4321,7 +4348,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Cache and reserve the replay identity before model switching. A restart
 	// based switch dispatches its prompt from StartAgentProcess, before the
 	// ordinary PromptTask admission path can initialize these records.
-	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
+	s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, options.onAccepted)
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
 	}
@@ -4404,6 +4431,8 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.isDynamicPromptSession(session),
 	)
 	dispatchOutcome := &promptDispatchOutcome{}
+	dispatchOutcome.turnID = rollback.turnID
+	dispatchOutcome.onAccepted = options.onAccepted
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
@@ -4616,6 +4645,15 @@ func (s *Service) promptDispatchCallback(
 				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		if outcome != nil && outcome.onAccepted != nil {
+			acceptedTurnID := outcome.turnID
+			if reservedTurn != nil && reservedTurn.ID != "" {
+				acceptedTurnID = reservedTurn.ID
+			}
+			if acceptedTurnID != "" {
+				outcome.onAccepted(acceptedTurnID)
+			}
 		}
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {
@@ -5026,6 +5064,9 @@ func (s *Service) claimSessionRunningForPrompt(
 	if s.isSessionResetInProgress(sessionID) {
 		return nil, "", "", false, nil, ErrSessionResetInProgress
 	}
+	if s.isRouteActionInFlight(sessionID) {
+		return nil, "", "", false, nil, fmt.Errorf("%w, route action is in progress", ErrAgentPromptInProgress)
+	}
 	if expectedCurrentTurnID != "" {
 		if s.turnService == nil {
 			return nil, "", "", false, nil, errors.New("cannot verify expected prompt turn without turn service")
@@ -5133,6 +5174,9 @@ func (s *Service) claimLifecycleSessionRunning(
 	}
 	if s.isSessionResetInProgress(sessionID) {
 		return nil, "", "", false, ErrSessionResetInProgress
+	}
+	if s.isRouteActionInFlight(sessionID) {
+		return nil, "", "", false, fmt.Errorf("%w, route action is in progress", ErrAgentPromptInProgress)
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
@@ -6333,7 +6377,7 @@ type cancelAgentPreparation struct {
 }
 
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error) {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
 		return err
 	}
 	if s.repo == nil {

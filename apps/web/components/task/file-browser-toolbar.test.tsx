@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileBrowserToolbar } from "./file-browser-toolbar";
+import { InlineFileInput } from "./inline-file-input";
 
 let isMobile = false;
 
@@ -121,24 +123,51 @@ describe("FileBrowserToolbar workspace actions", () => {
 });
 
 const CREATE_MENU_TESTID = "files-create-menu";
+const createMenuBaseProps = {
+  displayPath: "workspace",
+  fullPath: "/workspace",
+  copied: false,
+  expandedPathsSize: 0,
+  onCopyPath: vi.fn(),
+  onOpenFolder: vi.fn(),
+  onStartSearch: vi.fn(),
+  onCollapseAll: vi.fn(),
+};
+
+async function openCreateMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+  return screen.findByRole("menuitem", { name: "New file" });
+}
+
+function CreateMenuInlineInputHarness() {
+  const [creating, setCreating] = useState(false);
+
+  return (
+    <TooltipProvider>
+      <FileBrowserToolbar
+        {...createMenuBaseProps}
+        showCreateButton
+        onStartCreate={() => setCreating(true)}
+        onUploadFiles={vi.fn()}
+      />
+      {creating && (
+        <InlineFileInput depth={0} onSubmit={vi.fn()} onCancel={() => setCreating(false)} />
+      )}
+    </TooltipProvider>
+  );
+}
 
 describe("FileBrowserToolbar create menu", () => {
-  const baseProps = {
-    displayPath: "workspace",
-    fullPath: "/workspace",
-    copied: false,
-    expandedPathsSize: 0,
-    onCopyPath: vi.fn(),
-    onOpenFolder: vi.fn(),
-    onStartSearch: vi.fn(),
-    onCollapseAll: vi.fn(),
-  };
-
   it("keeps one-click New File when upload is unavailable", () => {
     const onStartCreate = vi.fn();
     render(
       <TooltipProvider>
-        <FileBrowserToolbar {...baseProps} showCreateButton onStartCreate={onStartCreate} />
+        <FileBrowserToolbar
+          {...createMenuBaseProps}
+          showCreateButton
+          onStartCreate={onStartCreate}
+        />
       </TooltipProvider>,
     );
 
@@ -153,7 +182,7 @@ describe("FileBrowserToolbar create menu", () => {
     render(
       <TooltipProvider>
         <FileBrowserToolbar
-          {...baseProps}
+          {...createMenuBaseProps}
           showCreateButton
           onStartCreate={onStartCreate}
           onUploadFiles={onUploadFiles}
@@ -162,19 +191,65 @@ describe("FileBrowserToolbar create menu", () => {
     );
 
     const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
-    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
-    fireEvent.click(menuTrigger);
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "New file" })).toBeTruthy());
+    await openCreateMenu(menuTrigger);
     expect(screen.getByRole("menuitem", { name: "Upload files" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Upload folder" })).toBeTruthy();
   });
 
-  it("still begins inline creation from the menu, unchanged", async () => {
+  it("keeps inline creation focused after the create menu closes", async () => {
+    // @covers AC-UI-WORKSPACE-FILE-TRANSFER-001.1
+    render(<CreateMenuInlineInputHarness />);
+
+    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
+    fireEvent.click(await openCreateMenu(menuTrigger));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "New file" })).toBeNull());
+
+    const input = await screen.findByPlaceholderText("filename...");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByPlaceholderText("filename...")).toBeNull());
+    await openCreateMenu(menuTrigger);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "New file" })).toBeNull());
+    expect(screen.queryByPlaceholderText("filename...")).toBeNull();
+  });
+
+  it("requests the right picker for each upload item", async () => {
+    const onUploadFiles = vi.fn();
     const onStartCreate = vi.fn();
     render(
       <TooltipProvider>
         <FileBrowserToolbar
-          {...baseProps}
+          {...createMenuBaseProps}
+          showCreateButton
+          onStartCreate={onStartCreate}
+          onUploadFiles={onUploadFiles}
+        />
+      </TooltipProvider>,
+    );
+
+    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
+    await openCreateMenu(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload folder" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("folder"));
+    await waitFor(() => expect(document.activeElement).toBe(menuTrigger));
+    expect(onStartCreate).not.toHaveBeenCalled();
+
+    onUploadFiles.mockClear();
+    await openCreateMenu(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload files" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("files"));
+    await waitFor(() => expect(document.activeElement).toBe(menuTrigger));
+    expect(onStartCreate).not.toHaveBeenCalled();
+  });
+
+  it("restores the create-menu trigger when the menu is dismissed", async () => {
+    const onStartCreate = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileBrowserToolbar
+          {...createMenuBaseProps}
           showCreateButton
           onStartCreate={onStartCreate}
           onUploadFiles={vi.fn()}
@@ -183,35 +258,11 @@ describe("FileBrowserToolbar create menu", () => {
     );
 
     const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
-    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
-    fireEvent.click(menuTrigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "New file" }));
-    await waitFor(() => expect(onStartCreate).toHaveBeenCalledTimes(1));
-  });
+    await openCreateMenu(menuTrigger);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
-  it("requests the right picker for each upload item", async () => {
-    const onUploadFiles = vi.fn();
-    render(
-      <TooltipProvider>
-        <FileBrowserToolbar
-          {...baseProps}
-          showCreateButton
-          onStartCreate={vi.fn()}
-          onUploadFiles={onUploadFiles}
-        />
-      </TooltipProvider>,
-    );
-
-    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
-    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
-    fireEvent.click(menuTrigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload folder" }));
-    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("folder"));
-
-    onUploadFiles.mockClear();
-    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
-    fireEvent.click(menuTrigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload files" }));
-    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("files"));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "New file" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(menuTrigger));
+    expect(onStartCreate).not.toHaveBeenCalled();
   });
 });

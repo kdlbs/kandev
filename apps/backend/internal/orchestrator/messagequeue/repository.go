@@ -66,6 +66,11 @@ type Repository interface {
 	// queue counts from the same atomic session mutation.
 	DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error)
 
+	// ListDurableLifecycleEntries returns every durable lifecycle entry across
+	// sessions. It is used by startup recovery to remove rows whose owning
+	// workflow reservation was not committed before a process crash.
+	ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error)
+
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 

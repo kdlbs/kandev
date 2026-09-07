@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- session hydration and lifecycle hooks share one transcript contract. */
+
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -9,7 +11,12 @@ import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
-import { doFetchMessages } from "./use-session-message-fetch";
+import {
+  doFetchMessages,
+  getHydratedMessagesForGeneration,
+  recordHydratedGeneration,
+  type SessionHydrationRef,
+} from "./use-session-message-fetch";
 import { useMessageFetchState } from "./use-message-fetch-state";
 import { reconcileLatestMessageWindow } from "./message-window-reconciliation";
 import { t } from "@/lib/i18n";
@@ -222,6 +229,8 @@ async function fetchAndStoreMessages(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
   isActive?: () => boolean,
+  hydrationRef?: SessionHydrationRef,
+  hydrationKey?: string,
 ): Promise<Message[]> {
   const client = getWebSocketClient();
   if (!client) {
@@ -234,6 +243,14 @@ async function fetchAndStoreMessages(
   const readiness = client.getSessionSubscriptionReadiness(sessionId);
   await readiness;
   if (isActive && !isActive()) return [];
+  const hydratedMessages = getHydratedMessagesForGeneration(
+    hydrationRef,
+    sessionId,
+    readiness,
+    hydrationKey,
+    store,
+  );
+  if (hydratedMessages !== undefined) return hydratedMessages;
   // The messages fetch is the session-entry chokepoint: any path that opens a
   // session's transcript must also make its turns resolvable. Start it only
   // after subscription acknowledgement so the REST snapshot cannot race the
@@ -269,6 +286,7 @@ async function fetchAndStoreMessages(
     hasMore: response.has_more ?? false,
     oldestCursor,
   });
+  recordHydratedGeneration(hydrationRef, sessionId, readiness, hydrationKey);
   // The store now holds the identity-reconciled array; callers only read length
   // and message content from the return, so `merged` is equivalent.
   return merged;
@@ -357,12 +375,22 @@ export function useVisibilityBackfill(
   );
 }
 
-function useSessionSubscription(
-  taskSessionId: string | null,
-  connectionStatus: string,
-  isSessionStartingOrUnknown: boolean,
-  store: ReturnType<typeof useAppStoreApi>,
-) {
+type SessionSubscriptionParams = {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  store: ReturnType<typeof useAppStoreApi>;
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
+};
+
+function useSessionSubscription({
+  taskSessionId,
+  connectionStatus,
+  isSessionStartingOrUnknown,
+  store,
+  hydrationRef,
+  hydrationKey,
+}: SessionSubscriptionParams & { isSessionStartingOrUnknown: boolean }) {
   useEffect(() => {
     debug("subscription: effect ran", {
       sessionId: taskSessionId,
@@ -391,7 +419,13 @@ function useSessionSubscription(
     void subscription.ready
       .then(() => {
         if (!active) return;
-        return fetchAndStoreMessages(taskSessionId, store, () => active);
+        return fetchAndStoreMessages(
+          taskSessionId,
+          store,
+          () => active,
+          hydrationRef,
+          hydrationKey,
+        );
       })
       .catch(() => {});
 
@@ -400,7 +434,14 @@ function useSessionSubscription(
       debug("subscription: unsubscribing", { sessionId: taskSessionId });
       subscription.unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
+  }, [
+    taskSessionId,
+    connectionStatus,
+    store,
+    isSessionStartingOrUnknown,
+    hydrationRef,
+    hydrationKey,
+  ]);
 }
 
 /**
@@ -483,16 +524,23 @@ function useSessionMessageInputs(taskSessionId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
 }
-function useSessionLifecycleSubscriptions(params: {
-  taskSessionId: string | null;
-  taskSessionState: TaskSessionState | null;
-  connectionStatus: string;
-  activeTurnId: string | null;
-  messages: Message[];
-  store: ReturnType<typeof useAppStoreApi>;
-}) {
-  const { taskSessionId, taskSessionState, connectionStatus, activeTurnId, messages, store } =
-    params;
+function useSessionLifecycleSubscriptions(
+  params: SessionSubscriptionParams & {
+    taskSessionState: TaskSessionState | null;
+    activeTurnId: string | null;
+    messages: Message[];
+  },
+) {
+  const {
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
+    store,
+    hydrationRef,
+    hydrationKey,
+  } = params;
   // Bool flips exactly once when a freshly-adopted session leaves STARTING,
   // so the subscription effect re-runs then (covering the backend race where
   // session.subscribe arrives before the session is fully constructed) without
@@ -503,7 +551,14 @@ function useSessionLifecycleSubscriptions(params: {
     taskSessionState,
     connectionStatus,
   });
-  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useSessionSubscription({
+    taskSessionId,
+    connectionStatus,
+    isSessionStartingOrUnknown,
+    store,
+    hydrationRef,
+    hydrationKey,
+  });
   useUnknownSessionSubscriptionRetryEffect({
     taskSessionId,
     connectionStatus,
@@ -528,6 +583,8 @@ type SessionEntryFetchParams = {
   store: ReturnType<typeof useAppStoreApi>;
   prevSessionIdRef: MutableRefObject<string | null>;
   fetchState: ReturnType<typeof useMessageFetchState>;
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
 };
 function useInitialMessagesWait(params: SessionEntryFetchParams): void {
   const { taskSessionId, messagesLength, fetchState } = params;
@@ -563,8 +620,16 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
   ]);
 }
 function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
-  const { taskSessionId, connectionStatus, messagesLength, store, prevSessionIdRef, fetchState } =
-    params;
+  const {
+    taskSessionId,
+    connectionStatus,
+    messagesLength,
+    store,
+    prevSessionIdRef,
+    fetchState,
+    hydrationRef,
+    hydrationKey,
+  } = params;
   const {
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
@@ -597,7 +662,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       setIsWaitingForInitialMessages(false);
       setIsCachedHistoryRefreshPending(true);
       const refreshGeneration = ++cachedRefreshGenerationRef.current;
-      void fetchAndStoreMessages(taskSessionId, store, () => active)
+      void fetchAndStoreMessages(taskSessionId, store, () => active, hydrationRef, hydrationKey)
         .catch(() => {})
         .finally(() => {
           if (cachedRefreshGenerationRef.current === refreshGeneration) {
@@ -612,6 +677,8 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       ...fetchRefs,
       fetchAndStoreMessages,
       isActive: () => active,
+      hydrationRef,
+      hydrationKey,
     });
     return deactivate;
   }, [
@@ -624,6 +691,8 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     setIsWaitingForInitialMessages,
     setIsCachedHistoryRefreshPending,
     fetchRefs,
+    hydrationRef,
+    hydrationKey,
   ]);
 }
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
@@ -631,6 +700,10 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
     useSessionMessageInputs(taskSessionId);
   const prevSessionIdRef = useRef<string | null>(null);
+  const hydrationRef = useRef<SessionHydrationRef["current"]>(null);
+  const hydrationKey = `${taskSessionId ?? "none"}:${
+    taskSessionState === null || taskSessionState === "STARTING" ? "starting" : "settled"
+  }`;
   const isSessionEntryRefreshPending =
     taskSessionId !== null &&
     connectionStatus === "connected" &&
@@ -650,6 +723,8 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     activeTurnId,
     messages,
     store,
+    hydrationRef,
+    hydrationKey,
   });
   const entryFetchParams = {
     taskSessionId,
@@ -658,6 +733,8 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     store,
     prevSessionIdRef,
     fetchState,
+    hydrationRef,
+    hydrationKey,
   };
   useInitialMessagesWait(entryFetchParams);
   useSessionEntryMessageFetch(entryFetchParams);

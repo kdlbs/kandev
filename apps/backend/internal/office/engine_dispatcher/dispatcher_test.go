@@ -71,6 +71,14 @@ type fakeEngine struct {
 	roleResult         string
 	roleParticipantID  string
 	roleErr            error
+
+	roleReadOnlyCalled         bool
+	roleReadOnlyTaskID         string
+	roleReadOnlyStepID         string
+	roleReadOnlyAgentProfileID string
+	roleReadOnlyResult         string
+	roleReadOnlyParticipantID  string
+	roleReadOnlyErr            error
 }
 
 func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (engine.HandleResult, error) {
@@ -105,6 +113,16 @@ func (f *fakeEngine) ResolveParticipantRole(
 	f.roleStepID = stepID
 	f.roleAgentProfileID = agentProfileID
 	return f.roleResult, f.roleParticipantID, f.roleErr
+}
+
+func (f *fakeEngine) ResolveParticipantRoleReadOnly(
+	_ context.Context, taskID, stepID, agentProfileID string,
+) (string, string, error) {
+	f.roleReadOnlyCalled = true
+	f.roleReadOnlyTaskID = taskID
+	f.roleReadOnlyStepID = stepID
+	f.roleReadOnlyAgentProfileID = agentProfileID
+	return f.roleReadOnlyResult, f.roleReadOnlyParticipantID, f.roleReadOnlyErr
 }
 
 type realRunsAdapter struct {

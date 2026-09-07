@@ -28,6 +28,9 @@ var ambientEnvNotScrubbed = []string{
 	// files are parsed by the guard below regardless of build tags (only one
 	// compiles per platform), so both names must stay exempt.
 	"COMSPEC",
+	// KANDEV_DESKTOP_RUNTIME describes the launch policy inherited by the
+	// agentctl child. Keep it intact so diagnostics reflect the real runtime.
+	"KANDEV_DESKTOP_RUNTIME",
 }
 
 // clearAmbientGitLabEnv removes the inherited GitLab host/token values so

@@ -26,6 +26,16 @@ func NewMockController(mock *MockClient, svc *Service, log *logger.Logger) *Mock
 	return &MockController{mock: mock, service: svc, logger: log}
 }
 
+// RegisterMockRoutes registers mock control endpoints when the service uses a MockClient.
+func RegisterMockRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
+	mock, ok := svc.Client().(*MockClient)
+	if !ok {
+		return
+	}
+	NewMockController(mock, svc, log).RegisterRoutes(router)
+	log.Info("registered GitLab mock control endpoints")
+}
+
 // RegisterRoutes wires the mock control endpoints under /api/v1/gitlab/mock.
 func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/gitlab/mock")

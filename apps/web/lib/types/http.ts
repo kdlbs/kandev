@@ -29,6 +29,15 @@ export type {
   SidebarViewApi,
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
+  SidebarTaskColorAutomation,
+  SidebarTaskColorAutomationApi,
+  SidebarTaskColor,
+  SidebarTaskColorsApi,
+  SidebarTaskColorPatchApi,
+  SidebarTaskColorDimension,
+  SidebarTaskColorRepositoryTarget,
+  SidebarTaskColorRule,
+  FixedAutomaticTaskColor,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   ThreadTaskScopeApi,
@@ -274,6 +283,14 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  /** "private" (owner + explicit members) or "org" (every non-guest user). */
+  /** The organization unit this workspace sits in; reach follows the tree. */
+  unit_id?: string;
+  /** The requesting user's role here; drives owner-only controls. */
+  viewer_role?: string;
+  /** Scopes the requesting user holds here. The server is authoritative. */
+  scopes?: string[];
+  member_count?: number;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
@@ -425,9 +442,21 @@ export type Task = ActiveSubagentCountFields & {
    * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /** Process-local transition generation for parked_on_background_work; used to reject stale snapshots. */
+  parked_revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
+  primary_executor_profile_id?: string | null;
   primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
@@ -435,6 +464,11 @@ export type Task = ActiveSubagentCountFields & {
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  /**
+   * The human assignee's user id, independent of the agent assignee. Advisory:
+   * it records who owns the task and gates nothing.
+   */
+  assignee_user_id?: string;
   parent_id?: TaskId;
   archived_at?: string | null;
   created_at: string;
@@ -560,6 +594,22 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the session is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /**
+   * Process-local transition generation for parked_on_background_work; used
+   * to reject stale snapshots. Deliberately named `revision`, not
+   * `parked_revision` — an accepted naming inconsistency with the task-level
+   * carrier (spec round-5 F20).
+   */
+  revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   /**
    * True when a send right now would be delivered into the still-generating turn
    * (mid-turn steering) rather than blocked/queued. Live, derived from the
@@ -702,10 +752,27 @@ export type LocalRepository = {
   default_branch?: string;
 };
 
+export type DesktopDiscoveryRoot = {
+  id: string;
+  path: string;
+  display_path: string;
+  state: "connected" | "reconnect_required" | string;
+  last_scan_at?: string;
+  last_failure_at?: string;
+  last_failure_code?: string;
+};
+
 export type RepositoryDiscoveryResponse = {
   roots: string[];
   repositories: LocalRepository[];
   total: number;
+  desktop_runtime?: boolean;
+  root_states?: DesktopDiscoveryRoot[];
+  scan_time?: string;
+  refreshing?: boolean;
+  cached?: boolean;
+  home_confirmation_required?: boolean;
+  failed_roots?: string[];
 };
 
 export type RepositoryPathValidationResponse = {

@@ -1,9 +1,9 @@
 /**
  * Dynamic layer over `CONFIGURABLE_SHORTCUTS`: builds the same
  * label/default shape for plugin-declared keybindings (`ui.keybindings` on a
- * `PluginRecord`), so Settings > Keyboard Shortcuts can render and
- * user-override plugin shortcuts alongside the static core list without
- * widening `ConfigurableShortcutId` to an open string type.
+ * `PluginRecord`), so the plugin detail shortcut editor can render
+ * user-overrides without widening `ConfigurableShortcutId` to an open string
+ * type.
  *
  * Namespacing: a plugin keybinding's effective override id is
  * `plugin:{pluginId}:{keybindingId}` — this is what gets stored under
@@ -59,7 +59,7 @@ export function coreShortcutEntries(
 }
 
 /**
- * Builds the plugin-sourced configurable shortcut entries for every active
+ * Builds the plugin-sourced configurable shortcut entries for every installed
  * plugin's declared `ui.keybindings`. A combo that fails to parse (should
  * never happen — the backend validates manifests at registration) is
  * skipped with a console warning rather than throwing.
@@ -90,8 +90,8 @@ function buildPluginEntries(plugins: PluginRecord[]): ShortcutEntry[] {
 
 /**
  * The full list of configurable shortcuts — core (static) entries followed
- * by plugin (dynamic) entries — for rendering in Settings > Keyboard
- * Shortcuts. Core behavior/order is unchanged from `CONFIGURABLE_SHORTCUTS`.
+ * by plugin (dynamic) entries — for conflict calculation and plugin detail
+ * editors. Core behavior/order is unchanged from `CONFIGURABLE_SHORTCUTS`.
  */
 export function buildConfigurableShortcutEntries(
   plugins: PluginRecord[],

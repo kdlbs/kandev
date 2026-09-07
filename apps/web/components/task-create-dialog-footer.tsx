@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import type { AgentCompatState } from "@/components/task-create-dialog-types";
 import {
   IconLoader2,
   IconFileInvoice,
@@ -233,6 +234,8 @@ export type TaskCreateDialogFooterProps = {
   effectiveWorkflowId: string | null;
   executorHint: string | null;
   noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  selectedAgentProfileName: string | null;
   executorProfileName: string | null;
   onCancel: () => void;
   onUpdateWithoutAgent: () => void;
@@ -290,6 +293,8 @@ export const REASON_WORKFLOW = "task:reasonSelectWorkflow";
 export const REASON_AGENT = "task:reasonSelectAgent";
 export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
 export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
+export const REASON_SELECTED_AGENT_INCOMPATIBLE = "task:selectedAgentNotConfiguredFor";
+export const REASON_SELECTED_AGENT_UNAVAILABLE = "task:selectedAgentProfileUnavailable";
 export const REASON_LOADING_DEPENDENCIES = "task:loadingDependencies";
 
 /**
@@ -301,12 +306,26 @@ export function resolveDisabledReason(
   t: (key: string, options?: Record<string, unknown>) => string,
   reason: string | null | undefined,
   executorProfileName: string | null,
+  agentProfileName: string | null = null,
 ): string | undefined {
   if (!reason) return undefined;
   if (!reason.startsWith("task:")) return reason;
   return t(reason, {
     target: executorProfileName ? `“${executorProfileName}”` : t("task:thisExecutor"),
+    agent: agentProfileName ?? t("task:selectedAgentProfileFallback"),
   });
+}
+
+/** The compatibility reason must name what the agent column shows. */
+function compatReason(props: TaskCreateDialogFooterProps): string | null {
+  if (props.agentCompatState === "selected-incompatible") {
+    return REASON_SELECTED_AGENT_INCOMPATIBLE;
+  }
+  if (props.agentCompatState === "selected-unavailable") {
+    return REASON_SELECTED_AGENT_UNAVAILABLE;
+  }
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  return null;
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
@@ -316,7 +335,8 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
-  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  const compat = compatReason(props);
+  if (compat) return compat;
   if (props.isEditMode && props.editDependenciesReady === false) {
     return REASON_LOADING_DEPENDENCIES;
   }
@@ -324,7 +344,8 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
-  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  const compat = compatReason(props);
+  if (compat) return compat;
   if (!props.agentProfileId) return REASON_AGENT;
   if (!props.hasDescription) return REASON_DESCRIPTION;
   return null;
@@ -429,7 +450,12 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
       </DialogClose>
       <KeyboardShortcutTooltip
         shortcut={SHORTCUTS.SUBMIT}
-        description={resolveDisabledReason(t, disabledReason, props.executorProfileName)}
+        description={resolveDisabledReason(
+          t,
+          disabledReason,
+          props.executorProfileName,
+          props.selectedAgentProfileName,
+        )}
       >
         <span className="inline-flex w-full sm:w-auto" data-testid="submit-start-agent-wrapper">
           {(() => {

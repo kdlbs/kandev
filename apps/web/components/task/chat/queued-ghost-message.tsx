@@ -40,6 +40,7 @@ import {
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
+import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
 import { t } from "@/lib/i18n";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
@@ -260,18 +261,8 @@ type DisplayViewProps = {
   sendNowDisabled: boolean;
 };
 
-/** Rough threshold above which we offer a per-row expand toggle. Two lines of
- * the row's text width fit ~80 chars OR any explicit newline implies overflow,
- * so we use either signal to surface the chevron — short multi-line messages
- * (lists, code blocks) would otherwise be silently truncated. */
-const EXPAND_THRESHOLD = 80;
-
 function queuePositionLabel(index: number | undefined, position: number | undefined): string {
   return `#${index === undefined ? (position ?? 1) : index + 1}`;
-}
-
-function shouldOfferExpand(text: string): boolean {
-  return text.length > EXPAND_THRESHOLD || text.includes("\n");
 }
 
 function DisplayView({
@@ -293,7 +284,11 @@ function DisplayView({
   const senderTask = getSenderTaskInfo(entry);
   const workflowMessage = getWorkflowMessageInfo(entry);
   const [expanded, setExpanded] = useState(false);
-  const canExpand = shouldOfferExpand(visible);
+  const { previewRef, disclosureButtonRef, canExpand } = useQueuedMessageOverflow(
+    visible,
+    expanded,
+    setExpanded,
+  );
   const referenceMarkdownComponents = useMemo(
     () => buildEntityReferenceMarkdownComponents(entityReferences),
     [entityReferences],
@@ -317,12 +312,12 @@ function DisplayView({
         {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
         {visible && (
           <div
+            ref={previewRef}
             data-testid="queue-entry-text"
             data-expanded={expanded ? "true" : "false"}
             className={cn(
               "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
               "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-              "transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
           >
@@ -335,6 +330,7 @@ function DisplayView({
       </div>
       <QueuedGhostRowActions
         canExpand={canExpand}
+        disclosureButtonRef={disclosureButtonRef}
         expanded={expanded}
         canMerge={canMerge}
         canEdit={canEdit}

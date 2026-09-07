@@ -718,3 +718,54 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 		})
 	}
 }
+
+func TestSwitchModelFallback_PreservesExecutorProfileMetadata(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-profile"] = &models.Task{
+		ID:          "task-profile",
+		WorkspaceID: "workspace-1",
+		Title:       "Profile task",
+	}
+	repo.sessions["session-profile"] = &models.TaskSession{
+		ID:                "session-profile",
+		TaskID:            "task-profile",
+		AgentProfileID:    "agent-profile",
+		ExecutorID:        "exec-local-docker",
+		ExecutorProfileID: "profile-userns",
+		State:             models.TaskSessionStateRunning,
+	}
+	repo.executors["exec-local-docker"] = &models.Executor{
+		ID: "exec-local-docker", Type: models.ExecutorTypeLocalDocker,
+	}
+	repo.executorProfiles["profile-userns"] = &models.ExecutorProfile{
+		ID:         "profile-userns",
+		ExecutorID: "exec-local-docker",
+		Config: map[string]string{
+			lifecycle.MetadataKeyAllowUserNamespaces: "true",
+		},
+	}
+
+	var capturedReq *LaunchAgentRequest
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-old", nil
+		},
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{AgentExecutionID: "execution-new"}, nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if _, err := exec.SwitchModel(
+		context.Background(), "task-profile", "session-profile", "new-model", "continue",
+	); err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("fallback did not call LaunchAgent")
+	}
+	if got, _ := capturedReq.Metadata[lifecycle.MetadataKeyAllowUserNamespaces].(string); got != "true" {
+		t.Fatalf("user namespace metadata = %q, want profile value true", got)
+	}
+}
