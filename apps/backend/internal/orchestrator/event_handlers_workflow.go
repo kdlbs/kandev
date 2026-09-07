@@ -5481,6 +5481,17 @@ func (s *Service) activeWorkflowTurnOccurrenceID(ctx context.Context, sessionID 
 	return turnID
 }
 
+// workflowTurnStartOperationID keeps the engine's on_turn_start ledger entry
+// distinct from the on_turn_complete entry for the same agent turn. The
+// operation ledger is shared by all triggers, while a single turn legitimately
+// evaluates both triggers.
+func workflowTurnStartOperationID(turnID string) string {
+	if turnID == "" {
+		return ""
+	}
+	return fmt.Sprintf("workflow-turn-start:%s", turnID)
+}
+
 // workflowTransitionOccurrenceID gives legacy and event-driven transition
 // paths one stable identity for ordered source-session exit actions. Engine
 // paths pass their own operation ID when one exists; this helper covers
@@ -6165,7 +6176,7 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 	}
 
 	state := s.buildMachineState(ctx, task, session)
-	operationID := s.activeWorkflowTurnOccurrenceID(ctx, session.ID)
+	operationID := workflowTurnStartOperationID(s.activeWorkflowTurnOccurrenceID(ctx, session.ID))
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:         taskID,
 		SessionID:      session.ID,
