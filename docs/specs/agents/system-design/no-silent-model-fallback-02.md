@@ -26,9 +26,9 @@ variation resolution.
 
 ## Risks & Open Questions
 
-- **Behavior change for existing profiles**: an unadvertised start model no
-  longer stops the launch. Kandev uses the executor agent default and persists
-  an actionable warning.
+- **Behavior change for existing profiles**: an unadvertised exact start model
+  stops the launch before inference. Only `auto_fallback=true` authorizes
+  continuation on the executor agent default, with an actionable warning.
 - **Office post-start fallback remains workspace-routing-governed**: a
   default-mode profile's Office run can still be re-dispatched to another
   provider mid-session by the ADR office policy (availability codes →
@@ -40,8 +40,9 @@ variation resolution.
   the launch decision.
 - **Cold Claude model lists**: a valid restricted model can be absent from a
   cold bridge's initial list. Pre-session exposure lets the bridge include and
-  select the configured model. If the bridge still omits it, Kandev uses the
-  agent default and persists a warning.
+  select the configured model. If the bridge still omits an exact model, Kandev
+  fails before inference. Only `auto_fallback=true` may continue on the agent
+  default and persist a warning.
 - **Context reset model changes**: this amendment covers the model selected
   before the initial process starts. It does not restart a live ACP bridge to
   expose a newly selected hidden model during context reset.
