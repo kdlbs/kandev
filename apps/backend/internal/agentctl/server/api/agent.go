@@ -68,9 +68,8 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID            string            `json:"session_id"`
-	McpServers           []types.McpServer `json:"mcp_servers,omitempty"`
-	WorkspaceSourceRoots []string          `json:"workspace_source_roots,omitempty"`
+	SessionID  string            `json:"session_id"`
+	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call

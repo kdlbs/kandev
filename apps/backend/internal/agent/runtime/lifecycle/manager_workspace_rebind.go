@@ -264,7 +264,7 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
-	err = client.LoadSession(ctx, acpID, nil, execution.WorkspaceSourceRoots)
+	err = client.LoadSession(ctx, acpID, nil)
 	releaseClient()
 	if err != nil {
 		return err

@@ -129,9 +129,6 @@ func TestRebindWorkspaceForSessionWaitsForRestartedAdapterBeforeLoadingSession(t
 	if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.load"}) {
 		t.Fatalf("ACP actions = %v, want initialize before load", actions)
 	}
-	if roots := server.loadRoots(); len(roots) != 1 || !sameStrings(roots[0], []string{"/attached"}) {
-		t.Fatalf("load roots = %v, want [[/attached]]", roots)
-	}
 }
 
 func TestRebindWorkspaceForSessionLoadsCodexAndCursorWithAdditionalDirectories(t *testing.T) {
@@ -158,9 +155,6 @@ func TestRebindWorkspaceForSessionLoadsCodexAndCursorWithAdditionalDirectories(t
 			}
 			if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.load"}) {
 				t.Fatalf("ACP actions = %v, want initialize then load", actions)
-			}
-			if roots := server.loadRoots(); len(roots) != 1 || !sameStrings(roots[0], []string{"/attached"}) {
-				t.Fatalf("load roots = %v, want [[/attached]]", roots)
 			}
 		})
 	}
@@ -366,7 +360,6 @@ type workspaceRebindAgentctlServer struct {
 	materializeCount  int
 	loadCount         int
 	loadedSessions    []string
-	loadedRoots       [][]string
 	actionLog         []string
 	connections       []*websocket.Conn
 }
@@ -591,13 +584,11 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 				continue
 			}
 			var load struct {
-				SessionID            string   `json:"session_id"`
-				WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+				SessionID string `json:"session_id"`
 			}
 			_ = request.ParsePayload(&load)
 			server.mu.Lock()
 			server.loadedSessions = append(server.loadedSessions, load.SessionID)
-			server.loadedRoots = append(server.loadedRoots, append([]string(nil), load.WorkspaceSourceRoots...))
 			server.loadCount++
 			failed := server.failLoadAt == server.loadCount
 			server.mu.Unlock()
@@ -620,16 +611,6 @@ func (s *workspaceRebindAgentctlServer) loads() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.loadedSessions...)
-}
-
-func (s *workspaceRebindAgentctlServer) loadRoots() [][]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([][]string, len(s.loadedRoots))
-	for index := range s.loadedRoots {
-		out[index] = append([]string(nil), s.loadedRoots[index]...)
-	}
-	return out
 }
 
 func (s *workspaceRebindAgentctlServer) reboundPaths() []string {

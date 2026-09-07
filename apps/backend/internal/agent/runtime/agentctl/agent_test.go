@@ -497,8 +497,8 @@ func TestLoadSession_Success(t *testing.T) {
 		if payload.SessionID != "sess-456" {
 			t.Fatalf("session_id = %q, want sess-456", payload.SessionID)
 		}
-		if got, want := payload.WorkspaceSourceRoots, []string{"/workspace", "/workspace/api"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("workspace_source_roots = %v, want %v", got, want)
+		if len(payload.WorkspaceSourceRoots) != 0 {
+			t.Fatalf("workspace_source_roots = %v, want omitted because agentctl owns the root allowlist", payload.WorkspaceSourceRoots)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success":    true,
@@ -512,7 +512,7 @@ func TestLoadSession_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456", nil, []string{"/workspace", "/workspace/api"})
+	err := c.LoadSession(ctx, "sess-456", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

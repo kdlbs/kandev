@@ -401,7 +401,10 @@ func TestHandleWSLoadSessionForwardsServerOwnedAdditionalDirectories(t *testing.
 	capture := &additionalDirectoriesCaptureAdapter{}
 	s.procMgr.SetAdapterForTest(capture)
 
-	msg, err := ws.NewRequest("req-1", "agent.session.load", LoadSessionRequest{SessionID: "session-existing"})
+	msg, err := ws.NewRequest("req-1", "agent.session.load", map[string]any{
+		"session_id":             "session-existing",
+		"workspace_source_roots": []string{"/untrusted"},
+	})
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
