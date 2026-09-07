@@ -198,7 +198,40 @@ func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
 	}
-	return schedule.Next(after), nil
+
+	// @every is a pure interval (cron.ConstantDelaySchedule), not a wall-clock
+	// schedule, so DST fall-back suppression does not apply to it.
+	spec, ok := schedule.(*cron.SpecSchedule)
+	if !ok {
+		return schedule.Next(after), nil
+	}
+
+	// schedule.Next returns its candidate in the input's location, so the
+	// input must already be in the schedule's own location for ZoneBounds to
+	// see the same transitions the schedule fires against.
+	candidate := spec.Next(after.In(spec.Location))
+	for !candidate.IsZero() && isAmbiguousFallBack(candidate) {
+		candidate = spec.Next(candidate)
+	}
+	return candidate, nil
+}
+
+// isAmbiguousFallBack reports whether t falls within the repeated wall-clock
+// window created by a DST "fall back" transition: after the transition, the
+// first (transition-end - transition-start)-wide slice of the new period
+// repeats wall-clock times already fired once in the pre-transition offset.
+func isAmbiguousFallBack(t time.Time) bool {
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return false
+	}
+	_, prevOffset := start.Add(-time.Second).Zone()
+	_, currOffset := t.Zone()
+	delta := time.Duration(prevOffset-currOffset) * time.Second
+	if delta <= 0 {
+		return false
+	}
+	return t.Sub(start) < delta
 }
 
 func hasCronTZPrefix(expr string) bool {
