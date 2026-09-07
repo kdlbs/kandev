@@ -2114,6 +2114,12 @@ func buildOfficeFeatureServices(
 	})
 	routineSvc.SetWorkflowEnsurer(&workflowEnsurerAdapter{repo: taskRepo})
 	routineSvc.SetTaskCreator(&taskCreatorAdapter{taskSvc: services.Task})
+	// office-routine-runs: closes out a heavy routine run when its
+	// linked task reaches a terminal step, so the routine's next fire
+	// isn't gated by a task that already finished.
+	if services.Office != nil {
+		services.Office.SetRoutineRunSyncer(routineSvc)
+	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)

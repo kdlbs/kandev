@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -26,6 +27,15 @@ func (n *noopActivity) LogActivityWithRun(_ context.Context, _, _, _, _, _, _, _
 // newTestRoutineService creates a RoutineService backed by in-memory SQLite.
 func newTestRoutineService(t *testing.T) *routines.RoutineService {
 	t.Helper()
+	svc, _ := newTestRoutineServiceWithDB(t)
+	return svc
+}
+
+// newTestRoutineServiceWithDB is newTestRoutineService plus the backing
+// *sqlx.DB, for tests that need to reach into office_routine_runs
+// directly (e.g. backdating created_at to exercise the TTL floor).
+func newTestRoutineServiceWithDB(t *testing.T) (*routines.RoutineService, *sqlx.DB) {
+	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -38,7 +48,7 @@ func newTestRoutineService(t *testing.T) *routines.RoutineService {
 	}
 
 	log := logger.Default()
-	return routines.NewRoutineService(repo, log, &noopActivity{})
+	return routines.NewRoutineService(repo, log, &noopActivity{}), db
 }
 
 // createTestRoutine creates a test routine in the DB.
@@ -69,8 +79,12 @@ func TestFireManual_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fire manual: %v", err)
 	}
-	if run.Status != "task_created" {
-		t.Errorf("status = %q, want task_created", run.Status)
+	// No workflow ensurer / task creator wired on this service, so this
+	// routine (despite having a task_template) takes the lightweight
+	// path and terminates immediately at "done" — see D1 in the
+	// office-routine-runs triage.
+	if run.Status != "done" {
+		t.Errorf("status = %q, want done", run.Status)
 	}
 	if run.Source != "manual" {
 		t.Errorf("source = %q, want manual", run.Source)
@@ -80,13 +94,21 @@ func TestFireManual_Basic(t *testing.T) {
 	}
 }
 
+// TestDispatch_SkipIfActive exercises skip_if_active on the heavy path,
+// where "active" is real: run1's task genuinely has not reached a
+// terminal step yet (office-routine-runs D2). Wired lightweight (the
+// pre-fix shape of this test), the gate can never engage — a
+// lightweight run never sits in an active status (D1) — so the test
+// would pass by asserting behaviour nothing exercises.
 func TestDispatch_SkipIfActive(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Skip Test", "skip_if_active")
 
-	// First run should succeed.
+	// First run should succeed and create a task.
 	run1, err := svc.FireManual(ctx, routine.ID, nil)
 	if err != nil {
 		t.Fatalf("first run: %v", err)
@@ -95,7 +117,8 @@ func TestDispatch_SkipIfActive(t *testing.T) {
 		t.Errorf("first run status = %q, want task_created", run1.Status)
 	}
 
-	// Second run with same fingerprint should be skipped.
+	// Second run with the same fingerprint should be skipped: run1's
+	// task is still open.
 	run2, err := svc.FireManual(ctx, routine.ID, nil)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
@@ -105,9 +128,14 @@ func TestDispatch_SkipIfActive(t *testing.T) {
 	}
 }
 
+// TestDispatch_CoalesceIfActive is the coalesce_if_active counterpart of
+// TestDispatch_SkipIfActive; see its comment for why this needs the
+// heavy path.
 func TestDispatch_CoalesceIfActive(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Coalesce Test", "coalesce_if_active")
 
@@ -131,6 +159,38 @@ func TestDispatch_CoalesceIfActive(t *testing.T) {
 	}
 }
 
+// TestDispatch_HeavyRoutine_SyncRunStatusUnblocksNextFire proves the
+// gate closes and reopens rather than bricking after the first fire
+// (the office-routine-runs symptom: 323 consecutive coalesces after one
+// fire). Each cycle fires, expects a fresh task_created run (not
+// skipped/coalesced against a prior cycle), then simulates the linked
+// task reaching Done via SyncRunStatus — the seam finalizeDone calls in
+// production.
+func TestDispatch_HeavyRoutine_SyncRunStatusUnblocksNextFire(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
+
+	routine := createTestRoutine(t, svc, "Sync Cycle", "coalesce_if_active")
+
+	for i := 1; i <= 3; i++ {
+		run, err := svc.FireManual(ctx, routine.ID, nil)
+		if err != nil {
+			t.Fatalf("fire %d: %v", i, err)
+		}
+		if run.Status != "task_created" {
+			t.Fatalf("fire %d status = %q, want task_created (previous cycle's gate should already be closed)", i, run.Status)
+		}
+		if run.LinkedTaskID == "" {
+			t.Fatalf("fire %d: expected a linked task", i)
+		}
+		if err := svc.SyncRunStatus(ctx, run.LinkedTaskID, "done"); err != nil {
+			t.Fatalf("sync run status after fire %d: %v", i, err)
+		}
+	}
+}
+
 func TestDispatch_AlwaysCreate(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
@@ -147,14 +207,24 @@ func TestDispatch_AlwaysCreate(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 
-	if run1.Status != "task_created" || run2.Status != "task_created" {
-		t.Errorf("both runs should be task_created, got %q and %q", run1.Status, run2.Status)
+	// No workflow ensurer / task creator wired: lightweight path, done
+	// on both fires (always_create never even consults the active-run
+	// gate, so this exercises only the "successful lightweight fire
+	// terminates" half of D1).
+	if run1.Status != "done" || run2.Status != "done" {
+		t.Errorf("both runs should be done, got %q and %q", run1.Status, run2.Status)
 	}
 }
 
+// TestDispatch_DifferentVarsNotSkipped is on the heavy path so the
+// active-run gate is real: without it, a lightweight run is never
+// "active" (D1) and the assertion would pass regardless of whether
+// fingerprints actually differ.
 func TestDispatch_DifferentVarsNotSkipped(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Diff Vars", "skip_if_active")
 
@@ -166,7 +236,8 @@ func TestDispatch_DifferentVarsNotSkipped(t *testing.T) {
 		t.Errorf("first run status = %q, want task_created", run1.Status)
 	}
 
-	// Different variable -> different fingerprint -> not skipped.
+	// Different variable -> different fingerprint -> not skipped, even
+	// though run1's task is still open.
 	run2, err := svc.FireManual(ctx, routine.ID, map[string]string{"name": "B"})
 	if err != nil {
 		t.Fatalf("second run: %v", err)
@@ -253,8 +324,11 @@ func TestDispatch_LightweightRoutine_EnqueuesWakeup(t *testing.T) {
 	if run.LinkedTaskID != "" {
 		t.Errorf("lightweight path must not link a task, got %q", run.LinkedTaskID)
 	}
-	if run.Status != "task_created" {
-		t.Errorf("status = %q, want task_created (run row reused even for taskless)", run.Status)
+	// The run's own lifecycle ends once the wakeup-request is enqueued
+	// and dispatched (D1) — it does not wait in task_created for the
+	// wakeup dispatcher's own concurrency gate to resolve.
+	if run.Status != "done" {
+		t.Errorf("status = %q, want done", run.Status)
 	}
 	if len(enq.created) != 1 {
 		t.Fatalf("expected 1 wakeup-request created, got %d", len(enq.created))
@@ -393,6 +467,12 @@ func TestDispatch_HeavyRoutine_FallsBackWithoutDeps(t *testing.T) {
 	if run.LinkedTaskID != "" {
 		t.Errorf("expected empty linked_task_id when deps missing, got %q", run.LinkedTaskID)
 	}
+	// Falling back to lightweight must still resolve to a terminal
+	// status, not strand the run in task_created with no task to ever
+	// close it out.
+	if run.Status != "done" {
+		t.Errorf("status = %q, want done", run.Status)
+	}
 }
 
 func TestListRoutineRuns(t *testing.T) {
@@ -410,5 +490,129 @@ func TestListRoutineRuns(t *testing.T) {
 	}
 	if len(runs) != 3 {
 		t.Errorf("expected 3 runs, got %d", len(runs))
+	}
+}
+
+// TestDispatch_LightweightRoutine_SubsequentFiresMaterialise is the
+// card's explicit regression requirement: a lightweight routine must
+// fire every time, under both concurrency policies, not just once. Pre-
+// fix, materialiseLightweightRoutineRun left every successful fire in
+// task_created, which both policies treat as "still active" forever.
+func TestDispatch_LightweightRoutine_SubsequentFiresMaterialise(t *testing.T) {
+	for _, policy := range []string{"skip_if_active", "coalesce_if_active"} {
+		t.Run(policy, func(t *testing.T) {
+			svc := newTestRoutineService(t)
+			ctx := context.Background()
+
+			routine := &models.Routine{
+				WorkspaceID:            "ws-1",
+				Name:                   "Coordinator heartbeat",
+				TaskTemplate:           "", // lightweight
+				AssigneeAgentProfileID: "agent-1",
+				Status:                 "active",
+				ConcurrencyPolicy:      models.RoutineConcurrencyPolicy(policy),
+			}
+			if err := svc.CreateRoutine(ctx, routine); err != nil {
+				t.Fatalf("create routine: %v", err)
+			}
+			svc.SetWakeupEnqueuer(&fakeWakeupEnqueuer{})
+
+			for i := 1; i <= 3; i++ {
+				run, err := svc.FireManual(ctx, routine.ID, nil)
+				if err != nil {
+					t.Fatalf("fire %d: %v", i, err)
+				}
+				if run.Status != "done" {
+					t.Fatalf("fire %d status = %q, want done (fire should materialise, not be gated by fire 1)", i, run.Status)
+				}
+			}
+		})
+	}
+}
+
+// TestDispatch_HeavyRoutine_StaleTaskCreatedDoesNotGate proves the TTL
+// floor (office-routine-runs D3): a task_created row old enough to be a
+// crashed/stranded dispatch — no SyncRunStatus call will ever arrive
+// for it — must not gate the routine forever.
+func TestDispatch_HeavyRoutine_StaleTaskCreatedDoesNotGate(t *testing.T) {
+	svc, db := newTestRoutineServiceWithDB(t)
+	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
+
+	routine := createTestRoutine(t, svc, "Stale Gate", "skip_if_active")
+
+	run1, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if run1.Status != "task_created" {
+		t.Fatalf("first run status = %q, want task_created", run1.Status)
+	}
+
+	// Backdate the row well past any sane TTL, simulating a dispatch
+	// that crashed before its task ever reached a terminal step.
+	longAgo := time.Now().UTC().AddDate(0, -1, 0)
+	if _, err := db.ExecContext(ctx,
+		`UPDATE office_routine_runs SET created_at = ? WHERE id = ?`, longAgo, run1.ID,
+	); err != nil {
+		t.Fatalf("backdate run: %v", err)
+	}
+
+	run2, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if run2.Status != "task_created" {
+		t.Errorf("second run status = %q, want task_created (stale row must not gate)", run2.Status)
+	}
+}
+
+// TestDispatch_LastRunAt verifies routines.last_run_at is populated by a
+// materialised fire and left untouched by a gated one — the card's
+// fourth symptom (empty last_run_at despite hundreds of runs).
+func TestDispatch_LastRunAt(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
+
+	routine := createTestRoutine(t, svc, "Last Run", "skip_if_active")
+
+	before, err := svc.GetRoutine(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("get routine: %v", err)
+	}
+	if before.LastRunAt != nil {
+		t.Fatalf("last_run_at = %v before any fire, want nil", before.LastRunAt)
+	}
+
+	if _, err := svc.FireManual(ctx, routine.ID, nil); err != nil {
+		t.Fatalf("first fire: %v", err)
+	}
+	afterFirst, err := svc.GetRoutine(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("get routine: %v", err)
+	}
+	if afterFirst.LastRunAt == nil {
+		t.Fatal("expected last_run_at to be set after a materialised fire")
+	}
+	firstStamp := *afterFirst.LastRunAt
+
+	// Second fire is skipped (run1's task is still open) — last_run_at
+	// must not advance for a fire that didn't materialise.
+	run2, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("second fire: %v", err)
+	}
+	if run2.Status != "skipped" {
+		t.Fatalf("second run status = %q, want skipped", run2.Status)
+	}
+	afterSecond, err := svc.GetRoutine(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("get routine: %v", err)
+	}
+	if !afterSecond.LastRunAt.Equal(firstStamp) {
+		t.Errorf("last_run_at changed from %v to %v after a skipped fire", firstStamp, afterSecond.LastRunAt)
 	}
 }

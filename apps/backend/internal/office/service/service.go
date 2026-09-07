@@ -281,7 +281,27 @@ type Service struct {
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
 	// delegate to it.
 	budgetChecker BudgetEvaluator
+
+	// routineRunSyncer closes out a heavy routine run when its linked
+	// task reaches a terminal step. Wired to the routines.RoutineService
+	// at startup; nil in tests that don't exercise routines.
+	routineRunSyncer RoutineRunSyncer
 }
+
+// RoutineRunSyncer is the surface the office service needs from the
+// routines feature to close out a routine run once its linked task
+// finishes. Implemented by *routines.RoutineService.SyncRunStatus —
+// declared here so tests can supply fakes without pulling the routines
+// package. terminalStatus is "done" or "cancelled".
+type RoutineRunSyncer interface {
+	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
+// used to close out a heavy routine run when its linked task reaches a
+// terminal step. Without this wired, a heavy routine's run stays in
+// task_created until routines.activeRunMaxAge lets a later fire through.
+func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by

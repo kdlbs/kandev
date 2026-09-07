@@ -35,9 +35,11 @@ type Repository interface {
 	CreateRoutineRun(ctx context.Context, run *RoutineRun) error
 	ListRoutineRuns(ctx context.Context, routineID string, limit, offset int) ([]*RoutineRun, error)
 	ListAllRuns(ctx context.Context, workspaceID string, limit int) ([]*RoutineRun, error)
-	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string) (*RoutineRun, error)
+	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string, notBefore time.Time) (*RoutineRun, error)
+	GetRoutineRunByLinkedTaskID(ctx context.Context, taskID string) (*RoutineRun, error)
 	UpdateRunStatus(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) error
 	UpdateRunCoalesced(ctx context.Context, runID, coalescedIntoRunID string) error
+	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 }
 
 // WakeupEnqueuer is the slim surface routines need to enqueue + dispatch
@@ -535,6 +537,10 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, err
 	}
 
+	if err := s.repo.TouchRoutineLastRun(ctx, routine.ID, now); err != nil {
+		s.logger.Warn("touch routine last_run_at",
+			zap.String("routine", routine.Name), zap.Error(err))
+	}
 	routine.LastRunAt = &now
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),
@@ -545,8 +551,12 @@ func (s *RoutineService) dispatchRoutineRun(
 }
 
 // materialiseRoutineRun branches on tmpl.Title to choose the lightweight
-// (taskless) or heavy (real task) path. Both paths transition the run
-// to models.RoutineRunStatusTaskCreated; only the heavy path attaches a real task id.
+// (taskless) or heavy (real task) path. The heavy path transitions the
+// run to models.RoutineRunStatusTaskCreated and attaches the new task's
+// id — that status stays until the linked task reaches a terminal step
+// (see SyncRunStatus). The lightweight path has no task to wait on, so
+// it resolves to a terminal status (done/failed) immediately; see
+// materialiseLightweightRoutineRun.
 // missedTicks is forwarded to the lightweight wakeup payload; the heavy
 // path doesn't attribute it (the agent reads context from the task).
 func (s *RoutineService) materialiseRoutineRun(
@@ -594,9 +604,21 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 }
 
 // materialiseLightweightRoutineRun enqueues a wakeup-request for the
-// routine assignee with source="routine". The wakeup dispatcher claims
-// it, applies the per-routine concurrency policy, and creates a fresh
-// taskless runs row. LinkedTaskID stays empty for lightweight.
+// routine assignee with source="routine" and then terminates this run:
+// a lightweight routine has no task to wait on, so its own lifecycle
+// ends the moment the request is enqueued and handed to the wakeup
+// dispatcher. From there the dispatcher owns everything downstream,
+// including its own concurrency gate over the same routine policy
+// (wakeup/dispatcher.go resolvePolicy/resolveRoutinePolicy) — so this
+// run must not sit in an "active" status waiting for that outcome, or
+// it permanently blocks the routine's next fire under skip_if_active /
+// coalesce_if_active (see the office-routine-runs triage).
+//
+// Terminal status: `done` once the request is enqueued, regardless of
+// whether Dispatch itself succeeds (a dispatch failure is the wakeup
+// layer's problem, logged there); `failed` only when the enqueue call
+// itself errors, since that means no request exists for the dispatcher
+// to ever pick up. LinkedTaskID stays empty for lightweight.
 //
 // missedTicks > 0 surfaces in the wakeup payload when the cron tick
 // collapsed N missed fires into one (catch-up cap policy
@@ -608,12 +630,8 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	vars map[string]string,
 	missedTicks int,
 ) error {
-	run.Status = models.RoutineRunStatusTaskCreated
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, ""); err != nil {
-		return fmt.Errorf("update run status: %w", err)
-	}
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {
-		return nil
+		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 	}
 	idemKey := buildRoutineIdempotencyKey(routine.ID, run.TriggerID, run.StartedAt)
 	payloadStr, _ := marshalRoutinePayload(routine.ID, vars, missedTicks)
@@ -627,17 +645,27 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		RequestedAt:    time.Now().UTC(),
 	}
 	if err := s.wakeup.CreateWakeupRequest(ctx, req); err != nil {
-		// Idempotency conflicts are quietly absorbed by the office repo
-		// returning a sentinel error; the caller treats it as a no-op.
 		s.logger.Warn("create routine wakeup request",
 			zap.String("routine", routine.Name), zap.Error(err))
-		return nil
+		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
 	}
 	if err := s.wakeup.Dispatch(ctx, req.ID); err != nil {
 		s.logger.Warn("dispatch routine wakeup request",
 			zap.String("routine", routine.Name),
 			zap.String("wakeup_id", req.ID),
 			zap.Error(err))
+	}
+	return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
+}
+
+// finalizeLightweightRun writes the lightweight run's terminal status.
+// LinkedTaskID is always empty for lightweight runs.
+func (s *RoutineService) finalizeLightweightRun(
+	ctx context.Context, run *RoutineRun, status models.RoutineRunStatus,
+) error {
+	run.Status = status
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, status, ""); err != nil {
+		return fmt.Errorf("update run status: %w", err)
 	}
 	return nil
 }
@@ -679,6 +707,17 @@ func marshalRoutinePayload(routineID string, vars map[string]string, missedTicks
 	return string(b), nil
 }
 
+// activeRunMaxAge bounds how long a heavy routine run can gate its
+// fingerprint's next fire while sitting in RoutineRunStatusTaskCreated.
+// SyncRunStatus is the normal way out of that status (the linked task
+// reaches a terminal step); this is the crash-recovery backstop for the
+// case that never fires — e.g. a process crash between task creation
+// and the task reaching Done/Cancelled. Long enough that no realistic
+// in-progress task gets force-cleared out from under it, short enough
+// that a genuinely stranded row self-heals within about a week instead
+// of gating the routine forever.
+const activeRunMaxAge = 7 * 24 * time.Hour
+
 func (s *RoutineService) applyConcurrencyPolicy(
 	ctx context.Context,
 	routine *Routine,
@@ -688,7 +727,8 @@ func (s *RoutineService) applyConcurrencyPolicy(
 	if routine.ConcurrencyPolicy == models.ConcurrencyPolicyAlwaysCreate {
 		return "", nil
 	}
-	active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint)
+	notBefore := time.Now().UTC().Add(-activeRunMaxAge)
+	active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint, notBefore)
 	if err != nil {
 		return "", fmt.Errorf("check active run: %w", err)
 	}
@@ -720,11 +760,29 @@ func (s *RoutineService) FireManual(
 	return s.DispatchRoutineRun(ctx, routine, nil, "manual", variableValues)
 }
 
-// SyncRunStatus updates a linked run when its task reaches a terminal state.
+// SyncRunStatus closes out the heavy routine run linked to taskID when
+// that task reaches a terminal step. This is the writer for the
+// terminal side of D2 in the office-routine-runs triage: heavy runs
+// stay in RoutineRunStatusTaskCreated (an active gate) until their task
+// finishes, and this is what clears the gate. terminalStatus is
+// "cancelled" for a task moved to the Cancelled step, "done" for
+// anything else terminal (currently only Done). A taskID with no
+// linked run is not an error — most tasks aren't routine-created.
 func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error {
-	s.logger.Info("sync run status",
-		zap.String("task_id", taskID),
-		zap.String("status", terminalStatus))
+	run, err := s.repo.GetRoutineRunByLinkedTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get routine run by linked task: %w", err)
+	}
+	if run == nil {
+		return nil
+	}
+	status := models.RoutineRunStatusDone
+	if terminalStatus == "cancelled" {
+		status = models.RoutineRunStatusCancelled
+	}
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, status, run.LinkedTaskID); err != nil {
+		return fmt.Errorf("update run status: %w", err)
+	}
 	return nil
 }
 
@@ -757,6 +815,11 @@ func parseDeclaredDefaults(variablesJSON string) map[string]string {
 	return defaults
 }
 
+// computeFingerprint is the dedup key for "an identical unit of work is
+// already in flight". Lightweight runs never sit in an active status
+// (see materialiseLightweightRoutineRun), so the fingerprint only gates
+// heavy runs in practice: it means "a task with this exact rendered
+// title, description, and assignee is still open".
 func computeFingerprint(title, description, assignee string) string {
 	h := sha256.Sum256([]byte(title + "|" + description + "|" + assignee))
 	return fmt.Sprintf("%x", h[:16])

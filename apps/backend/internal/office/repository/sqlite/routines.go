@@ -321,17 +321,22 @@ func (r *Repository) ListAllRuns(ctx context.Context, workspaceID string, limit 
 	return runs, nil
 }
 
-// GetActiveRunForFingerprint returns an active run matching the fingerprint.
+// GetActiveRunForFingerprint returns an active run matching the
+// fingerprint, if any. "Active" means status = task_created (the only
+// status a run can be gating another fire from — see
+// routines.RoutineService's materialise* methods) and created_at is no
+// older than notBefore, so a run stranded in task_created by a crash
+// cannot gate its routine forever (routines.activeRunMaxAge).
 func (r *Repository) GetActiveRunForFingerprint(
-	ctx context.Context, routineID, fingerprint string,
+	ctx context.Context, routineID, fingerprint string, notBefore time.Time,
 ) (*models.RoutineRun, error) {
 	var run models.RoutineRun
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM office_routine_runs
 		WHERE routine_id = ? AND dispatch_fingerprint = ?
-		  AND status = 'task_created'
+		  AND status = 'task_created' AND created_at >= ?
 		ORDER BY created_at DESC LIMIT 1
-	`), routineID, fingerprint).StructScan(&run)
+	`), routineID, fingerprint, notBefore).StructScan(&run)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -339,6 +344,40 @@ func (r *Repository) GetActiveRunForFingerprint(
 		return nil, err
 	}
 	return &run, nil
+}
+
+// GetRoutineRunByLinkedTaskID returns the most recent run linked to
+// taskID, or nil if no run is linked to it (most tasks aren't
+// routine-created). Used by SyncRunStatus to find the run to close out
+// when its task reaches a terminal step.
+func (r *Repository) GetRoutineRunByLinkedTaskID(
+	ctx context.Context, taskID string,
+) (*models.RoutineRun, error) {
+	var run models.RoutineRun
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM office_routine_runs
+		WHERE linked_task_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), taskID).StructScan(&run)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// TouchRoutineLastRun updates only last_run_at (+ updated_at) on a
+// routine. Deliberately narrower than UpdateRoutine, whose whole-row
+// snapshot write can revert concurrent edits to other columns (see
+// UpdateRoutineConfigFields above) — a dispatch in flight should never
+// clobber a config change made while it ran, or vice versa.
+func (r *Repository) TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routines SET last_run_at = ?, updated_at = ? WHERE id = ?
+	`), at, time.Now().UTC(), routineID)
+	return err
 }
 
 // UpdateRunStatus updates a run's status and optionally its linked task.

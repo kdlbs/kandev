@@ -182,7 +182,8 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	active, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123")
+	longAgo := time.Now().UTC().Add(-time.Hour)
+	active, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123", longAgo)
 	if err != nil {
 		t.Fatalf("get active: %v", err)
 	}
@@ -191,12 +192,22 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 	}
 
 	// Non-matching fingerprint should return nil.
-	none, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-999")
+	none, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-999", longAgo)
 	if err != nil {
 		t.Fatalf("get none: %v", err)
 	}
 	if none != nil {
 		t.Error("expected nil for non-matching fingerprint")
+	}
+
+	// A notBefore after the run's created_at excludes it (TTL floor).
+	future := time.Now().UTC().Add(time.Hour)
+	tooOld, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123", future)
+	if err != nil {
+		t.Fatalf("get too-old: %v", err)
+	}
+	if tooOld != nil {
+		t.Error("expected nil for a run older than notBefore")
 	}
 }
 
