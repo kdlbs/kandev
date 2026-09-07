@@ -60,9 +60,11 @@ Kandev must keep the task operational and explain the effective model.**
 ## Goals
 
 - A configured model that the executor does not advertise is never applied.
-  Exact profiles fail before inference; an explicit-fallback profile fails unless
-  its configured fallback is advertised and applied. Only `auto_fallback=true`
-  may continue with the executor's current or default model.
+  Exact profiles fail before inference when their start model is unavailable.
+  An explicit-fallback profile uses its start model when available. If the start
+  model is unavailable, Kandev applies the configured fallback only when it is
+  advertised and applied; otherwise, the profile fails before inference. Only
+  `auto_fallback=true` may continue with the executor's current or default model.
 - Every authorized default or explicit fallback creates a persisted warning in
   task chat. The warning survives reload and shows the effective model when
   known.

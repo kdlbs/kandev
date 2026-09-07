@@ -28,7 +28,8 @@ must stop the launch before inference rather than silently run another model.
 - **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.2:** An advertised explicit
   `fallback_model` may be selected with one durable warning. When
   `auto_fallback=true`, provider-default continuation remains explicitly
-  authorized and visible.
+  authorized and emits exactly one durable task-chat warning that survives
+  reload, including the effective model when known.
 
 ### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002: Resolve one advertised model variation
 
