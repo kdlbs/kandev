@@ -59,9 +59,12 @@ Kandev must keep the task operational and explain the effective model.**
 ## Goals
 
 - A configured model that the executor does not advertise is never applied.
-  The agent continues with its current or default model.
-- Every default or explicit fallback creates a persisted warning in task chat.
-  The warning survives reload and shows the effective model when known.
+  Exact profiles fail before inference; an explicit-fallback profile fails unless
+  its configured fallback is advertised and applied. Only `auto_fallback=true`
+  may continue with the executor's current or default model.
+- Every authorized default or explicit fallback creates a persisted warning in
+  task chat. The warning survives reload and shows the effective model when
+  known.
 - A Claude model that is valid for the user's account can start in a cold,
   isolated executor even when the initial Claude ACP model list omits it.
 - "Gone" models render **greyed out and unselectable** in every model
@@ -546,11 +549,12 @@ Backend (Go, `*_test.go` beside source):
 - Reconciler: gone start model is kept, not overwritten; empty model still
   seeded; gone fallback_model kept.
 - Runtime session start: an unadvertised start model causes no `SetModel` call.
-  The session continues with the reported current or default model.
+  Exact profiles fail before inference with sanitized mismatch evidence.
 - Runtime session start: an advertised explicit fallback is applied.
-  An unadvertised fallback causes no call and the agent default remains active.
-- Runtime session start: an empty catalog and method-not-supported both continue
-  with the agent default and create a model-selection warning.
+  An unadvertised fallback causes no call and the session fails before inference.
+- Runtime session start: an empty catalog and method-not-supported fail exact
+  and explicit-fallback profiles before inference. `auto_fallback=true` may
+  continue with the agent default and creates a model-selection warning.
 - Runtime session start: an advertised model apply error fails explicitly.
   Auto-fallback keeps best-effort behavior and creates a warning.
 - Runtime session start: each decision produces at most one model-selection
