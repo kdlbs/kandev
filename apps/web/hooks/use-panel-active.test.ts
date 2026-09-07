@@ -92,6 +92,8 @@ describe("usePanelActive", () => {
 
     expect(result.current).toBe(true);
 
+    // The hook subscribes to onDidVisibilityChange, not onDidActiveChange.
+    // Firing active-change events is a no-op; the result must not move.
     act(() => handle.fireActiveChange(true));
     act(() => handle.fireActiveChange(false));
     expect(result.current).toBe(true);

@@ -46,11 +46,11 @@ transcript placement without relying on a later agent update.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run hooks/use-panel-active.test.ts
-cd apps/web && pnpm exec eslint hooks/use-panel-active.ts hooks/use-panel-active.test.ts e2e/tests/chat/unread-divider.spec.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run --host --project chromium tests/chat/unread-divider.spec.ts -- --grep "completed task switch" --retries=0
-cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-unread-divider.spec.ts -- --grep "completed task switch" --retries=0
+(cd apps && pnpm --filter @kandev/web test -- --run hooks/use-panel-active.test.ts)
+(cd apps/web && pnpm exec eslint hooks/use-panel-active.ts hooks/use-panel-active.test.ts e2e/tests/chat/unread-divider.spec.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/chat/unread-divider.spec.ts -- --grep "completed task switch" --retries=0)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-unread-divider.spec.ts -- --grep "completed task switch" --retries=0)
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 git diff --check
