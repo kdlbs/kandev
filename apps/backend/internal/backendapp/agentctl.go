@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
@@ -31,7 +31,7 @@ type agentctlLauncherResult struct {
 	// endpoint. It governs how recovery classifies recovery-inventory records
 	// left by an earlier launch, which cannot be judged against a server this
 	// backend started itself.
-	inheritedRecordScope lifecycle.InheritedRecordScope
+	inheritedRecordScope agentruntime.InheritedRecordScope
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -40,7 +40,7 @@ type agentctlLauncherResult struct {
 //
 // When the agent-survival capability is enabled (Layer 6.1 of
 // agent-survival-across-restart), a surviving control server from a prior
-// launch is tried first via lifecycle.AttemptAdoptControlServer; only when
+// launch is tried first via agentruntime.AttemptAdoptControlServer; only when
 // that fails or there is no record does this spawn a fresh one, same as
 // when the capability is disabled. Either way, cfg.Agent.Standalone* is
 // updated to point at whichever server this launch ends up using.
@@ -49,7 +49,7 @@ func provideAgentctlLauncher(
 	cfg *config.Config,
 	log *logger.Logger,
 	availability *agentctlclient.Availability,
-	store lifecycle.AdoptionRecordStore,
+	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, error) {
 	result, scope := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore)
@@ -78,13 +78,13 @@ func resolveSurvivingAgentctl(
 	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
-	store lifecycle.AdoptionRecordStore,
+	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
-) (*agentctlLauncherResult, lifecycle.InheritedRecordScope) {
+) (*agentctlLauncherResult, agentruntime.InheritedRecordScope) {
 	if !cfg.Features.AgentSurvival {
-		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
+		agentruntime.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
 			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
-		return nil, lifecycle.InheritedRecordScopeNoServer
+		return nil, agentruntime.InheritedRecordScopeNoServer
 	}
 	return adoptSurvivingAgentctl(ctx, cfg, log, store, secretStore)
 }
@@ -96,11 +96,11 @@ func resolveSurvivingAgentctl(
 // probed and repaired. Every refusal that did reach a reachable server leaves
 // that server running, and an instance may still be alive on it, so nothing
 // may be concluded from its absence from a server this launch started.
-func refusedAdoptionScope(outcome lifecycle.AdoptionOutcome) lifecycle.InheritedRecordScope {
+func refusedAdoptionScope(outcome agentruntime.AdoptionOutcome) agentruntime.InheritedRecordScope {
 	if outcome.ContactedAt.IsZero() {
-		return lifecycle.InheritedRecordScopeNoServer
+		return agentruntime.InheritedRecordScopeNoServer
 	}
-	return lifecycle.InheritedRecordScopeForeignServer
+	return agentruntime.InheritedRecordScopeForeignServer
 }
 
 // adoptSurvivingAgentctl attempts to adopt a control server recorded by a
@@ -111,11 +111,11 @@ func adoptSurvivingAgentctl(
 	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
-	store lifecycle.AdoptionRecordStore,
+	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
-) (*agentctlLauncherResult, lifecycle.InheritedRecordScope) {
-	outcome := lifecycle.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
-		cfg.ResolvedHomeDir(), lifecycle.RequiredSurvivalCapabilities,
+) (*agentctlLauncherResult, agentruntime.InheritedRecordScope) {
+	outcome := agentruntime.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
+		cfg.ResolvedHomeDir(), agentruntime.RequiredSurvivalCapabilities,
 		cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	if !outcome.Adopted {
 		log.Info("control server adoption did not complete; spawning a fresh one",
@@ -165,8 +165,8 @@ func adoptSurvivingAgentctl(
 		},
 		binaryPath:            launcher.FindAgentctlBinary(),
 		recoveryDeadlineStart: outcome.ContactedAt,
-		inheritedRecordScope:  lifecycle.InheritedRecordScopeAdopted,
-	}, lifecycle.InheritedRecordScopeAdopted
+		inheritedRecordScope:  agentruntime.InheritedRecordScopeAdopted,
+	}, agentruntime.InheritedRecordScopeAdopted
 }
 
 // spawnFreshAgentctl is today's unconditional launch path. If the
@@ -180,7 +180,7 @@ func spawnFreshAgentctl(
 	cfg *config.Config,
 	log *logger.Logger,
 	availability *agentctlclient.Availability,
-	store lifecycle.AdoptionRecordStore,
+	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, error) {
 	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
@@ -206,13 +206,13 @@ func spawnFreshAgentctl(
 	// carry a real host-local liveness handle (executors_running.local_pid).
 	cfg.Agent.StandalonePID = l.Pid()
 
-	var renewer *lifecycle.OwnershipRenewer
+	var renewer *agentruntime.OwnershipRenewer
 	if cfg.Features.AgentSurvival {
 		endpoint := net.JoinHostPort(cfg.Agent.StandaloneHost, strconv.Itoa(cfg.Agent.StandalonePort))
 		client, err := controlClientFactory(log)(endpoint)
 		if err != nil {
 			log.Warn("failed to build control client for the freshly spawned agentctl; adoption record not written", zap.Error(err))
-		} else if err := lifecycle.RecordFreshControlServer(ctx, store, secretStore, client, endpoint, l.AuthToken()); err != nil {
+		} else if err := agentruntime.RecordFreshControlServer(ctx, store, secretStore, client, endpoint, l.AuthToken()); err != nil {
 			log.Warn("failed to record freshly spawned control server", zap.Error(err))
 		}
 		// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the bootstrap handshake this
@@ -254,7 +254,7 @@ func startOwnershipRenewal(
 	endpoint string,
 	credential string,
 	period time.Duration,
-) *lifecycle.OwnershipRenewer {
+) *agentruntime.OwnershipRenewer {
 	host, port, err := splitEndpoint(endpoint)
 	if err != nil {
 		log.Warn("failed to start ownership renewal loop; endpoint malformed", zap.Error(err))
@@ -262,7 +262,7 @@ func startOwnershipRenewal(
 	}
 	client := agentctlclient.NewControlClient(host, port, log)
 	client.SetAuthToken(credential)
-	renewer := lifecycle.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
+	renewer := agentruntime.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
 	renewer.Start(ctx)
 	return renewer
 }
@@ -283,11 +283,11 @@ func resolveAdoptedRenewalPeriod(reported time.Duration) time.Duration {
 	return reported
 }
 
-// controlClientFactory builds the real lifecycle.AdoptionControlClientFactory
+// controlClientFactory builds the real agentruntime.AdoptionControlClientFactory
 // used in production: it parses "host:port" and returns a live
 // agentctlclient.ControlClient targeting it.
-func controlClientFactory(log *logger.Logger) lifecycle.AdoptionControlClientFactory {
-	return func(endpoint string) (lifecycle.AdoptionControlClient, error) {
+func controlClientFactory(log *logger.Logger) agentruntime.AdoptionControlClientFactory {
+	return func(endpoint string) (agentruntime.AdoptionControlClient, error) {
 		host, port, err := splitEndpoint(endpoint)
 		if err != nil {
 			return nil, err

@@ -71,7 +71,14 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 	if got2.Endpoint != second.Endpoint || got2.ServerIdentity != second.ServerIdentity {
 		t.Fatalf("got2 = %#v, want the rewritten (second) record", got2)
 	}
-	if !got2.CreatedAt.Equal(firstCreatedAt) {
+	// Compared at microsecond granularity because PostgreSQL TIMESTAMP stores
+	// microseconds while Go's time.Time carries nanoseconds, so the first
+	// write's in-memory stamp reads back truncated (.330254029 -> .330254).
+	// That truncation is a storage property, not the contract under test: the
+	// regression this guards is an upsert that RESETS created_at to now, which
+	// the 2ms sleep above puts milliseconds away and which a microsecond
+	// comparison still catches with room to spare.
+	if !got2.CreatedAt.Truncate(time.Microsecond).Equal(firstCreatedAt.Truncate(time.Microsecond)) {
 		t.Fatalf("CreatedAt = %v, want preserved original %v", got2.CreatedAt, firstCreatedAt)
 	}
 	if !got2.UpdatedAt.After(got2.CreatedAt) {
