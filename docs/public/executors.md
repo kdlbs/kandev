@@ -102,12 +102,17 @@ Review the selected bundles before saving the profile.
 
 The host model probe helps edit a profile, but it is not the launch authority.
 At launch, the selected executor's advertised ACP catalog decides the model.
-Kandev applies this deterministic order:
+For profiles without automatic fallback, Kandev applies this deterministic
+order:
 
 1. An exact advertised model ID.
 2. An advertised explicit fallback.
 3. One unique advertised bracketed variation of the saved model.
 4. The agent's current or default model.
+
+For profiles with automatic fallback enabled, an absent saved model keeps the
+legacy behavior: Kandev ignores the explicit fallback and does not infer a
+variation. It uses the agent's current or default model instead.
 
 For example, a saved `opus` model uses `opus[1m]` when that is the only
 advertised variation. With both `opus[270k]` and `opus[1m, fast]`, Kandev

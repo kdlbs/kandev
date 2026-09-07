@@ -168,6 +168,10 @@ catalog at launch. Kandev resolves a saved model in this order:
    the executor advertises exactly one matching ID.
 4. Use the agent's current or default model when no earlier choice applies.
 
+Profiles with automatic fallback enabled keep the legacy behavior when the
+saved model is absent: Kandev ignores the explicit fallback and does not infer
+a variation. It uses the agent's current or default model instead.
+
 For example, a saved `opus` model can launch as `opus[1m]` when that is the
 only advertised `opus[...]` ID. If the executor advertises both
 `opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
@@ -235,13 +239,13 @@ The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
 model is missing from that host list.
 
-At task launch, the selected executor's ACP catalog is authoritative. Kandev
-sends the requested model only when the executor advertises it. If it does
-not, Kandev uses an advertised fallback when available, or sends no model
-request and continues with the agent's current or default model. Kandev stores
-one warning in task chat with the requested model and the effective model when
-known. The warning also identifies the agent and executor and asks you to
-check credentials, copied configuration, and the agent version.
+At task launch, the selected executor's ACP catalog is authoritative. For
+profiles without automatic fallback, Kandev follows the four-step order above.
+For profiles with automatic fallback enabled, an absent saved model causes no
+model request, and Kandev ignores the explicit fallback and any variation.
+Kandev stores one warning in task chat with the requested model and the
+effective model when known. The warning also identifies the agent and executor
+and asks you to check credentials, copied configuration, and the agent version.
 
 The saved profile model is not changed. Optional portable configuration can
 copy selected allowlisted files into a remote executor, but it cannot guarantee

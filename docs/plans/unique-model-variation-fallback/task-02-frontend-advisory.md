@@ -46,10 +46,17 @@ task chat. Keep the host probe non-authoritative on every viewport.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/task-create-dialog-options components/settings/profile-form-fields components/task/chat/messages/status-message lib/model-variation
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm run i18n:ratchet
+(
+  cd apps
+  pnpm --filter @kandev/web test -- --run components/task-create-dialog-options components/settings/profile-form-fields components/task/chat/messages/status-message lib/model-variation
+  pnpm --filter @kandev/web lint
+)
+(
+  cd apps/web
+  pnpm run typecheck
+  pnpm run i18n:check
+  pnpm run i18n:ratchet
+)
 git diff --check
 ```
 

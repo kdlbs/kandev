@@ -62,3 +62,6 @@ variation resolution.
   variations at launch.
 - **Bracketed requests do not drift sideways**: a request such as `opus[1m]`
   does not infer `opus[270k]`. The user must select another explicit model.
+- **Legacy automatic fallback remains unchanged**: when `auto_fallback` is
+  enabled and the requested model is absent, Kandev does not apply an explicit
+  fallback or infer a variation. It continues with the provider default.

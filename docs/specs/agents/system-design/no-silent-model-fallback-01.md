@@ -180,7 +180,8 @@ This rule keeps the outcome stable when an agent repeats a catalog entry.
 
 ### Resolution order
 
-After ACP initialization, the lifecycle applies this order:
+For profiles with `auto_fallback = false`, the lifecycle applies this order
+after ACP initialization:
 
 1. Apply the exact requested model when advertised.
 2. Apply the configured explicit fallback when advertised.
@@ -191,6 +192,12 @@ After ACP initialization, the lifecycle applies this order:
 An unadvertised explicit fallback does not block step 3. More than one distinct
 variation blocks inference even when one candidate appears first or is the
 provider current model.
+
+When `auto_fallback = true`, the legacy path takes precedence when the
+requested model is absent: Kandev ignores the explicit fallback and does not
+infer a variation. It makes no model-selection call and continues on the
+provider current or default model with a warning. Apply errors for an
+advertised model remain best-effort in that mode.
 
 `applyStartModelPolicy` remains the single runtime owner. A pure helper returns
 the unique candidate or no candidate. Initial launch, context reset, and

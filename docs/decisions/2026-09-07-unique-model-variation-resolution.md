@@ -27,7 +27,8 @@ requested ID `x` matches an advertised ID `x[v]` when `v` is non-empty and
 contains no bracket. Matching is exact and case-sensitive. Kandev treats `v` as
 opaque text.
 
-The executor-authoritative resolution order is:
+For profiles with `auto_fallback = false`, the executor-authoritative resolution
+order is:
 
 1. Exact requested model.
 2. Advertised explicit fallback from the profile.
@@ -40,6 +41,11 @@ fallback does not block step 3.
 
 A requested ID that contains a bracket is an exact ID only. Kandev does not
 infer another variation from it.
+
+Profiles with `auto_fallback = true` retain the legacy path when the requested
+model is absent. Kandev ignores the configured explicit fallback, does not
+infer a variation, and continues with the provider current or default model.
+Apply errors for an advertised model remain best-effort in that mode.
 
 The lifecycle stores `unique_variation` as the decision outcome and
 `unique_variation_applied` as the warning reason. The effective model contains

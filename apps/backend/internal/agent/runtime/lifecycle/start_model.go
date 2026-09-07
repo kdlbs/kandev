@@ -143,6 +143,9 @@ func applyStartModelPolicy(
 	if policy.Model == "" {
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
 	}
+	if policy.AutoFallback {
+		policy.FallbackModel = ""
+	}
 
 	decision := ModelSelectionDecision{
 		RequestedModel: policy.Model,
@@ -154,6 +157,9 @@ func applyStartModelPolicy(
 	}
 
 	if !containsModel(advertised, policy.Model) {
+		if policy.AutoFallback {
+			return providerDefaultDecision(state, policy, ModelSelectionReasonRequestedNotAdvertised), nil
+		}
 		if policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
 			return applyAdvertisedFallback(ctx, log, applier, state, policy, decision)
 		}
@@ -201,10 +207,16 @@ func applyUniqueAdvertisedVariation(
 	variation string,
 ) (ModelSelectionDecision, error) {
 	decision.FallbackModel = ""
+	policy.FallbackModel = ""
 	decision.SetModelCalled = true
 	if err := applier.SetModel(ctx, variation); err != nil {
 		if sessionmodel.IsMethodNotFound(err) {
 			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+			decision.SetModelCalled = true
+			return decision, nil
+		}
+		if policy.AutoFallback {
+			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionFailedAutoFallback)
 			decision.SetModelCalled = true
 			return decision, nil
 		}

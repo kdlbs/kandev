@@ -45,8 +45,10 @@ Add a pure unique-candidate helper in
 requested ID and executor model IDs. It returns one distinct advertised ID only
 when the structural contract matches.
 
-Extend `applyStartModelPolicy` with this order: exact request, advertised
-explicit fallback, unique variation, provider current or default. Add
+For profiles with automatic fallback disabled, extend `applyStartModelPolicy`
+with this order: exact request, advertised explicit fallback, unique variation,
+provider current or default. Automatic-fallback profiles retain their legacy
+no-selection behavior when the requested model is absent. Add
 `unique_variation` to `ModelSelectionOutcome` and
 `unique_variation_applied` to stable warning reasons.
 
@@ -81,7 +83,8 @@ unchanged saved-profile rule.
 ## Tests
 
 - AC-002.1 and AC-002.2: Go policy tests prove exact and explicit-fallback
-  precedence before one inferred variation.
+  precedence before one inferred variation, including the legacy
+  auto-fallback path.
 - AC-002.3 through AC-002.5: mirrored Go and TypeScript table tests prove zero,
   duplicate, multiple, case-different, bracketed, prefix, and malformed cases.
 - AC-002.6: lifecycle event and React status-message tests prove the distinct
@@ -110,7 +113,7 @@ unchanged saved-profile rule.
 
 ## Verification results
 
-Backend verification passed: 2,362 lifecycle tests, 27 focused model-policy
+Backend verification passed: 2,364 lifecycle tests, 29 focused model-policy
 tests, and 212 mock-agent tests. Frontend verification passed: 51 focused
 unit tests, typecheck, lint, `i18n:check`, and `i18n:ratchet`. Desktop E2E
 passed 5 tests and mobile E2E passed 3 tests. Public-document validation

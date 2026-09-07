@@ -63,9 +63,11 @@ my session to an unrelated default model.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.1:** When the exact requested model
-  is absent and an advertised explicit fallback exists, the system shall apply
-  the explicit fallback before it considers an inferred variation.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.1:** When automatic fallback is
+  disabled, the exact requested model is absent, and an advertised explicit
+  fallback exists, the system shall apply the explicit fallback before it
+  considers an inferred variation. Automatic-fallback profiles shall retain
+  their legacy no-selection behavior for an absent requested model.
 - **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.2:** When no advertised explicit
   fallback exists and the catalog contains exactly one distinct variation of a
   requested bare model ID, the system shall apply that advertised variation.

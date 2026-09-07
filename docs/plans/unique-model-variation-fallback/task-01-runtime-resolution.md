@@ -46,14 +46,19 @@ Expose a distinct decision without changing explicit fallback semantics.
 - One valid distinct variation is the only inferred model-selection call.
 - Exact and advertised explicit fallback models remain higher priority; zero or
   multiple variations cause no inference.
+- Automatic-fallback profiles keep the legacy no-selection behavior when the
+  requested model is absent.
 - The warning records the unique outcome and effective model without setting
   the explicit fallback field or compatibility fallback event.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test -tags fts5 -run 'TestApplyStartModelPolicy|TestInitializeAndPrompt.*Model|TestReapplySessionModel|TestWorkspaceRebind.*Model|Test.*ModelSelectionWarning' ./internal/agent/runtime/lifecycle
-cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle
+(
+  cd apps/backend
+  go test -tags fts5 -run 'TestApplyStartModelPolicy|TestInitializeAndPrompt.*Model|TestReapplySessionModel|TestWorkspaceRebind.*Model|Test.*ModelSelectionWarning' ./internal/agent/runtime/lifecycle
+  go test -tags fts5 ./internal/agent/runtime/lifecycle
+)
 git diff --check
 ```
 
@@ -62,7 +67,7 @@ git diff --check
 - `apps/backend/internal/agent/runtime/lifecycle/start_model.go`
 - `apps/backend/internal/agent/runtime/lifecycle/start_model_executor_authority_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/session.go`
-- `apps/backend/internal/agent/runtime/lifecycle/session_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/session_model_selection_warning_test.go`
 - `apps/backend/internal/agentctl/types/streams/agent.go`
 
 ## Dependencies
@@ -89,7 +94,7 @@ None.
 
 Implemented the executor-authoritative unique-variation policy in
 `start_model.go`, including explicit-fallback precedence, opaque and
-case-sensitive matching, and distinct warning metadata without a legacy
-fallback event. Initial launch, context reset, and workspace rebind all use
-the same policy. Focused model-policy tests passed (27), the full lifecycle
-suite passed (2,362), and mock-agent tests passed (212).
+case-sensitive matching, the legacy automatic-fallback path, and distinct
+warning metadata without a legacy fallback event. Initial launch, context
+reset, and workspace rebind all use the same policy. Focused model-policy
+tests passed (29), and the full lifecycle suite passed (2,364).

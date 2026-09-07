@@ -78,6 +78,14 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantWarning:   true,
 		},
 		{
+			name:        "auto fallback keeps unavailable model on provider default",
+			state:       modelState("fallback", "opus[1m]"),
+			policy:      StartModelPolicy{Model: "opus", FallbackModel: "fallback", AutoFallback: true},
+			wantOutcome: ModelSelectionOutcomeProviderDefault,
+			wantReason:  ModelSelectionReasonRequestedNotAdvertised,
+			wantWarning: true,
+		},
+		{
 			name:          "duplicate unique variation is one candidate",
 			state:         modelState("opus[1m]", "opus[1m]"),
 			policy:        StartModelPolicy{Model: "opus"},
@@ -143,6 +151,16 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			policy:        StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback"},
 			applierErrors: []error{methodNotFoundErr()},
 			wantCalls:     []string{"fallback"},
+			wantOutcome:   ModelSelectionOutcomeProviderDefault,
+			wantReason:    ModelSelectionReasonSelectionUnsupported,
+			wantWarning:   true,
+		},
+		{
+			name:          "unique variation method not supported keeps provider default",
+			state:         modelState("opus[1m]"),
+			policy:        StartModelPolicy{Model: "opus", FallbackModel: "fallback"},
+			applierErrors: []error{methodNotFoundErr()},
+			wantCalls:     []string{"opus[1m]"},
 			wantOutcome:   ModelSelectionOutcomeProviderDefault,
 			wantReason:    ModelSelectionReasonSelectionUnsupported,
 			wantWarning:   true,
@@ -224,6 +242,9 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			}
 			if decision.Outcome == ModelSelectionOutcomeUniqueVariation && decision.FallbackModel != "" {
 				t.Errorf("unique variation fallback model = %q, want empty", decision.FallbackModel)
+			}
+			if tt.policy.AutoFallback && decision.FallbackModel != "" {
+				t.Errorf("auto-fallback fallback model = %q, want empty", decision.FallbackModel)
 			}
 		})
 	}
