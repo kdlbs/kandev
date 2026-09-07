@@ -304,10 +304,10 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 
 // --- Tests ---
 
-// TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault
-// verifies the executor-authoritative policy for both the profile model and a
+// TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference
+// documents the strict launch contract for both the profile model and a
 // persisted runtime override.
-func TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault(t *testing.T) {
+func TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		profileModel string
@@ -353,40 +353,108 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault(t *t
 				},
 			}
 
+			readyCalls := 0
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			err := sm.InitializeAndPromptWithLayers(
 				ctx, execution, agentConfig, "", nil, nil,
-				func(executionID string) error { return nil },
+				func(executionID string) error {
+					readyCalls++
+					return nil
+				},
 				tc.profileModel, "plan", nil,
 				tc.runtimeModel, "", nil,
 				StartModelPolicy{},
 			)
-			if err != nil {
-				t.Fatalf("unadvertised model should not fail launch: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "requested_not_advertised") {
+				t.Fatalf("unadvertised model error = %v, want requested_not_advertised", err)
 			}
-			if !execution.sessionInitialized {
-				t.Error("provider-default continuation must be marked initialized")
+			if execution.sessionInitialized {
+				t.Error("strict unavailable model must not initialize the session")
+			}
+			if readyCalls != 0 {
+				t.Errorf("mark ready calls = %d, want 0", readyCalls)
 			}
 			for _, action := range mock.getActionLog() {
-				if action == "agent.session.set_model" {
-					t.Error("unadvertised model must not send a SetModel request")
+				if action == "agent.session.set_model" || action == "agent.prompt" {
+					t.Errorf("strict unavailable model must not dispatch %q", action)
 				}
 			}
-			var warning *AgentStreamEventPayload
 			for _, event := range eventBus.getStreamEvents() {
 				if event.Data != nil && event.Data.ModelSelectionWarning != nil {
-					warning = &event
-					break
+					t.Error("strict unavailable model must not publish a continuation warning")
 				}
 			}
-			if warning == nil {
-				t.Fatal("expected a model-selection warning event")
-			}
-			if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
-				t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
-			}
 		})
+	}
+}
+
+func TestInitializeAndPromptWithLayers_UnadvertisedModelAutoFallbackWarns(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	eventBus := &MockEventBusWithTracking{}
+	sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(modelState("gpt-5"))
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	err := sm.InitializeAndPromptWithLayers(
+		context.Background(), execution, agentConfig, "", nil, nil,
+		func(executionID string) error { return nil },
+		"claude-gone", "plan", nil,
+		"", "", nil,
+		StartModelPolicy{AutoFallback: true},
+	)
+	if err != nil {
+		t.Fatalf("auto fallback should continue on the provider default: %v", err)
+	}
+	if !execution.sessionInitialized {
+		t.Error("auto fallback continuation must initialize the session")
+	}
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.set_model" {
+			t.Error("unadvertised model must not send a SetModel request")
+		}
+	}
+	var warning *AgentStreamEventPayload
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.ModelSelectionWarning != nil {
+			warning = &event
+			break
+		}
+	}
+	if warning == nil {
+		t.Fatal("expected a model-selection warning event")
+	}
+	if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
+		t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
 	}
 }
 

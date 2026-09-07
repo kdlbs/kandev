@@ -109,12 +109,10 @@ substituting the executor default. Kandev uses an advertised explicit fallback
 when configured. With automatic fallback enabled, the agent can use its
 current or default model.
 
-the requested model, effective model, agent, executor, and executor profile.
 Kandev writes one warning to task chat for an explicitly authorized fallback.
 For an exact-profile mismatch, the session error reports the requested model,
 the effective model when known, and a stable reason. The warning can list the
 requested model, effective model, agent, executor, and executor profile.
-the requested model, effective model, agent, executor, and executor profile.
 It also tells you to check executor credentials, copied agent configuration,
 and the agent version. Kandev does not rewrite the saved profile model.
 Portable configuration can improve parity, but it does not guarantee equal
