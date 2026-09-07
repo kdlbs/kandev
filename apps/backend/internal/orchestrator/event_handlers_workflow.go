@@ -680,7 +680,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			return
 		}
 		if prerequisites != nil && prerequisites.targetStep != nil {
-			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, data.StepTransitionID)
+			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, data.StepTransitionID, false)
 		} else {
 			s.handleTaskMovedNoSession(ctx, data)
 		}
@@ -762,7 +762,7 @@ func (s *Service) loadTaskMovedSessionPrerequisites(
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved", data.StepTransitionID)
+	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved", data.StepTransitionID, false)
 }
 
 func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.TaskEventData) {
@@ -839,7 +839,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		}()
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, data.StepTransitionID)
+	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, data.StepTransitionID, false)
 }
 
 // handleTaskCreated lets a task that is created directly onto a step whose
@@ -896,7 +896,11 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
 		return
 	}
-	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated, data.StepTransitionID)
+	// The claim above already removed the key; carry that ownership into the
+	// launch attempt (autoStartOnCreateClaimed=true) so a StartTask failure
+	// before a durable session exists can restore it instead of stranding the
+	// task with no marker (see handleAutoStartFailure).
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated, data.StepTransitionID, true)
 }
 
 func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
@@ -1245,9 +1249,24 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		if _, err := s.clearManualMoveLifecycleMarkersIfCompleted(ctx, taskID, completedAt); err != nil {
 			return true
 		}
+		task, err = s.repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			return false
+		}
 	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
+		// handleTaskQueuePromoted's no-session branch schedules a launch via
+		// autoStartTaskForLoadedStep, which synchronously claims
+		// MetaKeyAutoStartOnCreate when the task still carries it (see
+		// claimAutoStartOnCreateForLaunch) before this call returns. Re-fetch
+		// so the actionability check below observes that claim instead of the
+		// stale in-memory task, which would otherwise report the token as
+		// still pending and schedule a second, redundant launch attempt.
+		task, err = s.repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			return false
+		}
 	}
 	if autoStartOnCreateActionable(task) {
 		s.recoverAutoStartOnCreate(ctx, task)
@@ -1473,7 +1492,14 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 	return nil
 }
 
-func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string, stepTransitionID int64) {
+// autoStartTaskForStep evaluates a target step's on_enter auto-start action
+// for a task with no session yet. autoStartOnCreateClaimed is true only when
+// the caller (handleTaskCreated) already removed MetaKeyAutoStartOnCreate
+// before dispatching here; every other caller passes false and lets
+// autoStartTaskForLoadedStep claim the key itself if the task still carries
+// it, so a concurrent launch attempt cannot observe the token as if nobody
+// had scheduled a launch for it (see claimAutoStartOnCreateForLaunch).
+func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string, stepTransitionID int64, autoStartOnCreateClaimed bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn(eventName+": failed to load task for auto-start",
@@ -1515,10 +1541,41 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.Error(err))
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID)
+	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed)
 }
 
-func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64) {
+// autoStartLaunchTokens carries the one-shot lifecycle tokens a launch
+// attempt must restore if it fails before producing a durable session or
+// run, so the next startup sweep retries instead of the task silently
+// losing its opt-in.
+type autoStartLaunchTokens struct {
+	hasGuard                 bool
+	restoreQueuePromotion    bool
+	queuePromotionToken      interface{}
+	restoreAutoStartOnCreate bool
+}
+
+// claimAutoStartOnCreateForLaunch decides whether this launch attempt owns
+// restoring MetaKeyAutoStartOnCreate on failure. When alreadyClaimed is true
+// (handleTaskCreated already removed the key before dispatching here), that
+// ownership is simply carried forward. Otherwise the key is claimed now,
+// synchronously and before any launch goroutine starts — so a concurrent
+// lifecycle-recovery read of this task never observes the token next to an
+// in-flight launch it did not itself schedule (see autoStartOnCreateActionable).
+// It does not gate the launch: on_enter's auto_start_agent action already
+// decided to launch, and consuming this key is a side effect of that, not a
+// precondition for it.
+func (s *Service) claimAutoStartOnCreateForLaunch(ctx context.Context, task *models.Task, alreadyClaimed bool) bool {
+	if alreadyClaimed {
+		return true
+	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		return false
+	}
+	return s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate)
+}
+
+func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, autoStartOnCreateClaimed bool) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
 		return
 	}
@@ -1535,8 +1592,10 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
+	restoreAutoStartOnCreate := s.claimAutoStartOnCreateForLaunch(ctx, task, autoStartOnCreateClaimed)
+
 	if s.isOfficeTask(ctx, task.ID) {
-		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID)
+		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID, restoreAutoStartOnCreate)
 		return
 	}
 
@@ -1585,7 +1644,12 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion, queuePromotionToken)
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, autoStartLaunchTokens{
+				hasGuard:                 hasGuard,
+				restoreQueuePromotion:    restoreQueuePromotion,
+				queuePromotionToken:      queuePromotionToken,
+				restoreAutoStartOnCreate: restoreAutoStartOnCreate,
+			})
 		}
 	}()
 }
@@ -1597,7 +1661,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 // a run through the engine's Office adapters instead, the same mechanism the
 // scheduler's recovery sweep and the "assign task" flow already use to start
 // Office work (internal/office/service/scheduler_recovery.go).
-func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64) {
+func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, restoreAutoStartOnCreate bool) {
 	queuePromotionToken := queuePromotionLifecycleToken(task)
 	// Async for the same reason as the kanban path above: the event bus
 	// delivers synchronously and blocking here would stall the HTTP handler
@@ -1619,7 +1683,12 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 			s.logger.Error(eventName+": failed to queue office auto-start run",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion, queuePromotionToken)
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, autoStartLaunchTokens{
+				hasGuard:                 hasGuard,
+				restoreQueuePromotion:    restoreQueuePromotion,
+				queuePromotionToken:      queuePromotionToken,
+				restoreAutoStartOnCreate: restoreAutoStartOnCreate,
+			})
 			return
 		}
 		// Log the outcome only after the attempt actually resolves — the log
@@ -1697,15 +1766,21 @@ func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID str
 // only ever called (and the token only ever taken) when the task carries
 // MetaKeyAutoStartGuard, so restoring it unconditionally stamps
 // auto_start_claimed onto tasks that never carried the guard, corrupting the
-// invariant documented at MetaKeyAutoStartGuard. It also stamps
-// MetaKeyAutoStartFailed so the failure surfaces on the task card instead of
-// only in backend logs.
-func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, hasGuard, restoreQueuePromotion bool, queuePromotionToken interface{}) {
-	if hasGuard {
+// invariant documented at MetaKeyAutoStartGuard. It also restores
+// MetaKeyAutoStartOnCreate when this attempt claimed it, so a StartTask/queue
+// failure before a durable session or run exists leaves the task retryable by
+// the next startup sweep instead of stranded with no marker at all. It also
+// stamps MetaKeyAutoStartFailed so the failure surfaces on the task card
+// instead of only in backend logs.
+func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, tokens autoStartLaunchTokens) {
+	if tokens.hasGuard {
 		s.restoreAutoStartClaim(ctx, taskID, eventName)
 	}
-	if restoreQueuePromotion {
-		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, eventName)
+	if tokens.restoreQueuePromotion {
+		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, tokens.queuePromotionToken, eventName)
+	}
+	if tokens.restoreAutoStartOnCreate {
+		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
 	}
 	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
