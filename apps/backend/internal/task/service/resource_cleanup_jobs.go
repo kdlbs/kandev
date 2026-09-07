@@ -723,6 +723,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	if err != nil {
 		return err
 	}
+	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("lookup task environment for cleanup snapshot: %w", err)
@@ -733,6 +734,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	}
 	snapshot := taskResourceCleanupSnapshot{
 		Sessions: sessions, Worktrees: worktrees, WorktreeHeadOIDs: worktreeHeadOIDs,
+		WorktreeTaskDirNames:   worktreeTaskDirNames,
 		StopTargets:            persistStopTargets(stopTargets),
 		TaskEnvironment:        taskEnv,
 		DeleteEnvironmentRow:   deleteEnvironmentRow,

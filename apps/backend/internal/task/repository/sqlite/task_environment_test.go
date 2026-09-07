@@ -177,6 +177,19 @@ func TestUpdateTaskEnvironmentDoesNotClearTaskDirNameFromStaleWriter(t *testing.
 	if persisted.TaskDirName != env.TaskDirName {
 		t.Fatalf("stale update cleared TaskDirName = %q, want %q", persisted.TaskDirName, env.TaskDirName)
 	}
+
+	later := *persisted
+	later.TaskDirName = "later-root_def"
+	if err := repo.UpdateTaskEnvironment(ctx, &later); err != nil {
+		t.Fatalf("UpdateTaskEnvironment with later name: %v", err)
+	}
+	persisted, err = repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after later update: %v", err)
+	}
+	if persisted.TaskDirName != env.TaskDirName {
+		t.Fatalf("later update replaced TaskDirName = %q, want %q", persisted.TaskDirName, env.TaskDirName)
+	}
 }
 
 // @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
@@ -320,6 +333,7 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 		ExecutorType:             string(models.ExecutorTypeWorktree),
 		Status:                   models.TaskEnvironmentStatusCreating,
 		MaterializationSessionID: "session-materializer",
+		TaskDirName:              "claimed-root_abc",
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
@@ -327,6 +341,7 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 	env.Status = models.TaskEnvironmentStatusReady
 	env.MaterializationSessionID = ""
 	env.WorkspacePath = "/tasks/task-finalize/repo"
+	env.TaskDirName = "stale-materializer-root_def"
 	if err := repo.FinalizeTaskEnvironmentMaterialization(ctx, env, []*models.TaskEnvironmentRepo{{
 		RepositoryID: "repository-1", WorktreeID: "worktree-1", WorktreePath: env.WorkspacePath, WorktreeBranch: "feature/finalize",
 	}}, "session-materializer"); err != nil {
@@ -339,6 +354,9 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 	}
 	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
 		t.Fatalf("environment = status %q owner %q, want ready with no owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if persisted.TaskDirName != "claimed-root_abc" {
+		t.Fatalf("finalize replaced claimed TaskDirName = %q, want claimed-root_abc", persisted.TaskDirName)
 	}
 	if len(persisted.Repos) != 1 || persisted.Repos[0].WorktreeID != "worktree-1" {
 		t.Fatalf("canonical inventory = %#v, want one finalized repository", persisted.Repos)
@@ -390,7 +408,7 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	}
 	env := &models.TaskEnvironment{
 		ID: "env-transition", TaskID: "task-transition", ExecutorType: string(models.ExecutorTypeLocal),
-		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old",
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old", TaskDirName: "claimed-transition-root",
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
@@ -406,6 +424,7 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 
 	env.ExecutorType = string(models.ExecutorTypeWorktree)
 	env.WorkspacePath = "/workspace/new"
+	env.TaskDirName = "stale-transition-root"
 	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
 		RepositoryID: "repo-keep", BranchSlug: "main", WorktreeID: "wt-new", WorktreePath: "/workspace/new/repo",
 	}}, true); err != nil {
@@ -418,6 +437,9 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	}
 	if persisted.ExecutorType != string(models.ExecutorTypeWorktree) || persisted.WorkspacePath != "/workspace/new" {
 		t.Fatalf("environment = %#v, want rebound executor and path", persisted)
+	}
+	if persisted.TaskDirName != "claimed-transition-root" {
+		t.Fatalf("transition replaced claimed TaskDirName = %q, want claimed-transition-root", persisted.TaskDirName)
 	}
 	if len(persisted.Repos) != 2 {
 		t.Fatalf("repository inventory = %#v, want active row plus tombstone", persisted.Repos)

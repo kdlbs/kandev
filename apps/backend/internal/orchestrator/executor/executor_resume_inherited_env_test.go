@@ -314,6 +314,23 @@ func TestPersistTaskEnvironment_GuestWorktreeStampsSharedTaskDirName(t *testing.
 	}
 }
 
+func TestClaimSharedTaskEnvironmentTaskDirNameRejectsConflictingWinner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-parent", TaskDirName: "winner-root_abc",
+	}
+
+	env := *repo.taskEnvironments["env-parent"]
+	env.TaskDirName = ""
+	err := exec.claimSharedTaskEnvironmentTaskDirName(context.Background(), &env, &LaunchAgentRequest{
+		TaskID: "task-child", UseWorktree: true, TaskDirName: "loser-root_def",
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("claimSharedTaskEnvironmentTaskDirName error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
 // TestPersistTaskEnvironment_GuestMaterializerRunsFinalizePath proves the guest
 // short-circuit does not swallow the shared_group case where a member session is
 // elected to materialize a still-CREATING canonical environment. Even though the

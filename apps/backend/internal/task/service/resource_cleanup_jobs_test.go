@@ -1065,6 +1065,68 @@ func TestPreparedCleanupIsNotRunnableUntilStarted(t *testing.T) {
 	}
 }
 
+func TestPreparedCascadeCleanupSnapshotPersistsWorktreeTaskDirNames(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	const taskID = "task-prepared-task-dir"
+	const sessionID = "session-prepared-task-dir"
+	const repositoryID = "repo-prepared-task-dir"
+	const taskDirName = "prepared-task-dir_root"
+	seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+
+	repoPath := initSimpleGitRepo(t)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: repositoryID, WorkspaceID: "ws-" + taskID, Name: repositoryID,
+		SourceType: "local", LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	const environmentID = "env-prepared-task-dir"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspacePath: "/workspace/prepared-task-dir", TaskDirName: taskDirName,
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.TaskEnvironmentID = environmentID
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link task session: %v", err)
+	}
+	mgr := newCleanupTestWorktreeManager(t, repo)
+	wt, err := mgr.Create(ctx, worktree.CreateRequest{
+		TaskID: taskID, SessionID: sessionID, TaskTitle: "Prepared cleanup task directory",
+		RepositoryID: repositoryID, RepositoryPath: repoPath, BaseBranch: "main",
+		TaskDirName: taskDirName, RepoName: repositoryID,
+	})
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	taskSvc.SetWorktreeCleanup(mgr)
+
+	const operationID = "cascade_delete:cascade-task-dir:task-prepared-task-dir"
+	if err := taskSvc.PrepareTaskResourceCleanup(ctx, taskID,
+		models.TaskResourceCleanupTriggerCascadeDelete, operationID, true); err != nil {
+		t.Fatalf("PrepareTaskResourceCleanup: %v", err)
+	}
+	prepared, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJobByOperationID: %v", err)
+	}
+	var snapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(prepared.ResourceSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode prepared cleanup snapshot: %v", err)
+	}
+	if got := snapshot.WorktreeTaskDirNames[wt.ID]; got != taskDirName {
+		t.Fatalf("prepared snapshot task directory = %q, want %q", got, taskDirName)
+	}
+}
+
 func TestRetryTaskResourceCleanupJobPersistsAfterRunContextCancellation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()

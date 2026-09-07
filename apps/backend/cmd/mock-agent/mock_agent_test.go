@@ -74,6 +74,30 @@ func TestMockAgentCancelStopsPrompt(t *testing.T) {
 	}
 }
 
+func TestWaitForReleaseFile(t *testing.T) {
+	releasePath := filepath.Join(t.TempDir(), "release")
+	done := make(chan struct{})
+	go func() {
+		waitForReleaseFile(releasePath)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("waitForReleaseFile returned before release")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(releasePath, nil, 0o600); err != nil {
+		t.Fatalf("write release file: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("waitForReleaseFile did not return after release")
+	}
+}
+
 func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	t.Setenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING", "false")
 

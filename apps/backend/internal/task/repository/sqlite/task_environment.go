@@ -191,7 +191,7 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
 			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
-			task_dir_name = COALESCE(NULLIF(?, ''), task_dir_name),
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),
@@ -344,7 +344,7 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			control_port = ?, status = ?, materialization_session_id = '',
 			workspace_path = ?, container_id = ?,
 			container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
-			sandbox_id = ?, task_dir_name = COALESCE(NULLIF(?, ''), task_dir_name), updated_at = ?
+			sandbox_id = ?, task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name), updated_at = ?
 		WHERE id = ? AND status = ? AND materialization_session_id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
@@ -453,7 +453,7 @@ func (r *Repository) updateTaskEnvironmentTransitionTx(
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
 			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
-			task_dir_name = COALESCE(NULLIF(?, ''), task_dir_name),
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),
