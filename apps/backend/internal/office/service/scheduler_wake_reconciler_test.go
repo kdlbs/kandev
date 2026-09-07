@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // adoptOffice satisfies HasOfficeAdoption via an office_projects row, the
@@ -322,6 +323,176 @@ func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *tes
 		}
 	}
 	t.Fatalf("zz-healthy-parent was never dispatched across 3 ticks behind 10 sticky candidates: %#v", dispatcher.Calls())
+}
+
+// oneShotFailureDispatcher wraps a queueRunDispatcher and fails the first
+// call for a chosen trigger, then delegates every other call (including
+// later calls for that same trigger) to the wrapped dispatcher. It records
+// every call it sees so a test can assert dispatch counts and operation ids
+// on both the failed attempt and the later recovery.
+type oneShotFailureDispatcher struct {
+	inner       *queueRunDispatcher
+	failTrigger engine.Trigger
+	failArmed   bool
+	failErr     error
+	calls       []dispatcherCall
+}
+
+func (d *oneShotFailureDispatcher) HandleTrigger(
+	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) error {
+	d.calls = append(d.calls, dispatcherCall{taskID, trigger, payload, opID})
+	if d.failArmed && trigger == d.failTrigger {
+		d.failArmed = false
+		return d.failErr
+	}
+	return d.inner.HandleTrigger(ctx, taskID, trigger, payload, opID)
+}
+
+// publishChildDone publishes the task.moved event that fires
+// finalizeDone -> queueChildrenCompletedRun for parentID, the same event
+// shape TestWakeOperationID_UnifiedAcrossEdgeAndReconcilerPaths uses.
+func publishChildDone(t *testing.T, eb bus.EventBus, parentID, workerID string) {
+	t.Helper()
+	ctx := context.Background()
+	moveEvent := bus.NewEvent("task.moved", "test", map[string]string{
+		"task_id":                   parentID + "-child-0",
+		"workspace_id":              "ws-1",
+		"from_step_id":              "step-1",
+		"to_step_id":                "step-done",
+		"to_step_name":              "Done",
+		"from_step_name":            "In Progress",
+		"assignee_agent_profile_id": workerID,
+		"parent_id":                 parentID,
+	})
+	if err := eb.Publish(ctx, "task.moved", moveEvent); err != nil {
+		t.Fatalf("publish task.moved: %v", err)
+	}
+}
+
+// TestParentWakeReconciler_RecoversFailedEdgeDispatch is the regression test
+// requested on PR #3271's review (discussion r3909576685): queueChildrenCompletedRun
+// can fail after AreAllChildrenTerminal succeeds (for example when
+// GetChildSetKey errors), and finalizeDone only logs that failure at Warn
+// because ParentWakeReconciler is the documented recovery path. This proves
+// the recovery actually happens: the edge-triggered dispatch is made to fail
+// once, then a reconciler Tick must re-deliver the same wake (same operation
+// id) as a real queued run.
+func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	dispatcher := &oneShotFailureDispatcher{
+		inner:       &queueRunDispatcher{svc: svc},
+		failTrigger: engine.TriggerOnChildrenCompleted,
+		failArmed:   true,
+		failErr:     fmt.Errorf("injected get child set key failure"),
+	}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	// Edge-triggered path: the child lands in Done, firing
+	// finalizeDone -> queueChildrenCompletedRun for parent-1, which fails
+	// on the injected dispatcher error and is swallowed at Warn.
+	publishChildDone(t, eb, "parent-1", "worker-1")
+
+	if len(dispatcher.calls) != 1 {
+		t.Fatalf("want exactly one dispatch attempt after the failed edge publish, got %d: %#v",
+			len(dispatcher.calls), dispatcher.calls)
+	}
+	edgeOpID := dispatcher.calls[0].opID
+	if edgeOpID == "" {
+		t.Fatal("failed edge dispatch attempt carried an empty operation id")
+	}
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("failed edge dispatch left a queued run: %#v", runs)
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("failed edge dispatch left a receipt: %#v", receipt)
+	}
+
+	// Level-triggered path: ListStuckParents still finds parent-1 stuck
+	// because nothing was persisted for it, so Tick must re-deliver.
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if len(dispatcher.calls) != 2 {
+		t.Fatalf("want a second dispatch attempt from the reconciler, got %d: %#v",
+			len(dispatcher.calls), dispatcher.calls)
+	}
+	reconcilerOpID := dispatcher.calls[1].opID
+	if reconcilerOpID != edgeOpID {
+		t.Fatalf("reconciler recovery used a different operation id than the failed edge attempt: edge=%q reconciler=%q",
+			edgeOpID, reconcilerOpID)
+	}
+
+	runsAfter, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs after tick: %v", err)
+	}
+	if len(runsAfter) != 1 {
+		t.Fatalf("want exactly one queued run after recovery, got %d: %#v", len(runsAfter), runsAfter)
+	}
+	if runsAfter[0].Reason != service.RunReasonTaskChildrenCompleted {
+		t.Fatalf("recovered run reason = %q, want %q", runsAfter[0].Reason, service.RunReasonTaskChildrenCompleted)
+	}
+
+	receiptAfter, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick: %v", err)
+	}
+	if receiptAfter == nil || receiptAfter.DeliveryOperationID != edgeOpID {
+		t.Fatalf("recovery receipt = %#v, want an operation id matching the failed edge attempt %q", receiptAfter, edgeOpID)
+	}
+}
+
+// TestParentWakeReconciler_DoesNotDoubleQueueASuccessfulEdgeDispatch is the
+// non-vacuity control for TestParentWakeReconciler_RecoversFailedEdgeDispatch:
+// identical setup, but the edge dispatch is left to succeed. It must be the
+// one that queues the run, and the following Tick must add nothing, proving
+// the recovery assertions above discriminate on the edge path's outcome
+// rather than passing regardless of it.
+func TestParentWakeReconciler_DoesNotDoubleQueueASuccessfulEdgeDispatch(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	publishChildDone(t, eb, "parent-1", "worker-1")
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("successful edge dispatch did not queue a run: %#v", runs)
+	}
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	runsAfter, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs after tick: %v", err)
+	}
+	if len(runsAfter) != 1 {
+		t.Fatalf("tick added a run behind a successful edge dispatch: %#v", runsAfter)
+	}
 }
 
 // TestWakeOperationID_UnifiedAcrossEdgeAndReconcilerPaths is the regression
