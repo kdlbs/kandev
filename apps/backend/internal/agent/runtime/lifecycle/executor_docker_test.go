@@ -161,6 +161,15 @@ func TestDockerExecutorAllowsReconnectWhenClonePolicyRequiresAttestation(t *test
 	}
 }
 
+func TestDockerReconnectRecreatesExistingAgentctlInstanceForClonePolicy(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
+	}
+	if !shouldRecreateDockerInstanceForGitMetadataPolicy(req) {
+		t.Fatal("clone metadata policy must recreate an existing agentctl instance before reuse")
+	}
+}
+
 func TestDockerExecutorCloneLaunchWiringUsesPathFreeRequirement(t *testing.T) {
 	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	req := &ExecutorCreateRequest{
@@ -985,6 +994,31 @@ func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.
 	}
 	if control.created == nil || control.created.Env[envKeyGitHubCredentialLease] != freshLease {
 		t.Fatalf("recreated request = %#v, want lease %q", control.created, freshLease)
+	}
+}
+
+func TestDockerClonePolicyReconnectRecreatesExistingInstance(t *testing.T) {
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		SessionID:  "session-1",
+		GitMetadataRequirement: GitMetadataRequirement{
+			Mode: gitMetadataRequirementMutableClone,
+		},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	port, reused, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if err != nil {
+		t.Fatalf("findExistingInstance() error = %v", err)
+	}
+	if reused || port != 41002 {
+		t.Fatalf("clone-policy reconnect = (port=%d, reused=%v), want recreated instance on 41002", port, reused)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET,DELETE,POST"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
 	}
 }
 

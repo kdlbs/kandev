@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -27,7 +28,9 @@ func TestPrepareExecutionGitMetadataAddsLazyWorktreeProjection(t *testing.T) {
 	runLazyGit(t, repo, "worktree", "add", "-b", "task", workspace)
 
 	info := &WorkspaceInfo{
-		WorkspacePath: workspaceRoot,
+		// Lazy recovery stores the sole checkout itself as WorkspacePath. Only
+		// multi-repository recovery uses the parent task root.
+		WorkspacePath: workspace,
 		ExecutorType:  string(models.ExecutorTypeWorktree),
 		WorkspaceRepositories: []WorkspaceRepositorySpec{{
 			RepositoryPath: repo,
@@ -135,6 +138,39 @@ func TestGetOrEnsureExecutionReconstructsRemoteMultiRepositoryWorkspace(t *testi
 				t.Fatalf("remote reconstruction operations = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+func TestGetOrEnsureExecutionForceCleansRemoteRuntimeWhenReconstructionFails(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	defer server.Close()
+	server.failMaterialize = true
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-remote": {
+			TaskID: "task-1", SessionID: "session-remote", TaskEnvironmentID: "environment-remote",
+			ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspacePath: "/executor/workspace", AgentID: "codex-acp",
+			WorkspaceRepositories: []WorkspaceRepositorySpec{
+				{RepositoryID: "repository-main", RepositoryURL: "https://github.com/acme/main.git", RepoName: "main", BaseBranch: "main"},
+				{RepositoryID: "repository-added", RepositoryURL: "https://github.com/acme/added.git", RepoName: "added", BaseBranch: "main"},
+			},
+		},
+	}}
+	log := newTestLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &lazyMultiRepositoryExecutor{createInstanceExecutor: createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker}, client: workspaceMaterializationAgentctlClient(t, server.URL),
+	}}
+	registry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	mgr.workspaceInfoProvider = provider
+	cleanupManagerStopCh(t, mgr)
+
+	_, err := mgr.GetOrEnsureExecution(context.Background(), "session-remote")
+	if err == nil || !strings.Contains(err.Error(), "reconstruct remote workspace repositories") {
+		t.Fatalf("GetOrEnsureExecution() error = %v, want reconstruction failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 || !backend.forceStopped.Load() {
+		t.Fatalf("remote reconstruction cleanup = (count=%d, force=%v), want one forced teardown", got, backend.forceStopped.Load())
 	}
 }
 

@@ -682,8 +682,8 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 			projectionErr = reconstructRemoteWorkspaceRepositories(launchCtx, rt, runtimeInstance, remoteRepositories)
 		}
 		if projectionErr != nil {
-			_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
-			return nil, fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr)
+			cleanupErr := stopRuntimeInstanceAndRelease(context.WithoutCancel(ctx), rt, runtimeInstance, true)
+			return nil, errors.Join(fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr), cleanupErr)
 		}
 	}
 	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
@@ -763,21 +763,30 @@ func (m *Manager) prepareExecutionGitMetadata(info *WorkspaceInfo, rt ExecutorBa
 		return nil
 	}
 	projections := make([]*worktree.GitMetadataProjection, 0, len(info.WorkspaceRepositories))
-	for _, repository := range info.WorkspaceRepositories {
-		spec := RepoLaunchSpec{
-			RepositoryPath: repository.RepositoryPath,
-			RepoName:       repository.RepoName,
-			BranchSlug:     repository.BranchSlug,
-		}
-		checkoutPath, err := resumedWorktreeCheckoutPath(info.WorkspacePath, spec)
-		if err != nil {
-			return errors.New(gitMetadataProjectionInvalid)
-		}
-		projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, repository.RepositoryPath)
+	if len(info.WorkspaceRepositories) == 1 {
+		repository := info.WorkspaceRepositories[0]
+		projection, err := worktree.ResolveGitMetadataForRepository(info.WorkspacePath, repository.RepositoryPath)
 		if err != nil {
 			return errors.New(gitMetadataProjectionInvalid)
 		}
 		projections = append(projections, projection)
+	} else {
+		for _, repository := range info.WorkspaceRepositories {
+			spec := RepoLaunchSpec{
+				RepositoryPath: repository.RepositoryPath,
+				RepoName:       repository.RepoName,
+				BranchSlug:     repository.BranchSlug,
+			}
+			checkoutPath, err := resumedWorktreeCheckoutPath(info.WorkspacePath, spec)
+			if err != nil {
+				return errors.New(gitMetadataProjectionInvalid)
+			}
+			projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, repository.RepositoryPath)
+			if err != nil {
+				return errors.New(gitMetadataProjectionInvalid)
+			}
+			projections = append(projections, projection)
+		}
 	}
 	if err := validateGitMetadataProjections(projections); err != nil {
 		return errors.New(gitMetadataProjectionInvalid)

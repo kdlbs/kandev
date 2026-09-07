@@ -267,6 +267,10 @@ func shouldSkipDockerReconnect(req *ExecutorCreateRequest) bool {
 	return req == nil || (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "")
 }
 
+func shouldRecreateDockerInstanceForGitMetadataPolicy(req *ExecutorCreateRequest) bool {
+	return requiresCloneGitMetadataPolicy(req)
+}
+
 // seedSessionDir copies the agent's auth files and selected configuration
 // bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
@@ -565,6 +569,12 @@ func (r *DockerExecutor) findExistingInstance(
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
+		if shouldRecreateDockerInstanceForGitMetadataPolicy(req) {
+			if deleteErr := ctl.DeleteInstance(ctx, prevExecutionID); deleteErr != nil {
+				return 0, false, fmt.Errorf("delete stale Git-policy instance: %w", deleteErr)
+			}
+			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
+		}
 		if hasManagedGitHubBrokerEnv(req.Env) {
 			instanceHost, instancePort := resolveDockerEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
