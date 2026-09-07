@@ -751,8 +751,6 @@
   "keyValueKeyPlaceholder": "键",
   "keyValueValuePlaceholder": "值",
   "profileStartModelNotAdvertisedOnHost": "主机探测未公布 {{model}}。所选执行器将在启动时决定使用的模型。",
-  "profileStartModelUniqueVariationOnHost": "主机探测发现 {{model}} 的一个可能变体：{{variation}}。所选执行器将在启动时决定使用的模型。",
-  "modelVariationAdvisory": "主机目录中有一个可能的 {{model}} 变体：{{variation}}。保存的模型在启动前保持不变。",
   "navUnits": "组织单元",
   "unitsTitle": "组织单元",
   "unitsDescription": "单元包含团队、工作区和成员。加入某个单元即可访问其下的所有工作区，包括之后创建的。",

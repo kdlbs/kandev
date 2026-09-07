@@ -12,15 +12,16 @@ owners:
 
 ## Purpose and boundaries
 
-This design defines executor-authoritative model fallback, including safe
-resolution from a bare requested model to one advertised bracketed variation.
+This design defines executor-authoritative model fallback. An exact configured
+model is a runtime identity: an advertised bracketed variation is a different
+model and cannot be inferred, selected, or used to authorize inference.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Unique model-variation resolution](#unique-model-variation-resolution) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | Superseded by `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001`; no active design behavior |
 
 ## Migrated source detail
 

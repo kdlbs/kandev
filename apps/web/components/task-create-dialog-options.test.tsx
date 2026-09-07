@@ -238,12 +238,13 @@ describe("useAgentProfileOptions executor-authoritative model hint", () => {
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
   });
 
-  it("names a unique advertised variation without disabling the profile", () => {
+  it("does not infer a unique advertised variation in the host warning", () => {
     setAvailableAgents([AGENT_WITH_OPUS_VARIATION]);
     const option = renderOptions([profileOption({ model: "opus" })]);
 
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(getModelProbeWarningLabel()).toContain("opus[1m]");
+    expect(getModelProbeWarningLabel()).toContain("opus");
+    expect(getModelProbeWarningLabel()).not.toContain("opus[1m]");
   });
 
   it("keeps a profile with an empty (agent default) model selectable", () => {

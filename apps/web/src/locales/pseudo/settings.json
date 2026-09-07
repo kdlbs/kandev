@@ -504,8 +504,6 @@
   "profileForTasksCreatedByAgents": "Ƥŕōƒĩĺē ƒōŕ Ţàśķś Ćŕēàţēď ƀŷ Àĝēńţś",
   "programming": "Ƥŕōĝŕàḿḿĩńĝ",
   "profileStartModelNotAdvertisedOnHost": "Ţĥē ĥōśţ ƥŕōƀē ďĩď ńōţ àďvēŕţĩśē {{model}}. Ţĥē śēĺēćţēď ēxēćũţōŕ ŵĩĺĺ ďēćĩďē ţĥē ḿōďēĺ àţ ĺàũńćĥ.",
-  "profileStartModelUniqueVariationOnHost": "Ţĥē ĥōśţ ƥŕōƀē ƒōũńď ōńē ƥōśśĩƀĺē vàŕĩàţĩōń ōƒ {{model}}: {{variation}}. Ţĥē śēĺēćţēď ēxēćũţōŕ ŵĩĺĺ ďēćĩďē ţĥē ḿōďēĺ àţ ĺàũńćĥ.",
-  "modelVariationAdvisory": "Ţĥē ĥōśţ ćàţàĺōĝ ĥàś ōńē ƥōśśĩƀĺē vàŕĩàţĩōń ōƒ {{model}}: {{variation}}. Ţĥē śàvēď ḿōďēĺ ŕēḿàĩńś ũńćĥàńĝēď ũńţĩĺ ĺàũńćĥ.",
   "promptAdd": "Àďď ƥŕōḿƥţ",
   "promptEditorAriaLabel": "Ƥŕōḿƥţ ēďĩţōŕ",
   "promptEditorBothHint": "Ţŷƥē {{placeholder}} ƒōŕ àvàĩĺàƀĺē ƥĺàćēĥōĺďēŕś ōŕ {{mention}} ƒōŕ śàvēď ƥŕōḿƥţś.",

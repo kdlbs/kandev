@@ -180,11 +180,15 @@ function modelSelectionReasonLabel(reason: string | undefined): string {
   const keyByReason: Record<string, string> = {
     requested_not_advertised: "task:modelSelectionReasonRequestedNotAdvertised",
     fallback_not_advertised: "task:modelSelectionReasonFallbackNotAdvertised",
-    unique_variation_applied: "task:modelSelectionReasonUniqueVariation",
     catalog_empty: "task:modelSelectionReasonCatalogEmpty",
     selection_unsupported: "task:modelSelectionReasonUnsupported",
     selection_failed_auto_fallback: "task:modelSelectionReasonAutoFallback",
   };
+  // Old persisted rows can contain this retired reason. Rendering it is a
+  // migration-only compatibility path; no active selection policy uses it.
+  if (reason === "unique_variation_applied") {
+    return t("task:modelSelectionReasonUniqueVariation");
+  }
   return reason
     ? t(keyByReason[reason] ?? "task:modelSelectionReasonUnknown", { reason })
     : t(UNKNOWN_TASK_KEY);
