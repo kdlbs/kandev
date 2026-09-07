@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -97,12 +99,15 @@ func (s *Service) approvalListByInstallation(installationID string) ([]Capabilit
 }
 
 func (s *Service) authorizePluginCapability(installationID, workspaceID, capabilityID string, requestedRevision uint64, requestDigest, methodDigest string) ApprovalDecision {
+	reason, wellFormed := malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest)
+	requestDigest = safeAuthorizationDigest(requestDigest)
+	methodDigest = safeAuthorizationDigest(methodDigest)
 	decision := ApprovalDecision{
 		Receipt: ApprovalReceipt{
-			InstallationID: installationID,
-			WorkspaceID:    workspaceID,
+			InstallationID: safeReceiptIdentifier(installationID),
+			WorkspaceID:    safeReceiptIdentifier(workspaceID),
 			Revision:       requestedRevision,
-			CapabilityID:   capabilityID,
+			CapabilityID:   safeReceiptCapabilityID(capabilityID),
 			RequestDigest:  requestDigest,
 			MethodDigest:   methodDigest,
 			AuditID:        CanonicalApprovalDigest(installationID, workspaceID, capabilityID, requestDigest, methodDigest, fmt.Sprint(requestedRevision)),
@@ -111,7 +116,7 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 		},
 	}
 	decision.AuditID = decision.Receipt.AuditID
-	if reason, ok := malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest); !ok {
+	if !wellFormed {
 		decision.Reason = reason
 		return decision
 	}
@@ -158,8 +163,8 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 // considered. ok is false when the request must be denied; reason is only
 // meaningful when ok is false.
 func malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest string) (reason ApprovalDenyReason, ok bool) {
-	if strings.TrimSpace(installationID) == "" || strings.TrimSpace(workspaceID) == "" ||
-		strings.TrimSpace(requestDigest) == "" || strings.TrimSpace(methodDigest) == "" {
+	if !isBoundedApprovalIdentifier(installationID) || !isBoundedApprovalIdentifier(workspaceID) ||
+		!isBoundedAuthorizationData(requestDigest) || !isBoundedAuthorizationData(methodDigest) {
 		return ApprovalDenyMalformedRequest, false
 	}
 	if isUnsupportedCapabilityID(capabilityID) {
@@ -201,12 +206,12 @@ func (s *Service) installedRecordByInstallationID(installationID string) *store.
 
 func manifestDeclaresCapability(record *store.Record, capabilityID string) bool {
 	for _, resource := range record.Capabilities.APIRead {
-		if capabilityID == "api_read:"+resource {
+		if capabilityID == "host.v2.read:"+resource {
 			return true
 		}
 	}
 	for _, resource := range record.Capabilities.APIWrite {
-		if capabilityID == "api_write:"+resource {
+		if capabilityID == "host.v2.write:"+resource {
 			return true
 		}
 	}
@@ -219,17 +224,73 @@ func manifestDeclaresCapability(record *store.Record, capabilityID string) bool 
 // grant time (CanonicalCapabilityList) so an authorization request cannot
 // bypass the same rule by presenting a broad identity directly.
 func isUnsupportedCapabilityID(capabilityID string) bool {
-	if capabilityID == "" || strings.TrimSpace(capabilityID) != capabilityID {
-		return true
-	}
-	return strings.ContainsAny(capabilityID, "*?")
+	return !isExactHostV2Capability(capabilityID) && !isHumanReservedCapability(capabilityID)
 }
 
 func isHumanReservedCapability(capabilityID string) bool {
-	switch capabilityID {
+	resource := capabilityID
+	if _, suffix, ok := strings.Cut(capabilityID, ":"); ok {
+		resource = suffix
+	}
+	switch resource {
 	case "merge", "deploy", "release", "rewrite_history", "cross_workspace", "secret_scope_expand":
 		return true
 	default:
 		return false
 	}
+}
+
+func isExactHostV2Capability(capabilityID string) bool {
+	if len(capabilityID) == 0 || len(capabilityID) > maxCapabilityIDLength ||
+		strings.TrimSpace(capabilityID) != capabilityID || strings.ContainsAny(capabilityID, "*?\x00") {
+		return false
+	}
+	kind, resource, ok := strings.Cut(capabilityID, ":")
+	if !ok || !isHostV2CapabilityKind(kind) || !isExactCapabilityResource(resource) {
+		return false
+	}
+	return true
+}
+
+func isHostV2CapabilityKind(kind string) bool {
+	return kind == "host.v2.read" || kind == "host.v2.write"
+}
+
+func isExactCapabilityResource(resource string) bool {
+	if resource == "" || strings.Contains(resource, ":") {
+		return false
+	}
+	for _, r := range resource {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func isBoundedApprovalIdentifier(value string) bool {
+	return value != "" && len(value) <= maxApprovalIDLength && strings.TrimSpace(value) == value && !strings.ContainsRune(value, '\x00')
+}
+
+func isBoundedAuthorizationData(value string) bool {
+	return value != "" && len(value) <= maxAuthorizationDataSize && !strings.ContainsRune(value, '\x00')
+}
+
+func safeAuthorizationDigest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func safeReceiptIdentifier(value string) string {
+	if !isBoundedApprovalIdentifier(value) {
+		return ""
+	}
+	return value
+}
+
+func safeReceiptCapabilityID(value string) string {
+	if !isExactHostV2Capability(value) && !isHumanReservedCapability(value) {
+		return ""
+	}
+	return value
 }

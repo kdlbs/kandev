@@ -10,10 +10,10 @@ func TestServiceApprovalQueriesReturnCurrentRows(t *testing.T) {
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
 
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant ws-1: %v", err)
 	}
-	if _, err := svc.approvalGrant("inst-1", "ws-2", 1, "digest-b", []string{"api_write:tasks"}, "human", "grant", "audit-2"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-2", 1, "digest-b", []string{"host.v2.write:tasks"}, "human", "grant", "audit-2"); err != nil {
 		t.Fatalf("grant ws-2: %v", err)
 	}
 
@@ -30,14 +30,14 @@ func TestServiceApprovalRevokeBumpsRevisionAndDenies(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := svc.approvalRevoke("inst-1", "ws-1", "human", "revoke", "audit-2"); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	decision := svc.authorizePluginCapability("inst-1", "ws-1", "api_read:tasks", 2, "req", "method")
+	decision := svc.authorizePluginCapability("inst-1", "ws-1", "host.v2.read:tasks", 2, "req", "method")
 	if decision.Allowed {
 		t.Fatalf("decision = %#v, want revoked approval denied", decision)
 	}
@@ -50,7 +50,7 @@ func TestServiceApprovalRevokeRetryReplaysOriginalResult(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	first, err := svc.approvalRevoke("inst-1", "ws-1", "human", "revoke", "revoke-1")
@@ -70,7 +70,7 @@ func TestServiceApprovalTombstoneRetainsStateOnReinstall(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := svc.approvalTombstoneInstallation("inst-1"); err != nil {
@@ -95,7 +95,7 @@ func TestApprovalReceiptAuditIDIsDeterministic(t *testing.T) {
 func TestApprovalLedgerGrantStoresCapabilitySnapshot(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)
-	approval, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks", "api_write:tasks"}, "human", "grant", "audit-1", time.Now().UTC())
+	approval, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks", "host.v2.write:tasks"}, "human", "grant", "audit-1", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}

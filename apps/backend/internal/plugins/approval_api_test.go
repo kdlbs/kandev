@@ -12,7 +12,7 @@ func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -32,7 +32,7 @@ func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 		t.Fatalf("row = %#v", row)
 	}
 
-	decision := svc.AuthorizeCapability("inst-1", "ws-1", "api_read:tasks", 1, "req", "method")
+	decision := svc.AuthorizeCapability("inst-1", "ws-1", "host.v2.read:tasks", 1, "req", "method")
 	if !decision.Allowed {
 		t.Fatalf("decision = %#v", decision)
 	}
@@ -41,7 +41,7 @@ func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 func TestApprovalAPIRevokeRetryReplaysOriginalResult(t *testing.T) {
 	svc := &Service{}
 	svc.SetPluginsDir(t.TempDir())
-	if _, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "grant-1"); err != nil {
+	if _, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "grant-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	first, err := svc.RevokeCapabilityApproval("inst-1", "ws-1", 1, "human", "revoke", "revoke-1")
@@ -69,7 +69,7 @@ func TestGrantCapabilityApprovalRequiresInstalledManifestBinding(t *testing.T) {
 	}
 	svc.registry.Add(installed)
 
-	_, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, ManifestCapabilityDigest(installed.Manifest), []string{"api_read:messages"}, "human", "grant", "audit-1")
+	_, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, ManifestCapabilityDigest(installed.Manifest), []string{"host.v2.read:messages"}, "human", "grant", "audit-1")
 	if err == nil {
 		t.Fatal("GrantCapabilityApproval accepted a capability outside the installed manifest")
 	}

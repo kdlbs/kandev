@@ -32,6 +32,13 @@ type ApprovalDenyReason string
 
 var ErrApprovalInvalidIdentifier = errors.New("plugins: approval identifier contains NUL")
 
+const (
+	maxCapabilityCount       = 1024
+	maxCapabilityIDLength    = 256
+	maxApprovalIDLength      = 1024
+	maxAuthorizationDataSize = 4096
+)
+
 // A foreign workspace (an installation with no approval in the requested
 // workspace) intentionally reuses ApprovalDenyMissingApproval rather than a
 // distinct reason: returning a different, more specific reason for "wrong
@@ -78,18 +85,21 @@ func CanonicalApprovalDigest(parts ...string) string {
 
 // CanonicalCapabilityList returns a copy of caps sorted and deduplicated.
 func CanonicalCapabilityList(caps []string) ([]string, error) {
+	if len(caps) > maxCapabilityCount {
+		return nil, fmt.Errorf("plugins: too many capabilities")
+	}
 	out := make([]string, 0, len(caps))
 	seen := make(map[string]struct{}, len(caps))
 	for _, raw := range caps {
 		capability := strings.TrimSpace(raw)
-		if capability == "" {
+		if capability == "" || len(capability) > maxCapabilityIDLength || strings.ContainsRune(capability, '\x00') {
 			return nil, errors.New("plugins: empty capability")
 		}
 		if isHumanReservedCapability(capability) {
 			return nil, fmt.Errorf("plugins: Human-reserved capability %q cannot be approved", capability)
 		}
-		if strings.ContainsAny(capability, "*?") {
-			return nil, fmt.Errorf("plugins: wildcard capability %q is unsupported", capability)
+		if !isExactHostV2Capability(capability) {
+			return nil, fmt.Errorf("plugins: capability %q is not an exact host.v2 capability", capability)
 		}
 		if _, ok := seen[capability]; ok {
 			continue
@@ -101,9 +111,9 @@ func CanonicalCapabilityList(caps []string) ([]string, error) {
 	return out, nil
 }
 
-// ManifestCapabilityDigest is the canonical digest of the exact capabilities
-// declared by an installed manifest. Legacy api_read/api_write declarations
-// are intentionally represented as exact capability IDs and never broadened.
+// ManifestCapabilityDigest is the canonical digest of the H6 capability set
+// derived from an installed manifest. Legacy v1 declarations retain their
+// original RPC behavior, but cannot themselves satisfy H6 authorization.
 func ManifestCapabilityDigest(m manifest.Manifest) string {
 	canonical, err := ManifestCapabilityIDs(m)
 	if err != nil {
@@ -117,10 +127,10 @@ func ManifestCapabilityDigest(m manifest.Manifest) string {
 func ManifestCapabilityIDs(m manifest.Manifest) ([]string, error) {
 	caps := make([]string, 0, len(m.Capabilities.APIRead)+len(m.Capabilities.APIWrite))
 	for _, resource := range m.Capabilities.APIRead {
-		caps = append(caps, "api_read:"+strings.TrimSpace(resource))
+		caps = append(caps, "host.v2.read:"+strings.TrimSpace(resource))
 	}
 	for _, resource := range m.Capabilities.APIWrite {
-		caps = append(caps, "api_write:"+strings.TrimSpace(resource))
+		caps = append(caps, "host.v2.write:"+strings.TrimSpace(resource))
 	}
 	return CanonicalCapabilityList(caps)
 }

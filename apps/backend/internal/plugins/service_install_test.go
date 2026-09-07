@@ -116,7 +116,7 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 		t.Fatalf("install initial plugin: %v", err)
 	}
 	originalDigest := ManifestCapabilityDigest(rec1.Manifest)
-	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, originalDigest, []string{"api_read:tasks", "api_read:messages"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, originalDigest, []string{"host.v2.read:tasks", "host.v2.read:messages"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant initial approval: %v", err)
 	}
 
@@ -138,10 +138,10 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 	if row.ManifestDigest != ManifestCapabilityDigest(rec2.Manifest) {
 		t.Fatalf("manifest digest after upgrade = %q, want %q", row.ManifestDigest, ManifestCapabilityDigest(rec2.Manifest))
 	}
-	if got, want := row.CapabilityIDs, []string{"api_read:tasks"}; !equalStrings(got, want) {
+	if got, want := row.CapabilityIDs, []string{"host.v2.read:tasks"}; !equalStrings(got, want) {
 		t.Fatalf("capabilities after narrowing upgrade = %#v, want %#v", got, want)
 	}
-	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 3, row.ManifestDigest, []string{"api_read:tasks"}, "human", "renew", "audit-2"); err != nil {
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 3, row.ManifestDigest, []string{"host.v2.read:tasks"}, "human", "renew", "audit-2"); err != nil {
 		t.Fatalf("renew approval: %v", err)
 	}
 	rec3, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.2.0", "tasks", "messages"))
@@ -158,7 +158,7 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 	if row.Revision != 4 {
 		t.Fatalf("revision after rollback-equivalent replacement = %d, want 4", row.Revision)
 	}
-	if got, want := row.CapabilityIDs, []string{"api_read:tasks"}; !equalStrings(got, want) {
+	if got, want := row.CapabilityIDs, []string{"host.v2.read:tasks"}; !equalStrings(got, want) {
 		t.Fatalf("capabilities after rollback-equivalent replacement = %#v, want %#v", got, want)
 	}
 	file, err := svc.approvalLedger().load()
@@ -179,7 +179,7 @@ func TestServiceInstallUpgradeReviewFailureRestartsPreviousRuntime(t *testing.T)
 	if err != nil {
 		t.Fatalf("install initial plugin: %v", err)
 	}
-	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec1.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec1.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant approval: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestServiceInstallEquivalentUpgradeBumpsApprovalRevision(t *testing.T) {
 		t.Fatalf("install initial plugin: %v", err)
 	}
 	digest := ManifestCapabilityDigest(rec1.Manifest)
-	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, digest, []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, digest, []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.1.0", "tasks")); err != nil {

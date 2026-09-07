@@ -177,7 +177,7 @@ func approvalIdempotencyKey(eventType CapabilityApprovalEventType, auditID, inst
 }
 
 func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
-	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+	if err := validateApprovalMutation(installationID, workspaceID, actor, reason, auditID); err != nil {
 		return CapabilityApproval{}, err
 	}
 	if revision == 0 {
@@ -262,7 +262,7 @@ func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reaso
 }
 
 func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, expectedRevision uint64, actor, reason, auditID string, at time.Time, allowCurrent bool) (CapabilityApproval, error) {
-	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+	if err := validateApprovalMutation(installationID, workspaceID, actor, reason, auditID); err != nil {
 		return CapabilityApproval{}, err
 	}
 	if strings.TrimSpace(auditID) == "" {
@@ -463,8 +463,24 @@ func (l *approvalLedger) listByInstallation(installationID string) ([]Capability
 }
 
 func validateApprovalIdentifiers(installationID, workspaceID string) error {
-	if strings.ContainsRune(installationID, '\x00') || strings.ContainsRune(workspaceID, '\x00') {
+	if !isBoundedApprovalIdentifier(installationID) || (workspaceID != "" && !isBoundedApprovalIdentifier(workspaceID)) {
 		return ErrApprovalInvalidIdentifier
 	}
 	return nil
+}
+
+func validateApprovalAuditMetadata(actor, reason, auditID string) error {
+	for _, value := range []string{actor, reason, auditID} {
+		if value == "" || len(value) > maxApprovalIDLength || strings.ContainsRune(value, '\x00') {
+			return errors.New("plugins: approval audit metadata is malformed")
+		}
+	}
+	return nil
+}
+
+func validateApprovalMutation(installationID, workspaceID, actor, reason, auditID string) error {
+	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+		return err
+	}
+	return validateApprovalAuditMetadata(actor, reason, auditID)
 }

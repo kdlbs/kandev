@@ -13,7 +13,7 @@ func TestApprovalDTOConversionCopiesState(t *testing.T) {
 		WorkspaceID:        "ws-1",
 		Revision:           7,
 		ManifestDigest:     "digest",
-		CapabilityIDs:      []string{"api_read:tasks"},
+		CapabilityIDs:      []string{"host.v2.read:tasks"},
 		State:              ApprovalStateActive,
 		HumanActor:         "human",
 		HumanPolicyVersion: "immutable",

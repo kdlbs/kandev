@@ -701,7 +701,7 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	if _, err := svc.UserState().Set(ctx, rec.ID, "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
 		t.Fatalf("seed user state: %v", err)
 	}
-	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("seed approval: %v", err)
 	}
 
@@ -784,7 +784,7 @@ func TestServiceUninstallReconcilesRuntimeStateWhenApprovalTombstoneFails(t *tes
 	if err != nil {
 		t.Fatalf("install plugin: %v", err)
 	}
-	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("seed approval: %v", err)
 	}
 	if err := os.Remove(svc.approvalLedger().path()); err != nil {
@@ -816,7 +816,7 @@ func TestServiceUninstallFencesOldApprovalAsRevokedAfterRegistryRemoval(t *testi
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant approval: %v", err)
 	}
 
@@ -824,7 +824,7 @@ func TestServiceUninstallFencesOldApprovalAsRevokedAfterRegistryRemoval(t *testi
 		t.Fatalf("uninstall: %v", err)
 	}
 
-	decision := svc.AuthorizeCapability(rec.InstallationID, "ws-1", "api_read:tasks", 1, "request-digest", "method-digest")
+	decision := svc.AuthorizeCapability(rec.InstallationID, "ws-1", "host.v2.read:tasks", 1, "request-digest", "method-digest")
 	if decision.Allowed {
 		t.Fatalf("AuthorizeCapability() allowed tombstoned installation: %#v", decision)
 	}
