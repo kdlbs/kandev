@@ -1,9 +1,13 @@
 # ADR-2026-09-07: Resolve Only One Advertised Model Variation
 
-**Status:** proposed
+**Status:** rejected (superseded by `2026-09-06-exact-profile-model-identity`)
 **Date:** 2026-09-07
 **Area:** backend, frontend, protocol
-**Amends:** `2026-08-15-executor-authoritative-model-selection`
+**Superseded by:** `2026-09-06-exact-profile-model-identity`
+
+> This proposed policy is rejected. An inferred variation is not the exact
+> model identity selected by the profile, so it cannot authorize inference.
+> The accepted exact-profile policy governs model selection instead.
 
 ## Context
 
