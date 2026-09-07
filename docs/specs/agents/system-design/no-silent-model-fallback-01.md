@@ -409,7 +409,9 @@ the execution profile cannot be resolved, rather than silently dropping its
 model and environment values.
 
 Kandev does not relax model validation after the ACP session starts.
-If Claude still omits the model, the executor-authoritative policy uses the default and warns.
+If an exact profile's selected model is unavailable or cannot be applied, the
+session fails before inference. Provider-default continuation with a durable
+warning is permitted only when `auto_fallback` explicitly authorizes it.
 
 Kandev does not copy the bridge private cache.
 The separate portable-configuration feature can copy `settings.json` after explicit user selection.

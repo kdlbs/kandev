@@ -694,6 +694,52 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOver
 	require.False(t, previous.IsPrimary)
 }
 
+func TestPrepareWorkflowStepSession_ExactProfileDoesNotPromoteParkedMismatchedRuntime(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{Model: "gpt-5.6-terra"}
+
+	parked := &models.TaskSession{
+		ID: "session-parked-terra", TaskID: "t1", AgentProfileID: "terra-work-profile",
+		ExecutorID: "exec-local", ExecutorProfileID: "ep1", TaskEnvironmentID: "env-1",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-luna"},
+		},
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, parked))
+	seedExecutorRunning(t, fixture.repo, parked.ID, parked.TaskID, "execution-parked-terra")
+	parkedRuntime, err := fixture.repo.GetExecutorRunningBySessionID(ctx, parked.ID)
+	require.NoError(t, err)
+	parkedRuntime.ResumeToken = "stale-luna-acp-token"
+	require.NoError(t, fixture.repo.UpsertExecutorRunning(ctx, parkedRuntime))
+
+	workStep := &wfmodels.WorkflowStep{
+		ID: "step-work", WorkflowID: "wf1", AgentProfileID: "terra-work-profile",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	qaStep := &wfmodels.WorkflowStep{
+		ID: "step-qa", WorkflowID: "wf1", AgentProfileID: "qa-profile",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+
+	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.NotNil(t, workSession)
+	require.NotEqual(t, parked.ID, workSession.ID, "a parked ACP session with a mismatched runtime model must not be promoted")
+	require.Equal(t, "terra-work-profile", workSession.AgentProfileID)
+	_, inheritedRuntime := models.LoadSessionRuntimeConfig(workSession.Metadata)
+	require.False(t, inheritedRuntime, "the fresh session must not inherit the parked ACP runtime model")
+
+	storedParked, err := fixture.repo.GetTaskSession(ctx, parked.ID)
+	require.NoError(t, err)
+	require.False(t, storedParked.IsPrimary, "the stale parked session must remain unpromoted")
+	storedRuntime, err := fixture.repo.GetExecutorRunningBySessionID(ctx, parked.ID)
+	require.NoError(t, err)
+	require.Equal(t, "stale-luna-acp-token", storedRuntime.ResumeToken, "the stale ACP identity must not be selected for the new step")
+}
+
 func TestPrepareWorkflowStepSession_HumanQAToWorkKeepsAuthorizedFallbackSession(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)

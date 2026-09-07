@@ -2808,6 +2808,17 @@ func (s *Service) prepareWorkflowStepSession(
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
+	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
+		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, session.ID)
+		if err != nil {
+			s.logger.Warn("failed to inspect reusable session for exact model identity",
+				zap.String("task_id", taskID),
+				zap.String("agent_profile_id", effectiveProfile),
+				zap.Error(err))
+		} else if s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, effectiveProfile) {
+			startPolicy = models.WorkflowProfileSessionStartPolicyNew
+		}
+	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
 	if err != nil {
