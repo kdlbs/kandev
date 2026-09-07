@@ -7,11 +7,46 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 type mergeQueueRecoveryGitHubService struct {
 	*mockGitHubService
+}
+
+type attemptProtocolQueueRecoveryGitHubService struct {
+	*mergeQueueRecoveryGitHubService
+}
+
+func (s *attemptProtocolQueueRecoveryGitHubService) BindTaskCIAutoFixAttemptTurn(
+	context.Context, github.TaskCIAutoFixAttemptBinding,
+) error {
+	return nil
+}
+
+func (s *attemptProtocolQueueRecoveryGitHubService) ReportTaskCIAutoFixOutcome(
+	context.Context, github.TaskCIAutoFixOutcomeReport,
+) error {
+	return nil
+}
+
+func (s *attemptProtocolQueueRecoveryGitHubService) ReconcileTaskCIAutoFixTurnCompletion(
+	context.Context, string, string, string,
+) error {
+	return nil
+}
+
+func (s *attemptProtocolQueueRecoveryGitHubService) ReconcileTaskCIAutoFixQueuedDispatchFailure(
+	context.Context, github.TaskCIAutoFixAttemptBinding,
+) error {
+	return nil
+}
+
+func (s *attemptProtocolQueueRecoveryGitHubService) ReconcileTaskCIAutoFixProviderProgress(
+	context.Context, github.TaskCIAutoFixProviderProgress,
+) error {
+	return nil
 }
 
 func (s *mergeQueueRecoveryGitHubService) RecordTaskCIMergeQueueObservation(
@@ -52,6 +87,9 @@ func (s *mergeQueueRecoveryGitHubService) RecordTaskCIFixAttempt(
 		}
 		s.ciPRState.LastQueueFixEventID = attempt.QueueRemovalEventID
 		s.ciPRState.LastQueueRemovalCause = attempt.QueueRemovalCause
+	}
+	if attempt.IncrementRound && s.ciPRState != nil {
+		s.ciPRState.AutoFixRoundCount++
 	}
 	return nil
 }
@@ -245,6 +283,56 @@ func TestCIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval(t *testing.T) {
 	}
 	if got := svc.messageQueue.GetStatus(ctx, "session-1"); got.Count != 1 || len(ghSvc.fixAttempts) != 1 {
 		t.Fatalf("duplicate queue recovery was dispatched: status=%+v attempts=%+v", got, ghSvc.fixAttempts)
+	}
+}
+
+func TestCIAutomationMergeQueueRecoveryReplacementAtRoundCapDoesNotIncrement(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", ChecksState: "success", HeadSHA: "head-a",
+		MergeQueueLastRemovalID: "removal-b", MergeQueueLastRemovalReason: "CHECKS_FAILED",
+		MergeQueueLastRemovedAt: &now,
+	}
+	previous := ciAutomationCurrentCheckpoint(&github.PRFeedback{})
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previous)
+	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(
+		ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "",
+		messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, previousSignature),
+		ciAutomationCoalesceKey(pr), true,
+	)
+	if err != nil {
+		t.Fatalf("seed pending auto-fix: %v", err)
+	}
+	ghSvc := &attemptProtocolQueueRecoveryGitHubService{mergeQueueRecoveryGitHubService: &mergeQueueRecoveryGitHubService{mockGitHubService: &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", AutoFixEnabled: true, EffectiveAutoFixPrompt: "Repair the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+			LastFixSignature: previousSignature, LastFixCheckpointJSON: previousJSON,
+			LastFixEnqueuedAt: &now, AutoFixRoundCount: github.TaskCIAutoFixMaxRounds,
+			LastQueueAttemptHeadSHA: "head-a", LastMergeSignature: "merge-a",
+		},
+	}}}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle capped queue replacement: %v", err)
+	}
+	if len(ghSvc.fixAttempts) != 1 {
+		t.Fatalf("expected one replacement attempt, got %+v", ghSvc.fixAttempts)
+	}
+	if ghSvc.fixAttempts[0].IncrementRound {
+		t.Fatalf("queue replacement consumed a round: %+v", ghSvc.fixAttempts[0])
+	}
+	if got := ghSvc.ciPRState.AutoFixRoundCount; got != github.TaskCIAutoFixMaxRounds {
+		t.Fatalf("queue replacement round count = %d, want %d", got, github.TaskCIAutoFixMaxRounds)
 	}
 }
 

@@ -114,6 +114,8 @@ Kandev seeds these built-ins:
 
 Built-ins are marked in the UI but remain editable. Editing `ci-auto-fix` or `changes-walkthrough` changes the corresponding PR repair or walkthrough action. Seed insertion does not overwrite edits. If you delete a built-in, it stays absent for the current backend run and is seeded again on the next service start. There is no reset-to-default button.
 
+Kandev upgrades exact, untouched legacy revisions of the built-in `ci-auto-fix` prompt when the backend starts. It preserves edited and unrecognized prompt content. Kandev also adds the PR auto-fix outcome instructions outside the saved prompt, so editing the prompt cannot remove the required outcome report.
+
 A saved prompt is an instruction, not an authorization or policy boundary. Executor permissions, human gates, tests, and provider protections still control what can happen.
 
 </details>

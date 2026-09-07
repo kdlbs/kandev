@@ -1073,6 +1073,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	if err != nil || !changed {
 		return false
 	}
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
 	officeAgentProfileID := data.AgentProfileID

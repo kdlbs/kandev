@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-CI-PR-AUTOMATION-001
 created: 2026-06-18
+updated: 2026-09-06
 owners:
   - tbd
 ---
@@ -201,12 +202,35 @@ scoping; see that ADR's Consequences section).
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.
 - Every auto-fix attempt records the latest actionable feedback snapshot.
-  Later rounds include only new or materially changed checks, comments, or
-  provider-owned conflict signals. When recorded feedback becomes
-  non-actionable, Kandev refreshes the checkpoint without a prompt or round.
+  Later rounds include new or materially changed checks, comments, or
+  provider-owned conflict signals. The same snapshot can also become eligible
+  again after its bound agent turn ends without an outcome or after reported
+  action produces no provider-visible progress within two PR watch intervals.
+  When recorded feedback becomes non-actionable, Kandev refreshes the
+  checkpoint without a prompt or round.
 - The first auto-fix round targets the task's active primary session when one exists. Once a PR has an accepted auto-fix round, later auto-fix prompts for that task/repository/PR continue targeting the recorded `last_fix_session_id`. A newer active agent session for the same task must not steal auto-fix messages. Disabling and re-enabling auto-fix resets this binding with the rest of the per-PR auto-fix state.
-- Automation must not repeatedly prompt for the same actionable snapshot or
-  repeatedly retry the same failed merge attempt on every poll.
+- Automation must not prompt concurrently for the same actionable snapshot or
+  repeatedly retry the same failed merge attempt on every poll. One unresolved
+  auto-fix attempt exists per task/repository/PR; it is queued, running,
+  awaiting provider progress, acknowledged, or retryable.
+- Each auto-fix turn receives an immutable server-owned instruction to call
+  `report_pr_auto_fix_outcome_kandev` after classifying the feedback. The tool
+  reports `action_taken`, `non_actionable`, or `blocked` for the current
+  turn-bound attempt; saved-prompt customization cannot remove this protocol.
+- `action_taken` waits for a changed PR head, check execution timestamp,
+  review-thread state, conflict state, or queue-removal state. An unchanged
+  snapshot becomes retryable after two PR watch intervals. `non_actionable`
+  acknowledges the snapshot. `blocked` acknowledges it and records the reason
+  in the existing per-PR automation error surface. A bare successful turn or
+  recoverable agent failure makes the snapshot retryable.
+- Check snapshot identity includes provider execution timestamps in addition
+  to check name, conclusion, URL, and output. A rerun of the same named check
+  is therefore a new provider generation even when it fails with identical
+  output.
+- Existing untouched `ci-auto-fix` built-in rows are upgraded only when their
+  content matches a known shipped legacy hash and `created_at == updated_at`.
+  User-edited rows are preserved. The immutable outcome instruction remains
+  separate from both the built-in and task prompt override.
 - When auto-fix is enabled and the task session is busy, Kandev keeps at most one pending CI auto-fix queue entry per task/repository/PR. Newer feedback replaces that pending entry instead of appending another queued `@ci-auto-fix` message.
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
 - The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; PRs paused by the backend after the cap is reached show `Auto-fix 10/10` with warning/paused styling.
@@ -227,6 +251,9 @@ scoping; see that ADR's Consequences section).
   horizontal overflow. The PR chip and its badges remain one tap target; the
   responsive layout does not add a second automation control or overlay.
 - Hovering the round-count help icon on desktop, or opening the same PR CI drawer on mobile and using the same help affordance, explains in plain language how many rounds have been used, what counts as a round, that queue replacement does not count again, and that Kandev pauses when 10/10 has no pending auto-fix message left to update.
+- The same shared help content explains that an agent turn without an outcome
+  can consume another round on a later check, while an explicit non-actionable
+  or blocked outcome suppresses the unchanged snapshot.
 - Accepted round-count changes and exhausted-state changes are broadcast to open clients through the task CI options update event so the chip stays current without a reload.
 - The PR automation popover/drawer shows the selected linked PR's
   `last_error`, including lifecycle delivery failures, and clears that error
