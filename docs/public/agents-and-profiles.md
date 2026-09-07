@@ -65,6 +65,8 @@ does not store the default as a user selection.
 When a Kandev upgrade changes the managed package or its reviewed default,
 Kandev removes the older selection during startup before the service becomes
 ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
 When the package and default stay the same, Kandev preserves your selection
 across restarts and unrelated upgrades. A process that is already running is
 not replaced, so the new default applies when Kandev starts a future process.

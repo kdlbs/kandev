@@ -40,7 +40,7 @@ Operators need newly released agent models without waiting for a Kandev release.
 #### Acceptance criteria
 
 - **AC-AGENTS-RUNTIME-UPDATES-002.1:** When startup detects a changed managed package or Kandev default, Kandev shall remove the prior selection for that agent before it becomes ready.
-- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve the operator selection across restarts and unrelated Kandev upgrades.
+- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve a current-generation operator selection across restarts and unrelated Kandev upgrades. An unmarked legacy selection is reset during the first reconciliation.
 - **AC-AGENTS-RUNTIME-UPDATES-002.3:** After Kandev activates a new default, Settings shall let the operator select any validated stable version, including an older version.
 - **AC-AGENTS-RUNTIME-UPDATES-002.4:** A selection made after default activation shall remain effective until the operator changes it or a later shipped default changes.
 - **AC-AGENTS-RUNTIME-UPDATES-002.5:** Default activation shall affect future probes and launches only. Kandev shall not replace an agent process that remains active during backend recovery.

@@ -56,7 +56,8 @@ Command resolution uses the persisted operator selection when its package
 identity still matches; otherwise it uses the shipped default. Kandev does not
 copy the default into the database. An installation with no explicit selection
 therefore follows newer defaults when Kandev upgrades, while an operator
-selection remains stable until the operator changes or clears it.
+selection remains stable until the operator changes or clears it, unless a
+changed applied default generation resets it before runtime consumers start.
 
 The resulting effective version applies to every Kandev-built ACP command for
 that managed package, including capability probes, utility prompts, local

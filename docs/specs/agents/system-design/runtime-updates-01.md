@@ -353,8 +353,10 @@ authoritative for launch-time stale metadata recovery.
 ## Persistence guarantees
 
 - The trusted package identity and operator-selected version are stored
-  install-wide per built-in agent. They survive restarts while the shipped
-  package and default version remain unchanged.
+  install-wide per built-in agent. Current-generation selections survive
+  restarts while the shipped package and default version remain unchanged. A
+  legacy selection without a generation marker is reset during the first
+  startup that applies this behavior.
 - Startup records one applied default generation per managed agent. A changed
   package or default removes the earlier selection before runtime consumers start.
 - The Kandev default is compiled into the managed runtime catalogue and is not

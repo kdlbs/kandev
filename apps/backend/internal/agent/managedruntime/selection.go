@@ -175,13 +175,13 @@ func (s *Store) ReconcileDefaults(ctx context.Context, generations []DefaultGene
 			continue
 		}
 
-		selectionKey := selectionKey(generation.AgentID)
-		_, selectionFound, err := s.settings.Get(ctx, selectionKey)
+		activeSelectionKey := selectionKey(generation.AgentID)
+		_, selectionFound, err := s.settings.Get(ctx, activeSelectionKey)
 		if err != nil {
 			return fmt.Errorf("read managed runtime selection for %q: %w", generation.AgentID, err)
 		}
 		if selectionFound {
-			if err := s.settings.Delete(ctx, selectionKey); err != nil {
+			if err := s.settings.Delete(ctx, activeSelectionKey); err != nil {
 				return fmt.Errorf("delete managed runtime selection for %q: %w", generation.AgentID, err)
 			}
 		}

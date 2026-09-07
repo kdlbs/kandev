@@ -3,7 +3,6 @@ package backendapp
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"go.uber.org/zap"
 
@@ -31,9 +30,6 @@ func managedRuntimeDefaultGenerations(agentRegistry *registry.Registry) []manage
 			Version: spec.DefaultVersionOrPinned(),
 		})
 	}
-	sort.Slice(generations, func(i, j int) bool {
-		return generations[i].AgentID < generations[j].AgentID
-	})
 	return generations
 }
 

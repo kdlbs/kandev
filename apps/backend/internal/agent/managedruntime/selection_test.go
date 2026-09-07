@@ -284,6 +284,14 @@ func TestStoreReconcileDefaultsPropagatesReadAndMarkerWriteErrors(t *testing.T) 
 	if _, found := settings.values[selectionKey("agent-a")]; found {
 		t.Fatal("selection remains after marker write failure")
 	}
+
+	settings.saveErr = nil
+	if err := store.ReconcileDefaults(context.Background(), generation); err != nil {
+		t.Fatalf("retry after marker write failure: %v", err)
+	}
+	if got := string(settings.values[defaultGenerationKey("agent-a")]); got != `{"package":"pkg-a","version":"1.0.0"}` {
+		t.Fatalf("marker after retry = %q, want current generation", got)
+	}
 }
 
 // @covers AC-AGENTS-RUNTIME-UPDATES-002.1
