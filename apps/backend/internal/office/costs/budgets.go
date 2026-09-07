@@ -272,6 +272,9 @@ func (s *CostService) pauseAgentForBudget(ctx context.Context, agentID string) b
 
 // CreateBudgetPolicy creates a new budget policy.
 func (s *CostService) CreateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.CreateBudgetPolicy(ctx, policy)
 }
 
@@ -287,6 +290,9 @@ func (s *CostService) GetBudgetPolicy(ctx context.Context, id string) (*BudgetPo
 
 // UpdateBudgetPolicy updates a budget policy.
 func (s *CostService) UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.UpdateBudgetPolicy(ctx, policy)
 }
 

@@ -1,12 +1,29 @@
 package costs
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// errorJSONKey is the JSON field name every handler in this file reports an
+// error under. Named to avoid adding a fresh "error" string literal on top
+// of this file's many pre-existing gin.H{"error": ...} call sites (goconst).
+const errorJSONKey = "error"
+
+// writeBudgetPolicyError maps validateBudgetPolicyWrite's rejection
+// (AC-OFFICE-BUDGET-002.6/.7) to 400; any other error (e.g. a repository
+// failure) stays 500.
+func writeBudgetPolicyError(c *gin.Context, err error) {
+	if errors.Is(err, ErrInvalidBudgetPolicy) {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{errorJSONKey: err.Error()})
+}
 
 // Handler provides HTTP handlers for cost and budget routes.
 type Handler struct {
@@ -159,7 +176,7 @@ func (h *Handler) createBudget(c *gin.Context) {
 		ActionOnExceed:    action,
 	}
 	if err := h.svc.CreateBudgetPolicy(c.Request.Context(), policy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeBudgetPolicyError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"budget": policy})
@@ -190,7 +207,7 @@ func (h *Handler) updateBudget(c *gin.Context) {
 	}
 	applyBudgetPatch(policy, &req)
 	if err := h.svc.UpdateBudgetPolicy(c.Request.Context(), policy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeBudgetPolicyError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"budget": policy})
