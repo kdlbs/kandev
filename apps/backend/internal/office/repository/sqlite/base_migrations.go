@@ -227,8 +227,9 @@ func (r *Repository) migrateProviderRouting() {
 	)`)
 }
 
-// migrateFailureColumns creates the auxiliary office_workspace_settings
-// and office_inbox_dismissals tables used by office-agent-error-handling.
+// migrateFailureColumns creates the auxiliary failure-handling tables:
+// workspace settings, inbox dismissals, and durable auto-pause recovery
+// snapshots.
 // The runs.error_message column is part of the canonical CREATE TABLE
 // in base.go, so no ALTER is needed here.
 func (r *Repository) migrateFailureColumns() {
@@ -248,6 +249,16 @@ func (r *Repository) migrateFailureColumns() {
 		PRIMARY KEY (user_id, item_kind, item_id)
 	)`)
 	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_inbox_dismissals_kind ON office_inbox_dismissals(item_kind, item_id)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_agent_pause_recoveries (
+		agent_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		failed_run_id TEXT NOT NULL,
+		captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (agent_id, task_id)
+	)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_agent ON office_agent_pause_recoveries(agent_id)`)
 }
 
 // migrateSchedulerColumns adds the atomic task-checkout columns to the

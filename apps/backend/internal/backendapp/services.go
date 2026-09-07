@@ -76,6 +76,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
+	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
+	}
+	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := reconcileManagedRuntimeDefaults(context.Background(), managedRuntimeSelections, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
+	}
+
 	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
 	if err != nil {
 		return nil, nil, err
@@ -84,11 +93,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
-	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
-	}
-	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)

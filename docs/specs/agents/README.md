@@ -79,6 +79,7 @@ surface shared by task and Office consumers.
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
+- [Managed Runtime Default Activation](system-design/runtime-default-activation.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
 - [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
 - [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)
