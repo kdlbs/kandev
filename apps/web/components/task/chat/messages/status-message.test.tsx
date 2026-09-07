@@ -42,6 +42,23 @@ describe("StatusMessage model selection warnings", () => {
     expect(screen.getByText("Check the agent version in the executor.")).toBeTruthy();
     expect(screen.getByText("The saved model was not advertised by the executor.")).toBeTruthy();
   });
+
+  it("explains when the executor applied the only advertised variation", () => {
+    const comment = modelSelectionWarningMessage();
+    comment.metadata = {
+      ...comment.metadata,
+      reason: "unique_variation_applied",
+      effective_model: "opus[1m]",
+      fallback_model: undefined,
+    };
+
+    render(<StatusMessage comment={comment} />);
+
+    expect(
+      screen.getByText("The executor applied the only advertised variation of the saved model."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/fallback model/i)).toBeNull();
+  });
 });
 
 describe("StatusMessage branch replacement warnings", () => {

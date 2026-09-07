@@ -157,6 +157,27 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
+### Model IDs and executor catalogs
+
+The host model probe is an editing hint. The selected executor owns the model
+catalog at launch. Kandev resolves a saved model in this order:
+
+1. Use the exact requested model when the executor advertises it.
+2. Use the advertised explicit fallback when the requested model is absent.
+3. Use one unique bracketed variation when the requested model is absent and
+   the executor advertises exactly one matching ID.
+4. Use the agent's current or default model when no earlier choice applies.
+
+For example, a saved `opus` model can launch as `opus[1m]` when that is the
+only advertised `opus[...]` ID. If the executor advertises both
+`opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
+Variation text is opaque and model IDs remain case-sensitive.
+
+Kandev shows a warning when the launch result differs from the saved model.
+The saved profile remains `opus`; Kandev does not rewrite it after applying a
+unique variation or using the agent default. Recheck the executor catalog when
+the warning repeats after credentials, copied configuration, or agent updates.
+
 ### Use a dynamic profile
 
 > [!EXPERIMENTAL]

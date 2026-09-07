@@ -150,6 +150,20 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.textContent).toContain("claude-gone");
   });
 
+  it("names a unique advertised variation while preserving the saved model", () => {
+    renderForm(formData({ model: "opus" }), {
+      ...modelConfig,
+      available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    });
+
+    const advisory = screen.getByTestId("profile-model-variation-advisory");
+    expect(advisory.textContent).toContain("opus[1m]");
+    expect(advisory.textContent).toContain("opus");
+    expect(
+      screen.getByRole("button", { name: profileStartModelSettingsLabel }).textContent,
+    ).toContain("opus");
+  });
+
   it("shows the agent fallback row when auto-fallback is off", () => {
     renderForm(formData({ auto_fallback: false }));
     expandFallbackSettings();
