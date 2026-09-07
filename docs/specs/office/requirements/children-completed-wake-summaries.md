@@ -19,59 +19,57 @@ produced.
 The prompt has always had a section for exactly that. It renders only when the
 assembled prompt context carries child summaries, and nothing has ever put them
 there: the only code that populates them reads a `children` key out of the run
-payload, and no producer of this run writes that key. Three of the four
-producers do assemble child summaries — two of them paying a database read and a
-pull-request lookup to do it — and then discard them at a boundary that has no
-field to carry them. The result is a wake that costs a full agent turn and
+payload, and no producer writes that key. Three of the four producers do assemble
+child summaries — two paying a database read and a pull-request lookup to do it —
+then discard them at a boundary that has no field to carry them. The result is a wake that costs a full agent turn and
 begins with the parent knowing nothing about the work it delegated.
 
 This capability makes the children-completed wake name its children. It defines
 what a child summary line reports, which children appear, in what order, and how
 the prompt behaves when the underlying reads are unavailable.
 
-The Office system owns this contract because the outcome is the content of an
-Office wake prompt: what an autonomous agent is told when the Office scheduler
-launches it. Adjacent contracts this capability reads but does not own are the
-task system's parent/child relationship, task state, comments, and archival, and
-the workflow engine's `on_children_completed` trigger and its payload type.
+Office owns this contract because the outcome is the content of an Office wake
+prompt: what an autonomous agent is told when the Office scheduler launches it.
+Adjacent contracts it reads but does not own are the task system's parent/child
+relationship, task state, comments and archival, and the workflow engine's
+`on_children_completed` trigger and its payload type.
 
 This capability is constrained by
-[parent wake wave identity](parent-wake-wave-identity.md), which collapses the
-four producers onto a single run per completion wave. That capability's
-AC-OFFICE-WAKE-WAVE-IDENTITY-002.10 requires the surviving run to deliver a wake
-equivalent to the one any other producer would have delivered. Producer-specific
+[parent wake wave identity](parent-wake-wave-identity.md), a sibling capability
+that may not have merged yet. Its constraint is therefore restated here rather
+than delegated, so that REQ-OFFICE-WAKE-CHILD-SUMMARIES-002 stands without it:
+**four producers can queue this run, at most one survives per completion wave, no
+producer can observe which one won, and the surviving run must deliver a wake
+equivalent to the one any other producer would have delivered.** That is the link
+target's AC-OFFICE-WAKE-WAVE-IDENTITY-002.10; the link is a pointer to the
+capability that owns it, not a dependency a reader must resolve to build this. Producer-specific
 prompt content would make prompt quality a race outcome, so REQ-OFFICE-WAKE-
 CHILD-SUMMARIES-002 below is not a convenience — it is the condition under which
 this capability can ship at all.
 
 ## Prior art
 
-**Wiki leg — receipt: not run, tool absent.** The step's `wiki-query` leg could
-not be executed in this session. `find ~/.claude /Users/neo/Projects/gstack
--maxdepth 3 -name 'wiki-query*'` returned nothing, `~/.obsidian-wiki` does not
-exist (`ls: No such file or directory`), and `OBSIDIAN_VAULT_PATH` is unset, so
-there is no vault to pin with `@henry` and no QMD collection to name. No
-degraded grep fallback was substituted, because a keyword sweep over a vault
-that is not present would produce an empty result indistinguishable from a
-healthy miss.
+**Wiki leg — receipt: not run, tool absent.** No `wiki-query` skill exists under
+`~/.claude` or `/Users/neo/Projects/gstack`, `~/.obsidian-wiki` does not exist,
+and `OBSIDIAN_VAULT_PATH` is unset, so there is no vault to pin with `@henry` and
+no QMD collection to name. No grep fallback was substituted: a sweep over a vault
+that is not present returns an empty result indistinguishable from a healthy miss.
 
-**saas-kb leg — receipt: not run, server absent.** The `saas-kb` MCP server is
-not registered in this session; the only MCP server available is `kandev`
-(`~/.claude.json` `mcpServers` is empty and the session tool registry exposes no
-`search_fsm_docs`). No `ai_sdlc` query was issued and no vendor comparison is
-claimed.
+**saas-kb leg — receipt: not run, server absent.** `~/.claude.json` `mcpServers`
+is empty, the session's only MCP server is `kandev`, and no `search_fsm_docs`
+tool is exposed. No `ai_sdlc` query was issued and no vendor comparison is claimed.
 
 **In-repo prior art, which was available and was read.** The immediately
 preceding capability,
 [parent wake wave identity](parent-wake-wave-identity.md), took a position on
-this exact defect while specifying something else. Its system design records, in
-its "Wake equivalence between producers" section, that all four producers queue a
-payload with no child summaries, that this is why collapsing a racing pair is
-currently safe, and that "a change that starts populating `children` from one
-producer must populate it from all four." This capability adopts that position
-rather than re-deriving it, and satisfies it structurally — by removing the
-per-producer payload as the carrier — instead of by editing four producers to
-agree.
+this exact defect while specifying something else. Its "Wake equivalence between
+producers" section records that all four producers queue a **run row** payload
+carrying no child summaries — three do build summaries for the engine trigger,
+which is a different payload and never reaches the row — that this is why
+collapsing a racing pair is currently safe, and that "a change that starts
+populating `children` from one producer must populate it from all four." This
+capability adopts that position and satisfies it structurally, by removing the
+per-producer payload as the carrier.
 
 ## Terminology
 
@@ -79,8 +77,13 @@ agree.
   reason `task_children_completed`, or the legacy reason `children_completed`,
   to wake a parent whose children have all reached a terminal state.
 - **Producer:** any code path that can cause a children-completed run to be
-  queued. Four exist, as enumerated by
-  [parent wake wave identity](parent-wake-wave-identity.md).
+  queued. Exactly four exist: `cascadeChildrenCompleted`
+  (`office/scheduler/reactivity.go`), `queueChildrenCompletedRun`
+  (`office/service/event_subscribers.go`), `ParentWakeReconciler.buildPayload`
+  (`office/service/scheduler_wake_reconciler.go`), and `childCompletionPayload`
+  (`orchestrator/event_handlers_children_completed.go`). The first queues a
+  scheduler run context directly; the other three dispatch a workflow-engine
+  trigger.
 - **Prompt assembly time:** the moment the scheduler renders the wake prompt for
   a claimed run, immediately before launching the agent session. This is later
   than, and can be much later than, the moment the run was queued.
@@ -111,20 +114,26 @@ that my first action can be judgement rather than discovery.
   AC-OFFICE-WAKE-CHILD-SUMMARIES-003.4.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.2:** Each child summary line shall report
   the child's task identifier, the child's title, and the child's task state.
-- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3:** When a child has at least one
-  comment, its line shall report the body of that child's most recent comment.
-- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.4:** When a child has no comments, its
-  line shall report no comment text and shall still report identifier, title,
-  and state.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3:** When a child's most recent comment
+  has a non-empty body, its line shall report that body.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.4:** When a child has no comments, or its
+  most recent comment has an empty body, its line shall report no comment text
+  and shall still report identifier, title, and state. The two cases shall render
+  identically.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5:** When a reported comment body is
   longer than the per-comment display limit, the line shall report the leading
   portion of that body followed by an explicit truncation marker. A body at or
-  below the limit shall be reported without a marker.
-- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6:** A reported comment body shall occupy
-  a single line. Line breaks within the body shall not split a child summary
-  line into two.
+  below the limit shall be reported without a marker. The limit shall be counted
+  in Unicode code points, and a truncated body shall remain valid UTF-8.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6:** A child summary line shall occupy
+  exactly one line. A line break within any reported field, including the title
+  and the comment body, shall not split it into two. Each reported field the task
+  system does not itself bound shall have a display bound, so the section's total
+  size is bounded by the line cap in AC-OFFICE-WAKE-CHILD-SUMMARIES-003.4.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7:** When a child has one or more linked
-  pull requests, its line shall report each of those pull request URLs.
+  pull requests, its line shall report those pull request URLs up to a display
+  cap, and shall indicate when the cap elided any. Which URLs survive the cap
+  shall follow the ordering in AC-OFFICE-WAKE-CHILD-SUMMARIES-003.7.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.8:** When a child has no linked pull
   request, its line shall report no pull-request text, and its remaining fields
   shall be unaffected.
@@ -134,6 +143,12 @@ that my first action can be judgement rather than discovery.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.10:** When the parent has no live direct
   children at prompt assembly time, the prompt shall contain no child list
   section, no heading for it, and no truncation notice.
+- **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.12:** The child list section's heading
+  shall not assert that the children it lists have completed. The lead-in
+  sentence, which describes why the wake fired rather than the present state of
+  the list, is unaffected. Without this, a child listed under
+  AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a in a non-terminal state would appear
+  under a heading contradicting the state reported on its own line.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.11:** The wake prompt's existing lead-in
   sentence and its existing closing instruction shall be present and unchanged in
   every case, including the empty case in
@@ -142,12 +157,10 @@ that my first action can be judgement rather than discovery.
 
 ### REQ-OFFICE-WAKE-CHILD-SUMMARIES-002: One rendering, whichever producer won
 
-**Intent:** Four producers can queue this run, and
-[wave identity](parent-wake-wave-identity.md) makes exactly one of them win a
-race that none of them can observe. If the prompt's content depended on which
-one won, the parent's briefing would be decided by a race. The only way to
-guarantee equivalence across four producers is to stop asking the producers for
-the content.
+**Intent:** Four producers can queue this run, and exactly one wins a race none
+of them can observe. If the prompt's content depended on which one won, the
+parent's briefing would be a race outcome. The only way to guarantee equivalence
+across four producers is to stop asking the producers for the content.
 
 #### Acceptance criteria
 
@@ -188,9 +201,9 @@ the content.
 ### REQ-OFFICE-WAKE-CHILD-SUMMARIES-003: Deterministic membership, order, and cap
 
 **Intent:** The same parent in the same state must produce the same briefing
-twice. Every axis that could decide otherwise — which children count, what order
-they appear in, which comment is "the" comment, and what happens past the cap —
-is named here rather than left to whichever row the database returns first.
+twice. Every axis that could decide otherwise — which children count, their
+order, which comment is "the" comment, and what happens past the cap — is named
+here rather than left to whichever row the database returns first.
 
 #### Acceptance criteria
 
@@ -260,9 +273,12 @@ with a prompt that is honestly short rather than one that is wrong.
   the child list section shall be re-derived at each assembly rather than reused
   from the previous assembly.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-004.7:** When a child is written concurrently
-  with prompt assembly, the section shall report either that child's pre-write or
-  its post-write values, and assembly shall not fail. The section is a
-  point-in-time reading and carries no cross-child atomicity guarantee.
+  with prompt assembly, each read behind that child's line shall report either the
+  child's pre-write or its post-write values, and assembly shall not fail. The
+  guarantee is per read, not per line: a child's task fields and its pull-request
+  links come from separate reads, so one line may pair pre-write task fields with
+  post-write links. The section is a point-in-time reading and carries no
+  atomicity guarantee across children or across those reads.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8:** Prompt assembly for one
   children-completed run shall perform a bounded number of reads that does not
   grow with the number of live direct children.
@@ -277,15 +293,12 @@ with a prompt that is honestly short rather than one that is wrong.
 
 - **The existing divergence in archived-child handling between readiness and
   membership.** Office readiness counts archived children as blocking; this
-  capability's child list excludes them
-  (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1). The two therefore answer different
-  questions, deliberately: readiness asks whether anything is still running, the
-  list describes the wave the parent is being asked to review.
-  [Parent wake wave identity](parent-wake-wave-identity.md)
-  AC-OFFICE-WAKE-WAVE-IDENTITY-004.7 leaves that divergence in place, and this
-  capability does not close it either. The visible consequence is bounded and
-  named: a parent all of whose children are archived and terminal can be woken
-  with no child list section, which
+  capability's list excludes them (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1). The two
+  answer different questions deliberately: readiness asks whether anything is
+  still running, the list describes the wave the parent must review. The parent
+  capability leaves that divergence in place and this one does not close it. The
+  consequence is bounded and named: a parent whose children are all archived and
+  terminal can be woken with no child list section, which
   AC-OFFICE-WAKE-CHILD-SUMMARIES-001.10 defines as a valid rendering.
 
 - **Wave identity, run deduplication, and backstop admission.** Owned by
@@ -297,33 +310,30 @@ with a prompt that is honestly short rather than one that is wrong.
 - **Removing `ChildSummaries` from the workflow engine's
   `on_children_completed` trigger payload type.** That field is part of a
   workflow-engine type shared across systems, and no consumer reads it today.
-  AC-OFFICE-WAKE-CHILD-SUMMARIES-002.5 stops Office producers paying for data
-  that is discarded, but the field itself stays. Deleting a field from a shared
-  trigger payload is a change to the workflow engine's contract, with a different
-  owner and a different blast radius, and belongs in its own capability. A future
-  capability that removes it needs to know that the field is written by three
+  AC-OFFICE-WAKE-CHILD-SUMMARIES-002.5 stops Office producers paying for data that
+  is discarded, but the field stays: deleting a field from a shared trigger payload
+  changes the workflow engine's contract, with a different owner and blast radius.
+  A future capability that removes it needs to know the field is written by three
   producers, read by none, and unreachable from workflow conditions, which reach
   the trigger payload only through a typed assertion for comment payloads.
 
 - **Merging the two children-completed run reasons.** The legacy reason is
   rendered by AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6 and is otherwise untouched.
 
-- **The cross-parent coalescing behaviour of children-completed runs.** Two
-  children-completed runs for different parents addressed to the same agent
-  within the coalescing window can merge, because this reason is not
-  task-scoped for coalescing. That is pre-existing, is not caused or worsened by
-  this capability — deriving content at assembly time from the surviving run's
-  own parent makes the merged run's prompt self-consistent rather than less so —
-  and its correctness is a separate question about which parent should have been
-  woken, not about what the wake says.
+- **The cross-parent coalescing behaviour of children-completed runs.** Two such
+  runs for different parents addressed to the same agent within the coalescing
+  window can merge, because this reason is not task-scoped for coalescing. That is
+  pre-existing and is not worsened here — deriving content at assembly time from
+  the surviving run's own parent makes the merged prompt self-consistent rather
+  than less so. Which parent should have been woken is a separate question from
+  what the wake says.
 
-- **User interface.** This capability adds no control, view, or setting. Its
-  output is visible in two existing surfaces without change to either: the agent
-  session's first message, and the assembled-prompt panel on the Office run
-  detail page.
+- **User interface.** No control, view or setting is added. The output appears in
+  two existing surfaces unchanged: the agent session's first message, and the
+  assembled-prompt panel on the Office run detail page.
 
-- **Changing which comment represents a child's conclusion.** The most recent
-  comment by any author is what this capability reports
-  (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.3). Selecting a designated summary
-  comment, or preferring an agent-authored comment over a user's, is a different
-  contract about what a child's conclusion *is*, and is not decided here.
+- **Changing which comment represents a child's conclusion.** This capability
+  reports the most recent comment by any author
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.3). Selecting a designated summary comment,
+  or preferring an agent-authored one, is a different contract about what a
+  child's conclusion *is*, and is not decided here.

@@ -29,6 +29,21 @@ The producer-equivalence constraint from
 [parent wake wave identity](parent-wake-wave-identity.md) — its
 AC-OFFICE-WAKE-WAVE-IDENTITY-002.10 and its "Wake equivalence between producers"
 section — is the governing constraint on this design, not a nearby concern.
+That document is a sibling capability that may not have merged yet, so the
+constraint is restated here in full rather than delegated: **four producers can
+queue a children-completed run, at most one survives per completion wave, no
+producer can observe which one won, and the surviving run must therefore deliver
+a wake equivalent to the one any other producer would have delivered.** Nothing
+below depends on being able to read that document.
+
+The four producers, named here so this design stands on its own:
+
+| Producer | Queues through | Assembles child summaries today |
+| --- | --- | --- |
+| `office/scheduler/reactivity.go` `cascadeChildrenCompleted` | `scheduler.RunContext` | No — that struct has no child-list field |
+| `office/service/event_subscribers.go` `queueChildrenCompletedRun` | workflow engine trigger | Yes, from a database read, then discarded |
+| `office/service/scheduler_wake_reconciler.go` `ParentWakeReconciler.buildPayload` | workflow engine trigger | Yes, from a database read, then discarded |
+| `orchestrator/event_handlers_children_completed.go` `childCompletionPayload` | workflow engine trigger | Yes, from rows already in memory |
 
 ## Requirement mapping
 
@@ -107,59 +122,114 @@ One line per child, from `writeChildSummaryLine`:
 - {identifier} ({title}) [{state}] — {"comment"} — {pr urls}
 ```
 
+**Every length in this section is counted in Unicode code points, never in
+bytes.** This is load-bearing rather than pedantic. SQL `SUBSTR` counts code
+points in both SQLite and PostgreSQL, while Go's `len(s)` and `s[:n]` count
+bytes, so mixing the two units makes a body SQL never cut trip the byte
+threshold — reporting a complete comment as truncated — and lets a slice split a
+UTF-8 sequence, putting invalid UTF-8 into a live agent prompt. The product ships
+zh-cn, zh-hk, zh-tw and pt-pt, and agent comments routinely contain non-ASCII, so
+this is the ordinary case rather than an exotic one. Both the comparison and the
+slice operate on runes.
+
 - `identifier` falls back to `?` when empty, as today
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.9).
-- The comment segment is present only when the child has a comment
-  (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3, .4). It is rendered with `%q`, which
-  escapes an embedded newline rather than emitting it, so a multi-line comment
-  cannot split the line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6). Title is
-  rendered unquoted, as today; this design does not change that, and the
-  single-line guarantee is scoped to the comment body only.
-- `truncateComment` keeps its existing rule — bodies longer than 500 characters
-  render as the first 485 followed by ` [truncated]`. See
+- **The rendered line contains no line break except its terminator.** Every
+  interpolated field — identifier, title, state, comment, URL — has any embedded
+  CR or LF replaced with a single space before rendering, so one child is always
+  exactly one line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.1, -001.6). The comment
+  gets this from `%q`, which escapes a newline rather than emitting it; the
+  title, rendered unquoted, needs it applied explicitly. Scoping the guarantee to
+  the comment alone would leave `001.1`'s one-line-per-child promise breakable by
+  any title containing a newline.
+- The comment segment is present only when the child has a most-recent comment
+  **whose body is non-empty** (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3, .4). The
+  schema permits an empty body (`task_comments.body TEXT NOT NULL DEFAULT ''`),
+  and an empty body carries no information, so such a child renders exactly as a
+  child with no comments does: the segment is omitted. Rendering `""` would spend
+  a segment to say nothing.
+- `truncateComment` keeps its shape but counts runes: a body longer than 500 code
+  points renders as its first 485 code points followed by ` [truncated]`; a body
+  of 500 or fewer renders whole, with no marker
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5). See
   [Child query contract](#child-query-contract) for why that branch becomes
-  reachable (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5).
-- The pull-request segment is present only when the child has at least one link,
-  and lists the URLs joined by `, ` in ascending URL order
-  (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7).
+  reachable at all.
+- The title is capped the same way, at 200 code points followed by
+  ` [truncated]`. The task system does not bound title length, so without a cap
+  neither the one-line shape nor the section's size ceiling means anything.
+- The pull-request segment is present only when the child has at least one link.
+  URLs are sorted ascending by URL string, then joined by `, `
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7). At most 10 render; a child
+  with more gets ` (+N more)` after the tenth. Sorting before capping is what
+  makes *which* URLs appear deterministic rather than a property of whatever
+  order the link projection returned.
 
-`ChildSummaryPrompt` gains a `PRLinks []string` field. The section heading, the
-truncation notice text, the lead-in sentence, and the closing instruction are
-unchanged (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.11).
+`ChildSummaryPrompt` gains a `PRLinks []string` field. The lead-in sentence, the
+closing instruction and the truncation notice text are unchanged
+(AC-OFFICE-WAKE-CHILD-SUMMARIES-001.11). The section heading is **not**: it
+changes from "Completed children:" to a neutral label, because
+AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a deliberately lists a child that is no
+longer terminal, and a heading asserting completion would contradict the `[state]`
+on that child's own line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.12). The lead-in
+stays as it is because it describes why the wake fired — every child did reach a
+terminal state — whereas the heading labels a list describing the present.
 
 ## Child query contract
 
 `Repository.GetChildSummaries` is the single read behind the section. After this
 change it has exactly one caller — the prompt path — because
-[Producer changes](#producer-changes) removes the other two. Four changes to it:
+[Producer changes](#producer-changes) removes the other two. Five changes to it:
 
-1. **Archived children are excluded**, in both the count and the select
-   (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1, -003.6). The predicate is
+1. **It becomes one statement, not two.** Today it issues an un-transacted
+   `COUNT(*)` and then a separate `SELECT … LIMIT`. Two statements are two
+   snapshots, so a child archived between them leaves a stale total above the cap
+   while the capped select already covers every live child — precisely the state
+   AC-OFFICE-WAKE-CHILD-SUMMARIES-003.6 says shall never occur. The count moves
+   into the select list as a scalar subquery over the same predicate, so every
+   returned row carries the same live-child count and count and rows come from one
+   statement's snapshot. When the statement returns no rows the
+   section is empty and no count is read — which is also the correct outcome when
+   the parent-existence guard below suppresses rows that do exist. A plain scalar subquery is used
+   rather than `COUNT(*) OVER ()` so that no window-function support is assumed
+   (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.6, -003.9, -004.8).
+2. **Archived children are excluded**, in both the count subquery and the row
+   predicate (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1, -003.6). The predicate is
    `archived_at IS NULL`, matching `GetChildSetKey`. No state predicate is added:
    the query already returns every child regardless of state, which is what
    AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a requires.
-2. **Ordering gains a tiebreak**: `ORDER BY t.created_at ASC, t.id ASC`.
+3. **The statement guards on the parent existing.** `tasks.parent_id` is
+   `TEXT DEFAULT ''` with no foreign key and no cascade anywhere in the schema, so
+   a child row can outlive its parent and `WHERE t.parent_id = ?` alone would
+   list children for a task that no longer exists. An
+   `EXISTS (SELECT 1 FROM tasks p WHERE p.id = ?)` guard in the same statement
+   makes a deleted parent yield no rows and a zero count, which is what
+   AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3 requires, and costs no extra round trip.
+   The guard tests existence only, not archival: an archived parent that is being
+   woken anyway still gets its list.
+4. **Ordering gains a tiebreak**: `ORDER BY t.created_at ASC, t.id ASC`.
    `created_at` alone is not unique, so today's order is whatever the engine
    returns for a tie, which also makes the 20-row cap non-deterministic
    (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.2, -003.4, -003.8). `tasks.id` is unique,
    so no third column is needed. This matches the existing convention in
    `RunnerProjection`, which already tiebreaks `position ASC, id ASC`.
-3. **The last-comment subquery gains a tiebreak**: `ORDER BY c.created_at DESC,
-   c.id DESC` (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.3).
-4. **The comment slice takes one character more than the display limit**:
+5. **The last-comment subquery gains a tiebreak and one extra code point**:
+   `ORDER BY c.created_at DESC, c.id DESC`, and
    `SUBSTR(c.body, 1, maxCommentChars + 1)`. Today the SQL slices to exactly 500
-   and `truncateComment` only fires above 500, so the truncation marker is
-   unreachable and a cut comment is presented as if complete. Reading 501
-   characters makes the existing branch fire for exactly the bodies that were
-   cut (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5).
+   while `truncateComment` fires only above 500, so the truncation marker is
+   unreachable and a cut comment is presented as if complete. Reading one code
+   point more than the display limit makes the branch fire for exactly the bodies
+   that were cut — which holds only because both sides now count code points; see
+   [Rendered line contract](#rendered-line-contract)
+   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5, -003.3).
 
-Everything the query uses — `SUBSTR`, `COUNT`, `IS NULL`, `LIMIT`, correlated
-subquery — is common to SQLite and PostgreSQL, and the query performs no JSON
-extraction, so no dialect branch is introduced
+Everything the statement uses — `SUBSTR`, `COUNT`, `EXISTS`, `IS NULL`, `LIMIT`,
+correlated subqueries — is common to SQLite and PostgreSQL, and it performs no
+JSON extraction and no window function, so no dialect branch is introduced
 (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.9).
 
-Read cost per assembled prompt is fixed at one child query plus one
-`ListTaskPRsByTaskIDs` call for the returned ids, independent of child count
+Read cost per assembled prompt is fixed at **two** database round trips: this one
+statement, and one `ListTaskPRsByTaskIDs` call for the returned ids. Neither
+grows with the number of live direct children
 (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8). Both run only for the two
 children-completed reasons (AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6, -002.7).
 
@@ -183,6 +253,12 @@ AC-OFFICE-WAKE-CHILD-SUMMARIES-002.5 removes:
   (`orchestrator/event_handlers_children_completed.go`) builds its summaries
   from rows already in memory for the readiness check, costing no extra read. It
   is left alone; touching it would be churn with no measurable effect.
+
+`SchedulerService.cascadeChildrenCompleted` (`office/scheduler/reactivity.go`),
+the fourth producer, queues a bare `scheduler.RunContext` that has no child-list
+field and never assembled summaries to discard. It is unchanged and needs no
+change. It is named here so a builder does not have to rediscover it to establish
+that AC-OFFICE-WAKE-CHILD-SUMMARIES-002.4 and -002.5 already hold for it.
 
 `engine.ChildSummary` and the payload field itself stay. Deleting a field from a
 shared workflow-engine type is a separate contract change with a different owner,
@@ -220,23 +296,37 @@ Office run detail prompt panel.
 - **PR lookup fails or `TaskPRLister` is unwired.** `lookupChildPRLinks` already
   returns an empty map and warns internally; lines render without the PR segment
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.2).
-- **Parent gone, or no parent id on the run.** `buildPromptContext` only calls
-  the enricher when it parsed a `task_id`, and a parent that no longer exists
-  returns no rows, so both cases omit the section exactly as for a parent with no
-  live children (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3, -004.3a).
+- **Parent gone, or no parent id on the run.** `buildPromptContext` calls the
+  enricher only when it parsed a non-empty `task_id`
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3a); the existing call site is gated on the
+  run reason but not yet on the id, so that gate is added. A parent that no longer
+  exists is caught by the statement's `EXISTS` guard, not by an absence of child
+  rows — orphaned children would supply rows, because nothing in the schema
+  deletes them with their parent (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3). Both
+  cases omit the section exactly as for a parent with no live children.
 - **Retry.** The prompt is reassembled from scratch on each launch, so the
   section is re-derived rather than reused
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.6).
-- **Concurrent child writes.** Reads are not serialised against child writes.
-  Each row is read once, so a child reports either its pre-write or post-write
-  values and assembly cannot fail; the section carries no cross-child atomicity
-  guarantee (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.7).
+- **Concurrent child writes.** Reads are not serialised against child writes, and
+  **two reads stand behind one line**: the child statement supplies identifier,
+  title, state and comment from a single snapshot, and `ListTaskPRsByTaskIDs`
+  supplies the URLs from another. Within each read a child reports either its
+  pre-write or its post-write values, and assembly cannot fail; across the two, a
+  line may pair pre-write task fields with post-write pull-request links
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-004.7). The section carries no atomicity
+  guarantee across children and none across those two reads. Making it atomic
+  would mean holding a transaction open across a port call, for a briefing that is
+  advisory by construction.
 
 ## Persistence
 
 No schema change and no migration. `runs.payload` gains no field; the run row is
 unchanged. `runs.assembled_prompt` grows by the rendered section, bounded by 20
-lines of at most roughly 600 characters each.
+lines whose length is bounded in turn by the per-field caps in
+[Rendered line contract](#rendered-line-contract): 200 code points of title, 500
+of comment, and at most 10 pull-request URLs. Those caps are why this is a bound
+rather than an estimate — the task system limits neither title length nor link
+count, so without them the section would have no ceiling at all.
 
 Runs queued before this change and claimed after it render the section normally,
 because the section does not depend on anything the producer recorded. No
