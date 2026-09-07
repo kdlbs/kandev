@@ -356,3 +356,25 @@ func TestNextCronTime_InvalidTimezone(t *testing.T) {
 		t.Fatal("expected error for invalid timezone")
 	}
 }
+
+// TestNextCronTime_RejectsCronTZPrefix verifies that a caller-supplied
+// TZ=/CRON_TZ= prefix is rejected rather than silently accepted. robfig/cron
+// strips the prefix in Parse() before any field-mask check, so without this
+// guard the expression's own prefix would override the trigger's timezone
+// column and bypass the DST fall-back suppression (the candidate would carry
+// the column's location while the schedule actually ran in the prefix's
+// zone).
+func TestNextCronTime_RejectsCronTZPrefix(t *testing.T) {
+	exprs := []string{
+		"CRON_TZ=America/New_York 30 1 * * *",
+		"TZ=Asia/Tokyo 0 9 * * *",
+	}
+	for _, expr := range exprs {
+		t.Run(expr, func(t *testing.T) {
+			_, err := NextCronTime(expr, "UTC", time.Now())
+			if err == nil {
+				t.Fatalf("expected error for prefixed expression %q, got none", expr)
+			}
+		})
+	}
+}

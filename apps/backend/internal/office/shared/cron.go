@@ -36,7 +36,11 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 	if err != nil {
 		return time.Time{}, err
 	}
-	schedule, err := cronParser.Parse(strings.TrimSpace(expression))
+	trimmed := strings.TrimSpace(expression)
+	if len(strings.Fields(trimmed)) != 5 {
+		return time.Time{}, fmt.Errorf("parse cron expression: %q: must be exactly 5 whitespace-separated fields (minute hour day-of-month month day-of-week); descriptors and TZ/CRON_TZ prefixes are not supported", expression)
+	}
+	schedule, err := cronParser.Parse(trimmed)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
 	}
