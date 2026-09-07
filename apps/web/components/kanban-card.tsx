@@ -137,7 +137,7 @@ export interface WorkflowStep {
 
 export type KanbanPresentation = PluginTaskMenuContext["presentation"];
 
-interface KanbanCardProps {
+export interface KanbanCardProps {
   task: Task;
   workspaceId: string | null;
   presentation?: KanbanPresentation;
