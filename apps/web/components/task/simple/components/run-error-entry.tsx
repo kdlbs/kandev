@@ -54,6 +54,7 @@ function TypedRunLaunchErrorEntry({
         stamp: error.errorStamp ?? "",
         occurred_at: error.failedAt,
         preview,
+        details: error.failureDetails,
         category: error.failureCode,
         recovery_actions: error.recoveryActions,
       }}

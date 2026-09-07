@@ -66,6 +66,49 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	return nil
 }
 
+// claimSharedTaskEnvironmentTaskDirName records the first stable task-root
+// identity supplied by an inherited worktree launch. The claim must happen
+// before lifecycle materialization so the physical root and durable projection
+// cannot diverge. A losing concurrent claimant may continue only when it asked
+// for the same canonical identity.
+func (e *Executor) claimSharedTaskEnvironmentTaskDirName(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+) error {
+	if env == nil || req == nil || env.TaskID == "" || env.TaskID == req.TaskID || env.TaskDirName != "" || !req.UseWorktree || req.TaskDirName == "" {
+		return nil
+	}
+	stamper, ok := e.repo.(taskEnvironmentTaskDirNameStamper)
+	if !ok {
+		return nil
+	}
+	claimed, err := stamper.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, req.TaskDirName)
+	if err != nil {
+		return fmt.Errorf("claim shared task directory name: %w", err)
+	}
+	if claimed {
+		env.TaskDirName = req.TaskDirName
+		return nil
+	}
+	current, err := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		return fmt.Errorf("read shared task directory name after claim: %w", err)
+	}
+	if current == nil || current.TaskDirName == "" || current.TaskDirName != req.TaskDirName {
+		return fmt.Errorf("%w: shared task environment was claimed for task directory %q, requested %q", models.ErrWorkspaceReuseUnsafe, currentTaskDirName(current), req.TaskDirName)
+	}
+	env.TaskDirName = current.TaskDirName
+	return nil
+}
+
+func currentTaskDirName(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.TaskDirName
+}
+
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
 	matches := 0
 	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)

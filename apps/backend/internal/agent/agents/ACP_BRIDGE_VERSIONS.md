@@ -2,9 +2,10 @@
 
 Kandev invokes these managed npm-provided ACP runtimes with the exact effective
 version. The default values below are the reviewed pins in
-`managed_npm_runtime_versions.json` at this commit. An operator selection
-replaces the default for that installation until **Use Kandev default** clears
-it.
+`managed_npm_runtime_versions.json` at this commit. An operator selection takes
+precedence for the current default generation. It remains effective until
+**Use Kandev default** clears it or a later shipped package/default generation
+resets it during startup.
 
 | Agent | Package | Default version | ACP arguments |
 | --- | --- | --- | --- |

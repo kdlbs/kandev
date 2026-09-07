@@ -81,6 +81,10 @@ test.describe("mobile task launch failure recovery", () => {
 
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1, { timeout: 30_000 });
+      await expect(testPage.getByTestId("last-agent-error-notice")).toHaveCount(0);
+      await expect(testPage.getByTestId("prepare-progress-panel")).toHaveCount(0);
+      await expect(testPage.getByTestId("missing-branch-recovery")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
       const actionButtons = card.locator("button[data-testid^='task-launch-']");
       await expect(actionButtons).not.toHaveCount(0);
       for (const button of await actionButtons.all()) {

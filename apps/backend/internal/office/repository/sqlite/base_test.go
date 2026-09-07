@@ -67,6 +67,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 		"office_agent_instructions",
 		"office_labels",
 		"office_task_labels",
+		"office_agent_pause_recoveries",
 		"task_workspace_groups",
 		"task_workspace_group_members",
 	}
