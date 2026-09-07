@@ -107,6 +107,7 @@ import (
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 
 	// Runs queue (Phase 3 of task-model-unification)
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsscheduler "github.com/kandev/kandev/internal/runs/scheduler"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	schedulercron "github.com/kandev/kandev/internal/scheduler/cron"
@@ -1090,6 +1091,7 @@ func startGatewayAndServe(
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),
+		launchSafetyLimitsFromConfig(cfg),
 	)
 	addCleanup(scheduling.Stop)
 	var restoreQuiesceOnce sync.Once
@@ -1588,6 +1590,34 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 		})
 }
 
+// launchSafetyLimits bundles the boot-time-resolved
+// REQ-OFFICE-LAUNCH-SAFETY / REQ-OFFICE-BACKPRESSURE-003 operator
+// overrides, mirroring the tickInterval pre-resolve-then-pass pattern
+// startSchedulingRuntime already uses for office.schedulerTickMs: every
+// field here is read once from cfg at startup and handed to the owning
+// repository/service via its SetXxx method, never polled at runtime.
+type launchSafetyLimits struct {
+	claim                runssqlite.ClaimSafetyLimits
+	maxCausationDepth    int
+	selfTriggerAllowance int
+	gateFailureThreshold int
+}
+
+func launchSafetyLimitsFromConfig(cfg *config.Config) launchSafetyLimits {
+	return launchSafetyLimits{
+		claim: runssqlite.ClaimSafetyLimits{
+			MaxConcurrentInstance:  cfg.Office.MaxConcurrentInstance,
+			MaxConcurrentWorkspace: cfg.Office.MaxConcurrentWorkspace,
+			WorkspaceBudgetPerHour: cfg.Office.WorkspaceBudgetPerHour,
+			RoutineBudgetPerHour:   cfg.Office.RoutineBudgetPerHour,
+			PromotionAge:           time.Duration(cfg.Office.PromotionAgeMinutes) * time.Minute,
+		},
+		maxCausationDepth:    cfg.Office.MaxCausationDepth,
+		selfTriggerAllowance: cfg.Office.SelfTriggerAllowance,
+		gateFailureThreshold: cfg.Office.GateFailureThreshold,
+	}
+}
+
 // startSchedulingRuntime wires the backend-wide runs service, workflow engine
 // dispatcher, runs scheduler, and shared cron loop. Office recovery is attached
 // only when Office feature services were initialized.
@@ -1600,6 +1630,7 @@ func startSchedulingRuntime(
 	runProcessorSvc *officeservice.Service,
 	log *logger.Logger,
 	tickInterval time.Duration,
+	safetyLimits launchSafetyLimits,
 ) *schedulingRuntime {
 	log.Info("Global run processor wired to orchestrator StartTask")
 	orchScheduler := officeservice.NewSchedulerIntegration(
@@ -1612,9 +1643,13 @@ func startSchedulingRuntime(
 	services.OrchScheduler = orchScheduler
 	// Wire the runs queue service so office.QueueRun delegates the
 	// insert + publish + signal to it (Phase 3 of task-model-unification).
+	runsRepo := repos.Office.RunsRepository()
+	runsRepo.SetClaimSafetyLimits(safetyLimits.claim)
+	runsRepo.SetGateFailureThreshold(safetyLimits.gateFailureThreshold)
 	runsSvc := runsservice.New(
-		repos.Office.RunsRepository(), eventBus, log, nil,
+		runsRepo, eventBus, log, nil,
 	)
+	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance)
 	runProcessorSvc.SetRunsService(runsSvc)
 	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
 	// dispatcher so office event subscribers route through the engine

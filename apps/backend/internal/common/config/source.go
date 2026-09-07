@@ -77,6 +77,14 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"agentctl.notificationQueueCapacity": {},
 	"planning.coalesceWindowMs":          {},
 	"office.schedulerTickMs":             {},
+	"office.maxConcurrentInstance":       {},
+	"office.maxConcurrentWorkspace":      {},
+	"office.workspaceBudgetPerHour":      {},
+	"office.routineBudgetPerHour":        {},
+	"office.promotionAgeMinutes":         {},
+	"office.maxCausationDepth":           {},
+	"office.selfTriggerAllowance":        {},
+	"office.gateFailureThreshold":        {},
 	"observability.otlpEndpoint":         {},
 	"launcher.webPort":                   {},
 	"launcher.healthTimeoutMs":           {},
@@ -293,6 +301,14 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072)
 	setDefaultInt("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000)
 	setDefaultInt("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000)
+	setDefaultInt("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8)
+	setDefaultInt("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4)
+	setDefaultInt("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120)
+	setDefaultInt("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20)
+	setDefaultInt("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15)
+	setDefaultInt("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8)
+	setDefaultInt("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3)
+	setDefaultInt("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3)
 	if !yamlKeys["observability.otlpEndpoint"] {
 		cfg.Observability.OTLPEndpoint = ""
 	}
@@ -316,6 +332,14 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyBoundedIntEnv("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072, 1024, 131072, envSnapshot, sources)
 	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, envSnapshot, sources)
 	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4, envSnapshot, sources)
+	applyPositiveIntEnv("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120, envSnapshot, sources)
+	applyPositiveIntEnv("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20, envSnapshot, sources)
+	applyPositiveIntEnv("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3, envSnapshot, sources)
+	applyPositiveIntEnv("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3, envSnapshot, sources)
 	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
 	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
