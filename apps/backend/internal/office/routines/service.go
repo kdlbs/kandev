@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -34,6 +35,7 @@ type Repository interface {
 	ListRoutines(ctx context.Context, workspaceID string) ([]*Routine, error)
 	UpdateRoutine(ctx context.Context, routine *Routine) error
 	DeleteRoutine(ctx context.Context, id string) error
+	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 
 	CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error
 	ListTriggersByRoutineID(ctx context.Context, routineID string) ([]*RoutineTrigger, error)
@@ -565,6 +567,18 @@ func (s *RoutineService) dispatchRoutineRun(
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
+	// AC-OFFICE-LOOP-LIVENESS-001.1: advances last_run_at for every
+	// dispatch, whatever disposition the run later reaches — so it must
+	// run before applyConcurrencyPolicy, which can short-circuit into a
+	// coalesced or skipped return. Errors are logged and counted, never
+	// returned (AC-001.7): a routine that fired must not read as having
+	// failed to fire because a bookkeeping write lost a lock.
+	if err := s.repo.TouchRoutineLastRun(ctx, routine.ID, *run.StartedAt); err != nil {
+		service.IncLoopLastRunAtWriteFailed(routine.WorkspaceID)
+		s.logger.Warn("touch routine last_run_at",
+			zap.String("routine_id", routine.ID), zap.Error(err))
+	}
+
 	status, err := s.applyConcurrencyPolicy(ctx, routine, run, fingerprint)
 	if err != nil {
 		return run, err
@@ -577,11 +591,6 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, err
 	}
 
-	if err := s.repo.TouchRoutineLastRun(ctx, routine.ID, now); err != nil {
-		s.logger.Warn("touch routine last_run_at",
-			zap.String("routine", routine.Name), zap.Error(err))
-	}
-	routine.LastRunAt = &now
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),
 		zap.String("run_id", run.ID),

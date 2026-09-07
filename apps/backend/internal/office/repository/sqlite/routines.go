@@ -196,7 +196,13 @@ func (r *Repository) ListRoutines(ctx context.Context, workspaceID string) ([]*m
 	return routines, nil
 }
 
-// UpdateRoutine updates an existing routine.
+// UpdateRoutine updates an existing routine. It deliberately does not
+// carry last_run_at (AC-OFFICE-LOOP-LIVENESS-001.8): that column only
+// ever moves forward, written by TouchRoutineLastRun from a dispatch, and
+// a caller here may be holding a routine loaded before a fire (or one
+// that never populated the field) — writing it unconditionally would let
+// that stale or nil snapshot silently move the value backwards or clear
+// it. routine.LastRunAt stays on the struct for reads.
 func (r *Repository) UpdateRoutine(ctx context.Context, routine *models.Routine) error {
 	routine.UpdatedAt = time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
@@ -204,12 +210,27 @@ func (r *Repository) UpdateRoutine(ctx context.Context, routine *models.Routine)
 			name = ?, description = ?, task_template = ?,
 			assignee_agent_profile_id = ?, status = ?, concurrency_policy = ?,
 			catch_up_policy = ?, catch_up_max = ?,
-			variables = ?, last_run_at = ?, updated_at = ?
+			variables = ?, updated_at = ?
 		WHERE id = ?
 	`), routine.Name, routine.Description, routine.TaskTemplate,
 		routine.AssigneeAgentProfileID, routine.Status, routine.ConcurrencyPolicy,
 		routine.CatchUpPolicy, routine.CatchUpMax,
-		routine.Variables, routine.LastRunAt, routine.UpdatedAt, routine.ID)
+		routine.Variables, routine.UpdatedAt, routine.ID)
+	return err
+}
+
+// TouchRoutineLastRun advances office_routines.last_run_at to at,
+// monotonically: the write is a zero-row no-op, not an error, when the
+// stored value is already at or after at (AC-OFFICE-LOOP-LIVENESS-001.3,
+// .4, .6). Deliberately narrower than UpdateRoutine's eleven-column
+// read-modify-write, which would turn a routine dispatch into a race
+// against a concurrent UI or config-sync edit (AC-OFFICE-LOOP-LIVENESS-001.5).
+func (r *Repository) TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routines
+		SET last_run_at = ?, updated_at = ?
+		WHERE id = ? AND (last_run_at IS NULL OR last_run_at < ?)
+	`), at, time.Now().UTC(), routineID, at)
 	return err
 }
 
@@ -402,18 +423,6 @@ func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (
 	default:
 		return "", nil
 	}
-}
-
-// TouchRoutineLastRun updates only last_run_at (+ updated_at) on a
-// routine. Deliberately narrower than UpdateRoutine, whose whole-row
-// snapshot write can revert concurrent edits to other columns (see
-// UpdateRoutineConfigFields above) — a dispatch in flight should never
-// clobber a config change made while it ran, or vice versa.
-func (r *Repository) TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE office_routines SET last_run_at = ?, updated_at = ? WHERE id = ?
-	`), at, time.Now().UTC(), routineID)
-	return err
 }
 
 // UpdateRunStatus updates a run's status and optionally its linked task.
