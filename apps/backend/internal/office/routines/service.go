@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -64,6 +65,11 @@ type Repository interface {
 	// reports "" when it is active, "done", "failed", "cancelled", or
 	// "missing" for the other outcomes.
 	GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error)
+
+	// CreatePauseSkippedRoutineRun records a fire blocked by a workspace
+	// pause as a skipped run, keyed on (routine_id, pause_id) so a second
+	// blocked fire under the same pause writes no duplicate row.
+	CreatePauseSkippedRoutineRun(ctx context.Context, routineID, triggerID, source, pauseID string) (bool, error)
 }
 
 // WakeupEnqueuer is the slim surface routines need to enqueue + dispatch
@@ -120,6 +126,7 @@ type RoutineService struct {
 	wakeup          WakeupEnqueuer
 	workflowEnsurer RoutineWorkflowEnsurer
 	taskCreator     RoutineTaskCreator
+	pauseGate       shared.PauseGate
 }
 
 // NewRoutineService creates a new RoutineService.
@@ -145,6 +152,12 @@ func (s *RoutineService) SetWorkflowEnsurer(e RoutineWorkflowEnsurer) { s.workfl
 // routine flow. Optional — when nil the heavy branch falls back to
 // lightweight behaviour (no task created).
 func (s *RoutineService) SetTaskCreator(c RoutineTaskCreator) { s.taskCreator = c }
+
+// SetPauseGate wires the workspace-pause read used to block routine
+// dispatch (cron, webhook, and manual all funnel through
+// dispatchRoutineRun). Optional — when nil, dispatch is never gated
+// (used by tests that don't exercise the kill switch).
+func (s *RoutineService) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
 // CoordinatorRoutineName is the canonical name used for the
 // pre-installed coordinator-heartbeat routine. The (workspace_id, name,
@@ -422,6 +435,13 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 		missedForPayload = runCount - 1
 	}
 	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload)
+	if errors.Is(err, shared.ErrWorkspacePaused) {
+		// A confirmed operator pause is not a cron-tick failure — the
+		// blocked fire is already recorded as a skipped run, and
+		// TickScheduledTriggers logs any non-nil error at ERROR, which
+		// would otherwise page on-call for expected behaviour.
+		return nil
+	}
 	return err
 }
 
@@ -552,6 +572,10 @@ func (s *RoutineService) dispatchRoutineRun(
 	}
 	payloadJSON, _ := json.Marshal(vars)
 
+	if err := s.checkPauseGate(ctx, routine.WorkspaceID, routine.ID, triggerID, source); err != nil {
+		return nil, err
+	}
+
 	run := &RoutineRun{
 		RoutineID:           routine.ID,
 		TriggerID:           triggerID,
@@ -588,6 +612,36 @@ func (s *RoutineService) dispatchRoutineRun(
 		zap.String("title", title),
 		zap.Bool("heavy", tmpl.Title != ""))
 	return run, nil
+}
+
+// checkPauseGate is the shared routine-dispatch gate — the single
+// insertion point cron, webhook, and manual fires all pass through via
+// dispatchRoutineRun. A confirmed pause records the blocked fire as a
+// skipped run (best-effort: an insert failure is logged, not returned,
+// since the fire is blocked either way) and returns
+// shared.ErrWorkspacePaused. A gate-read error writes no row (nothing
+// to retry from — the caller gets shared.ErrPauseGateUnavailable and
+// the next tick/call tries again) and fails closed.
+func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routineID, triggerID, source string) error {
+	if s.pauseGate == nil {
+		return nil
+	}
+	active, err := s.pauseGate.PauseState(ctx, workspaceID)
+	if err != nil {
+		pause.RecordGateError("routine_dispatch")
+		s.logger.Warn("routine dispatch: pause gate read failed",
+			zap.String("routine_id", routineID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active == nil {
+		return nil
+	}
+	pause.RecordBlocked("routine_dispatch")
+	if _, err := s.repo.CreatePauseSkippedRoutineRun(ctx, routineID, triggerID, source, active.ID); err != nil {
+		s.logger.Warn("routine dispatch: record pause-skipped run failed",
+			zap.String("routine_id", routineID), zap.Error(err))
+	}
+	return shared.ErrWorkspacePaused
 }
 
 // materialiseRoutineRun branches on tmpl.Title to choose the lightweight
