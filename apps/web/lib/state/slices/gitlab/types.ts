@@ -101,6 +101,7 @@ export type GitLabSliceActions = {
 
   setGitLabStatus: (workspaceId: string, status: GitLabStatus | null) => void;
   setGitLabStatusLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitLabStatus: (workspaceId: string) => void;
 
   setTaskMRAutomationOptions: (taskId: string, options: TaskMRAutomationOptions) => void;
   setTaskMRAutomationLoading: (taskId: string, loading: boolean) => void;

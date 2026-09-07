@@ -217,6 +217,20 @@ describe("GitLab status", () => {
       "ws-b": { data: null, loading: true, loadedAt: null },
     });
   });
+
+  it("resets one workspace status without affecting another", () => {
+    const store = makeStore();
+    store.getState().setGitLabStatus("ws-a", makeStatus());
+    store.getState().setGitLabStatusLoading("ws-a", true);
+    store.getState().setGitLabStatus("ws-b", makeStatus());
+
+    store.getState().resetGitLabStatus("ws-a");
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: null, loading: false, loadedAt: null },
+      "ws-b": { data: expect.any(Object), loading: false, loadedAt: expect.any(Number) },
+    });
+  });
 });
 
 describe("removeTaskMR", () => {

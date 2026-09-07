@@ -25,6 +25,7 @@ type AsyncResult<T> = {
 
 type AzureDevOpsConnectionState = AsyncResult<AzureDevOpsConfig | null> & {
   workspaceId?: string;
+  refreshing: boolean;
 };
 
 function useOperationGeneration(scope?: string) {
@@ -42,22 +43,39 @@ export function useAzureDevOpsConnection(workspaceId?: string) {
     data: null,
     loading: true,
     error: null,
+    refreshing: false,
   });
   useEffect(() => {
     let cancelled = false;
     let requestId = 0;
     const load = async () => {
       const currentRequestId = ++requestId;
-      setState({ workspaceId, data: null, loading: Boolean(workspaceId), error: null });
+      setState((previous) => {
+        const sameWorkspace = previous.workspaceId === workspaceId;
+        const backgroundRefresh = sameWorkspace && !previous.loading;
+        return {
+          workspaceId,
+          data: sameWorkspace ? previous.data : null,
+          loading: Boolean(workspaceId) && !backgroundRefresh,
+          error: null,
+          refreshing: Boolean(workspaceId) && backgroundRefresh,
+        };
+      });
       if (!workspaceId) return;
       try {
         const data = await getAzureDevOpsConfig(workspaceId, { cache: "no-store" });
         if (!cancelled && currentRequestId === requestId) {
-          setState({ workspaceId, data, loading: false, error: null });
+          setState({ workspaceId, data, loading: false, error: null, refreshing: false });
         }
       } catch (err) {
         if (!cancelled && currentRequestId === requestId) {
-          setState({ workspaceId, data: null, loading: false, error: String(err) });
+          setState((previous) => ({
+            workspaceId,
+            data: previous.workspaceId === workspaceId ? previous.data : null,
+            loading: false,
+            error: String(err),
+            refreshing: false,
+          }));
         }
       }
     };
@@ -79,7 +97,7 @@ export function useAzureDevOpsConnection(workspaceId?: string) {
   const scopedState =
     state.workspaceId === workspaceId
       ? state
-      : { workspaceId, data: null, loading: Boolean(workspaceId), error: null };
+      : { workspaceId, data: null, loading: Boolean(workspaceId), error: null, refreshing: false };
   return { ...scopedState, refresh };
 }
 

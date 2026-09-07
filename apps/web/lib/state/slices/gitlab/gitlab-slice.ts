@@ -217,6 +217,14 @@ function statusActions(set: ImmerSet) {
           });
         entry.loading = loading;
       }),
+    resetGitLabStatus: (workspaceId: string) =>
+      set((draft) => {
+        draft.gitlabStatus.byWorkspaceId[workspaceId] = {
+          data: null,
+          loading: false,
+          loadedAt: null,
+        };
+      }),
   };
 }
 

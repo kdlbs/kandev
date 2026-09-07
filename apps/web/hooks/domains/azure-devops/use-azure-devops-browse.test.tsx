@@ -2,6 +2,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AzureDevOpsPullRequest } from "@/lib/types/azure-devops";
 import { invalidateIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 
 const apiMocks = vi.hoisted(() => ({
   config: vi.fn(),
@@ -28,10 +29,12 @@ const WORKSPACE_A = "workspace-a";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 const pullRequest = {
@@ -46,7 +49,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("Azure DevOps browse hooks", () => {
+describe("Azure DevOps connection hook", () => {
   it("clears connection data while switching workspaces", async () => {
     const nextWorkspace = deferred<{ hasSecret: boolean; organizationUrl: string }>();
     apiMocks.config
@@ -83,6 +86,70 @@ describe("Azure DevOps browse hooks", () => {
     await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps a connected state usable during the scheduled background refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const refresh = deferred<{ hasSecret: boolean; lastOk: boolean }>();
+      apiMocks.config
+        .mockResolvedValueOnce({ hasSecret: true, lastOk: true })
+        .mockReturnValueOnce(refresh.promise);
+      const { result } = renderHook(() => useAzureDevOpsConnection(WORKSPACE_A));
+
+      await vi.waitFor(() => expect(result.current.data?.hasSecret).toBe(true));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(INTEGRATION_STATUS_REFRESH_MS);
+      });
+
+      expect(apiMocks.config).toHaveBeenCalledTimes(2);
+      expect(result.current.data?.hasSecret).toBe(true);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.refreshing).toBe(true);
+
+      await act(async () => {
+        refresh.resolve({ hasSecret: true, lastOk: true });
+        await refresh.promise;
+      });
+      expect(result.current.refreshing).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves a connected state during and after a failed background refresh", async () => {
+    const refresh = deferred<{ hasSecret: boolean; lastOk: boolean }>();
+    apiMocks.config
+      .mockResolvedValueOnce({ hasSecret: true, lastOk: true })
+      .mockReturnValueOnce(refresh.promise);
+    const { result } = renderHook(() => useAzureDevOpsConnection(WORKSPACE_A));
+
+    await waitFor(() => expect(result.current.data?.hasSecret).toBe(true));
+    act(() => invalidateIntegrationAvailability());
+    await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(2));
+
+    expect(result.current.data?.hasSecret).toBe(true);
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => refresh.reject(new Error("Azure temporarily unavailable")));
+    await waitFor(() => expect(result.current.error).toContain("temporarily unavailable"));
+    expect(result.current.data?.hasSecret).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("removes eligibility when a background refresh confirms no connection", async () => {
+    apiMocks.config
+      .mockResolvedValueOnce({ hasSecret: true, lastOk: true })
+      .mockResolvedValueOnce(null);
+    const { result } = renderHook(() => useAzureDevOpsConnection(WORKSPACE_A));
+
+    await waitFor(() => expect(result.current.data?.hasSecret).toBe(true));
+    act(() => invalidateIntegrationAvailability());
+
+    await waitFor(() => expect(result.current.data).toBeNull());
+    expect(result.current.loading).toBe(false);
+  });
+});
+
+describe("Azure DevOps browse hooks", () => {
   it("ignores a work-item response from the previous workspace", async () => {
     const stale = deferred<{ items: Array<{ id: number }> }>();
     apiMocks.workItems.mockReturnValueOnce(stale.promise);
