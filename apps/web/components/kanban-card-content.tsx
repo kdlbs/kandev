@@ -36,12 +36,7 @@ import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
-import {
-  getTaskStateIcon,
-  shouldShowTaskRunningSpinner,
-  shouldUsePermissionTaskIcon,
-  shouldUseQuestionTaskIcon,
-} from "@/lib/ui/state-icons";
+import { shouldShowTaskRunningSpinner } from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import { canShowHumanAssignee } from "@/lib/auth/human-assignee";

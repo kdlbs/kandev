@@ -10,21 +10,15 @@ import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
+import { KanbanCardDialogs } from "@/components/kanban-card-dialogs";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
-import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
-import {
-  TaskExternalLinkDialog,
-  type ExternalLinkProvider,
-} from "@/components/task/task-external-link-dialog";
+import { type ExternalLinkProvider } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
-import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
-import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
@@ -32,7 +26,6 @@ import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
   type ForegroundActivity,
-  type Repository,
   type TaskPendingAction,
   type TaskPriority,
   type TaskState,
@@ -398,70 +391,6 @@ function useKanbanCardMenus({
 }
 
 type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
-
-function KanbanCardDialogs({
-  task,
-  workspaceId,
-  repositories,
-  menu,
-  isDeleting,
-  onDelete,
-}: {
-  task: Task;
-  workspaceId: string | null;
-  repositories: Repository[];
-  menu: KanbanCardMenuState;
-  isDeleting?: boolean;
-  onDelete?: KanbanCardProps["onDelete"];
-}) {
-  return (
-    <>
-      <TaskDeleteConfirmDialog
-        open={menu.showDeleteConfirm}
-        onOpenChange={menu.setShowDeleteConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isDeleting={isDeleting}
-        onConfirm={(opts) => onDelete?.(task, opts)}
-      />
-      <TaskGitHubPRDialog
-        workspaceId={workspaceId}
-        open={menu.showPRDialog}
-        onOpenChange={menu.setShowPRDialog}
-        task={task}
-        repositories={repositories}
-      />
-      <TaskGitHubIssueDialog
-        open={menu.showIssueDialog}
-        onOpenChange={menu.setShowIssueDialog}
-        task={task}
-        repositories={repositories}
-      />
-      {workspaceId && (
-        <TaskMRLinkDialog
-          open={menu.showMRDialog}
-          onOpenChange={menu.setShowMRDialog}
-          taskId={task.id}
-          workspaceId={workspaceId}
-          taskRepositories={task.repositories ?? []}
-          repositories={repositories}
-        />
-      )}
-      {menu.externalLinkProvider && workspaceId && (
-        <TaskExternalLinkDialog
-          open={true}
-          onOpenChange={(open) => {
-            if (!open) menu.setExternalLinkProvider(null);
-          }}
-          provider={menu.externalLinkProvider}
-          task={task}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
 
 /**
  * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the
