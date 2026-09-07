@@ -313,8 +313,8 @@ func TestMarkAgentPausedFixed_NonPausedAgentGuardAndRequeueError(t *testing.T) {
 	}
 
 	err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-guarded")
-	if err == nil {
-		t.Fatalf("expected requeue failure to be returned, got nil error")
+	if err == nil || !strings.Contains(err.Error(), "requeue task") {
+		t.Fatalf("expected a requeue error, got: %v", err)
 	}
 
 	after, getErr := svc.GetAgentInstance(ctx, "agent-guarded")
