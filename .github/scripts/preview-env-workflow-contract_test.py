@@ -111,6 +111,11 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         self.assertIn("--skip-web-build", package_job)
         self.assertIn("actions/download-artifact", deploy_job)
         self.assertIn("sha256sum --check", deploy_job)
+        self.assertIn(
+            '(cd "$RUNNER_TEMP" && /usr/bin/sha256sum kandev-preview.tar.gz) '
+            '> "$RUNNER_TEMP/kandev-preview.tar.gz.sha256"',
+            package_job,
+        )
         self.assertRegex(
             deploy_job,
             re.compile(
