@@ -107,7 +107,7 @@ func (s *Service) QueueRunWithActor(
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
-			Payload:        payloadWithAgent(payload, agentInstanceID),
+			Payload:        PayloadWithAgent(payload, agentInstanceID),
 			ActorKind:      actorKind,
 			ActorID:        actorID,
 		})
@@ -181,12 +181,14 @@ func (s *Service) queueRunInline(
 	return nil
 }
 
-// payloadWithAgent decodes the JSON payload string and adds the
+// PayloadWithAgent decodes the JSON payload string and adds the
 // agent_profile_id field so the runs service can resolve the
 // instance without a separate resolver. The runs queue's payload
 // column is JSON, so re-injecting the field here keeps the row shape
-// identical to the legacy office.QueueRun insert.
-func payloadWithAgent(payload, agentInstanceID string) map[string]any {
+// identical to the legacy office.QueueRun insert. Exported so
+// office/scheduler.SchedulerService.QueueRun can delegate through the
+// same seam without duplicating this decode-and-inject step.
+func PayloadWithAgent(payload, agentInstanceID string) map[string]any {
 	out := map[string]any{}
 	if payload != "" {
 		_ = json.Unmarshal([]byte(payload), &out)

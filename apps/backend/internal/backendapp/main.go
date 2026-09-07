@@ -1651,6 +1651,15 @@ func startSchedulingRuntime(
 	)
 	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance)
 	runProcessorSvc.SetRunsService(runsSvc)
+	// office/scheduler.SchedulerService.QueueRun/QueueRunCtx (approval-resolved
+	// and reactivity wakes) also delegate through the same seam, gaining
+	// causation resolution and the launch-safety refusal gates
+	// (AC-CONSOLIDATION-001.6). services.OfficeSvcs is populated by
+	// initOfficeServices before this function runs; nil only when
+	// features.office is off, in which case there's no scheduler to wire.
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Scheduler != nil {
+		services.OfficeSvcs.Scheduler.SetRunsService(runsSvc)
+	}
 	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
 	// dispatcher so office event subscribers route through the engine
 	// unconditionally.

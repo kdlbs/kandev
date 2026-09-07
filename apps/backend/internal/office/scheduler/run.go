@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // ErrRoutingNotSupported is returned by TaskStarter.StartTaskWithRoute
@@ -168,6 +169,7 @@ type SchedulerService struct {
 	repo                    *sqlite.Repository
 	logger                  *logger.Logger
 	svc                     *service.Service
+	runsService             *runsservice.Service
 	taskStarter             TaskStarter
 	resolver                *routing.Resolver
 	eb                      bus.EventBus
@@ -207,6 +209,16 @@ func (ss *SchedulerService) SetResolver(r *routing.Resolver) {
 // the scheduler silent and tests don't need to stand up a bus.
 func (ss *SchedulerService) SetEventBus(eb bus.EventBus) {
 	ss.eb = eb
+}
+
+// SetRunsService wires the shared runs queue service (AC-CONSOLIDATION-001.6).
+// When set, QueueRun delegates its insert + publish + signal to it instead of
+// its own ss.repo.CreateRun, so this path gains causation resolution,
+// priority stamping, and the launch-safety refusal gates for free. Optional;
+// nil keeps the legacy inline path this package has always used, so existing
+// tests that never call this still pass.
+func (ss *SchedulerService) SetRunsService(svc *runsservice.Service) {
+	ss.runsService = svc
 }
 
 // Resolver returns the wired routing resolver (may be nil).
@@ -251,6 +263,16 @@ func (ss *SchedulerService) QueueRun(
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
 	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
+		return err
+	}
+
+	if ss.runsService != nil {
+		_, err := ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+			Reason:         reason,
+			IdempotencyKey: idempotencyKey,
+			Payload:        service.PayloadWithAgent(payload, agentInstanceID),
+			ActorKind:      models.ActorKindSystem,
+		})
 		return err
 	}
 
