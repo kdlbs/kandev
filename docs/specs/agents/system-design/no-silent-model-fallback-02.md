@@ -12,15 +12,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design records risks for executor-authoritative model fallback and unique
-variation resolution.
+This design records risks for executor-authoritative model fallback.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Risks & Open Questions](#risks--open-questions) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | Superseded by exact-profile identity. |
 
 ## Migrated source detail
 
@@ -55,14 +54,8 @@ variation resolution.
 - **Hover is supplementary**: every info icon is focusable, and coarse-pointer
   devices receive the same content in a drawer. The visible option helper copy
   remains the baseline explanation.
-- **Provider-specific labels remain opaque**: `1m`, `270k`, and `fast` have no
-  Kandev-defined order. More than one variation therefore fails closed to the
-  existing provider-default path.
-- **Host and executor decisions can differ**: a unique host variation is only
-  an advisory. The selected executor can advertise zero, one, or multiple
-  variations at launch.
-- **Bracketed requests do not drift sideways**: a request such as `opus[1m]`
-  does not infer `opus[270k]`. The user must select another explicit model.
+- **Provider-specific labels remain opaque**: Kandev does not infer a variation
+  from an exact requested model. The user must select another explicit model.
 - **Legacy automatic fallback remains unchanged**: when `auto_fallback` is
   enabled and the requested model is absent, Kandev does not apply an explicit
   fallback or infer a variation. It continues with the provider default.

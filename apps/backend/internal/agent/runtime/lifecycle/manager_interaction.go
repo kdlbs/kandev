@@ -544,8 +544,7 @@ func (m *Manager) reapplySessionModelAfterReset(
 	}
 	if decision.EffectiveModel != "" &&
 		(decision.Outcome == ModelSelectionOutcomeApplied ||
-			decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-			decision.Outcome == ModelSelectionOutcomeUniqueVariation) {
+			decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),

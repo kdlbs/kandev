@@ -30,6 +30,16 @@ must stop the launch before inference rather than silently run another model.
   `auto_fallback=true`, provider-default continuation remains explicitly
   authorized and visible.
 
+### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002: Resolve one advertised model variation
+
+**Status:** Superseded by the exact-profile amendment to
+`REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001`. An inferred variation is not an
+exact model identity and therefore cannot authorize inference.
+
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-002.1:** This superseded requirement
+  has no active runtime behavior; model selection follows
+  `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001`.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/no-silent-model-fallback-01.md), [part 2](../system-design/no-silent-model-fallback-02.md).
