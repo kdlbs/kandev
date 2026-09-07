@@ -455,11 +455,11 @@ func (r *Repository) CoalesceRun(
 	taskID := taskIDFromPayload(payload)
 	taskPredicate := ""
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
-	// Task assignment and failure recovery wakes are task-specific: merging
-	// two tasks for the same agent would replace the first task's payload and
-	// silently drop its launch. Other reasons, such as task comments,
-	// intentionally retain their existing cross-task coalescing behaviour.
-	if taskID != "" && isTaskScopedCoalescingReason(reason) {
+	// A task-scoped payload identifies a specific launch: merging two
+	// tasks for the same agent would replace the first task's payload
+	// and silently drop its launch. Agent-scoped reasons (heartbeat,
+	// budget_alert) carry no task_id, so the predicate is inert there.
+	if taskID != "" {
 		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
 		args = append(args, taskID)
 	}
@@ -485,10 +485,6 @@ func (r *Repository) CoalesceRun(
 		return false, err
 	}
 	return rows > 0, nil
-}
-
-func isTaskScopedCoalescingReason(reason string) bool {
-	return reason == "task_assigned" || reason == "manual_resume_after_failure"
 }
 
 func taskIDFromPayload(payload string) string {

@@ -98,6 +98,34 @@ func TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns(t *t
 	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
 }
 
+// TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons pins the
+// same guarantee as TestCoalesceRun_DoesNotMergeDifferentTaskRuns for a
+// task-scoped reactivity reason other than "task_assigned" — e.g. two
+// blocked tasks unblocked by the same predecessor and assigned to the
+// same agent within the coalesce window must not merge into one run.
+func TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "task-a-run", AgentProfileID: "a1", Reason: "task_blockers_resolved",
+		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_blockers_resolved", 3600, `{"task_id":"task-b"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a different task, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
 // TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates proves
 // the task-scoping predicate added for manual_resume_after_failure still
 // allows genuine duplicates (repeated wakes for the same task) to coalesce
