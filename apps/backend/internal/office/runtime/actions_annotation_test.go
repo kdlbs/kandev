@@ -190,6 +190,28 @@ func TestPostComment_NoTargetAndNoBoundTaskRefuses(t *testing.T) {
 	}
 }
 
+func TestPostComment_TaskBoundRunPaddedTargetMatchingOwnTaskSucceeds(t *testing.T) {
+	comments := &recordingCommentWriter{}
+	actions := NewActions(ActionDependencies{Comments: comments})
+	runCtx := RunContext{
+		AgentID:      "agent-1",
+		WorkspaceID:  "ws-1",
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		Capabilities: Capabilities{CanPostComments: true},
+	}
+
+	if err := actions.PostComment(context.Background(), runCtx, "  task-1  ", "status update"); err != nil {
+		t.Fatalf("PostComment: %v", err)
+	}
+	if len(comments.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(comments.comments))
+	}
+	if comments.comments[0].TaskID != "task-1" {
+		t.Fatalf("TaskID = %q, want trimmed task-1", comments.comments[0].TaskID)
+	}
+}
+
 func TestPostComment_AnnotationIsNotIdempotent(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{"task-x": "ws-1"}}
 	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("ws-1", tasks)

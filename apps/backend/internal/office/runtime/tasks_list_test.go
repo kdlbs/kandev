@@ -234,6 +234,29 @@ func TestListTasks_AppendsActionRunEventOnSuccess(t *testing.T) {
 	assertActionRunEvent(t, h.runEvents, "list_tasks", "workspace", "ws-1")
 }
 
+func TestListTasks_RepeatedIdenticalCallsAreNotDeduplicated(t *testing.T) {
+	lister := &fakeTaskFilteredLister{}
+	h := newBoardReadHarness(t, Capabilities{CanListTasks: true}, "ws-1", lister)
+
+	for i := 0; i < 2; i++ {
+		resp := h.get(t, "/runtime/tasks")
+		if resp.Code != http.StatusOK {
+			t.Fatalf("call %d: status = %d, want %d; body=%s", i, resp.Code, http.StatusOK, resp.Body.String())
+		}
+	}
+	if lister.calls != 2 {
+		t.Fatalf("lister calls = %d, want 2", lister.calls)
+	}
+	if len(h.runEvents.events) != 2 {
+		t.Fatalf("run events = %d, want 2 (no dedup)", len(h.runEvents.events))
+	}
+	for _, event := range h.runEvents.events {
+		if event.eventType != "runtime.action" {
+			t.Fatalf("event = %#v, want eventType runtime.action", event)
+		}
+	}
+}
+
 func TestListTasks_DeniedCapabilityAppendsDeniedRunEvent(t *testing.T) {
 	lister := &fakeTaskFilteredLister{}
 	h := newBoardReadHarness(t, Capabilities{}, "ws-1", lister)

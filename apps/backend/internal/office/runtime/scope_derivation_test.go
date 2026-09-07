@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -446,5 +448,65 @@ func TestBuildAndPersist_CASErrorReturnsError(t *testing.T) {
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err == nil {
 		t.Fatal("expected the CAS error to propagate")
+	}
+}
+
+func TestBuildAndPersist_NilRunReturnsErrorNotPanic(t *testing.T) {
+	builder := ContextBuilder{}
+
+	if _, err := builder.BuildAndPersist(context.Background(), nil); err == nil {
+		t.Fatal("expected an error for a nil run, not a panic")
+	}
+}
+
+func TestBuildAndPersist_CASLoserReadFailureReturnsError(t *testing.T) {
+	lister := &stubRunnerLister{ids: []string{"mine"}, total: 1}
+	store := &recordingRunSnapshotStore{casWins: false, getErr: errors.New("db down")}
+	builder := ContextBuilder{
+		Agents:       &recordingAgentReader{agent: taskAgent()},
+		Runs:         store,
+		RunnerLister: lister,
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+
+	_, err := builder.BuildAndPersist(context.Background(), run)
+	if err == nil {
+		t.Fatal("expected the re-read failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "re-read run after lost scope race") {
+		t.Fatalf("error = %v, want it to mention the re-read failure", err)
+	}
+}
+
+func TestBuildAndPersist_PersistsSerializedRunnerSetScope(t *testing.T) {
+	lister := &stubRunnerLister{ids: []string{"t1", "t2"}, total: 2}
+	store := &recordingRunSnapshotStore{casWins: true}
+	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+
+	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
+		t.Fatalf("BuildAndPersist: %v", err)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("expected 1 snapshot write, got %d", len(store.calls))
+	}
+
+	var persistedCaps Capabilities
+	if err := json.Unmarshal([]byte(store.calls[0].Capabilities), &persistedCaps); err != nil {
+		t.Fatalf("decode persisted capabilities: %v", err)
+	}
+	if got := persistedCaps.AllowedTaskIDs; len(got) != 2 || got[0] != "t1" || got[1] != "t2" {
+		t.Fatalf("persisted AllowedTaskIDs = %v, want [t1 t2]", got)
+	}
+	if persistedCaps.TaskScopeSource != TaskScopeSourceRunnerSet {
+		t.Fatalf("persisted TaskScopeSource = %q, want runner_set", persistedCaps.TaskScopeSource)
+	}
+
+	var persistedRunCtx RunContext
+	if err := json.Unmarshal([]byte(store.calls[0].InputSnapshot), &persistedRunCtx); err != nil {
+		t.Fatalf("decode persisted input snapshot: %v", err)
+	}
+	if got := persistedRunCtx.Capabilities.AllowedTaskIDs; len(got) != 2 || got[0] != "t1" || got[1] != "t2" {
+		t.Fatalf("persisted input snapshot AllowedTaskIDs = %v, want [t1 t2]", got)
 	}
 }

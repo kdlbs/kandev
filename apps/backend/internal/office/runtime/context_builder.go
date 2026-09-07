@@ -241,11 +241,11 @@ func withScope(caps Capabilities, derivation scopeDerivation) Capabilities {
 // appender, or persists nothing (no Runs store) appends no scope event and
 // still returns a context.
 func (b *ContextBuilder) BuildAndPersist(ctx context.Context, run *models.Run) (RunContext, error) {
-	prevCapabilities := run.Capabilities
 	runCtx, derivation, err := b.build(ctx, run)
 	if err != nil {
 		return RunContext{}, err
 	}
+	prevCapabilities := run.Capabilities
 	if b.Runs == nil {
 		return runCtx, nil
 	}

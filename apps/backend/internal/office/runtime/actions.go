@@ -392,13 +392,13 @@ func (a *Actions) authorizeTaskWorkspace(ctx context.Context, runCtx RunContext,
 }
 
 // canAnnotateTask is the annotation scope predicate: a task-bound run may
-// annotate only its own task; a taskless run may annotate any task that
-// resolves to its own workspace claim. The two checks never interact — a
-// task-bound run never consults a workspace lookup, and a taskless run
-// never falls back to its (absent) task id. A cross-workspace target and a
-// nonexistent one refuse with the same sentinel so annotation cannot be
-// used as an existence oracle; a failed lookup is returned as-is so an
-// outage is not read as a refusal.
+// annotate only its own (already-trimmed) task; a taskless run may annotate
+// any task that resolves to its own workspace claim. The two checks never
+// interact — a task-bound run never consults a workspace lookup, and a
+// taskless run never falls back to its (absent) task id. A cross-workspace
+// target and a nonexistent one refuse with the same sentinel so annotation
+// cannot be used as an existence oracle; a failed lookup is returned as-is
+// so an outage is not read as a refusal.
 func (a *Actions) canAnnotateTask(ctx context.Context, runCtx RunContext, taskID string) error {
 	if strings.TrimSpace(runCtx.TaskID) != "" {
 		if taskID != runCtx.TaskID {
@@ -430,6 +430,7 @@ func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, bo
 	if strings.TrimSpace(body) == "" {
 		return ErrCommentBodyRequired
 	}
+	taskID = strings.TrimSpace(taskID)
 	if err := a.canAnnotateTask(ctx, runCtx, taskID); err != nil {
 		return err
 	}

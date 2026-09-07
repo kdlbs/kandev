@@ -39,11 +39,11 @@ type TaskListItem struct {
 	IsSystem    bool   `json:"is_system,omitempty"`
 }
 
-// listTasks handles GET /runtime/tasks (REQ-OFFICE-COORDINATOR-AUTHORITY-001,
-// -002): board read scoped to the run token's workspace claim, never a
-// caller-supplied one. Evaluation order is capability, workspace claim,
-// parameter validation, then the query — so a run lacking the capability
-// learns nothing about which parameters would have been accepted.
+// listTasks handles GET /runtime/tasks: board read scoped to the run
+// token's workspace claim, never a caller-supplied one. Evaluation order is
+// capability, workspace claim, parameter validation, then the query — so a
+// run lacking the capability learns nothing about which parameters would
+// have been accepted.
 func (h *Handler) listTasks(c *gin.Context) {
 	runCtx, _, ok := h.contextFromRequest(c)
 	if !ok {
