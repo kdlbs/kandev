@@ -34,10 +34,10 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The seven requirements above now have
-authoritative, wrapper-free requirement/design pairs. Other migrated files still
-need the same extraction before this system can return to a complete migration
-state.
+Migration remains in progress. Use the catalog command to find the current
+requirement and system-design documents for this system. Other migrated files
+still need the same extraction before this system can return to a complete
+migration state.
 
 ## Related systems
 

@@ -46,8 +46,10 @@ Read status, date, and area from the metadata block. Filter status by its leadin
 class, such as `accepted`, while displaying the complete value.
 
 Specification parsing derives `system` and `kind` from the path. Recognized
-kinds are `system`, `requirement`, `system-design`, and `legacy`. Read titles and
-metadata with the same meaning as the specification linter.
+kinds are `system`, `glossary`, `requirement`, `system-design`, `product`, and
+`legacy`. Both the catalog and the specification linter use
+`scripts/spec_metadata.py` for path classification, frontmatter parsing, and
+status sets.
 
 The JSON output contains a top-level schema version and an ordered `documents`
 array. Each item contains the common path, title, and type fields plus the
@@ -60,7 +62,8 @@ type-specific metadata. Empty filters return an empty successful result.
 - Every documented filter works alone and with other filters.
 - Each output format represents the same ordered result set.
 - Invalid metadata returns a nonzero exit status and identifies the file.
-- Tests cover existing ADR metadata variants and specification frontmatter.
+- Tests cover existing ADR metadata variants, every specification source kind,
+  and specification frontmatter errors.
 
 ## Verification
 
@@ -75,6 +78,8 @@ python3 scripts/list-docs.py specs --system ui --kind requirement --format paths
 
 - `scripts/list-docs.py`
 - `scripts/list-docs.test.py`
+- `scripts/spec_metadata.py`
+- `scripts/lint-spec-files.py`
 
 ## Dependencies
 
@@ -99,5 +104,7 @@ None.
 
 ## Results
 
-Done. The catalog command finds 247 decisions and 708 specifications. Focused
-tests, repository validation, and the documented filter examples pass.
+Done. The catalog command discovers every supported decision and specification
+source kind. Product documents and valid glossaries are not legacy sources.
+Malformed system README metadata fails validation with the source path. The
+focused tests, repository validation, and documented filter examples pass.

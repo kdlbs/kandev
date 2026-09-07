@@ -146,6 +146,7 @@ Review the artifacts before you run the linter:
 Run:
 
 ```bash
+python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs docs/decisions

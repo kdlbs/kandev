@@ -11,15 +11,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from spec_metadata import (
+        classify_path,
+        metadata_text as spec_metadata_text,
+        parse_frontmatter as parse_spec_frontmatter,
+        validate_metadata,
+    )
+except ModuleNotFoundError:
+    from scripts.spec_metadata import (
+        classify_path,
+        metadata_text as spec_metadata_text,
+        parse_frontmatter as parse_spec_frontmatter,
+        validate_metadata,
+    )
+
 
 SCHEMA_VERSION = 1
 DECISION_METADATA_KEYS = {"status", "date", "area", "scope", "tags"}
-SPEC_KINDS = ("system", "requirement", "system-design", "legacy")
+SPEC_KINDS = ("system", "glossary", "requirement", "system-design", "product", "legacy")
 SPEC_KIND_ORDER = {kind: index for index, kind in enumerate(SPEC_KINDS)}
-VALID_REQUIREMENT_STATUSES = {"draft", "active", "deprecated"}
-VALID_DESIGN_STATUSES = {"draft", "current", "superseded"}
-VALID_SYSTEM_STATUSES = {"draft", "active", "retired"}
-VALID_MIGRATION_STATUSES = {"in_progress", "complete"}
 FIELD_LINE = re.compile(
     r"^\*{0,2}(?P<key>Status|Date|Area|Scope|Tags)"
     r"(?::\s*\*{0,2}\s*|\*{0,2}\s*:\s*)(?P<value>.*?)\s*$",
@@ -70,49 +81,6 @@ def read_source(root: Path, path: Path) -> tuple[str, str]:
         return relative, path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise CatalogError(f"{relative}: cannot read source file: {exc}") from exc
-
-
-def parse_frontmatter(text: str, relative: str) -> tuple[dict[str, object], int]:
-    """Parse the small YAML subset used by the specification linter."""
-    lines = text.splitlines()
-    if not lines or lines[0] != "---":
-        return {}, 0
-    try:
-        end = lines.index("---", 1)
-    except ValueError as exc:
-        raise CatalogError(f"{relative}: YAML frontmatter has no closing delimiter") from exc
-
-    metadata: dict[str, object] = {}
-    current_list: str | None = None
-    for line_number, line in enumerate(lines[1:end], start=2):
-        if re.match(r"^\s+-\s+", line) and current_list:
-            value = re.sub(r"^\s+-\s+", "", line).strip().strip("\"'`")
-            current_value = metadata.setdefault(current_list, [])
-            if not isinstance(current_value, list):
-                raise CatalogError(
-                    f"{relative}:{line_number}: frontmatter field {current_list} mixes scalar and list values"
-                )
-            current_value.append(value)
-            continue
-
-        match = re.match(r"^(?P<key>[a-z][a-z0-9_-]*):(?:\s*(?P<value>.*))?$", line)
-        if not match:
-            if not line.strip():
-                continue
-            raise CatalogError(f"{relative}:{line_number}: frontmatter contains unsupported YAML")
-
-        key = match.group("key")
-        value = (match.group("value") or "").strip()
-        if value == "[]":
-            metadata[key] = []
-            current_list = None
-        elif value:
-            metadata[key] = value.strip("\"'`")
-            current_list = None
-        else:
-            metadata[key] = []
-            current_list = key
-    return metadata, end + 1
 
 
 def first_heading(lines: list[str], start: int, relative: str) -> str:
@@ -230,7 +198,13 @@ def parse_decision_metadata(
 def parse_decision(root: Path, path: Path) -> Document:
     relative, text = read_source(root, path)
     lines = text.splitlines()
-    frontmatter, frontmatter_end = parse_frontmatter(text, relative)
+    parsed_frontmatter = parse_spec_frontmatter(text)
+    if parsed_frontmatter.error:
+        raise CatalogError(
+            f"{relative}:{parsed_frontmatter.line}: {parsed_frontmatter.error}"
+        )
+    frontmatter = parsed_frontmatter.metadata or {}
+    frontmatter_end = parsed_frontmatter.end
     heading = first_heading(lines, frontmatter_end, relative)
     fields = parse_decision_metadata(lines, frontmatter_end, frontmatter, relative)
     return Document(
@@ -266,86 +240,52 @@ def spec_files(root: Path) -> Iterable[Path]:
     )
 
 
-def parse_spec_kind(relative: str, frontmatter: dict[str, object]) -> tuple[str, str]:
+def parse_spec_kind(
+    relative: str, frontmatter: dict[str, object] | None = None
+) -> tuple[str, str | None]:
+    del frontmatter
     inside = Path(relative).relative_to("docs/specs").parts
     if not inside:
         raise CatalogError(f"{relative}: specification path has no system directory")
-    system = inside[0]
-    if system in {"guide", "templates"}:
+    source_kind, source_system = classify_path(Path(relative))
+    if source_kind in {"guide", "template"}:
         raise CatalogError(f"{relative}: authoring support files are not catalog sources")
-    if len(inside) == 2 and inside[1] == "README.md":
-        if frontmatter.get("specification_version") == "1":
-            return "system", system
-        raise CatalogError(f"{relative}: system README must set specification_version: 1")
-    if len(inside) >= 3 and inside[1] == "requirements":
-        return "requirement", system
-    if len(inside) >= 3 and inside[1] == "system-design":
-        return "system-design", system
-    return "legacy", system
-
-
-def frontmatter_text(metadata: dict[str, object], key: str) -> str | None:
-    value = metadata.get(key)
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, list) and value:
-        return ", ".join(str(item) for item in value)
-    return None
+    if source_kind == "system-index":
+        if inside[-1] == "README.md":
+            return "system", source_system
+        return "glossary", source_system
+    if source_kind in {"requirement", "system-design", "product", "legacy"}:
+        return source_kind, source_system
+    raise CatalogError(f"{relative}: unsupported specification source")
 
 
 def validate_spec_metadata(
     relative: str,
     kind: str,
-    system: str,
+    system: str | None,
     metadata: dict[str, object],
     has_frontmatter: bool,
 ) -> None:
-    if kind == "legacy":
-        return
-    if not has_frontmatter:
-        raise CatalogError(f"{relative}: {kind} source must start with YAML frontmatter")
-    if metadata.get("system") != system:
-        raise CatalogError(
-            f"{relative}: frontmatter system must be {system}, found {metadata.get('system', '')}"
-        )
-    status = frontmatter_text(metadata, "status")
-    valid_statuses = {
-        "requirement": VALID_REQUIREMENT_STATUSES,
-        "system-design": VALID_DESIGN_STATUSES,
-        "system": VALID_SYSTEM_STATUSES,
-    }[kind]
-    if status not in valid_statuses:
-        raise CatalogError(
-            f"{relative}: {kind} status must be one of {sorted(valid_statuses)}, found {status or ''}"
-        )
-    if kind == "system":
-        if metadata.get("specification_version") != "1":
-            raise CatalogError(f"{relative}: system source must set specification_version: 1")
-        migration = frontmatter_text(metadata, "migration")
-        if migration not in VALID_MIGRATION_STATUSES:
-            raise CatalogError(
-                f"{relative}: migration must be one of {sorted(VALID_MIGRATION_STATUSES)}"
-            )
-    if kind == "system-design" and not isinstance(metadata.get("requirements"), list):
-        raise CatalogError(
-            f"{relative}: system design must declare requirements as a YAML list"
-        )
+    issues = validate_metadata(kind, system, metadata, has_frontmatter)
+    if issues:
+        raise CatalogError(f"{relative}: {issues[0].message}")
 
 
 def parse_spec(root: Path, path: Path) -> Document:
     relative, text = read_source(root, path)
-    metadata, frontmatter_end = parse_frontmatter(text, relative)
-    inside = Path(relative).relative_to("docs/specs").parts
-    if (
-        len(inside) == 2
-        and inside[1] == "README.md"
-        and metadata.get("specification_version") != "1"
-    ):
+    if relative == "docs/specs/product/README.md":
         raise SkipSource
+    parsed_frontmatter = parse_spec_frontmatter(text)
+    if parsed_frontmatter.error:
+        raise CatalogError(
+            f"{relative}:{parsed_frontmatter.line}: {parsed_frontmatter.error}"
+        )
+    metadata = parsed_frontmatter.metadata or {}
+    frontmatter_end = parsed_frontmatter.end
     kind, system = parse_spec_kind(relative, metadata)
     has_frontmatter = bool(text.splitlines() and text.splitlines()[0] == "---")
     validate_spec_metadata(relative, kind, system, metadata, has_frontmatter)
-    title = frontmatter_text(metadata, "title")
+    title = spec_metadata_text(metadata, "title")
     if not title:
         try:
             title = first_heading(text.splitlines(), frontmatter_end, relative)
@@ -355,14 +295,14 @@ def parse_spec(root: Path, path: Path) -> Document:
                 for word in re.split(r"[-_]+", Path(relative).stem)
                 if word
             )
-    identifier = frontmatter_text(metadata, "id") or relative.removesuffix(".md")
+    identifier = spec_metadata_text(metadata, "id") or relative.removesuffix(".md")
     return Document(
         type="specification",
         path=relative,
         title=title,
         text=text,
         id=identifier,
-        status=frontmatter_text(metadata, "status"),
+        status=spec_metadata_text(metadata, "status"),
         system=system,
         kind=kind,
     )
@@ -404,9 +344,8 @@ def decision_sort_key(document: Document) -> tuple[int, int | str, str]:
 
 
 def spec_sort_key(document: Document) -> tuple[str, int, str]:
-    assert document.system is not None
     assert document.kind is not None
-    return (document.system, SPEC_KIND_ORDER[document.kind], document.path)
+    return (document.system or "", SPEC_KIND_ORDER[document.kind], document.path)
 
 
 def filter_decisions(

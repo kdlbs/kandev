@@ -177,6 +177,20 @@ requirements: []
 This file has no frontmatter and remains in the legacy layout.
 """,
         )
+        self.write(
+            "docs/specs/product/overview.md",
+            """# Product overview
+
+This document describes the product boundary.
+""",
+        )
+        self.write(
+            "docs/specs/ui/glossary.md",
+            """# UI glossary
+
+This document defines UI terms.
+""",
+        )
 
     def test_decisions_support_variants_filters_and_stable_sorting(self) -> None:
         self.add_decisions()
@@ -268,9 +282,35 @@ This file has no frontmatter and remains in the legacy layout.
         self.assertEqual(paths.returncode, 0, paths.stderr)
         self.assertEqual(paths.stdout.splitlines(), ["docs/specs/legacy/spec.md"])
 
+        product_paths = self.run_cli("specs", "--kind", "product", "--format", "paths")
+        self.assertEqual(product_paths.returncode, 0, product_paths.stderr)
+        self.assertEqual(product_paths.stdout.splitlines(), ["docs/specs/product/overview.md"])
+
+        glossary_paths = self.run_cli("specs", "--kind", "glossary", "--format", "paths")
+        self.assertEqual(glossary_paths.returncode, 0, glossary_paths.stderr)
+        self.assertEqual(glossary_paths.stdout.splitlines(), ["docs/specs/ui/glossary.md"])
+
         empty = self.run_cli("specs", "--system", "missing", "--format", "json")
         self.assertEqual(empty.returncode, 0, empty.stderr)
         self.assertEqual(json.loads(empty.stdout)["documents"], [])
+
+    def test_spec_kind_filters_cover_each_linter_source_category(self) -> None:
+        self.add_specs()
+        expected = {
+            "system": "docs/specs/ui/README.md",
+            "glossary": "docs/specs/ui/glossary.md",
+            "requirement": "docs/specs/ui/requirements/first.md",
+            "system-design": "docs/specs/ui/system-design/first.md",
+            "product": "docs/specs/product/overview.md",
+            "legacy": "docs/specs/legacy/spec.md",
+        }
+
+        for kind, path in expected.items():
+            with self.subTest(kind=kind):
+                result = self.run_cli("specs", "--kind", kind, "--format", "paths")
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), [path])
 
     def test_empty_markdown_keeps_the_catalog_type(self) -> None:
         self.add_decisions()
@@ -357,6 +397,17 @@ system: ui
         self.assertIn("docs/decisions/bad.md", combined)
         self.assertIn("docs/specs/ui/requirements/two.md", combined)
         self.assertIn("duplicate", combined.lower())
+
+    def test_validate_rejects_system_readmes_without_valid_frontmatter(self) -> None:
+        for content in ("# UI system\n", "---\nstatus: active\n---\n# UI system\n"):
+            with self.subTest(content=content):
+                self.write("docs/specs/ui/README.md", content)
+
+                result = self.run_cli("validate")
+
+                self.assertNotEqual(result.returncode, 0)
+                combined = result.stdout + result.stderr
+                self.assertIn("docs/specs/ui/README.md", combined)
 
     def test_invalid_kind_is_an_actionable_cli_error(self) -> None:
         result = self.run_cli("specs", "--kind", "unknown")

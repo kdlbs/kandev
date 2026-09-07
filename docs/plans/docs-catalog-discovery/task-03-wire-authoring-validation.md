@@ -36,8 +36,9 @@ hooks and CI without generating or changing files.
 ## Implementation details
 
 The pre-commit hook uses `python3 scripts/list-docs.py validate`. Configure its
-file match for decisions, specifications, and the catalog command. It must not
-pass filenames because validation checks cross-file identities.
+file match for decisions, specifications, the catalog command, the shared
+metadata helper, and the specification linter. It must not pass filenames
+because validation checks cross-file identities.
 
 The CI workflow first runs `scripts/list-docs.test.py`, then validates the real
 repository. Keep the checks in the existing lightweight harness lint job.
@@ -49,6 +50,8 @@ public navigation and coverage files when those contracts change.
 ## Acceptance
 
 - Pre-commit rejects invalid catalog metadata and never rewrites files.
+- Changes to the specification linter or shared metadata helper run catalog
+  validation as well.
 - CI runs focused catalog tests and full repository validation.
 - Agent guidance no longer tells authors to add decision rows or specification
   map entries.
@@ -79,6 +82,7 @@ git diff --check -- .pre-commit-config.yaml .github AGENTS.md .agents docs
 - `.agents/skills/context-engineering/SKILL.md`
 - `.pre-commit-config.yaml`
 - `.github/workflows/lint-harness-files.yml`
+- `scripts/spec_metadata.py`
 
 ## Dependencies
 
@@ -106,4 +110,5 @@ git diff --check -- .pre-commit-config.yaml .github AGENTS.md .agents docs
 ## Results
 
 Done. Agent guidance, skills, pre-commit, and harness CI use read-only catalog
-validation. Harness, specification, catalog, and whitespace checks pass.
+validation. The specification skill includes the catalog check. Harness,
+specification, catalog, reference-audit, and whitespace checks pass.

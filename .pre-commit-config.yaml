@@ -22,7 +22,7 @@ repos:
         name: Documentation catalog validation
         entry: python3 scripts/list-docs.py validate
         language: system
-        files: ^docs/(decisions|specs)/.*\.md$|^scripts/list-docs\.py$|^scripts/list-docs\.test\.py$
+        files: ^docs/(decisions|specs)/.*\.md$|^scripts/(list-docs|spec_metadata|lint-spec-files)\.py$|^scripts/(list-docs|lint-spec-files)\.test\.py$
         pass_filenames: false
 
       - id: architecture-lint

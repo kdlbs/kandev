@@ -59,9 +59,12 @@ status text in output. Sort numeric identifiers by number, then sort dated
 identifiers by filename.
 
 For specifications, derive the system and document kind from the path. Read the
-title and current frontmatter fields. Use the same metadata meaning as
-`scripts/lint-spec-files.py`. Do not make the catalog command a second source of
-specification policy.
+title and current frontmatter fields. Keep path classification, frontmatter
+parsing, and status sets in the shared `scripts/spec_metadata.py` helper used by
+both `scripts/list-docs.py` and `scripts/lint-spec-files.py`. The catalog owns
+filtering and output formats. It does not become a second source of
+specification policy. Recognized catalog kinds are `system`, `glossary`,
+`requirement`, `system-design`, `product`, and `legacy`.
 
 The command exits with a nonzero status for malformed metadata, duplicate
 catalog identities, unsupported filter values, or unreadable source files. An
@@ -79,8 +82,9 @@ repeat the files below its own directory.
 
 Focused Python tests use temporary document trees. They cover parsing, sorting,
 filters, output formats, Markdown escaping, malformed metadata, duplicate
-identities, and empty results. Repository validation then proves that the real
-decision and specification trees satisfy the command contract.
+identities, empty results, and parity across all specification source kinds.
+Repository validation then proves that the real decision and specification
+trees satisfy the command contract.
 
 The existing specification linter stays authoritative for specification
 structure and size rules. Harness lint covers changed agent instructions and
@@ -113,8 +117,9 @@ All listed commands passed on 2026-09-07.
 
 - ADR metadata has older variants. Tests must cover the forms present in the
   repository before the tracked table is removed.
-- A second specification parser can drift from the linter. Keep policy in the
-  linter and test shared metadata expectations against representative files.
+- A catalog parser can drift from the linter. Keep path classification,
+  frontmatter parsing, and status sets in the shared helper. Test all source
+  kinds against representative files.
 - Removing maps can remove useful ownership context. Keep durable boundary and
   migration text in every system README.
 - Existing links can target table rows or map sections. Search and update these

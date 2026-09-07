@@ -22,8 +22,10 @@ Use filters for common discovery tasks:
 The command recognizes these kinds:
 
 - system: a system boundary README with specification frontmatter.
+- glossary: a system glossary.md file.
 - requirement: a document under a system requirements directory.
 - system-design: a document under a system system-design directory.
+- product: a product-wide document under docs/specs/product/.
 - legacy: a document that remains outside the migrated layout.
 
 Use paths for shell tools and JSON for structured consumers. The command

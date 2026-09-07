@@ -29,6 +29,9 @@ pages and durable system ownership text.
 - Mark ADR-0001 and ADR-2026-08-22-system-oriented-specifications as amended by
   the catalog decision.
 - Repair links that target removed table rows or map sections.
+- Replace the product README's per-file document list with a catalog command.
+- Audit active specification sources for references to removed index rows and
+  stale "above" list wording.
 
 ## Out of scope
 
@@ -72,6 +75,7 @@ python3 scripts/list-docs.py specs --format markdown
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 rg -n "Specification map|add.*INDEX|update.*INDEX" docs AGENTS.md .agents
+! rg -n -i "docs/specs/INDEX\.md.*(row|status)|INDEX\.md.*row|the (seven|[0-9]+|current|listed) requirements? above|the (seven|[0-9]+|current|listed) system[- ]designs? above" docs/specs AGENTS.md .agents
 git diff --check -- docs/decisions docs/specs docs/plans
 ```
 
@@ -112,4 +116,6 @@ git diff --check -- docs/decisions docs/specs docs/plans
 ## Results
 
 Done. Both root catalog pages are static entry pages, all derived system
-README maps are removed, and specification validation passes.
+README maps and the product per-file list are removed, and active source
+references use on-demand discovery. The specification and catalog validation
+checks pass.
