@@ -279,15 +279,6 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID string, execCfg *ExecutorConfig,
 ) {
-	// ADR 0005 Wave E: skill + instruction file delivery moved into the
-	// runtime (internal/agent/runtime/lifecycle/skill). We still build
-	// the manifest here to extract AGENTS.md content for the prompt and
-	// to compute the deterministic instructionsDir path the runtime
-	// will write to. No filesystem side effects from this call.
-	manifest := si.buildSkillManifest(ctx, agent, defaultWorkspaceName)
-	instructionsDir, agentsMD := si.resolveInstructionsForPrompt(manifest, execCfg.Type)
-	si.snapshotRunSkills(ctx, run.ID, manifest, instructionsDir)
-
 	runCtx, err := (&officeruntime.ContextBuilder{
 		Agents: si.svc,
 		Runs:   si.svc.repo,
@@ -308,6 +299,14 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		"workspace_id": runCtx.WorkspaceID,
 		"wake_reason":  runCtx.Reason,
 	})
+	// ADR 0005 Wave E: skill + instruction file delivery moved into the
+	// runtime (internal/agent/runtime/lifecycle/skill). We still build
+	// the manifest here to extract AGENTS.md content for the prompt and
+	// to compute the deterministic instructionsDir path the runtime
+	// will write to. No filesystem side effects from this call.
+	manifest := si.buildSkillManifest(ctx, agent, defaultWorkspaceName, runCtx.AvailableActions...)
+	instructionsDir, agentsMD := si.resolveInstructionsForPrompt(manifest, execCfg.Type)
+	si.snapshotRunSkills(ctx, run.ID, manifest, instructionsDir)
 
 	token, err := si.mintRuntimeToken(run, agent, runCtx)
 	if err != nil {

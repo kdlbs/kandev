@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -20,6 +21,7 @@ type Handler struct {
 	actions     *Actions
 	skillLister SkillLister
 	runEvents   RunEventAppender
+	decisions   DecisionRecorder
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -33,18 +35,21 @@ func NewHandler(
 	actions *Actions,
 	skillLister SkillLister,
 	runEvents RunEventAppender,
+	decisions DecisionRecorder,
 ) *Handler {
 	return &Handler{
 		agentSvc:    agentSvc,
 		actions:     actions,
 		skillLister: skillLister,
 		runEvents:   runEvents,
+		decisions:   decisions,
 	}
 }
 
 // RegisterRoutes mounts runtime syscall routes.
 func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/comments", h.postComment)
+	group.POST("/runtime/task/decision", h.recordAgentDecision)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
 	group.POST("/runtime/tasks", h.createTask)
@@ -58,6 +63,43 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.PUT("/runtime/memory/*path", h.putMemory)
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
+}
+
+type recordAgentDecisionRequest struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func (h *Handler) recordAgentDecision(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	if runCtx.TaskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decision requires a task-bound runtime"})
+		return
+	}
+	var req recordAgentDecisionRequest
+	if !bindClosedJSON(c, &req) {
+		return
+	}
+	if h.decisions == nil {
+		h.respondRuntimeError(c, runCtx, "record_agent_decision", "task", runCtx.TaskID, errDecisionRecorderMissing)
+		return
+	}
+	result, err := h.decisions.RecordAgentDecision(c.Request.Context(), RecordAgentDecisionInput{
+		TaskID:         runCtx.TaskID,
+		AgentProfileID: runCtx.AgentID,
+		SessionID:      runCtx.SessionID,
+		Decision:       req.Decision,
+		Reason:         req.Reason,
+	})
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "record_agent_decision", "task", runCtx.TaskID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "record_agent_decision", "task", runCtx.TaskID)
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) createTask(c *gin.Context) {
@@ -392,6 +434,24 @@ func bindJSON(c *gin.Context, target any) bool {
 	return true
 }
 
+func bindClosedJSON(c *gin.Context, target any) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = errors.New("request body must contain one JSON value")
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 func bearerToken(header string) string {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
@@ -409,6 +469,12 @@ func (h *Handler) respondRuntimeError(
 	err error,
 ) {
 	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) {
+		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var decisionValidation *DecisionValidationError
+	if errors.As(err, &decisionValidation) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

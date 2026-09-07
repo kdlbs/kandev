@@ -471,9 +471,6 @@ const (
 	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
 	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
-	// Office quorum decision recording.
-	ActionMCPRecordStepDecision = "mcp.record_step_decision"
-
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"

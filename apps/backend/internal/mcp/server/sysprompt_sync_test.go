@@ -256,6 +256,23 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
+	assert.Len(t, registered, 11, "Office MCP must expose the replacement 11-tool catalog")
+}
+
+func TestDecisionMCPTransportIsAbsentFromOfficeAndKanban(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	office := New(backend, "office-session", "office-task", 10005, log, "", false, ModeOffice)
+	kanban := New(backend, "task-session", "task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, office)
+	require.NotNil(t, kanban)
+
+	assert.NotContains(t, office.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.OfficeContext(), "record_step_decision_kandev")
+	assert.NotContains(t, kanban.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.KandevContext(), "record_step_decision")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
