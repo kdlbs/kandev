@@ -704,6 +704,7 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	}
 	execution.SetModelState(&CachedModelState{
 		CurrentModelID: "default-model",
+		Models:         []streams.SessionModelInfo{{ModelID: "sonnet"}},
 		ConfigOptions: []streams.ConfigOption{
 			{
 				ID: "model", Category: "model", CurrentValue: "default-model",

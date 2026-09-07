@@ -786,6 +786,45 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkKeepsAuthorizedFallbackSession(
 	require.Equal(t, fixture.current.ID, workSession.ID)
 }
 
+func TestPrepareWorkflowStepSession_FallbackProfileDoesNotReuseUnauthorizedRuntime(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+		Model: "gpt-5.6-terra", FallbackModel: "gpt-5.6-luna",
+	}
+
+	parked := &models.TaskSession{
+		ID: "session-parked-terra", TaskID: "t1", AgentProfileID: "terra-with-luna-fallback",
+		ExecutorID: "exec-local", ExecutorProfileID: "ep1", TaskEnvironmentID: "env-1",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-sol"},
+		},
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, parked))
+	seedExecutorRunning(t, fixture.repo, parked.ID, parked.TaskID, "execution-parked-terra")
+
+	workStep := &wfmodels.WorkflowStep{
+		ID: "step-work", WorkflowID: "wf1", AgentProfileID: "terra-with-luna-fallback",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	qaStep := &wfmodels.WorkflowStep{
+		ID: "step-qa", WorkflowID: "wf1", AgentProfileID: "qa-profile",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+
+	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.NotNil(t, workSession)
+	require.NotEqual(t, parked.ID, workSession.ID, "a parked ACP session with an unauthorized runtime model must not be promoted")
+	require.Equal(t, "terra-with-luna-fallback", workSession.AgentProfileID)
+
+	storedParked, err := fixture.repo.GetTaskSession(ctx, parked.ID)
+	require.NoError(t, err)
+	require.False(t, storedParked.IsPrimary, "the stale parked session must remain unpromoted")
+}
+
 func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
