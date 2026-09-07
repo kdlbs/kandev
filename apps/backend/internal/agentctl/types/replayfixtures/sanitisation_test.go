@@ -119,7 +119,7 @@ func TestValidateFixtureRejectsForbiddenProvenanceShapes(t *testing.T) {
 		"opencode id, mixed case":       "SES_abc123",
 		"email address":                 "ops@example.com",
 		"rfc4122 uuid":                  "4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab",
-		"userinfo in url":               "https://user:pass@example.com/docs",
+		"userinfo in url":               "https://user:PASSWORD@example.com/docs",
 		"localhost":                     "http://localhost:4173/docs",
 		"loopback literal":              "http://127.0.0.1:4173/docs",
 		"rfc1918 10":                    "http://10.1.2.3/docs",
