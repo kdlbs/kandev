@@ -9,6 +9,10 @@ import (
 )
 
 func runPackage(ctx context.Context, args []string) int {
+	return runPackageWithArtifactBuilder(ctx, args, buildPreviewArtifact)
+}
+
+func runPackageWithArtifactBuilder(ctx context.Context, args []string, buildArtifact func(context.Context, string, string, bool, bool) error) int {
 	fs := flag.NewFlagSet("package", flag.ContinueOnError)
 	artifact := fs.String("artifact", "", "path for the preview bundle (required)")
 	skipWebInstall := fs.Bool("skip-web-install", false, "skip pnpm install (CI already ran it)")
@@ -33,7 +37,7 @@ func runPackage(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "preview package: create artifact directory: %v\n", err)
 		return 1
 	}
-	if err := buildPreviewArtifact(ctx, binDir, *artifact, *skipWebInstall, *skipWebBuild); err != nil {
+	if err := buildArtifact(ctx, binDir, *artifact, *skipWebInstall, *skipWebBuild); err != nil {
 		fmt.Fprintf(os.Stderr, "preview package: %v\n", err)
 		return 1
 	}
