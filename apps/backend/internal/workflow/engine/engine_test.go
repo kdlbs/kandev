@@ -295,6 +295,87 @@ func TestHandleTrigger_IdempotentByOperationID(t *testing.T) {
 	}
 }
 
+func TestHandleTrigger_OperationWithUnregisteredActionIsNotMarked(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Events: map[Trigger][]Action{
+					TriggerOnAgentError: {{Kind: ActionClearDecisions}},
+				},
+			},
+		},
+		applied: map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	_, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnAgentError, OperationID: "op-1",
+	})
+	if err == nil || !errors.Is(err, ErrActionNotYetWired) {
+		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
+	}
+	if store.applied["op-1"] {
+		t.Fatal("operation was marked applied before its callback was wired")
+	}
+}
+
+func TestHandleTrigger_UnregisteredActionWithoutOperationIDRemainsNoOp(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Events: map[Trigger][]Action{
+					TriggerOnEnter: {{Kind: ActionRunCodeReview}},
+				},
+			},
+		},
+		applied: map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	result, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnEnter,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ActionCount != 1 {
+		t.Fatalf("ActionCount = %d, want 1", result.ActionCount)
+	}
+}
+
+func TestHandleTrigger_DeferOperationMark(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Position: 1,
+				Events: map[Trigger][]Action{
+					TriggerOnChildrenCompleted: {{Kind: ActionMoveToNext}},
+				},
+			},
+		},
+		nextSteps: map[int]StepSpec{1: {ID: "step-2", Position: 2}},
+		applied:   map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	result, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnChildrenCompleted,
+		OperationID: "op-1", EvaluateOnly: true, DeferOperationMark: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Transitioned || result.ToStepID != "step-2" {
+		t.Fatalf("expected deferred transition result, got %#v", result)
+	}
+	if store.applied["op-1"] {
+		t.Fatal("operation was marked applied before the outer transition committed")
+	}
+}
+
 func TestHandleTrigger_EvaluateOnlySkipsPersistence(t *testing.T) {
 	store := &fakeStore{
 		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf1", CurrentStepID: "step-1"},

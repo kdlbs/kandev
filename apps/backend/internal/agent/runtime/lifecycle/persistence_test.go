@@ -80,6 +80,19 @@ func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionPersistsOfficeAgentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID:                   "exec-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		OfficeAgentProfileID: "reviewer",
+	}, nil)
+
+	if got := getMetadataString(running.Metadata, MetadataKeyOfficeAgentProfileID); got != "reviewer" {
+		t.Fatalf("persisted OfficeAgentProfileID = %q, want reviewer", got)
+	}
+}
+
 func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
 	running := buildRunningFromExecution(&AgentExecution{
 		ID: "exec-2", TaskID: "task-1", SessionID: "session-1",

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 const (
@@ -65,6 +66,8 @@ type Config struct {
 	Now         func() time.Time
 	NewID       func() string
 	Pruner      WorktreePruner
+	Scanner     *filescan.Limiter
+	OnProgress  func(filescan.Progress)
 }
 
 type WorktreePruner interface {

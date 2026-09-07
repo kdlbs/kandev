@@ -26,6 +26,7 @@ import { resolveTaskRepositoryChips } from "@/components/kanban-card-repositorie
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { formatRelativeTime } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import { usePipelineOverflowStage } from "@/hooks/use-pipeline-overflow-stage";
@@ -368,7 +369,7 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
       className="flex shrink-0 items-center gap-1.5"
       data-testid="pipeline-row-status-strip"
     >
-      <PRTaskIcon taskId={task.id} />
+      <PRTaskIcon taskId={task.id} prInfo={taskPRInfoFromSummary(task.statusSummary)} />
       <MRTaskIcon taskId={task.id} />
       <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <TaskCardIndicators task={task} />

@@ -302,6 +302,7 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Group by none hides group headers", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, ["One", "Two"]);
     await filters.open();
+    await filters.openGroupSettings();
     await filters.popover.getByTestId("group-key-select").click();
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },
@@ -333,6 +334,7 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
+    await filters.openSortSettings();
     const toggle = filters.popover.getByTestId("sort-direction-toggle");
     const initial = await toggle.getAttribute("data-direction");
     await toggle.click();
@@ -364,6 +366,7 @@ test.describe("Sidebar filter — group + sort", () => {
     await session.waitForLoad();
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();
+    await filters.openSortSettings();
     await filters.popover.getByTestId("sort-key-select").click();
     await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
       "Last task summary refresh. Background events can change it.",
@@ -500,11 +503,15 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const renameInput = await filters.beginNewView();
     await expect(renameInput).toHaveValue("New view");
     await expect(filters.popover.getByTestId("filter-clause-row")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sort-key-select")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
+    await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
     await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
       "data-direction",
       "asc",
     );
+    await filters.openGroupSettings();
     await expect(filters.popover.getByTestId("group-key-select")).toContainText("Repository");
 
     await renameInput.fill("Planning view");

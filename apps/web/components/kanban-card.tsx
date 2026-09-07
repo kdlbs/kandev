@@ -16,6 +16,7 @@ import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirma
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import {
   type ForegroundActivity,
@@ -93,6 +94,7 @@ export interface Task {
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
+  statusSummary?: TaskStatusSummary | null;
 }
 
 export type RepositoryChip = {

@@ -47,6 +47,15 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return nil, err
 	}
+	// expectedState is the session lifecycle state last confirmed under this
+	// in-memory copy. The selection and error writes below are conditioned on
+	// it, so a terminal transition (e.g. cancellation) that lands
+	// concurrently with route selection is detected instead of clobbered by a
+	// whole-row write built from this stale snapshot. The post-launch
+	// recovery write is different: the launch attempt itself can mutate
+	// state, so that write re-reads and gates on the state current at
+	// recovery time instead (see recoverDynamicRouteAction).
+	expectedState := session.State
 	if err := repairDynamicRouteAfterLaunchFailure(
 		ctx, session, request.ExpectedGeneration, resolver.MarkRouteRecoveryActionRequired,
 	); err != nil {
@@ -54,10 +63,14 @@ func applyDynamicRouteAction(
 	}
 	decision, err := resolveDynamicRouteAction(ctx, resolver, request, session)
 	if err != nil {
-		return handleDynamicRouteActionError(ctx, repo, session, err)
+		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	if err := persistDynamicRouteSelection(ctx, repo, session, decision); err != nil {
+	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision)
+	if err != nil {
 		return nil, err
+	}
+	if !changed {
+		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
 		return routeActionResult(ctx, repo, session), nil
@@ -113,6 +126,7 @@ func handleDynamicRouteActionError(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
 	session *models.TaskSession,
+	expectedState models.TaskSessionState,
 	err error,
 ) (*orchestrator.RouteActionResult, error) {
 	var noCandidate *dynamicruntime.NoEligibleCandidateError
@@ -123,8 +137,12 @@ func handleDynamicRouteActionError(
 	session.RouteState = "waiting"
 	session.RouteReason = "no_eligible_candidate"
 	session.DownstreamACPSessionID = ""
-	if updateErr := repo.UpdateTaskSession(ctx, session); updateErr != nil {
+	changed, updateErr := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	if updateErr != nil {
 		return nil, routeActionPersistenceError(ctx, repo, session, updateErr)
+	}
+	if !changed {
+		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	return routeActionResult(ctx, repo, session), nil
 }
@@ -133,8 +151,9 @@ func persistDynamicRouteSelection(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
 	session *models.TaskSession,
+	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
-) error {
+) (bool, error) {
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Decision.Status
@@ -151,10 +170,11 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		return routeActionPersistenceError(ctx, repo, session, err)
+	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	if err != nil {
+		return false, routeActionPersistenceError(ctx, repo, session, err)
 	}
-	return nil
+	return changed, nil
 }
 
 func finishDynamicRouteAction(
@@ -182,6 +202,16 @@ func finishDynamicRouteAction(
 	return routeActionResult(ctx, repo, session), nil
 }
 
+// recoverDynamicRouteAction records why a successor launch failed after a
+// route action was accepted. The launcher itself may mutate session state
+// before failing (a real launch failure resets the row to CREATED ahead of
+// the launch attempt), so the write here is gated on a fresh reload rather
+// than on any state captured before launchSuccessor ran: a stale pre-launch
+// snapshot would never match the launcher's own mutation and this recovery
+// write would be silently dropped. A reloaded state that is already terminal
+// (CANCELLED, COMPLETED, or FAILED) means a concurrent handler has already
+// settled the session, and that must win over resurrecting it into
+// WAITING_FOR_INPUT.
 func recoverDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
@@ -200,13 +230,47 @@ func recoverDynamicRouteAction(
 	if session.RouteGeneration != expectedGeneration {
 		return routeActionResult(ctx, repo, session), nil
 	}
+	if isTerminalRouteActionSessionState(session.State) {
+		return routeActionResult(ctx, repo, session), nil
+	}
+	reloadedState := session.State
 	session.RouteState = "action_required"
 	session.RouteReason = orchestrator.RouteActionLaunchFailedReason
 	session.State = models.TaskSessionStateWaitingForInput
 	session.ErrorMessage = launchErr.Error()
 	session.DownstreamACPSessionID = ""
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, reloadedState)
+	if err != nil {
 		return nil, routeActionPersistenceError(ctx, repo, session, err)
+	}
+	if !changed {
+		return reloadRouteActionResult(ctx, repo, sessionID)
+	}
+	return routeActionResult(ctx, repo, session), nil
+}
+
+// isTerminalRouteActionSessionState reports whether a reloaded session state
+// means a concurrent handler has already settled the session, mirroring
+// orchestrator's unexported isTerminalSessionState (not reachable from this
+// package).
+func isTerminalRouteActionSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCancelled ||
+		state == models.TaskSessionStateCompleted ||
+		state == models.TaskSessionStateFailed
+}
+
+// reloadRouteActionResult reloads the session that a guarded write refused to
+// overwrite (because its state moved since expectedState was captured) and
+// reports that superseded/terminal state instead of the write the caller
+// intended.
+func reloadRouteActionResult(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	sessionID string,
+) (*orchestrator.RouteActionResult, error) {
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
 	return routeActionResult(ctx, repo, session), nil
 }
@@ -249,7 +313,11 @@ func routeActionResult(
 	}
 	if repo != nil {
 		if state, err := repo.LoadRouteState(ctx, session.ID); err == nil && state != nil {
+			result.LogicalProfileID = state.LogicalProfileID
+			result.ExecutionProfileID = state.ExecutionProfileID
+			result.RouteGeneration = state.Generation
 			result.ProfileVersion = state.ProfileVersion
+			result.State = state.Status
 			var policyState dynamicruntime.PolicyState
 			if jsonErr := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); jsonErr == nil {
 				result.ErrorCode = string(policyState.FailureCode)

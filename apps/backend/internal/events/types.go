@@ -211,6 +211,7 @@ const PluginUserStateUpdated = "plugin.user-state.updated"
 // every state transition and broadcast to all WebSocket clients.
 const (
 	SystemJobUpdate                 = "system.job.update"
+	SystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	AgentRuntimeAvailabilityChanged = "system.agent_runtime.availability_changed"
 )
 

@@ -6,7 +6,7 @@ const NAVIGATION_TITLE = "PR summary navigation";
 const TARGET_TITLE = "Inactive PR summary target";
 
 test.describe("inactive task PR summary hydration", () => {
-  test("loads full PR details on hover and reuses the settled task cache", async ({
+  test("keeps pending CI yellow across reload and full PR hydration", async ({
     testPage,
     apiClient,
     seedData,
@@ -49,11 +49,11 @@ test.describe("inactive task PR summary hydration", () => {
       author_login: "persisted-author",
       state: "open",
       review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "clean",
+      checks_state: "pending",
+      mergeable_state: "blocked",
       required_reviews: 1,
       review_count: 1,
-      checks_total: 1,
+      checks_total: 2,
       checks_passing: 1,
     });
 
@@ -78,10 +78,21 @@ test.describe("inactive task PR summary hydration", () => {
     await expect(icon).toHaveAttribute("data-pr-state", "Open");
     await expect(icon).toHaveAttribute("data-pr-count", "1");
     await expect(icon).not.toHaveAttribute("data-pr-ready-to-merge");
+    await expect(icon).toHaveClass(/text-yellow-500/);
     expect(taskDetailRequests).toBe(0);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(targetRow).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveClass(/text-yellow-500/);
+    expect(taskDetailRequests).toBe(0);
+    await prCapture.screenshot("desktop-pr-sidebar-pending-ci-reloaded", {
+      caption: "Desktop sidebar keeps pending CI yellow after reload",
+    });
 
     await icon.hover();
     await expect.poll(() => taskDetailRequests).toBe(1);
+    await expect(icon).toHaveClass(/text-yellow-500/);
 
     const summary = testPage
       .locator(

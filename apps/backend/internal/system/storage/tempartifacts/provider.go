@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 const staleArtifactAge = 24 * time.Hour
@@ -25,23 +26,27 @@ type QuarantineStore interface {
 }
 
 type ProviderConfig struct {
-	Registry  *Registry
-	Store     QuarantineStore
-	HomeDir   string
-	TrashDir  string
-	Retention time.Duration
-	Now       func() time.Time
-	NewID     func() string
+	Registry   *Registry
+	Store      QuarantineStore
+	HomeDir    string
+	TrashDir   string
+	Retention  time.Duration
+	Now        func() time.Time
+	NewID      func() string
+	Scanner    *filescan.Limiter
+	OnProgress func(filescan.Progress)
 }
 
 type Provider struct {
-	registry  *Registry
-	store     QuarantineStore
-	homeDir   string
-	trashDir  string
-	retention time.Duration
-	now       func() time.Time
-	newID     func() string
+	registry   *Registry
+	store      QuarantineStore
+	homeDir    string
+	trashDir   string
+	retention  time.Duration
+	now        func() time.Time
+	newID      func() string
+	scanner    *filescan.Limiter
+	onProgress func(filescan.Progress)
 }
 
 type Analysis struct {
@@ -90,6 +95,7 @@ func NewProvider(config ProviderConfig) *Provider {
 		registry: config.Registry, store: config.Store, homeDir: filepath.Clean(config.HomeDir),
 		trashDir:  filepath.Clean(trashDir),
 		retention: retention, now: now, newID: newID,
+		scanner: config.Scanner, onProgress: config.OnProgress,
 	}
 }
 
@@ -227,6 +233,8 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	}
 	analysis := Analysis{Available: true}
 	cutoff := p.now().Add(-staleArtifactAge)
+	inspectable := make([]storage.TemporaryArtifact, 0, len(artifacts))
+	roots := make([]filescan.Root, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		if artifact.State == storage.TemporaryArtifactStateQuarantined ||
 			artifact.State == storage.TemporaryArtifactStateDeleted {
@@ -237,12 +245,34 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 			analysis.Warnings = append(analysis.Warnings, temporaryArtifactWarning(artifact))
 			continue
 		}
-		size, inspectErr := p.inspect(artifact)
-		if inspectErr != nil {
+		if err := p.registry.Validate(artifact); err != nil {
 			analysis.SkippedCount++
-			analysis.Warnings = append(analysis.Warnings, inspectErr.Error())
+			analysis.Warnings = append(analysis.Warnings, fmt.Errorf("skip temporary artifact %s: %w", artifact.Path, err).Error())
 			continue
 		}
+		inspectable = append(inspectable, artifact)
+		roots = append(roots, filescan.Root{Path: artifact.Path, SymlinkPolicy: filescan.RejectSymlinks})
+	}
+	scanner := p.scanner
+	if scanner == nil {
+		scanner = filescan.NewLimiter(4)
+	}
+	measurements := scanner.Measure(ctx, roots, p.onProgress)
+	for index, artifact := range inspectable {
+		measurement := measurements[index]
+		if measurement.Err != nil {
+			if errors.Is(measurement.Err, context.Canceled) ||
+				errors.Is(measurement.Err, context.DeadlineExceeded) {
+				return analysis, measurement.Err
+			}
+			analysis.SkippedCount++
+			analysis.Warnings = append(
+				analysis.Warnings,
+				fmt.Errorf("measure temporary artifact %s: %w", artifact.Path, measurement.Err).Error(),
+			)
+			continue
+		}
+		size := measurement.Bytes
 		analysis.TotalCount++
 		analysis.TotalBytes += size
 		if artifact.State == storage.TemporaryArtifactStateActive {
@@ -259,6 +289,15 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		analysis.StaleBytes += size
 	}
 	return analysis, nil
+}
+
+func (p *Provider) AnalyzeWithProgress(
+	ctx context.Context,
+	onProgress func(filescan.Progress),
+) (Analysis, error) {
+	copy := *p
+	copy.onProgress = onProgress
+	return copy.Analyze(ctx)
 }
 
 func (p *Provider) Cleanup(context.Context) (map[string]any, error) {

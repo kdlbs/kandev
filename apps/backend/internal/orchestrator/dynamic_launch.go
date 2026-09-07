@@ -1055,11 +1055,30 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 			return false
 		}
 	}
-	if err := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateCreated, ""); err != nil {
+	// Reload immediately before the reset: StopExecution is I/O and a
+	// coordinator stop can commit a terminal state while it runs. A stale
+	// pre-stop snapshot would let this write resurrect a session the user
+	// already cancelled, so refuse on a reloaded terminal state and CAS the
+	// write on that same reload to catch a cancellation landing after it.
+	preResetState, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || preResetState == nil {
+		return false
+	}
+	if isTerminalSessionState(preResetState.State) {
+		return false
+	}
+	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
+		ctx, data.SessionID, preResetState.State, models.TaskSessionStateCreated, "",
+	)
+	if err != nil || !changed {
 		return false
 	}
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	officeAgentProfileID := data.AgentProfileID
+	if officeAgentProfileID == "" {
+		officeAgentProfileID = session.AgentProfileID
+	}
 	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
 	if officeErr == nil && !isOfficeTask {
 		_, err := s.StartCreatedSession(
@@ -1070,7 +1089,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	}
 	_, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           "",
 		Prompt:               prompt.text,
 		StartAgent:           true,

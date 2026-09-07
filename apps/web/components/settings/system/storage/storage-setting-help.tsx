@@ -6,7 +6,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 
-export function StorageSettingHelp({ label, children }: { label: string; children: string }) {
+export function StorageSettingHelp({
+  label,
+  children,
+  testId,
+}: {
+  label: string;
+  children: string;
+  testId?: string;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
@@ -17,6 +25,7 @@ export function StorageSettingHelp({ label, children }: { label: string; childre
           variant="ghost"
           size="icon-sm"
           className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
+          data-testid={testId}
           aria-label={t("system:storageMoreInformationAbout", { label })}
           onClick={() => setOpen((current) => !current)}
         >

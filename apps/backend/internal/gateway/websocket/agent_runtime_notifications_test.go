@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -75,6 +76,36 @@ func TestSystemEventBroadcasterCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("subscriptions after concurrent Close = %d, want 0", len(broadcaster.subscriptions))
 	}
 	eventBus.Close()
+}
+
+func TestSystemStorageAnalysisNotificationsBroadcastProgressState(t *testing.T) {
+	hub := newTestHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go hub.Run(ctx)
+
+	eventBus := bus.NewMemoryEventBus(testLoggerForUserNotifications(t))
+	t.Cleanup(eventBus.Close)
+	broadcaster := RegisterSystemNotifications(ctx, eventBus, hub, testLoggerForUserNotifications(t))
+	t.Cleanup(broadcaster.Close)
+	client := newTestClient("storage")
+	registerTestClient(hub, client)
+	payload := storagepkg.StorageAnalysisUpdated{Generation: 3, State: storagepkg.AnalysisStateScanning}
+	if err := eventBus.Publish(ctx, events.SystemStorageAnalysisUpdated,
+		bus.NewEvent(events.SystemStorageAnalysisUpdated, "test", payload)); err != nil {
+		t.Fatalf("publish storage event: %v", err)
+	}
+	message := readNotification(t, client)
+	if message.Action != ws.ActionSystemStorageAnalysisUpdated {
+		t.Fatalf("storage action = %q, want %q", message.Action, ws.ActionSystemStorageAnalysisUpdated)
+	}
+	var received storagepkg.StorageAnalysisUpdated
+	if err := json.Unmarshal(message.Payload, &received); err != nil {
+		t.Fatalf("decode storage payload: %v", err)
+	}
+	if received != payload {
+		t.Fatalf("storage payload = %#v, want %#v", received, payload)
+	}
 }
 
 func readNotification(t *testing.T, client *Client) ws.Message {

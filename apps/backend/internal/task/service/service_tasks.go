@@ -615,29 +615,30 @@ func prepareAutoTitle(req *CreateTaskRequest) error {
 	return nil
 }
 
-func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) {
+func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) error {
 	stepLister, ok := s.workflowStepGetter.(workflowStepLister)
 	if !ok || workflowID == "" || feederStepID == "" {
-		return
+		return nil
 	}
 	steps, err := stepLister.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
 		s.logger.Warn("failed to list workflow steps after feeder task creation",
 			zap.String("workflow_id", workflowID), zap.Error(err))
-		return
+		return err
 	}
 	for _, step := range steps {
 		if step != nil && step.PullFromStepID == feederStepID {
 			s.pullNextTaskOnVacate(ctx, step.ID, "")
 		}
 	}
+	return nil
 }
 
 // ReconcileFeederPulls wakes steps that pull from feederStepID. The
 // orchestrator calls this after an admitted manual move's lifecycle barrier
 // completes so selection and promotion rules stay owned by this service.
-func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
-	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) error {
+	return s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
 }
 
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {

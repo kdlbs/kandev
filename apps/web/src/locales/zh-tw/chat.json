@@ -96,7 +96,7 @@
   "quickChatDialogIntro": "與代理程式開始快速對話，無需建立正式任務。",
   "quickChatIntro": "就想法、問題或程式碼庫與代理程式聊天。",
   "quickChatIntroSecondary": "快速聊天獨立於任務看板。",
-  "quickChatTabOrderSaveFailed": "無法儲存快速聊天分頁順序。",
+  "quickChatTabOrderSaveFailed": "無法儲存快速聊天標籤頁順序。",
   "quickChatTabOrderSaveFailedDescription": "目前順序會保留在此處。重新載入可恢復上次儲存的順序。",
   "renameChat": "重新命名聊天",
   "renameSavedOnThisDeviceOnly": "重新命名僅儲存在此裝置上",

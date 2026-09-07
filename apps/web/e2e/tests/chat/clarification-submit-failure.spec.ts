@@ -32,10 +32,11 @@ test.describe("Clarification submit failure feedback", () => {
       attempt += 1;
       if (attempt === 1) {
         await route.fulfill({
-          status: 500,
+          status: 503,
           contentType: "application/json",
           body: JSON.stringify({
-            error: "claim active clarification bundle: context deadline exceeded",
+            error: "clarification response is temporarily unavailable",
+            code: "temporarily_unavailable",
           }),
         });
         return;
@@ -50,7 +51,13 @@ test.describe("Clarification submit failure feedback", () => {
     await expect(errorBanner).toBeVisible({ timeout: 15_000 });
     // The user's answer must survive the failed submit -- no re-typing on retry.
     await expect(postgres).toHaveAttribute("data-selected", "true");
+    await expect(session.clarificationSkip()).toBeEnabled();
     await expect(session.idleInput()).toHaveCount(0);
+
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeHidden();
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeVisible();
 
     const settled = waitForSessionSettled(ws, sessionId);
     await testPage.getByTestId("clarification-retry").click();

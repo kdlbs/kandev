@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 var (
@@ -40,10 +41,12 @@ type QuarantineStore interface {
 
 // Config contains the provider's install-owned paths and persistence dependencies.
 type Config struct {
-	HomeDir  string
-	TrashDir string
-	Settings SettingsSource
-	Store    QuarantineStore
+	HomeDir    string
+	TrashDir   string
+	Settings   SettingsSource
+	Store      QuarantineStore
+	Scanner    *filescan.Limiter
+	OnProgress func(filescan.Progress)
 }
 
 // Provider manages the single Go cache selected by persisted settings.
@@ -118,22 +121,50 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		return Analysis{}, err
 	}
 	owned := adopted || hasValidMarker(cachePath)
-	size, err := directorySize(cachePath)
-	if err != nil {
-		return Analysis{}, err
+	scanner := p.config.Scanner
+	if scanner == nil {
+		scanner = filescan.NewLimiter(4)
 	}
-	analysis := Analysis{Path: cachePath, SizeBytes: size, Owned: owned, Enabled: settings.GoCache.Enabled}
-	unmanagedPath, ok := defaultGoCachePath()
-	if !ok || unmanagedPath == cachePath {
+	measurementRoots := []filescan.Root{
+		{
+			Path: cachePath, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
+			Exclude: func(path string, _ fs.DirEntry) bool { return path == markerPath(cachePath) },
+		},
+	}
+	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
+	if hasUnmanagedPath && unmanagedPath != cachePath {
+		measurementRoots = append(measurementRoots, filescan.Root{
+			Path: unmanagedPath, MissingOK: true, SymlinkPolicy: filescan.SkipSymlinks,
+		})
+	}
+	measurements := scanner.Measure(ctx, measurementRoots, p.config.OnProgress)
+	if len(measurements) != len(measurementRoots) {
+		return Analysis{}, errors.New("go-cache scanner returned an invalid result")
+	}
+	if err := measurements[0].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
+	}
+	analysis := Analysis{
+		Path: cachePath, SizeBytes: measurements[0].Bytes, Owned: owned, Enabled: settings.GoCache.Enabled,
+	}
+	if !hasUnmanagedPath || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	unmanagedSize, err := directorySizeNoFollow(unmanagedPath)
-	if err != nil {
-		return Analysis{}, err
+	if err := measurements[1].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	analysis.UnmanagedSizeBytes = unmanagedSize
+	analysis.UnmanagedSizeBytes = measurements[1].Bytes
 	return analysis, nil
+}
+
+func (p *Provider) AnalyzeWithProgress(
+	ctx context.Context,
+	onProgress func(filescan.Progress),
+) (Analysis, error) {
+	copy := *p
+	copy.config.OnProgress = onProgress
+	return copy.Analyze(ctx)
 }
 
 func defaultGoCachePath() (string, bool) {

@@ -85,6 +85,45 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestGetStorageReturnsBeforeColdOverviewScanCompletes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := newProgressiveOverview()
+	cache := NewOverviewCache(provider)
+	router := newTestRouter(NewHandler(HandlerConfig{
+		Settings: staticSettingsManager{}, Runs: staticRunLister{}, Overview: cache,
+	}))
+
+	responseCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage", nil))
+		responseCh <- response
+	}()
+	<-provider.started
+
+	var response *httptest.ResponseRecorder
+	select {
+	case response = <-responseCh:
+	case <-time.After(100 * time.Millisecond):
+		close(provider.release)
+		t.Fatal("storage overview request waited for the cold scan")
+	}
+	close(provider.release)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Summary  *Summary             `json:"summary"`
+		Analysis StorageAnalysisState `json:"analysis"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Summary != nil || body.Analysis.State != AnalysisStateScanning {
+		t.Fatalf("cold response = %#v, want scanning state without summary", body)
+	}
+}
+
 func TestGetStorageDiskReturnsIndependentCapacityResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newTestRouter(NewHandler(HandlerConfig{}))

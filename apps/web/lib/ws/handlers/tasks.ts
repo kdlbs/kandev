@@ -50,6 +50,9 @@ function preservePrimaryExecutorFields(
   if (!hasPayloadField(payload, "primary_executor_id")) {
     merged.primaryExecutorId = existing.primaryExecutorId;
   }
+  if (!hasPayloadField(payload, "primary_executor_profile_id")) {
+    merged.primaryExecutorProfileId = existing.primaryExecutorProfileId;
+  }
   if (!hasPayloadField(payload, "primary_executor_type")) {
     merged.primaryExecutorType = existing.primaryExecutorType;
   }

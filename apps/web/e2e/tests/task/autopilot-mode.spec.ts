@@ -1,7 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -33,6 +33,10 @@ function parentQuestionScript(): string {
   return `e2e:mcp:kandev:ask_parent_question_kandev(${args})`;
 }
 
+function busyParentScript(): string {
+  return 'e2e:delay(5000)\ne2e:message("Parent is ready.")';
+}
+
 async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<string> {
   let questionID = "";
   await expect
@@ -61,7 +65,7 @@ test.describe("Task autopilot", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -80,6 +84,14 @@ test.describe("Task autopilot", () => {
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
+    );
+    if (!parent.session_id) throw new Error("autopilot parent did not return a session ID");
+    await waitForSessionDone(
+      apiClient,
+      parent.id,
+      parent.session_id,
+      "autopilot parent should finish its initial turn before the child asks a question",
+      60_000,
     );
     const child = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -152,5 +164,73 @@ test.describe("Task autopilot", () => {
         typeof message.metadata.parent_question_response === "string",
     );
     expect(correlatedAnswers).toHaveLength(1);
+  });
+
+  test("drains a queued parent question after the parent turn completes", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const parent = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queued Autopilot Parent",
+      seedData.agentProfileId,
+      {
+        description: busyParentScript(),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!parent.session_id) throw new Error("queued autopilot parent did not return a session ID");
+
+    await waitForSessionState(apiClient, {
+      taskId: parent.id,
+      sessionId: parent.session_id,
+      expectedState: "RUNNING",
+      message: "queued autopilot parent should enter its barrier turn",
+      timeout: 30_000,
+    });
+
+    const child = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queued Autopilot Child",
+      seedData.agentProfileId,
+      {
+        description: parentQuestionScript(),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        parent_id: parent.id,
+        workspace_mode: "inherit_parent",
+        autopilot: true,
+      },
+    );
+    if (!child.session_id) throw new Error("queued autopilot child did not return a session ID");
+
+    await waitForSessionState(apiClient, {
+      taskId: child.id,
+      sessionId: child.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "queued autopilot child should pause for its parent",
+      timeout: 60_000,
+    });
+
+    const questionID = await waitForParentQuestion(apiClient, parent.id);
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(child.id)).sessions[0]?.state ?? "", {
+        timeout: 60_000,
+        message: "queued parent answer should resume the child",
+      })
+      .not.toBe("WAITING_FOR_INPUT");
+
+    const childMessages = await apiClient.listSessionMessages(child.session_id);
+    expect(
+      childMessages.messages.find(
+        (message) =>
+          message.metadata?.status === "answered" && message.metadata.question_id === questionID,
+      ),
+    ).toBeDefined();
   });
 });
