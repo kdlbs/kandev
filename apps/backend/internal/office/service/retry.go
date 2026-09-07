@@ -170,9 +170,9 @@ func (s *Service) queueCEOAgentError(
 		return
 	}
 	payload := mustJSON(map[string]string{
-		"agent_profile_id": run.AgentProfileID,
-		"run_id":           run.ID,
-		"error":            errMsg,
+		"failed_agent_id": run.AgentProfileID,
+		"run_id":          run.ID,
+		"error":           errMsg,
 	})
 	_ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, "")
 }

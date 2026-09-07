@@ -972,6 +972,12 @@ func (si *SchedulerIntegration) buildPromptContext(
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
 	}
 
+	if reason == RunReasonAgentError {
+		pc.FailedAgentID = parsed["failed_agent_id"]
+		pc.FailedSessionID = parsed["failed_session_id"]
+		pc.AgentErrorMessage = parsed["error"]
+	}
+
 	return pc
 }
 

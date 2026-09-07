@@ -49,6 +49,11 @@ type PromptContext struct {
 	BudgetUsedPct   int
 	RecentErrors    []string
 
+	// Agent error fields (CEO agent_error escalation)
+	FailedAgentID     string
+	FailedSessionID   string
+	AgentErrorMessage string
+
 	// Stage fields (execution policy)
 	StageID         string   // execution policy stage ID
 	StageType       string   // "work", "review", "approval", "ship"
@@ -437,7 +442,20 @@ func buildAgentErrorPrompt(pc *PromptContext) string {
 	if len(pc.RecentErrors) > 0 {
 		errMsg = pc.RecentErrors[0]
 	}
-	return fmt.Sprintf("An agent session has failed. Error: %s\nInvestigate and take corrective action.", errMsg)
+	if pc.AgentErrorMessage != "" {
+		errMsg = pc.AgentErrorMessage
+	}
+	var b strings.Builder
+	b.WriteString("An agent session has failed.\n")
+	if pc.FailedAgentID != "" {
+		fmt.Fprintf(&b, "Failed agent: %s\n", pc.FailedAgentID)
+	}
+	if pc.FailedSessionID != "" {
+		fmt.Fprintf(&b, "Failed session: %s\n", pc.FailedSessionID)
+	}
+	fmt.Fprintf(&b, "Error: %s\n", errMsg)
+	b.WriteString("Investigate and take corrective action.")
+	return b.String()
 }
 
 func taskRef(pc *PromptContext) string {

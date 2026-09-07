@@ -411,8 +411,20 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 			out["author_id"] = comment.AuthorID
 		}
 	}
+	if agentErr, aok := agentErrorPayload(in.Payload); aok {
+		if agentErr.FailedAgentID != "" {
+			out["failed_agent_id"] = agentErr.FailedAgentID
+		}
+		if agentErr.FailedSessionID != "" {
+			out["failed_session_id"] = agentErr.FailedSessionID
+		}
+		if agentErr.ErrorMessage != "" {
+			out["error"] = agentErr.ErrorMessage
+		}
+	}
 	// Workflow-authored payload fields are explicit overrides. The trigger's
-	// comment_id/author_id only provide defaults for ordinary comment wakes.
+	// comment_id/author_id/failed_agent_id/etc. only provide defaults for
+	// their respective wake kinds.
 	for k, v := range actionPayload {
 		out[k] = v
 	}
@@ -438,6 +450,18 @@ func commentPayload(payload any) (OnCommentPayload, bool) {
 		}
 	}
 	return OnCommentPayload{}, false
+}
+
+func agentErrorPayload(payload any) (OnAgentErrorPayload, bool) {
+	switch p := payload.(type) {
+	case OnAgentErrorPayload:
+		return p, true
+	case *OnAgentErrorPayload:
+		if p != nil {
+			return *p, true
+		}
+	}
+	return OnAgentErrorPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all
