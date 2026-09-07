@@ -1605,9 +1605,10 @@ type stepArrivalBatchLocker interface {
 	LockStepArrivalsForBatch(ctx context.Context, stepID string) (context.Context, func())
 }
 
-// orderTasksForBulkMove re-derives the AC.29 submission order from each
-// task's current source step, rather than trusting the caller-supplied list
-// order: source step ordinal ascending, ties on source step id ascending
+// orderTasksForBulkMove re-derives the
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order from each task's
+// current source step, rather than trusting the caller-supplied list order:
+// source step ordinal ascending, ties on source step id ascending
 // (a selection can span workflows, so two source steps can share an
 // ordinal), then within one source step that step's admitted band in step
 // order followed by its queued band in step order.
@@ -1734,8 +1735,28 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	if len(tasks) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
-	for i, task := range tasks {
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, i); err != nil {
+
+	// Re-derive the REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order
+	// from each task's source step, the same as BulkMoveSelectedTasks: the
+	// server now computes each arriving task's position from the target
+	// step's current max, so dispatch order alone decides the final order.
+	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hold the target step's arrival-position lock across the whole dispatch
+	// loop, for the same consecutiveness reason as BulkMoveSelectedTasks: a
+	// per-call-only lock leaves a window between two of this batch's own
+	// calls where an unrelated arrival can land mid-sequence.
+	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
+		var unlock func()
+		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, targetStepID)
+		defer unlock()
+	}
+
+	for _, task := range orderedTasks {
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 	}

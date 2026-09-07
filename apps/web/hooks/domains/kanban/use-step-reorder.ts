@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { ApiError } from "@/lib/api/client";
@@ -10,7 +11,8 @@ import { compareStepOrder } from "@/lib/kanban/task-order";
 import { arraysEqual, mergeVisibleReorderIntoBand } from "@/lib/kanban/reorder-merge";
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 import { getTaskReorderErrorMessage } from "@/components/task/task-move-error-message";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { AppState } from "@/lib/state/app-state-types";
+import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type {
   ReorderBand,
   ReorderedTaskPosition,
@@ -62,6 +64,37 @@ function applyOrderedPositions(
   return tasks.map((task) =>
     positionById.has(task.id) ? { ...task, position: positionById.get(task.id)! } : task,
   );
+}
+
+/**
+ * Restores `band`'s pre-drag positions (from `originalTasks`) onto the LIVE
+ * `current` snapshot, scoped to `band`'s own task ids. Used when a plain
+ * (non-409) reorder failure leaves nothing more authoritative to reconcile
+ * to: replacing the whole snapshot with `originalTasks` would also roll back
+ * any sibling-band or other-step update applied during the in-flight window
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.27).
+ */
+function restoreBandOnFailure(params: {
+  store: StoreApi<AppState>;
+  workflowId: string;
+  stepId: string;
+  band: ReorderBand;
+  originalTasks: SnapshotTask[];
+  current: WorkflowSnapshotData;
+}) {
+  const { store, workflowId, stepId, band, originalTasks, current } = params;
+  const bandIds = bandTaskIds(
+    originalTasks.filter((task) => task.workflowStepId === stepId),
+    stepId,
+    band,
+  );
+  const originalPositions: ReorderedTaskPosition[] = originalTasks
+    .filter((task) => bandIds.has(task.id))
+    .map((task) => ({ id: task.id, position: task.position }));
+  store.getState().setWorkflowSnapshot(workflowId, {
+    ...current,
+    tasks: applyOrderedPositions(current.tasks, originalPositions, bandIds),
+  });
 }
 
 /**
@@ -181,9 +214,15 @@ export function useStepReorder() {
           } else {
             const withheld = store.getState().kanbanMulti.withheldReorderByBandKey[bandKey];
             if (withheld) {
-              reconcileAndApply({ tasks: originalTasks }, withheld);
+              // A published order for this band arrived and was withheld
+              // while the (now-failed) request was in flight; it is more
+              // authoritative than this band's own pre-drag order. Reconcile
+              // against the LIVE snapshot, not `originalTasks`, so a sibling
+              // band or another step that changed during the in-flight
+              // window is preserved rather than rolled back.
+              reconcileAndApply(current, withheld);
             } else {
-              state.setWorkflowSnapshot(workflowId, { ...current, tasks: originalTasks });
+              restoreBandOnFailure({ store, workflowId, stepId, band, originalTasks, current });
             }
             toast({
               title: t("task:failedToReorderTasks"),

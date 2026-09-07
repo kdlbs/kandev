@@ -1134,6 +1134,133 @@ func TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmission
 	}
 }
 
+// TestService_BulkMoveSelectedTasksOrdersAdmittedBeforeQueuedWithinSourceStep
+// pins AC-TASKS-KANBAN-TASK-REORDERING-001.29's second clause for the
+// caller-selected path: within one source step, the admitted band goes
+// before the queued band, in step order, regardless of selection order.
+func TestService_BulkMoveSelectedTasksOrdersAdmittedBeforeQueuedWithinSourceStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+
+	createMoveTask(t, ctx, repo, "sel-queued-1", "wf-source", "step-source", nil)
+	must(t, repo.UpdateTask(ctx, mustGetTask(t, ctx, repo, "sel-queued-1", func(task *models.Task) {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = "step-source"
+	})))
+	createMoveTask(t, ctx, repo, "sel-admitted-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveSelectedTasks(
+		ctx,
+		// Submitted queued-before-admitted: the final order must not follow
+		// this submission order, only the band precedence.
+		[]string{"sel-queued-1", "sel-admitted-1"},
+		"wf-target",
+		"step-target",
+	)
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
+	}
+	if result.MovedCount != 2 {
+		t.Fatalf("MovedCount = %d, want 2", result.MovedCount)
+	}
+
+	want := map[string]int{"sel-admitted-1": 0, "sel-queued-1": 1}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (admitted band before queued band)", id, task.Position, wantPosition)
+		}
+	}
+}
+
+// TestService_BulkMoveTasksOrdersBySourceStepOrdinal is BulkMoveTasks' sibling
+// of TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder:
+// the admin whole-workflow migration path (no explicit task_ids) must also
+// derive AC.29's submission order from source step ordinal, not the
+// repository's raw created_at listing order.
+func TestService_BulkMoveTasksOrdersBySourceStepOrdinal(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "late-1", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "late-2", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "early-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveTasks(ctx, "wf-source", "", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+	if result.MovedCount != 3 {
+		t.Fatalf("MovedCount = %d, want 3", result.MovedCount)
+	}
+
+	want := map[string]int{"early-1": 0, "late-1": 1, "late-2": 2}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (step-source ordinal 0 before step-review-target ordinal 1)",
+				id, task.Position, wantPosition)
+		}
+	}
+}
+
+// TestService_BulkMoveTasksOrdersAdmittedBeforeQueuedWithinSourceStep covers
+// AC.29's second clause for the same admin path: within one source step, the
+// admitted band goes before the queued band, in step order.
+func TestService_BulkMoveTasksOrdersAdmittedBeforeQueuedWithinSourceStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+
+	createMoveTask(t, ctx, repo, "queued-1", "wf-source", "step-source", nil)
+	must(t, repo.UpdateTask(ctx, mustGetTask(t, ctx, repo, "queued-1", func(task *models.Task) {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = "step-source"
+	})))
+	createMoveTask(t, ctx, repo, "admitted-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+	if result.MovedCount != 2 {
+		t.Fatalf("MovedCount = %d, want 2", result.MovedCount)
+	}
+
+	want := map[string]int{"admitted-1": 0, "queued-1": 1}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (admitted band before queued band)", id, task.Position, wantPosition)
+		}
+	}
+}
+
+func mustGetTask(t *testing.T, ctx context.Context, repo interface {
+	GetTask(context.Context, string) (*models.Task, error)
+}, id string, mutate func(*models.Task)) *models.Task {
+	t.Helper()
+	task, err := repo.GetTask(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTask(%s): %v", id, err)
+	}
+	mutate(task)
+	return task
+}
+
 func seedMoveWorkflows(t *testing.T, ctx context.Context, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error

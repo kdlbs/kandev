@@ -24,7 +24,12 @@ describe("classifyDrop", () => {
   it("classifies a same-band drop as a reorder with the moved visible order (AC.5)", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1), admitted("c", 2)];
 
-    const result = classifyDrop({ draggedTaskId: "a", overId: "c", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: "c",
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({
       kind: "reorder",
@@ -37,7 +42,12 @@ describe("classifyDrop", () => {
   it("classifies a queued-band drop the same way as admitted", () => {
     const stepTasks = [admitted("a", 0), queued("b", 1), queued("c", 2)];
 
-    const result = classifyDrop({ draggedTaskId: "b", overId: "c", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "b",
+      overId: "c",
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({
       kind: "reorder",
@@ -50,7 +60,12 @@ describe("classifyDrop", () => {
   it("rejects a drop onto the other band of the same step, without a request (AC.11)", () => {
     const stepTasks = [admitted("a", 0), queued("b", 1)];
 
-    const result = classifyDrop({ draggedTaskId: "a", overId: "b", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: "b",
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "reject" });
   });
@@ -59,7 +74,12 @@ describe("classifyDrop", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
     // Dropping "a" back onto itself.
-    const result = classifyDrop({ draggedTaskId: "a", overId: "a", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: "a",
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "no-op" });
   });
@@ -67,7 +87,12 @@ describe("classifyDrop", () => {
   it("is a no-op when there is no drop target (dropped outside any band, AC.9)", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
-    const result = classifyDrop({ draggedTaskId: "a", overId: null, stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: null,
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "no-op" });
   });
@@ -75,7 +100,12 @@ describe("classifyDrop", () => {
   it("is a no-op when dropped on the column itself with no specific card underneath", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
-    const result = classifyDrop({ draggedTaskId: "a", overId: STEP_A, stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: STEP_A,
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "no-op" });
   });
@@ -83,15 +113,12 @@ describe("classifyDrop", () => {
   it("classifies a drop onto a different step's column as cross-step (AC.13)", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
-    const result = classifyDrop({ draggedTaskId: "a", overId: STEP_B, stepTasks });
-
-    expect(result).toEqual({ kind: "cross-step", targetStepId: STEP_B });
-  });
-
-  it("classifies a drop onto a card that belongs to a different step as cross-step", () => {
-    const stepTasks = [admitted("a", 0), { ...admitted("x", 0, STEP_B) }];
-
-    const result = classifyDrop({ draggedTaskId: "a", overId: "x", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: STEP_B,
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "cross-step", targetStepId: STEP_B });
   });
@@ -99,8 +126,40 @@ describe("classifyDrop", () => {
   it("is a no-op when the dragged task cannot be found", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
-    const result = classifyDrop({ draggedTaskId: "missing", overId: "b", stepTasks });
+    const result = classifyDrop({
+      draggedTaskId: "missing",
+      overId: "b",
+      stepTasks,
+      allTasks: stepTasks,
+    });
 
     expect(result).toEqual({ kind: "no-op" });
+  });
+});
+
+describe("classifyDrop — cross-step target resolution (AC.13)", () => {
+  it("classifies a drop onto a card that belongs to a different step as cross-step, resolving the target from the whole board rather than the dragged task's own step", () => {
+    // `stepTasks` is scoped to the dragged task's own step, exactly as the
+    // real caller (`useSwimlaneKanbanDnd`) produces it — it never contains a
+    // foreign-step card. Only `allTasks` (the whole board) has "x".
+    const stepTasks = [admitted("a", 0)];
+    const allTasks = [...stepTasks, admitted("x", 0, STEP_B)];
+
+    const result = classifyDrop({ draggedTaskId: "a", overId: "x", stepTasks, allTasks });
+
+    expect(result).toEqual({ kind: "cross-step", targetStepId: STEP_B });
+  });
+
+  it("treats an overId that matches no task anywhere on the board as a literal step id (dropped on an empty column)", () => {
+    const stepTasks = [admitted("a", 0)];
+
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: STEP_B,
+      stepTasks,
+      allTasks: stepTasks,
+    });
+
+    expect(result).toEqual({ kind: "cross-step", targetStepId: STEP_B });
   });
 });

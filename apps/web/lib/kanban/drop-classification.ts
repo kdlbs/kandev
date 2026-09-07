@@ -28,24 +28,36 @@ export type ClassifyDropParams<T extends ClassifiableTask> = {
   overId: string | null;
   /** Every task currently displayed in the dragged task's step, in display order. */
   stepTasks: T[];
+  /**
+   * Every task on the board, across every step. Used only to resolve
+   * `overId` to its owning step when the drop lands on a card outside the
+   * dragged task's own step: every card is its own drop target (for the
+   * insertion indicator), so a cross-step drop's `over.id` is a foreign
+   * task's id, not the destination column's step id
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.13).
+   */
+  allTasks: T[];
 };
 
 /**
  * Classifies a drop against the dragged task's OWN step's currently
  * displayed tasks. `stepTasks` must be scoped to the dragged task's step
  * (whatever step it started in) so band membership (admitted vs queued) can
- * be computed the same way the board renders it.
+ * be computed the same way the board renders it. `allTasks` resolves a
+ * foreign card's step; `overId` is treated as a literal step id only when it
+ * names no task anywhere on the board (a drop on an empty column).
  */
 export function classifyDrop<T extends ClassifiableTask>(
   params: ClassifyDropParams<T>,
 ): DropClassification {
-  const { draggedTaskId, overId, stepTasks } = params;
+  const { draggedTaskId, overId, stepTasks, allTasks } = params;
   if (!overId) return { kind: "no-op" };
 
   const draggedTask = stepTasks.find((task) => task.id === draggedTaskId);
   if (!draggedTask) return { kind: "no-op" };
 
-  const overTask = stepTasks.find((task) => task.id === overId);
+  const overTask =
+    stepTasks.find((task) => task.id === overId) ?? allTasks.find((task) => task.id === overId);
   const targetStepId = overTask ? overTask.workflowStepId : overId;
 
   if (targetStepId !== draggedTask.workflowStepId) {

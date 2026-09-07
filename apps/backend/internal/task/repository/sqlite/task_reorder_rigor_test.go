@@ -2,11 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // markHiddenForReorder marks id as a hidden task per Terminology (archived,
@@ -67,9 +69,12 @@ func TestReorderStepTasksDoesNotTouchOtherStepPositions(t *testing.T) {
 
 // TestReorderStepTasksExcludesHiddenTasksFromMembership pins
 // AC-TASKS-KANBAN-TASK-REORDERING-001.33/.31: an archived, ephemeral, or
-// automation-run task is never part of band membership, is never named in a
-// valid submission, never has its position rewritten, and never causes the
-// step_changed conflict of .19/.26 just by existing in the step.
+// automation-run task is never part of band membership, is never required in
+// a valid submission, and never has its position rewritten. Naming it
+// explicitly is the membership-change conflict of .19/.26, not a malformed
+// request, because it still belongs to stepID — only an id that never
+// belonged to stepID at all is malformed
+// (TestReorderStepTasksNamingForeignTaskIsMalformed covers that case).
 func TestReorderStepTasksExcludesHiddenTasksFromMembership(t *testing.T) {
 	for _, kind := range []string{"archived", "ephemeral", "automation_run"} {
 		t.Run(kind, func(t *testing.T) {
@@ -105,15 +110,52 @@ func TestReorderStepTasksExcludesHiddenTasksFromMembership(t *testing.T) {
 				t.Fatalf("hidden task position = %d, want unchanged %d", got, hiddenBefore)
 			}
 
-			// Naming the hidden task explicitly is a structurally malformed
-			// request (it resolves to no current non-hidden member), not a
-			// step_changed conflict.
+			// Naming the hidden task explicitly means the client's submission
+			// reflects a membership it saw before hidden-task became hidden:
+			// the .26/.33 membership-change conflict (409 step_changed), not
+			// the .18 malformed-request case (400).
 			_, _, err = repo.ReorderStepTasks(ctx, stepID, ReorderBandAdmitted, []string{"visible-a", "hidden-task"})
-			if err == nil {
-				t.Fatal("naming a hidden task: want an error")
+			if !errors.Is(err, repoerrors.ErrStepChanged) {
+				t.Fatalf("naming a hidden task: err = %v, want ErrStepChanged", err)
+			}
+			if got := taskPosition(t, ctx, repo, "hidden-task"); got != hiddenBefore {
+				t.Fatalf("hidden task position = %d, want unchanged %d after the conflict", got, hiddenBefore)
 			}
 		})
 	}
+}
+
+// TestReorderStepTasksNamingForeignTaskIsMalformed pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.18: an id that never belonged to the
+// named step at all — it belongs to a different step, or never existed — is
+// a structurally malformed request (400 invalid_reorder), unlike a hidden
+// task that still belongs to the step
+// (TestReorderStepTasksExcludesHiddenTasksFromMembership).
+func TestReorderStepTasksNamingForeignTaskIsMalformed(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-foreign-reorder-id")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-foreign-reorder-id", WorkspaceID: "ws-foreign-reorder-id", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderStep(t, repo, "step-foreign-reorder-id", "wf-foreign-reorder-id")
+	seedReorderStep(t, repo, "step-foreign-reorder-id-other", "wf-foreign-reorder-id")
+	mustCreateReorderTask(t, ctx, repo, "foreign-visible-a", "ws-foreign-reorder-id", "wf-foreign-reorder-id", "step-foreign-reorder-id")
+	mustCreateReorderTask(t, ctx, repo, "foreign-elsewhere", "ws-foreign-reorder-id", "wf-foreign-reorder-id", "step-foreign-reorder-id-other")
+
+	t.Run("belongs to a different step", func(t *testing.T) {
+		_, _, err := repo.ReorderStepTasks(ctx, "step-foreign-reorder-id", ReorderBandAdmitted, []string{"foreign-visible-a", "foreign-elsewhere"})
+		if !errors.Is(err, repoerrors.ErrInvalidReorder) {
+			t.Fatalf("err = %v, want ErrInvalidReorder", err)
+		}
+	})
+
+	t.Run("never existed", func(t *testing.T) {
+		_, _, err := repo.ReorderStepTasks(ctx, "step-foreign-reorder-id", ReorderBandAdmitted, []string{"foreign-visible-a", "does-not-exist"})
+		if !errors.Is(err, repoerrors.ErrInvalidReorder) {
+			t.Fatalf("err = %v, want ErrInvalidReorder", err)
+		}
+	})
 }
 
 // TestReorderStepTasksDepartureLeavesRemainingRelativeOrderIntact pins
@@ -201,10 +243,19 @@ func TestReorderStepTasksConcurrentSameBandSerializes(t *testing.T) {
 	if results[0] == results[1] {
 		t.Fatalf("both commits produced revision %d; want two distinct revisions", results[0])
 	}
-	// Positions must be dense 0..1 whichever order committed last.
-	posA, posB := taskPosition(t, ctx, repo, "same-a"), taskPosition(t, ctx, repo, "same-b")
-	if (posA != 0 || posB != 1) && (posA != 1 || posB != 0) {
-		t.Fatalf("final positions not dense/consistent: same-a=%d same-b=%d", posA, posB)
+	// AC.25: "the last committed order shall be authoritative" — the
+	// persisted positions must match the submission with the higher
+	// revision, not just be dense/consistent with either.
+	winner := 0
+	if results[1] > results[0] {
+		winner = 1
+	}
+	wantFirst, wantSecond := orders[winner][0], orders[winner][1]
+	if got := taskPosition(t, ctx, repo, wantFirst); got != 0 {
+		t.Fatalf("%s position = %d, want 0 (higher-revision submission %v is authoritative)", wantFirst, got, orders[winner])
+	}
+	if got := taskPosition(t, ctx, repo, wantSecond); got != 1 {
+		t.Fatalf("%s position = %d, want 1 (higher-revision submission %v is authoritative)", wantSecond, got, orders[winner])
 	}
 }
 

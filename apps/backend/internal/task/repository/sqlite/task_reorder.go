@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sort"
+	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -22,19 +23,19 @@ const (
 // non-hidden task list in its new order plus the step's order_revision as of
 // commit.
 //
-// Validation is two-tiered. A submitted id that names no current non-hidden
-// task of stepID at all (never existed, belongs to a different step, or has
-// been archived/hidden since the client last read the band) is a
+// Validation is two-tiered. A submitted id naming a task that never belonged
+// to stepID at all — never existed or belongs to a different step — is a
 // structurally malformed request: ErrInvalidReorder, alongside an invalid
 // band value, an empty list, or a duplicate id
-// (REQ-TASKS-KANBAN-TASK-REORDERING-001.18). Once every id resolves to a
-// current member of stepID, whether that member set exactly equals the named
-// band's current membership is a race, not a malformed request — a task that
-// moved to the step's other band, or a band that has gained members the
-// caller doesn't know about, is exactly the drift
-// REQ-TASKS-KANBAN-TASK-REORDERING-001.26 says to treat as the
-// REQ-TASKS-KANBAN-TASK-REORDERING-001.19 conflict, ErrStepChanged, whatever
-// caused it.
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.18). A submitted id naming a task
+// that still belongs to stepID but has become hidden since the client read
+// the band is not malformed: hidden tasks are excluded from band membership,
+// so this is exactly the membership drift
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.26 and .33 route to the
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.19 conflict, ErrStepChanged. Once
+// every id resolves to a current, non-hidden member of stepID, whether that
+// member set exactly equals the named band's current membership is the same
+// conflict, checked by set comparison instead of existence.
 func (r *Repository) ReorderStepTasks(
 	ctx context.Context, stepID, band string, orderedTaskIDs []string,
 ) ([]*models.Task, int64, error) {
@@ -65,9 +66,9 @@ func (r *Repository) ReorderStepTasks(
 		named, other = queued, admitted
 	}
 
-	orderedNamed, err := resolveReorderStepMembership(tasks, orderedTaskIDs)
-	if err != nil {
-		return nil, 0, err
+	orderedNamed, unresolvedIDs := resolveReorderStepMembership(tasks, orderedTaskIDs)
+	if len(unresolvedIDs) > 0 {
+		return r.reorderUnresolvedIDsResult(ctx, tx, stepID, tasks, unresolvedIDs)
 	}
 	if !sameTaskSet(orderedNamed, named) {
 		revision, revErr := r.stepOrderRevisionInTx(ctx, tx, stepID)
@@ -138,23 +139,76 @@ func partitionReorderBands(tasks []*models.Task, stepID string) (admitted, queue
 	return admitted, queued
 }
 
-// resolveReorderStepMembership resolves each of orderedIDs against stepTasks
-// (both bands). An id with no match is a structurally malformed request:
-// repoerrors.ErrInvalidReorder.
-func resolveReorderStepMembership(stepTasks []*models.Task, orderedIDs []string) ([]*models.Task, error) {
+// resolveReorderStepMembership resolves each of orderedIDs against
+// stepTasks, the step's current non-hidden members (both bands). An id with
+// no match is returned in unresolved rather than rejected immediately: the
+// caller still has to tell an id that never belonged to stepID apart from
+// one that belongs to stepID but has become hidden since the client read the
+// band, which is a membership-change conflict rather than a malformed
+// request (REQ-TASKS-KANBAN-TASK-REORDERING-001.33).
+func resolveReorderStepMembership(stepTasks []*models.Task, orderedIDs []string) (resolved []*models.Task, unresolved []string) {
 	byID := make(map[string]*models.Task, len(stepTasks))
 	for _, task := range stepTasks {
 		byID[task.ID] = task
 	}
-	resolved := make([]*models.Task, 0, len(orderedIDs))
+	resolved = make([]*models.Task, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
 		task, ok := byID[id]
 		if !ok {
-			return nil, repoerrors.ErrInvalidReorder
+			unresolved = append(unresolved, id)
+			continue
 		}
 		resolved = append(resolved, task)
 	}
-	return resolved, nil
+	return resolved, unresolved
+}
+
+// reorderUnresolvedIDsResult resolves the two-way branch for ids that don't
+// currently match any of stepID's non-hidden tasks: a genuinely foreign id
+// (never belonged to stepID) is a structurally malformed request,
+// ErrInvalidReorder; otherwise every one of them simply became hidden inside
+// the window, which is the REQ-TASKS-KANBAN-TASK-REORDERING-001.26/.33
+// membership-change conflict, ErrStepChanged.
+func (r *Repository) reorderUnresolvedIDsResult(
+	ctx context.Context, tx *sql.Tx, stepID string, tasks []*models.Task, unresolvedIDs []string,
+) ([]*models.Task, int64, error) {
+	foreign, err := r.hasForeignReorderID(ctx, tx, stepID, unresolvedIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	if foreign {
+		return nil, 0, repoerrors.ErrInvalidReorder
+	}
+	revision, err := r.stepOrderRevisionInTx(ctx, tx, stepID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sortStepOrder(tasks), revision, repoerrors.ErrStepChanged
+}
+
+// hasForeignReorderID reports whether any of ids is not associated with
+// stepID at all — never existed or belongs to a different step — regardless
+// of hidden status. Called only for ids resolveReorderStepMembership could
+// not match against the step's live non-hidden tasks, so a false result
+// means every one of ids still belongs to stepID and has simply become
+// hidden since the client read the band
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.26/.33).
+func (r *Repository) hasForeignReorderID(ctx context.Context, tx *sql.Tx, stepID string, ids []string) (bool, error) {
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, stepID)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := r.db.Rebind(`
+		SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND id IN (` + strings.Join(placeholders, ",") + `)
+	`)
+	var belongingCount int
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&belongingCount); err != nil {
+		return false, err
+	}
+	return belongingCount != len(ids), nil
 }
 
 // sameTaskSet reports whether resolved (already deduplicated, one entry per

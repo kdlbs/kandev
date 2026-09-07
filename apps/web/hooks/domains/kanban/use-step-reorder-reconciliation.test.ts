@@ -291,3 +291,108 @@ describe("useStepReorder — in-flight reconciliation (AC.27), conflict and sibl
     expect(tasks.find((t) => t.id === "q1")?.position).toBe(9);
   });
 });
+
+describe("useStepReorder — in-flight reconciliation (AC.27), plain-failure sibling-band paths", () => {
+  it("does not let a plain request failure roll back the sibling band's already-fresher positions", async () => {
+    resetStore([
+      admittedTask("a", 0),
+      admittedTask("b", 1),
+      queuedTask("q1", 2),
+      queuedTask("q2", 3),
+    ]);
+    const { promise, reject } = deferred<{
+      workflow_step_id: string;
+      revision: number;
+      tasks: Array<{ id: string; position: number }>;
+    }>();
+    reorderStepTasks.mockReturnValue(promise);
+    const { result } = renderHook(() => useStepReorder());
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "b",
+        visibleOrderAfterMove: ["b", "a"],
+      });
+    });
+
+    // A sibling-band WS event is applied locally while this band's request
+    // is still in flight, exactly as in the success-path test above.
+    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = {
+      tasks: storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks.map((t) =>
+        t.id === "q1" ? { ...t, position: 9 } : t,
+      ),
+    };
+
+    await act(async () => {
+      reject(new Error("network error"));
+      await pending;
+    });
+
+    const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
+    // The sibling (queued) band's fresher WS-applied position must survive a
+    // failure of the unrelated admitted-band request.
+    expect(tasks.find((t) => t.id === "q1")?.position).toBe(9);
+    // This band reverts to its own pre-drag positions.
+    expect(tasks.find((t) => t.id === "a")?.position).toBe(0);
+    expect(tasks.find((t) => t.id === "b")?.position).toBe(1);
+  });
+
+  it("applies a withheld higher-revision order on a plain request failure without rolling back the sibling band", async () => {
+    resetStore([
+      admittedTask("a", 0),
+      admittedTask("b", 1),
+      queuedTask("q1", 2),
+      queuedTask("q2", 3),
+    ]);
+    const { promise, reject } = deferred<{
+      workflow_step_id: string;
+      revision: number;
+      tasks: Array<{ id: string; position: number }>;
+    }>();
+    reorderStepTasks.mockReturnValue(promise);
+    const { result } = renderHook(() => useStepReorder());
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "b",
+        visibleOrderAfterMove: ["b", "a"],
+      });
+    });
+
+    // A whole-step task.reordered event arrives while this band's request is
+    // in flight: the sibling (queued) band's positions are applied live, and
+    // this band's own positions are withheld under AC.27.
+    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = {
+      tasks: storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks.map((t) =>
+        t.id === "q1" ? { ...t, position: 9 } : t,
+      ),
+    };
+    storeState.kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`] = {
+      revision: 3,
+      tasks: [
+        { id: "a", position: 20 },
+        { id: "b", position: 21 },
+      ],
+    };
+
+    await act(async () => {
+      reject(new Error("network error"));
+      await pending;
+    });
+
+    const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
+    expect(tasks.find((t) => t.id === "q1")?.position).toBe(9);
+    expect(tasks.find((t) => t.id === "a")?.position).toBe(20);
+    expect(tasks.find((t) => t.id === "b")?.position).toBe(21);
+    expect(storeState.kanbanMulti.orderRevisionByStepId[STEP_ID]).toBe(3);
+    expect(storeState.kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`]).toBeUndefined();
+  });
+});

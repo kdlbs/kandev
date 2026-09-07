@@ -110,6 +110,7 @@ export function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: Swimlan
         draggedTaskId: taskId,
         overId,
         stepTasks: tasksRef.current.filter((t) => t.workflowStepId === task.workflowStepId),
+        allTasks: tasksRef.current,
       });
 
       if (classification.kind === "reorder") {
