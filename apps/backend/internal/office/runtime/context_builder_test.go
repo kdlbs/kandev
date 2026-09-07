@@ -101,11 +101,15 @@ func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshot(
 }
 
 type stubSeatResolver struct {
-	held bool
-	err  error
+	held    bool
+	err     error
+	taskID  string
+	agentID string
 }
 
-func (r *stubSeatResolver) HoldsDecisionSeat(_ context.Context, _, _ string) (bool, error) {
+func (r *stubSeatResolver) HoldsDecisionSeat(_ context.Context, taskID, agentID string) (bool, error) {
+	r.taskID = taskID
+	r.agentID = agentID
 	return r.held, r.err
 }
 
@@ -128,31 +132,47 @@ func buildTestRunContext(t *testing.T, seats DecisionSeatResolver) RunContext {
 	return runCtx
 }
 
+func hasAvailableAction(runCtx RunContext, want string) bool {
+	for _, action := range runCtx.AvailableActions {
+		if action == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestContextBuilderGrantsRecordStepDecisionForSeatHolder(t *testing.T) {
 	runCtx := buildTestRunContext(t, &stubSeatResolver{held: true})
-	if !runCtx.Capabilities.CanRecordStepDecision {
+	if !hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
 		t.Fatal("expected seat holder to be granted record_step_decision")
 	}
 }
 
 func TestContextBuilderDeniesRecordStepDecisionForNonHolder(t *testing.T) {
 	runCtx := buildTestRunContext(t, &stubSeatResolver{held: false})
-	if runCtx.Capabilities.CanRecordStepDecision {
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
 		t.Fatal("expected non-holder to be denied record_step_decision")
 	}
 }
 
 func TestContextBuilderDeniesRecordStepDecisionWhenResolverNil(t *testing.T) {
 	runCtx := buildTestRunContext(t, nil)
-	if runCtx.Capabilities.CanRecordStepDecision {
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
 		t.Fatal("expected nil resolver to deny record_step_decision")
 	}
 }
 
-func TestContextBuilderDeniesRecordStepDecisionOnResolverError(t *testing.T) {
-	runCtx := buildTestRunContext(t, &stubSeatResolver{held: true, err: errBoom})
-	if runCtx.Capabilities.CanRecordStepDecision {
-		t.Fatal("expected resolver error to deny record_step_decision")
+func TestContextBuilderReturnsResolverError(t *testing.T) {
+	seats := &stubSeatResolver{held: true, err: errBoom}
+	builder := ContextBuilder{
+		Agents: &recordingAgentReader{
+			agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+		},
+		Seats: seats,
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
+	if _, err := builder.Build(context.Background(), run); !errors.Is(err, errBoom) {
+		t.Fatalf("expected resolver error to abort context build, got %v", err)
 	}
 }
 
@@ -170,7 +190,58 @@ func TestContextBuilderDeniesRecordStepDecisionForTasklessRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if runCtx.Capabilities.CanRecordStepDecision {
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
 		t.Fatal("expected taskless run to deny record_step_decision")
+	}
+}
+
+func TestContextBuilderPersistsSeatActionAsAdvisoryMetadata(t *testing.T) {
+	store := &recordingRunSnapshotStore{}
+	seats := &stubSeatResolver{held: true}
+	builder := ContextBuilder{
+		Agents: &recordingAgentReader{
+			agent: &models.AgentInstance{
+				ID:          "agent-1",
+				WorkspaceID: "ws-1",
+				Role:        models.AgentRoleWorker,
+			},
+		},
+		Runs:  store,
+		Seats: seats,
+	}
+	run := &models.Run{
+		ID:             "run-1",
+		AgentProfileID: "agent-1",
+		Reason:         "task_review_requested",
+		Payload:        `{"task_id":"task-1"}`,
+	}
+
+	runCtx, err := builder.BuildAndPersist(context.Background(), run)
+	if err != nil {
+		t.Fatalf("BuildAndPersist: %v", err)
+	}
+	if seats.taskID != "task-1" || seats.agentID != "agent-1" {
+		t.Fatalf("seat resolver received task=%q agent=%q", seats.taskID, seats.agentID)
+	}
+
+	rawContext, err := json.Marshal(runCtx)
+	if err != nil {
+		t.Fatalf("marshal run context: %v", err)
+	}
+	var contextSnapshot map[string]any
+	if err := json.Unmarshal(rawContext, &contextSnapshot); err != nil {
+		t.Fatalf("decode run context: %v", err)
+	}
+	actions, ok := contextSnapshot["available_actions"].([]any)
+	if !ok || len(actions) != 1 || actions[0] != "record_step_decision" {
+		t.Fatalf("expected advisory record_step_decision action, got %#v", contextSnapshot["available_actions"])
+	}
+
+	var capabilities map[string]any
+	if err := json.Unmarshal([]byte(store.calls[0].Capabilities), &capabilities); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	if _, ok := capabilities["record_step_decision"]; ok {
+		t.Fatalf("record_step_decision must not be serialized as a runtime capability: %s", store.calls[0].Capabilities)
 	}
 }

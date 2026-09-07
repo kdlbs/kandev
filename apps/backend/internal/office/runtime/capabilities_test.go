@@ -6,25 +6,15 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 )
 
-func TestCapabilityRecordStepDecisionRoundTripsThroughAllowsAndAllowedKeys(t *testing.T) {
-	caps := Capabilities{CanRecordStepDecision: true}
-	if !caps.Allows(CapabilityRecordStepDecision) {
-		t.Fatal("expected Allows to report the granted decision capability")
+func TestDecisionToolIsNotRuntimeCapability(t *testing.T) {
+	caps := Capabilities{}
+	if caps.Allows(AvailableActionRecordStepDecision) {
+		t.Fatal("decision tool availability must not be treated as a runtime capability")
 	}
-	keys := caps.AllowedKeys()
-	found := false
-	for _, k := range keys {
-		if k == CapabilityRecordStepDecision {
-			found = true
+	for _, key := range caps.AllowedKeys() {
+		if key == AvailableActionRecordStepDecision {
+			t.Fatalf("runtime capability list must not include the decision tool: %v", caps.AllowedKeys())
 		}
-	}
-	if !found {
-		t.Fatalf("expected AllowedKeys to include %q, got %v", CapabilityRecordStepDecision, keys)
-	}
-
-	denied := Capabilities{CanRecordStepDecision: false}
-	if denied.Allows(CapabilityRecordStepDecision) {
-		t.Fatal("expected Allows to report false when the field is unset")
 	}
 }
 
@@ -35,10 +25,7 @@ func TestFromAgentNeverGrantsRecordStepDecision(t *testing.T) {
 		Role:        models.AgentRoleCEO,
 	}
 	caps := FromAgent(ceo)
-	if caps.CanRecordStepDecision {
-		t.Fatal("FromAgent must never grant record_step_decision, even though the CEO role defaults to can_approve; the seat, not a permission, is the authority")
-	}
-	if caps.Allows(CapabilityRecordStepDecision) {
-		t.Fatal("Allows should agree with the unset field")
+	if caps.Allows(AvailableActionRecordStepDecision) {
+		t.Fatal("Allows must not authorize the decision tool")
 	}
 }

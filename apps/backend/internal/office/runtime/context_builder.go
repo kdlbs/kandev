@@ -23,8 +23,8 @@ type RunSnapshotStore interface {
 // DecisionSeatResolver reports whether an agent currently holds a decision
 // seat (reviewer or approver) at a task's current workflow step. Implemented
 // by *service.Service via HoldsDecisionSeat, mirroring the authorization
-// RecordAgentDecision itself applies, so the runtime capability can never
-// over- or under-state who can actually record a decision.
+// RecordAgentDecision itself applies. The result is advisory prompt metadata;
+// the decision tool performs live authorization when it is called.
 type DecisionSeatResolver interface {
 	HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID string) (bool, error)
 }
@@ -52,31 +52,39 @@ func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext
 	taskID := payload["task_id"]
 	sessionID := firstNonEmpty(run.SessionID, payload["session_id"])
 	caps := FromAgent(agent).WithTaskScope(taskID)
-	caps.CanRecordStepDecision = b.resolveDecisionSeat(ctx, taskID, agent.ID)
+	availableActions, err := b.resolveAvailableActions(ctx, taskID, agent.ID)
+	if err != nil {
+		return RunContext{}, err
+	}
 	runCtx := RunContext{
-		WorkspaceID:  agent.WorkspaceID,
-		AgentID:      agent.ID,
-		TaskID:       taskID,
-		RunID:        run.ID,
-		SessionID:    sessionID,
-		Reason:       run.Reason,
-		Capabilities: caps,
+		WorkspaceID:      agent.WorkspaceID,
+		AgentID:          agent.ID,
+		TaskID:           taskID,
+		RunID:            run.ID,
+		SessionID:        sessionID,
+		Reason:           run.Reason,
+		Capabilities:     caps,
+		AvailableActions: availableActions,
 	}
 	return runCtx, nil
 }
 
-// resolveDecisionSeat reports whether the agent holds a decision seat for
-// taskID. A taskless run, a missing resolver, or a lookup error all deny the
-// capability rather than granting it speculatively.
-func (b *ContextBuilder) resolveDecisionSeat(ctx context.Context, taskID, agentID string) bool {
+// resolveAvailableActions reports advisory tools for the run prompt. A
+// taskless run or missing resolver has no seat-derived actions. A lookup error
+// aborts context construction so the scheduler can retry instead of launching
+// a prompt that requires a tool which it could not advertise.
+func (b *ContextBuilder) resolveAvailableActions(ctx context.Context, taskID, agentID string) ([]string, error) {
 	if taskID == "" || b.Seats == nil {
-		return false
+		return nil, nil
 	}
 	held, err := b.Seats.HoldsDecisionSeat(ctx, taskID, agentID)
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("resolve decision seat: %w", err)
 	}
-	return held
+	if !held {
+		return nil, nil
+	}
+	return []string{AvailableActionRecordStepDecision}, nil
 }
 
 // BuildAndPersist builds context and stores its serialized snapshot on the run.

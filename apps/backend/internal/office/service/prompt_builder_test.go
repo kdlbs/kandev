@@ -429,7 +429,7 @@ func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testi
 		StageType:      "review",
 		RunID:          "run-1",
 		AgentID:        "agent-1",
-		AllowedActions: []string{officeruntime.CapabilityPostComment, officeruntime.CapabilityRecordStepDecision},
+		AllowedActions: []string{officeruntime.CapabilityPostComment, officeruntime.AvailableActionRecordStepDecision},
 	}
 	prompt := service.BuildPrompt(pc)
 
@@ -441,7 +441,7 @@ func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testi
 		t.Fatalf("expected an allowed actions line:\n%s", prompt)
 	}
 	allowedLine := prompt[allowedIdx : strings.Index(prompt[allowedIdx:], "\n")+allowedIdx]
-	if !strings.Contains(allowedLine, officeruntime.CapabilityRecordStepDecision) {
+	if !strings.Contains(allowedLine, officeruntime.AvailableActionRecordStepDecision) {
 		t.Fatalf("allowed actions line must list record_step_decision so it does not contradict the decision contract:\n%s", allowedLine)
 	}
 }

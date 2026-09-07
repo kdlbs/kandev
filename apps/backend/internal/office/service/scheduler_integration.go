@@ -378,7 +378,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
 	pc.TaskScope = append([]string(nil), runCtx.Capabilities.AllowedTaskIDs...)
-	pc.AllowedActions = runCtx.Capabilities.AllowedKeys()
+	pc.AllowedActions = append(runCtx.Capabilities.AllowedKeys(), runCtx.AvailableActions...)
 	wakeContext := BuildPrompt(pc)
 
 	// Resume = the (task, agent_instance) session has run before. On resume
