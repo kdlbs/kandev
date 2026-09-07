@@ -439,6 +439,17 @@ const createTablesSQL = `
 		last_lifecycle_session_id TEXT,
 		last_error TEXT,
 		last_error_kind TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_state TEXT NOT NULL DEFAULT 'acknowledged',
+		auto_fix_attempt_queue_entry_id TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_session_id TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_turn_id TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_signature TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_provider_generation TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_outcome TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_summary TEXT NOT NULL DEFAULT '',
+		auto_fix_attempt_started_at DATETIME,
+		auto_fix_attempt_outcome_at DATETIME,
+		auto_fix_attempt_progress_deadline DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (task_id, repository_id, pr_number)
@@ -1247,6 +1258,17 @@ func (s *Store) addTaskPRAgentAutomationColumns() error {
 			{"last_lifecycle_event", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_event TEXT NOT NULL DEFAULT ''"},
 			{"last_lifecycle_prompt_at", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_prompt_at DATETIME"},
 			{"last_lifecycle_session_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_session_id TEXT"},
+			{"auto_fix_attempt_state", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_state TEXT NOT NULL DEFAULT 'acknowledged'"},
+			{"auto_fix_attempt_queue_entry_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_queue_entry_id TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_session_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_session_id TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_turn_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_turn_id TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_signature", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_signature TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_provider_generation", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_provider_generation TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_outcome", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_outcome TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_summary", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_summary TEXT NOT NULL DEFAULT ''"},
+			{"auto_fix_attempt_started_at", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_started_at DATETIME"},
+			{"auto_fix_attempt_outcome_at", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_outcome_at DATETIME"},
+			{"auto_fix_attempt_progress_deadline", "ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_attempt_progress_deadline DATETIME"},
 		},
 	}
 	for table, fields := range migrations {
@@ -2690,8 +2712,19 @@ func resetTaskCIAutoFixStateForTask(
 		    last_fix_checkpoint_json = '',
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
-		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
-		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
+		    auto_fix_attempt_state = 'acknowledged',
+		    auto_fix_attempt_queue_entry_id = '',
+		    auto_fix_attempt_session_id = '',
+		    auto_fix_attempt_turn_id = '',
+		    auto_fix_attempt_signature = '',
+		    auto_fix_attempt_provider_generation = '',
+		    auto_fix_attempt_outcome = '',
+		    auto_fix_attempt_summary = '',
+		    auto_fix_attempt_started_at = NULL,
+		    auto_fix_attempt_outcome_at = NULL,
+		    auto_fix_attempt_progress_deadline = NULL,
+		    last_error = NULL,
+		    last_error_kind = '',
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ?`), now, taskID)
@@ -2918,11 +2951,23 @@ func resetTaskCIAutoFixState(
 		    last_fix_checkpoint_json = '',
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
-		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
-		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
+		    auto_fix_attempt_state = ?,
+		    auto_fix_attempt_queue_entry_id = '',
+		    auto_fix_attempt_session_id = '',
+		    auto_fix_attempt_turn_id = '',
+		    auto_fix_attempt_signature = '',
+		    auto_fix_attempt_provider_generation = '',
+		    auto_fix_attempt_outcome = '',
+		    auto_fix_attempt_summary = '',
+		    auto_fix_attempt_started_at = NULL,
+		    auto_fix_attempt_outcome_at = NULL,
+		    auto_fix_attempt_progress_deadline = NULL,
+		    last_error = NULL,
+		    last_error_kind = '',
 		    auto_fix_exhausted_at = NULL,
-		    updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), now, taskID, repositoryID, prNumber)
+			updated_at = ?
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
+		string(TaskCIAutoFixAttemptAcknowledged), now, taskID, repositoryID, prNumber)
 	return err
 }
 
@@ -3002,6 +3047,23 @@ func (s *Store) ListTaskCIPRStates(ctx context.Context, taskID string) ([]*TaskC
 	return out, nil
 }
 
+// ListAllTaskCIPRStates returns every persisted PR automation state row. It is
+// used only by bounded startup reconciliation; watcher evaluation remains
+// task-scoped and uses ListTaskCIPRStates.
+func (s *Store) ListAllTaskCIPRStates(ctx context.Context) ([]*TaskCIPRAutomationState, error) {
+	var rows []TaskCIPRAutomationState
+	if err := s.ro.SelectContext(ctx, &rows,
+		s.ro.Rebind(`SELECT * FROM github_task_ci_pr_state ORDER BY task_id ASC, repository_id ASC, pr_number ASC`),
+	); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskCIPRAutomationState, 0, len(rows))
+	for i := range rows {
+		out = append(out, &rows[i])
+	}
+	return out, nil
+}
+
 // GetTaskCIPRState returns one task/PR automation state row, or nil.
 func (s *Store) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskCIPRAutomationState, error) {
 	var state TaskCIPRAutomationState
@@ -3015,11 +3077,26 @@ func (s *Store) GetTaskCIPRState(ctx context.Context, taskID, repositoryID strin
 	return &state, err
 }
 
-// RecordTaskCIFixAttempt records the feedback checkpoint that produced an auto-fix prompt.
+var (
+	ErrTaskCIAutoFixAttemptNotFound = errors.New("CI auto-fix attempt not found or no longer matches")
+	ErrTaskCIAutoFixOutcomeInvalid  = errors.New("invalid CI auto-fix outcome")
+)
+
+const taskCIAutoFixProviderProgressWindow = 2 * time.Minute
+
+// RecordTaskCIFixAttempt records the feedback checkpoint that produced an
+// auto-fix prompt and starts or replaces its durable attempt reservation.
 func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
 	when := attempt.EnqueuedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
+	}
+	attemptState := attempt.State
+	if attemptState == "" {
+		// Callers from before the explicit outcome protocol recorded the
+		// checkpoint after dispatch completed. Treat those rows as already
+		// acknowledged during the compatibility window.
+		attemptState = TaskCIAutoFixAttemptAcknowledged
 	}
 	roundCount := 0
 	if attempt.IncrementRound {
@@ -3031,14 +3108,31 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 				task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
 				last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
 				last_queue_fix_event_id, last_queue_removal_cause,
+				auto_fix_attempt_state, auto_fix_attempt_queue_entry_id,
+				auto_fix_attempt_session_id, auto_fix_attempt_turn_id,
+				auto_fix_attempt_signature, auto_fix_attempt_provider_generation,
+				auto_fix_attempt_outcome, auto_fix_attempt_summary,
+				auto_fix_attempt_started_at, auto_fix_attempt_outcome_at,
+				auto_fix_attempt_progress_deadline,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, NULL, NULL, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_fix_signature = excluded.last_fix_signature,
 				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 				last_fix_enqueued_at = excluded.last_fix_enqueued_at,
 				last_fix_session_id = excluded.last_fix_session_id,
 				auto_fix_round_count = github_task_ci_pr_state.auto_fix_round_count + excluded.auto_fix_round_count,
+				auto_fix_attempt_state = excluded.auto_fix_attempt_state,
+				auto_fix_attempt_queue_entry_id = excluded.auto_fix_attempt_queue_entry_id,
+				auto_fix_attempt_session_id = excluded.auto_fix_attempt_session_id,
+				auto_fix_attempt_turn_id = excluded.auto_fix_attempt_turn_id,
+				auto_fix_attempt_signature = excluded.auto_fix_attempt_signature,
+				auto_fix_attempt_provider_generation = excluded.auto_fix_attempt_provider_generation,
+				auto_fix_attempt_outcome = excluded.auto_fix_attempt_outcome,
+				auto_fix_attempt_summary = excluded.auto_fix_attempt_summary,
+				auto_fix_attempt_started_at = excluded.auto_fix_attempt_started_at,
+				auto_fix_attempt_outcome_at = excluded.auto_fix_attempt_outcome_at,
+				auto_fix_attempt_progress_deadline = excluded.auto_fix_attempt_progress_deadline,
 				last_queue_fix_event_id = CASE
 					WHEN excluded.last_queue_fix_event_id <> '' THEN excluded.last_queue_fix_event_id
 					ELSE github_task_ci_pr_state.last_queue_fix_event_id END,
@@ -3050,8 +3144,221 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 				updated_at = excluded.updated_at`),
 			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
 			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount,
-			attempt.QueueRemovalEventID, attempt.QueueRemovalCause, now, now)
+			attempt.QueueRemovalEventID, attempt.QueueRemovalCause,
+			string(attemptState), strings.TrimSpace(attempt.QueueEntryID), strings.TrimSpace(attempt.SessionID),
+			strings.TrimSpace(attempt.TurnID), attempt.Signature, strings.TrimSpace(attempt.ProviderGeneration),
+			when, now, now)
 		return err
+	})
+}
+
+// BindTaskCIAutoFixAttemptTurn binds a queued or direct auto-fix reservation
+// to the exact turn accepted by the agent runtime. Every identity component is
+// part of the compare-and-set predicate so a replaced or stale queue entry
+// cannot claim a newer attempt.
+func (s *Store) BindTaskCIAutoFixAttemptTurn(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	if strings.TrimSpace(binding.TaskID) == "" || strings.TrimSpace(binding.SessionID) == "" ||
+		strings.TrimSpace(binding.Signature) == "" || strings.TrimSpace(binding.TurnID) == "" {
+		return ErrTaskCIAutoFixAttemptNotFound
+	}
+	return s.mutateTaskCIPRState(ctx, binding.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_attempt_state = ?,
+				auto_fix_attempt_turn_id = ?,
+				updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND auto_fix_attempt_session_id = ?
+			  AND auto_fix_attempt_queue_entry_id = ?
+			  AND auto_fix_attempt_signature = ?
+			  AND auto_fix_attempt_state IN (?, ?, ?)
+			  AND (auto_fix_attempt_turn_id = '' OR auto_fix_attempt_turn_id = ? OR auto_fix_attempt_state = ?)`),
+			string(TaskCIAutoFixAttemptRunning), binding.TurnID, now,
+			binding.TaskID, binding.RepositoryID, binding.PRNumber,
+			binding.SessionID, binding.QueueEntryID, binding.Signature,
+			string(TaskCIAutoFixAttemptQueued), string(TaskCIAutoFixAttemptRunning),
+			string(TaskCIAutoFixAttemptRetryable), binding.TurnID, string(TaskCIAutoFixAttemptRetryable))
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIAutoFixAttemptNotFound
+		}
+		return nil
+	})
+}
+
+// ReportTaskCIAutoFixOutcome accepts the first explicit disposition from a
+// matching auto-fix turn. The task/session/turn identity is server-owned; the
+// caller never selects a repository or PR.
+func (s *Store) ReportTaskCIAutoFixOutcome(ctx context.Context, report TaskCIAutoFixOutcomeReport) error {
+	if !validTaskCIAutoFixOutcome(report.Outcome) {
+		return ErrTaskCIAutoFixOutcomeInvalid
+	}
+	if strings.TrimSpace(report.TaskID) == "" || strings.TrimSpace(report.SessionID) == "" ||
+		strings.TrimSpace(report.TurnID) == "" {
+		return ErrTaskCIAutoFixAttemptNotFound
+	}
+	summary := strings.TrimSpace(report.Summary)
+	if len(summary) > 4096 {
+		return fmt.Errorf("CI auto-fix outcome summary exceeds 4096 bytes")
+	}
+	return s.mutateTaskCIPRState(ctx, report.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		state := TaskCIAutoFixAttemptAcknowledged
+		deadline := (*time.Time)(nil)
+		if report.Outcome == TaskCIAutoFixOutcomeActionTaken {
+			state = TaskCIAutoFixAttemptAwaitingProviderProgress
+			progressDeadline := now.Add(taskCIAutoFixProviderProgressWindow)
+			deadline = &progressDeadline
+		}
+		lastError := interface{}(nil)
+		lastErrorKind := ""
+		if report.Outcome == TaskCIAutoFixOutcomeBlocked && summary != "" {
+			lastError = summary
+			lastErrorKind = TaskCIErrorKindAutoFix
+		}
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_attempt_state = ?,
+				auto_fix_attempt_outcome = ?,
+				auto_fix_attempt_summary = ?,
+				auto_fix_attempt_outcome_at = ?,
+				auto_fix_attempt_progress_deadline = ?,
+				last_error = ?,
+				last_error_kind = ?,
+				updated_at = ?
+			WHERE task_id = ?
+			  AND auto_fix_attempt_session_id = ?
+			  AND auto_fix_attempt_turn_id = ?
+			  AND auto_fix_attempt_state = ?
+			  AND auto_fix_attempt_outcome = ''`),
+			string(state), string(report.Outcome), summary, now, deadline,
+			lastError, lastErrorKind, now,
+			report.TaskID, report.SessionID, report.TurnID,
+			string(TaskCIAutoFixAttemptRunning))
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIAutoFixAttemptNotFound
+		}
+		return nil
+	})
+}
+
+func validTaskCIAutoFixOutcome(outcome TaskCIAutoFixOutcome) bool {
+	switch outcome {
+	case TaskCIAutoFixOutcomeActionTaken, TaskCIAutoFixOutcomeNonActionable, TaskCIAutoFixOutcomeBlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReconcileTaskCIAutoFixTurnCompletion makes a matching undispositioned turn
+// retryable. It is safe to call for every turn completion: non-auto-fix turns
+// and already-dispositioned attempts simply return ErrTaskCIAutoFixAttemptNotFound.
+func (s *Store) ReconcileTaskCIAutoFixTurnCompletion(ctx context.Context, taskID, sessionID, turnID string) error {
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_attempt_state = ?, updated_at = ?
+			WHERE task_id = ? AND auto_fix_attempt_session_id = ? AND auto_fix_attempt_turn_id = ?
+			  AND auto_fix_attempt_state = ? AND auto_fix_attempt_outcome = ''`),
+			string(TaskCIAutoFixAttemptRetryable), now, taskID, sessionID, turnID,
+			string(TaskCIAutoFixAttemptRunning))
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIAutoFixAttemptNotFound
+		}
+		return nil
+	})
+}
+
+// ReconcileTaskCIAutoFixQueuedDispatchFailure releases a queued reservation
+// when the queue worker cannot reach the agent acceptance boundary.
+func (s *Store) ReconcileTaskCIAutoFixQueuedDispatchFailure(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	return s.mutateTaskCIPRState(ctx, binding.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_attempt_state = ?, updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND auto_fix_attempt_session_id = ?
+			  AND auto_fix_attempt_queue_entry_id = ?
+			  AND auto_fix_attempt_signature = ?
+			  AND auto_fix_attempt_state = ?`),
+			string(TaskCIAutoFixAttemptRetryable), now,
+			binding.TaskID, binding.RepositoryID, binding.PRNumber,
+			binding.SessionID, binding.QueueEntryID, binding.Signature,
+			string(TaskCIAutoFixAttemptQueued))
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIAutoFixAttemptNotFound
+		}
+		return nil
+	})
+}
+
+// ReconcileTaskCIAutoFixProviderProgress acknowledges action_taken after a
+// provider generation changes, or makes it retryable after the bounded
+// progress deadline expires.
+func (s *Store) ReconcileTaskCIAutoFixProviderProgress(ctx context.Context, progress TaskCIAutoFixProviderProgress) error {
+	observedAt := progress.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	return s.mutateTaskCIPRState(ctx, progress.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_attempt_state = CASE
+					WHEN auto_fix_attempt_provider_generation <> ? THEN ?
+					WHEN auto_fix_attempt_progress_deadline <= ? THEN ?
+					ELSE auto_fix_attempt_state END,
+				auto_fix_attempt_progress_deadline = NULL,
+				updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND auto_fix_attempt_signature = ?
+			  AND auto_fix_attempt_state = ?
+			  AND (
+				auto_fix_attempt_provider_generation <> ?
+				OR auto_fix_attempt_progress_deadline <= ?
+			  )`),
+			progress.ProviderGeneration, string(TaskCIAutoFixAttemptAcknowledged), observedAt,
+			string(TaskCIAutoFixAttemptRetryable), now,
+			progress.TaskID, progress.RepositoryID, progress.PRNumber, progress.Signature,
+			string(TaskCIAutoFixAttemptAwaitingProviderProgress),
+			progress.ProviderGeneration, observedAt)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIAutoFixAttemptNotFound
+		}
+		return nil
 	})
 }
 
@@ -3066,10 +3373,20 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 				last_fix_signature = excluded.last_fix_signature,
 				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 				last_fix_enqueued_at = NULL,
-				last_error = NULL,
-				last_error_kind = '',
+				last_error = CASE
+					WHEN auto_fix_attempt_state = ?
+					 AND auto_fix_attempt_outcome = ?
+					 AND last_fix_signature = ? THEN last_error
+					ELSE NULL END,
+				last_error_kind = CASE
+					WHEN auto_fix_attempt_state = ?
+					 AND auto_fix_attempt_outcome = ?
+					 AND last_fix_signature = ? THEN last_error_kind
+					ELSE '' END,
 				updated_at = excluded.updated_at`),
-			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
+			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now,
+			string(TaskCIAutoFixAttemptAcknowledged), string(TaskCIAutoFixOutcomeBlocked), signature,
+			string(TaskCIAutoFixAttemptAcknowledged), string(TaskCIAutoFixOutcomeBlocked), signature)
 		return err
 	})
 }

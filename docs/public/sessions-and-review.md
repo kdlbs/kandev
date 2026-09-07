@@ -281,6 +281,8 @@ The PR panel has two action controls:
 
 Auto-fix also sends one repair round for an ordinary merge conflict or an actionable merge-queue removal after the PR checks settle. It snapshots each feedback state, so the same conflict, check, comment, or removal does not create duplicate rounds. A resolved conflict clears its checkpoint without using a round, while an unknown mergeability state keeps the prior checkpoint. A retained queue removal starts repair only when durable evidence from an attempted or adopted queue entry matches the current pull-request head. If that provenance is unavailable, Kandev fails closed without using a round. Updating an already queued message does not use another round, and the 10-round limit still applies.
 
+Kandev keeps a queued or running auto-fix attempt separate from its feedback checkpoint. If a turn ends without a recorded outcome, Kandev can send the same settled snapshot again, and that retry uses another round. After an `action_taken` outcome, Kandev waits for provider progress before retrying. A `non_actionable` or `blocked` outcome acknowledges unchanged feedback and does not retry it.
+
 Open **PR events** for three notification controls:
 
 - **Your review is requested** wakes the agent for any new request, including re-review after changes.
