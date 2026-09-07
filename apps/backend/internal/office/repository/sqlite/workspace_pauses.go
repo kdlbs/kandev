@@ -192,19 +192,11 @@ type rebinder interface {
 	Rebind(query string) string
 }
 
-// InflightRun is one queued-or-claimed run the halt sweep found for a
-// workspace: its id, for cancellation, and its payload task id (empty for
-// a taskless run), for checkout release and execution cancellation.
-type InflightRun struct {
-	RunID  string `db:"id"`
-	TaskID string `db:"task_id"`
-}
-
 // ListInflightRunsForWorkspace returns every queued or claimed run
 // belonging to an agent in the workspace. Selecting on the agent (not the
 // payload task id) is what covers taskless runs, which lightweight
 // routines produce. An empty result is not an error.
-func (r *Repository) ListInflightRunsForWorkspace(ctx context.Context, workspaceID string) ([]InflightRun, error) {
+func (r *Repository) ListInflightRunsForWorkspace(ctx context.Context, workspaceID string) ([]models.InflightRun, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
 	query := fmt.Sprintf(`
 		SELECT id, COALESCE(%s, '') AS task_id
@@ -212,12 +204,12 @@ func (r *Repository) ListInflightRunsForWorkspace(ctx context.Context, workspace
 		WHERE status IN ('queued', 'claimed')
 		  AND agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)
 	`, taskIDExpr)
-	var runs []InflightRun
+	var runs []models.InflightRun
 	if err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(query), workspaceID); err != nil {
 		return nil, err
 	}
 	if runs == nil {
-		runs = []InflightRun{}
+		runs = []models.InflightRun{}
 	}
 	return runs, nil
 }
