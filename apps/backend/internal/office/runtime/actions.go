@@ -166,12 +166,15 @@ func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string,
 	}
 	if input.ParentTaskID != "" {
 		parentWorkspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, input.ParentTaskID)
-		if err != nil || parentWorkspaceID != workspaceID {
+		if err != nil {
+			return fmt.Errorf("get parent task workspace: %w", err)
+		}
+		if parentWorkspaceID != workspaceID {
 			return ErrWorkspaceOutOfScope
 		}
 		parentProjectID, err := a.deps.Tasks.GetTaskProjectID(ctx, input.ParentTaskID)
 		if err != nil {
-			return ErrWorkspaceOutOfScope
+			return fmt.Errorf("get parent task project: %w", err)
 		}
 		if input.ProjectID != "" && input.ProjectID != parentProjectID {
 			return ErrWorkspaceOutOfScope

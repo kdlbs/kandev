@@ -1043,12 +1043,13 @@ func (w *recordingCommentWriter) CreateComment(_ context.Context, comment *model
 }
 
 type recordingTaskCreator struct {
-	calls            []createTaskCall
-	taskID           string
-	taskScopes       map[string]taskScope
-	workspaceLookups []string
-	projectLookups   []string
-	projectLookupErr error
+	calls              []createTaskCall
+	taskID             string
+	taskScopes         map[string]taskScope
+	workspaceLookups   []string
+	projectLookups     []string
+	projectLookupErr   error
+	workspaceLookupErr error
 }
 
 type taskScope struct {
@@ -1088,6 +1089,9 @@ type createTaskCall struct {
 
 func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
 	c.workspaceLookups = append(c.workspaceLookups, taskID)
+	if c.workspaceLookupErr != nil {
+		return "", c.workspaceLookupErr
+	}
 	return c.taskScopes[taskID].WorkspaceID, nil
 }
 
