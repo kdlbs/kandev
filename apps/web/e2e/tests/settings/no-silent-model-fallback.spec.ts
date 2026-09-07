@@ -45,13 +45,13 @@ test.describe("executor-authoritative model selection", () => {
     }
   });
 
-  test("names one host-advertised variation while keeping the profile selectable", async ({
+  test("does not infer one host-advertised variation while keeping the profile selectable", async ({
     testPage,
     apiClient,
   }) => {
     const profile = await createModelVariationProfile(
       apiClient,
-      "Unique host variation selectable profile",
+      "No inferred host variation selectable profile",
       "unique",
     );
     try {
@@ -72,7 +72,8 @@ test.describe("executor-authoritative model selection", () => {
       await expect(option).toBeEnabled();
       const warning = option.getByTestId("agent-profile-model-probe-warning");
       await expect(warning).toBeVisible();
-      const warningText = `The host probe found one possible variation of ${MODEL_VARIATION_BASE}: ${UNIQUE_MODEL_VARIATION}. The selected executor will decide the model at launch.`;
+      const warningText = `The host probe did not advertise ${MODEL_VARIATION_BASE}. The selected executor will decide the model at launch.`;
+      await expect(warning).not.toHaveAccessibleName(UNIQUE_MODEL_VARIATION);
       await warning.hover();
       await expect(
         testPage

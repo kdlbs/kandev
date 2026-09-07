@@ -45,13 +45,13 @@ test.describe("executor-authoritative model selection on mobile", () => {
     }
   });
 
-  test("opens the unique variation advisory by touch without overflow", async ({
+  test("does not infer one host-advertised variation by touch without overflow", async ({
     testPage,
     apiClient,
   }) => {
     const profile = await createModelVariationProfile(
       apiClient,
-      "Mobile unique host variation profile",
+      "Mobile no inferred host variation profile",
       "unique",
     );
     try {
@@ -72,14 +72,15 @@ test.describe("executor-authoritative model selection on mobile", () => {
       await expect(option).toBeEnabled();
       const warning = option.getByTestId("agent-profile-model-probe-warning");
       await expect(warning).toBeVisible();
-      const warningText = `The host probe found one possible variation of ${MODEL_VARIATION_BASE}: ${UNIQUE_MODEL_VARIATION}. The selected executor will decide the model at launch.`;
+      const warningText = `The host probe did not advertise ${MODEL_VARIATION_BASE}. The selected executor will decide the model at launch.`;
+      await expect(warning).not.toHaveAccessibleName(UNIQUE_MODEL_VARIATION);
       await warning.tap();
       await expect(
         testPage
           .locator('[data-slot="drawer-content"][data-state="open"]')
           .filter({ hasText: warningText }),
       ).toBeVisible();
-      await assertNoDocumentHorizontalOverflow(testPage, "mobile unique variation advisory");
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile no inferred variation advisory");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
     }
