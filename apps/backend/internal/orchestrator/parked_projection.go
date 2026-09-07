@@ -32,13 +32,43 @@ type parkedSessionState struct {
 }
 
 // taskParkedState is the task-level parked_on_background_work OR-aggregate
-// (spec: "Data model -> Task-level projection"). sessions tracks only the
-// member sessions currently parked (true); the aggregate is len(sessions) > 0
-// so no session ever needs an explicit false entry removed on task deletion.
+// (spec: "Data model -> Task-level projection"). sessions retains one entry
+// per session ever tracked for this task — including a settled (false) one —
+// so clearParkedProjectionOnTaskDeleted can find and clean up every session's
+// parkedStates entry, not just the currently-parked ones: a session that
+// parked and then settled before its task was deleted would otherwise never
+// be visited, leaking both maps for the process lifetime. Entries are removed
+// only when the session itself is pruned (clearParkedProjectionOnSessionDeleted,
+// pruneParkedTerminalState) or the whole task entry is dropped. parkedCount is
+// the number of entries currently true; the aggregate is parkedCount > 0.
 type taskParkedState struct {
-	sessions map[string]bool
-	parked   bool
-	revision uint64
+	sessions    map[string]bool
+	parkedCount int
+	parked      bool
+	revision    uint64
+}
+
+// setTaskSessionParkedLocked records sessionID's current parked value in
+// tst.sessions and keeps parkedCount in sync. Callers must hold parkedMu.
+func setTaskSessionParkedLocked(tst *taskParkedState, sessionID string, sessionParked bool) {
+	was, tracked := tst.sessions[sessionID]
+	tst.sessions[sessionID] = sessionParked
+	switch {
+	case sessionParked && (!tracked || !was):
+		tst.parkedCount++
+	case !sessionParked && tracked && was:
+		tst.parkedCount--
+	}
+}
+
+// removeTaskSessionParkedLocked drops sessionID's entry entirely (session
+// deleted or reached a terminal state) and keeps parkedCount in sync. Callers
+// must hold parkedMu.
+func removeTaskSessionParkedLocked(tst *taskParkedState, sessionID string) {
+	if was, tracked := tst.sessions[sessionID]; tracked && was {
+		tst.parkedCount--
+	}
+	delete(tst.sessions, sessionID)
 }
 
 type parkedProjectionTransition struct {
@@ -152,12 +182,8 @@ func (s *Service) recomputeTaskParkedLocked(taskID, sessionID string, sessionPar
 		tst = &taskParkedState{sessions: make(map[string]bool)}
 		s.taskParkedStates[taskID] = tst
 	}
-	if sessionParked {
-		tst.sessions[sessionID] = true
-	} else {
-		delete(tst.sessions, sessionID)
-	}
-	newParked := len(tst.sessions) > 0
+	setTaskSessionParkedLocked(tst, sessionID, sessionParked)
+	newParked := tst.parkedCount > 0
 	changed = newParked != tst.parked
 	if changed {
 		tst.revision++
@@ -347,8 +373,8 @@ func (s *Service) clearParkedProjectionOnSessionDeleted(ctx context.Context, tas
 	var taskChanged bool
 	if taskID != "" {
 		if tst := s.taskParkedStates[taskID]; tst != nil {
-			delete(tst.sessions, sessionID)
-			newParked := len(tst.sessions) > 0
+			removeTaskSessionParkedLocked(tst, sessionID)
+			newParked := tst.parkedCount > 0
 			if newParked != tst.parked {
 				tst.parked = newParked
 				tst.revision++
@@ -485,7 +511,7 @@ func (s *Service) pruneParkedTerminalState(taskID, sessionID string) {
 	}
 	if taskID != "" {
 		if tst := s.taskParkedStates[taskID]; tst != nil {
-			delete(tst.sessions, sessionID)
+			removeTaskSessionParkedLocked(tst, sessionID)
 		}
 	}
 	s.parkedMu.Unlock()
@@ -609,6 +635,20 @@ func (s *Service) stopParkedSamplingLoopFor(sessionID string) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+// resetParkedSamplingWorkers clears a stop recorded by a previous Stop and
+// creates a fresh cancellable root context, so a restarted service can launch
+// sampling loops again — mirroring resetSendNowWorkers/resetCIAutomationWorkers.
+// Call at the top of Start, before any path that can call Stop concurrently.
+// Without this, parkedLoopStopped stays true forever after one Stop->Start
+// cycle and maybeStartParkedSamplingLoop silently refuses every worker for
+// the remainder of the process's life.
+func (s *Service) resetParkedSamplingWorkers() {
+	s.parkedLoopMu.Lock()
+	defer s.parkedLoopMu.Unlock()
+	s.parkedLoopStopped = false
+	s.parkedLoopCtx, s.parkedLoopCancel = context.WithCancel(context.Background())
 }
 
 // stopParkedSamplingLoops cancels every running sampling loop and waits for

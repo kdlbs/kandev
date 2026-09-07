@@ -2680,6 +2680,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetSendNowWorkers()
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
+	s.resetParkedSamplingWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily

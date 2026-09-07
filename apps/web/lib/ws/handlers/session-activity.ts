@@ -85,8 +85,19 @@ export function applyForegroundActivity(
   if (!existing) return;
   // Detached work can outlive the foreground turn, whose coarse state is then
   // WAITING_FOR_INPUT. Terminal/parked sessions reject delayed activity frames;
-  // their execution teardown owns the final clear.
-  if (existing.state !== "RUNNING" && existing.state !== "WAITING_FOR_INPUT") return;
+  // their execution teardown owns the final clear. A parked-only payload (no
+  // `foreground_activity` key) is also let through during STARTING: a reset
+  // clears the projection on the WAITING_FOR_INPUT -> STARTING leg, and
+  // because the backend's own projection is already false at that point, the
+  // later STARTING -> WAITING_FOR_INPUT settle has nothing left to change and
+  // never republishes — rejecting the STARTING-leg clear here would leave the
+  // store showing a stale parked icon with no later event to correct it.
+  const isParkedOnlyPayload = payload.foreground_activity === undefined;
+  const stateAcceptsActivity =
+    existing.state === "RUNNING" ||
+    existing.state === "WAITING_FOR_INPUT" ||
+    (isParkedOnlyPayload && existing.state === "STARTING");
+  if (!stateAcceptsActivity) return;
   if (existing.task_id && existing.task_id !== taskId) return;
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,

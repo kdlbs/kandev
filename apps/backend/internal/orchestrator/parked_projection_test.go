@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -225,6 +227,119 @@ func TestSettleParkedProjectionSync_AttestedButUnknown_NotParked(t *testing.T) {
 
 	if parked, _ := svc.ParkedSnapshot("sess-1"); parked {
 		t.Fatal("expected not parked for an unknown probe result")
+	}
+}
+
+// Mirrors TestSendNowWorkersCanRestartAfterStop: without resetParkedSamplingWorkers,
+// parkedLoopStopped stays true forever after one Stop -> Start cycle and
+// maybeStartParkedSamplingLoop silently refuses every worker for the rest of
+// the process's life.
+func TestParkedSamplingWorkersCanRestartAfterStop(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+
+	svc.stopParkedSamplingLoops()
+	if !svc.parkedLoopStopped {
+		t.Fatal("stopping parked sampling workers did not mark the worker owner stopped")
+	}
+
+	svc.resetParkedSamplingWorkers()
+	if svc.parkedLoopStopped {
+		t.Fatal("resetting parked sampling workers left the worker owner stopped")
+	}
+	if svc.parkedLoopCtx == nil || svc.parkedLoopCancel == nil {
+		t.Fatal("resetting parked sampling workers did not create a fresh cancellable context")
+	}
+	select {
+	case <-svc.parkedLoopCtx.Done():
+		t.Fatal("fresh parked sampling worker context is already cancelled")
+	default:
+	}
+
+	svc.stopParkedSamplingLoops()
+}
+
+// After a reset, maybeStartParkedSamplingLoop must actually be able to admit a
+// new worker again — a pure flag/context check would miss a bug where the
+// reset context is fresh but some other gate still refuses admission.
+func TestParkedSamplingLoopAdmitsWorkerAfterReset(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, _ := newParkedTestService(t, repo)
+	svc.backgroundProbeConfig.Interval = time.Hour
+
+	svc.stopParkedSamplingLoops()
+	svc.resetParkedSamplingWorkers()
+	t.Cleanup(svc.stopParkedSamplingLoops)
+
+	svc.parkedMu.Lock()
+	svc.parkedStates["sess-1"] = &parkedSessionState{parked: true}
+	svc.parkedMu.Unlock()
+
+	svc.maybeStartParkedSamplingLoop("task-1", "sess-1")
+
+	svc.parkedMu.Lock()
+	cancel := svc.parkedStates["sess-1"].loopCancel
+	svc.parkedMu.Unlock()
+	if cancel == nil {
+		t.Fatal("expected maybeStartParkedSamplingLoop to admit a worker after reset")
+	}
+}
+
+// A ScheduleWakeup self-resume with no tool call in the resumed turn never
+// leaves WAITING_FOR_INPUT, so D8's session-state term never fires. The
+// turn_started handler must clear the projection itself once the attestation
+// it depends on is cleared, instead of leaving parked=true stuck until the
+// next periodic probe.
+func TestHandleAgentStreamEvent_TurnStartedClearsParkedProjectionWithoutStateChange(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, bus, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); !parked {
+		t.Fatal("precondition: session should be parked before the self-resume")
+	}
+	callsBeforeTurnStarted := probe.callCount()
+
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-1", SessionID: "sess-1",
+		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeTurnStarted},
+	})
+
+	parked, revision := svc.ParkedSnapshot("sess-1")
+	if parked || revision != 2 {
+		t.Fatalf("ParkedSnapshot = (%v, %d), want (false, 2) after turn_started with no intervening state change", parked, revision)
+	}
+	if got, want, ok := lastParkedEvent(bus); !ok || got != false || want != 2 {
+		t.Fatalf("published event = (%v, %d, %v), want (false, 2, true)", got, want, ok)
+	}
+	if n := probe.callCount(); n != callsBeforeTurnStarted {
+		t.Fatalf("turn_started triggered a new probe: %d -> %d, want no probe call", callsBeforeTurnStarted, n)
+	}
+	if svc.ObservedDetachedLaunch("sess-1") {
+		t.Fatal("expected turn_started to also clear the attestation (D3)")
+	}
+}
+
+// An ordinary human-driven turn_started (session already left WAITING_FOR_INPUT
+// through the normal D8 session-state term) must be a no-op: no duplicate
+// publish, no probe call.
+func TestHandleAgentStreamEvent_TurnStartedNoOpWhenAlreadyUnparked(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, bus, probe := newParkedTestService(t, repo)
+
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-1", SessionID: "sess-1",
+		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeTurnStarted},
+	})
+
+	if parked, revision := svc.ParkedSnapshot("sess-1"); parked || revision != 0 {
+		t.Fatalf("ParkedSnapshot = (%v, %d), want (false, 0) for a session never parked", parked, revision)
+	}
+	if len(bus.events) != 0 {
+		t.Fatalf("published %d events, want 0", len(bus.events))
+	}
+	if n := probe.callCount(); n != 0 {
+		t.Fatalf("probe called %d times, want 0", n)
 	}
 }
 
@@ -519,6 +634,55 @@ func TestClearParkedProjectionOnTaskDeleted_StopsLoopAndRemovesTaskEntryEntirely
 	}
 	if svc.ObservedDetachedLaunch("sess-1") {
 		t.Fatal("deleted task's session retained its detached-launch attestation")
+	}
+}
+
+// A session that parked and then settled again (still WAITING_FOR_INPUT, not
+// terminal) drops out of the task's currently-true membership before the task
+// is ever deleted. clearParkedProjectionOnTaskDeleted must still find and
+// clean up its parkedStates entry — deriving the cleanup set only from
+// currently-true members would iterate an empty set here and leak
+// parkedStates/observedDetached for the process lifetime.
+func TestClearParkedProjectionOnTaskDeleted_CleansUpSettledSession(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive, executor.ProbeResultSettled}
+	svc.backgroundProbeConfig.Interval = time.Hour
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); !parked {
+		t.Fatal("precondition: session should be parked")
+	}
+	// Settle back to non-parked without a state change or task deletion — the
+	// periodic sample simply reports the background work finished. The loop
+	// should stop since the session is no longer parked.
+	svc.sampleParkedSessionTick(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); parked {
+		t.Fatal("precondition: session should have settled back to not parked")
+	}
+	svc.parkedMu.Lock()
+	_, sessionStillTracked := svc.parkedStates["sess-1"]
+	tst := svc.taskParkedStates["task-1"]
+	_, taskSessionStillTracked := tst.sessions["sess-1"]
+	svc.parkedMu.Unlock()
+	if !sessionStillTracked || !taskSessionStillTracked {
+		t.Fatal("precondition: settled session should remain tracked (not terminal, not deleted)")
+	}
+
+	svc.clearParkedProjectionOnTaskDeleted("task-1")
+
+	svc.parkedMu.Lock()
+	_, sessionTracked := svc.parkedStates["sess-1"]
+	_, taskTracked := svc.taskParkedStates["task-1"]
+	svc.parkedMu.Unlock()
+	if sessionTracked {
+		t.Fatal("settled session leaked in parkedStates after its task was deleted")
+	}
+	if taskTracked {
+		t.Fatal("deleted task remained in taskParkedStates")
+	}
+	if svc.ObservedDetachedLaunch("sess-1") {
+		t.Fatal("settled session retained its detached-launch attestation after task deletion")
 	}
 }
 

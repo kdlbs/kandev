@@ -218,6 +218,18 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
 		// a detached launch attested during turn N cannot leak into turn N+1.
 		s.clearObservedDetachedLaunch(sessionID)
+		// A ScheduleWakeup self-resume issues its synthetic prompt straight to
+		// the agent subprocess (wakeup.go), never through
+		// updateTaskSessionStateWithHook, so D8's session-state term never
+		// fires when the resumed turn produces no tool call: the session
+		// stays WAITING_FOR_INPUT throughout. Recompute the projection here
+		// too, with the attestation already cleared above, so a still-parked
+		// session clears the moment its next turn starts instead of waiting
+		// on the next periodic probe (or never, when sampling is disabled).
+		// attested=false makes the state argument inert (recomputeParkedLocked
+		// short-circuits on it), so this is also a safe no-op for an ordinary
+		// human-driven turn where the session already left WAITING_FOR_INPUT.
+		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
 }
 

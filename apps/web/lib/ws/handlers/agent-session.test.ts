@@ -1564,6 +1564,68 @@ describe("session.activity_changed handler — parked-only payload shape", () =>
   });
 });
 
+// ResetAgentContext transitions a parked session WAITING_FOR_INPUT ->
+// STARTING before the backend's clearParkedOnSessionStateLeft publishes the
+// parked-only clear; the backend's own projection is already false by then,
+// so the later STARTING -> WAITING_FOR_INPUT settle never republishes.
+describe("session.activity_changed handler — parked-only clear during STARTING", () => {
+  it("applies a parked-only clear while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "STARTING",
+            parked_on_background_work: true,
+          },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: false,
+        revision: 2,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: false,
+      revision: 2,
+    });
+  });
+
+  it("still rejects a foreground-activity event while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe("session.state_changed carries and resets the busy substate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
