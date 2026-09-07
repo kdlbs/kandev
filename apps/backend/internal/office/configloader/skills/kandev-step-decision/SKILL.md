@@ -17,11 +17,12 @@ The only accepted verdicts are `approved` and `rejected`. Use a non-empty reason
 that explains the evidence for the verdict.
 
 ```bash
-$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."
+$KANDEV_CLI kandev task decision --decision approved --reason "..."
 ```
 
-Replace the verdict and reason with the decision for the current workflow
-step. Make this command the final action for the turn, then stop. A repeated
+Use `approved` as shown, or replace it with `rejected` when rejecting. Replace
+the reason with the evidence for the current workflow step. Make this command
+the final action for the turn, then stop. A repeated
 decision supersedes the previous decision for that participant and step.
 
 The command returns structured JSON with these fields:

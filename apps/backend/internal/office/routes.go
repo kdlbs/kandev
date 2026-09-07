@@ -43,6 +43,7 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 		svcs.Skills,
 		svcs.Workspaces,
 		newRuntimeDecisionRecorder(svcs.Dashboard),
+		log,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)

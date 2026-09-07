@@ -27,11 +27,12 @@ type SkillDeployer interface {
 // the agent will run inside; ExecutorType is the executor backend
 // (local_pc / local_docker / sprites) so the deployer can pick a strategy.
 type SkillDeployRequest struct {
-	Profile       *settingsmodels.AgentProfile
-	WorkspacePath string
-	ExecutorType  string
-	WorkspaceID   string
-	SessionID     string
+	Profile              *settingsmodels.AgentProfile
+	WorkspacePath        string
+	ExecutorType         string
+	WorkspaceID          string
+	SessionID            string
+	AdditionalSkillSlugs []string
 }
 
 // SkillDeployResult carries the side-effects a successful deploy produced

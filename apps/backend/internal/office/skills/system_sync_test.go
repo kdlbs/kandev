@@ -359,7 +359,7 @@ func TestBundledDecisionSkillContract(t *testing.T) {
 			t.Fatalf("decision skill default roles = %v, want none", spec.DefaultForRoles)
 		}
 		for _, fragment := range []string{
-			`$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."`,
+			`$KANDEV_CLI kandev task decision --decision approved --reason "..."`,
 			"approved",
 			"rejected",
 			"non-empty reason",

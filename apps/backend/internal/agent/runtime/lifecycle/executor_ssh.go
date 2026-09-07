@@ -40,18 +40,19 @@ const (
 // when many short-lived channels race the long-lived stream channels), and
 // the local port forwarder.
 type sshSessionState struct {
-	target         *SSHTarget
-	client         *ssh.Client
-	forwarder      *SSHPortForwarder
-	agentctlClient *agentctl.Client
-	pid            int
-	remoteDir      string
-	remoteTaskDir  string
-	authToken      string
-	reusingProcess bool
-	metadata       map[string]interface{}
-	prepareEnv     map[string]string
-	platform       SSHRemotePlatform
+	target           *SSHTarget
+	client           *ssh.Client
+	forwarder        *SSHPortForwarder
+	agentctlClient   *agentctl.Client
+	pid              int
+	remoteDir        string
+	remoteTaskDir    string
+	authToken        string
+	reusingProcess   bool
+	metadata         map[string]interface{}
+	prepareEnv       map[string]string
+	platform         SSHRemotePlatform
+	runtimeAPITunnel *sshRuntimeAPITunnel
 }
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
@@ -117,6 +118,7 @@ func (r *SSHExecutor) Close() error {
 	}
 	r.mu.Unlock()
 	for _, s := range states {
+		_ = s.runtimeAPITunnel.Close()
 		if s.forwarder != nil {
 			_ = s.forwarder.Close()
 		}
@@ -216,9 +218,11 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if err != nil {
 		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
 	}
+	var runtimeAPITunnel *sshRuntimeAPITunnel
 	released := false
 	defer func() {
 		if !released {
+			_ = runtimeAPITunnel.Close()
 			_ = client.Close()
 		}
 	}()
@@ -230,6 +234,16 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req)
 	if err != nil {
 		return nil, err
+	}
+	runtimeAPITunnel, runtimeAPIURL, err := openSSHRuntimeAPITunnel(client, req.Env[envKeyKandevAPIURL])
+	if err != nil {
+		return nil, err
+	}
+	if runtimeAPITunnel != nil {
+		if req.Env == nil {
+			req.Env = make(map[string]string)
+		}
+		req.Env[envKeyKandevAPIURL] = runtimeAPIURL
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
@@ -277,16 +291,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:        target,
-		client:        client,
-		forwarder:     fwd,
-		pid:           pid,
-		remoteDir:     sessionDir,
-		remoteTaskDir: taskDir,
-		authToken:     authToken,
-		metadata:      cloneSSHMetadata(req.Metadata),
-		prepareEnv:    sshRemoteContributionEnv(req, agentctlBin),
-		platform:      platform,
+		target:           target,
+		client:           client,
+		forwarder:        fwd,
+		pid:              pid,
+		remoteDir:        sessionDir,
+		remoteTaskDir:    taskDir,
+		authToken:        authToken,
+		metadata:         cloneSSHMetadata(req.Metadata),
+		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
+		platform:         platform,
+		runtimeAPITunnel: runtimeAPITunnel,
 	}
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
@@ -574,6 +589,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 			zap.String("instance_id", instance.InstanceID))
 		return nil
 	}
+	_ = state.runtimeAPITunnel.Close()
 	if state.forwarder != nil {
 		_ = state.forwarder.Close()
 	}
@@ -701,14 +717,27 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		clearSSHResumeRuntimeMetadata(req.Metadata)
 		return nil
 	}
+	runtimeAPITunnel, runtimeAPIURL, err := openSSHRuntimeAPITunnel(client, req.Env[envKeyKandevAPIURL])
+	if err != nil {
+		_ = client.Close()
+		return err
+	}
+	if runtimeAPITunnel != nil {
+		if req.Env == nil {
+			req.Env = make(map[string]string)
+		}
+		req.Env[envKeyKandevAPIURL] = runtimeAPIURL
+	}
 
 	remotePort, _ := strconv.Atoi(portStr)
 	fwd, err := StartPortForward(client, remotePort, r.logger)
 	if err != nil {
+		_ = runtimeAPITunnel.Close()
 		_ = client.Close()
 		return fmt.Errorf("ssh resume: port forward: %w", err)
 	}
 	if err := waitAgentctlHealthy(ctx, fwd.LocalPort(), sshAgentctlHealthTimeout); err != nil {
+		_ = runtimeAPITunnel.Close()
 		_ = fwd.Close()
 		_ = client.Close()
 		return fmt.Errorf("ssh resume: agentctl health: %w", err)
@@ -719,17 +748,18 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:         target,
-		client:         client,
-		forwarder:      fwd,
-		agentctlClient: instanceClient,
-		pid:            pid,
-		remoteDir:      sessionDir,
-		remoteTaskDir:  taskDir,
-		authToken:      req.AuthToken,
-		reusingProcess: reusingProcess,
-		metadata:       cloneSSHMetadata(req.Metadata),
-		prepareEnv:     sshRemoteContributionEnv(req, agentctlBin),
+		target:           target,
+		client:           client,
+		forwarder:        fwd,
+		agentctlClient:   instanceClient,
+		pid:              pid,
+		remoteDir:        sessionDir,
+		remoteTaskDir:    taskDir,
+		authToken:        req.AuthToken,
+		reusingProcess:   reusingProcess,
+		metadata:         cloneSSHMetadata(req.Metadata),
+		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
+		runtimeAPITunnel: runtimeAPITunnel,
 	}
 	r.mu.Unlock()
 

@@ -137,7 +137,7 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 	}
 }
 
-func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
+func TestSchedulerIntegration_SeatActionFlowsToPromptAndLaunch(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
 	dispatcher := &captureDispatcher{}
@@ -185,6 +185,10 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
 	allowedIdx := strings.Index(prompt, "- Allowed actions:")
 	if allowedIdx == -1 || !containsIgnoreCase(prompt[allowedIdx:], "record_step_decision") {
 		t.Fatalf("prompt must advertise the seat-derived action: %s", dispatcher.lastCall().Prompt)
+	}
+	launch := dispatcher.lastCall()
+	if len(launch.AdditionalSkillSlugs) != 1 || launch.AdditionalSkillSlugs[0] != "kandev-step-decision" {
+		t.Fatalf("launch skill additions = %v, want decision skill", launch.AdditionalSkillSlugs)
 	}
 
 	runs, err := svc.ListRuns(ctx, "ws-1")

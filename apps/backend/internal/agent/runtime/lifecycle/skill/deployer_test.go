@@ -344,6 +344,33 @@ func TestDeploy_KanbanProfile_NoSkillsNoOp(t *testing.T) {
 	}
 }
 
+func TestDeploy_AdditionalSkillSlugMaterializesForEmptyProfile(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"kandev-step-decision": {Slug: "kandev-step-decision", Content: "# decision"},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	_, err := d.Deploy(context.Background(), skill.Request{
+		Profile: &settingsmodels.AgentProfile{
+			ID:      "office-p1",
+			AgentID: "claude-acp",
+		},
+		AdditionalSkillSlugs: []string{"kandev-step-decision"},
+		ExecutorType:         "local_pc",
+		WorkspacePath:        worktree,
+	})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	skillPath := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("additional decision skill was not materialized: %v", err)
+	}
+}
+
 // TestDeploy_KanbanProfileWithSkill_DeploysFiles verifies that a
 // kanban-flavoured profile (no DesiredSkills, no Role) that the user
 // later enriched with SkillIDs gets the same delivery treatment as

@@ -800,6 +800,18 @@ const (
 	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
 	envKeyMCPTimeout           = "MCP_TIMEOUT"
 	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
+	envKeyKandevAPIURL         = "KANDEV_API_URL"
+	envKeyKandevAPIKey         = "KANDEV_API_KEY"
+	envKeyKandevRunToken       = "KANDEV_RUN_TOKEN"
+	envKeyKandevCLI            = "KANDEV_CLI"
+	envKeyKandevAgentID        = "KANDEV_AGENT_ID"
+	envKeyKandevAgentName      = "KANDEV_AGENT_NAME"
+	envKeyKandevWorkspaceID    = "KANDEV_WORKSPACE_ID"
+	envKeyKandevRunID          = "KANDEV_RUN_ID"
+	envKeyKandevTaskID         = "KANDEV_TASK_ID"
+	envKeyKandevWakeReason     = "KANDEV_WAKE_REASON"
+	envKeyKandevWakeCommentID  = "KANDEV_WAKE_COMMENT_ID"
+	envKeyKandevWakePayload    = "KANDEV_WAKE_PAYLOAD_JSON"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -815,11 +827,23 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyKandevGitLabHost,
 }
 
-// sshRemoteAgentRuntimeEnvKeys are non-secret runtime controls that must reach
-// the remote agent process after profile and agent precedence has been resolved.
+// sshRemoteAgentRuntimeEnvKeys are resolved runtime contract values that must
+// reach the remote agent process after profile and agent precedence is applied.
 var sshRemoteAgentRuntimeEnvKeys = []string{
 	envKeyMCPTimeout,
 	envKeyMCPToolTimeout,
+	envKeyKandevAPIURL,
+	envKeyKandevAPIKey,
+	envKeyKandevRunToken,
+	envKeyKandevCLI,
+	envKeyKandevAgentID,
+	envKeyKandevAgentName,
+	envKeyKandevWorkspaceID,
+	envKeyKandevRunID,
+	envKeyKandevTaskID,
+	envKeyKandevWakeReason,
+	envKeyKandevWakeCommentID,
+	envKeyKandevWakePayload,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each

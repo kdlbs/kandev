@@ -18,7 +18,7 @@ import (
 // SkillIDs (the new merged column) and DesiredSkills (legacy office
 // column) and union the two into a single list of slugs / IDs. Empty
 // slots are dropped before lookup.
-func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.AgentProfile, workspaceSlug string) *Manifest {
+func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.AgentProfile, workspaceSlug string, additionalSkillSlugs []string) *Manifest {
 	// Profile.AgentID IS the agent type ID after ADR 0005 — the
 	// agent_profiles row's agent_id column points at the agents
 	// table (claude-acp, codex-acp, ...). No extra resolver needed.
@@ -29,7 +29,7 @@ func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.Ag
 		AgentID:         profile.ID,
 		ProjectSkillDir: d.resolveProjectSkillDir(agentTypeID),
 	}
-	d.appendSkills(ctx, manifest, profile)
+	d.appendSkills(ctx, manifest, profile, additionalSkillSlugs)
 	d.appendInstructions(ctx, manifest, profile.ID)
 	return manifest
 }
@@ -37,11 +37,27 @@ func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.Ag
 // appendSkills resolves every desired slug / id on the profile to a
 // runtime Skill record. Lookups that fail are logged at debug level
 // and dropped — a missing skill must never abort a launch.
-func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile *settingsmodels.AgentProfile) {
+func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile *settingsmodels.AgentProfile, additionalSkillSlugs []string) {
 	if d.skillReader == nil {
 		return
 	}
-	for _, key := range mergedSkillKeys(profile) {
+	keys := mergedSkillKeys(profile)
+	seen := make(map[string]struct{}, len(keys)+len(additionalSkillSlugs))
+	for _, key := range keys {
+		seen[key] = struct{}{}
+	}
+	for _, key := range additionalSkillSlugs {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	for _, key := range keys {
 		skill, err := d.skillReader.GetSkillFromConfig(ctx, key)
 		if err != nil || skill == nil {
 			d.logger.Debug("skip skill in manifest",

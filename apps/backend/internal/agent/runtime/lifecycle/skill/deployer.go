@@ -80,11 +80,12 @@ func New(cfg Config) (*Deployer, error) {
 // lifecycle.SkillDeployRequest but is decoupled from the lifecycle
 // package to keep the import boundary one-way.
 type Request struct {
-	Profile       *settingsmodels.AgentProfile
-	WorkspacePath string
-	ExecutorType  string
-	WorkspaceID   string
-	SessionID     string
+	Profile              *settingsmodels.AgentProfile
+	WorkspacePath        string
+	ExecutorType         string
+	WorkspaceID          string
+	SessionID            string
+	AdditionalSkillSlugs []string
 }
 
 // Deploy materialises the profile's skills and instructions into the
@@ -95,7 +96,7 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) (DeployResult, error
 	if req.Profile == nil {
 		return DeployResult{}, errors.New("skill deploy: profile is required")
 	}
-	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID))
+	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID), req.AdditionalSkillSlugs)
 	result := d.deliver(ctx, manifest, req.ExecutorType, req.WorkspacePath)
 	return result, nil
 }

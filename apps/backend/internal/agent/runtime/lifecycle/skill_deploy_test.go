@@ -82,6 +82,29 @@ func TestRunSkillDeploy_FastPathEmptyProfile(t *testing.T) {
 	}
 }
 
+func TestRunSkillDeploy_AdditionalSkillSlugInvokesDeployerForEmptyProfile(t *testing.T) {
+	mgr := newSkillDeployTestManager(t)
+	rec := &recordingDeployer{}
+	mgr.skillDeployer = rec
+	mgr.agentProfileReader = &fakeProfileReader{
+		profile: &settingsmodels.AgentProfile{ID: "p1", AgentID: "a1"},
+	}
+
+	mgr.runSkillDeploy(context.Background(),
+		&LaunchRequest{
+			AgentProfileID:       "p1",
+			AdditionalSkillSlugs: []string{"kandev-step-decision"},
+		},
+		&LaunchRequest{WorkspacePath: "/tmp/ws", ExecutorType: "local_pc"})
+
+	if rec.called.Load() != 1 {
+		t.Fatalf("expected deployer once, got %d", rec.called.Load())
+	}
+	if len(rec.last.AdditionalSkillSlugs) != 1 || rec.last.AdditionalSkillSlugs[0] != "kandev-step-decision" {
+		t.Fatalf("additional skill slugs = %v", rec.last.AdditionalSkillSlugs)
+	}
+}
+
 // TestRunSkillDeploy_RichProfileInvokesDeployer verifies the deployer fires
 // when the profile carries any of skill_ids or desired_skills.
 func TestRunSkillDeploy_RichProfileInvokesDeployer(t *testing.T) {

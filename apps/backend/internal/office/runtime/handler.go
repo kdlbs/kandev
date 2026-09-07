@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -22,6 +24,7 @@ type Handler struct {
 	skillLister SkillLister
 	runEvents   RunEventAppender
 	decisions   DecisionRecorder
+	logger      *commonlogger.Logger
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -36,13 +39,18 @@ func NewHandler(
 	skillLister SkillLister,
 	runEvents RunEventAppender,
 	decisions DecisionRecorder,
+	log *commonlogger.Logger,
 ) *Handler {
+	if log == nil {
+		log = commonlogger.Default()
+	}
 	return &Handler{
 		agentSvc:    agentSvc,
 		actions:     actions,
 		skillLister: skillLister,
 		runEvents:   runEvents,
 		decisions:   decisions,
+		logger:      log,
 	}
 }
 
@@ -484,7 +492,15 @@ func (h *Handler) respondRuntimeError(
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	h.logger.Error("office runtime action failed",
+		zap.String("action", action),
+		zap.String("target_type", targetType),
+		zap.String("target_id", targetID),
+		zap.String("run_id", runCtx.RunID),
+		zap.String("agent_id", runCtx.AgentID),
+		zap.Error(err),
+	)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal runtime error"})
 }
 
 func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, taskID string, err error) {

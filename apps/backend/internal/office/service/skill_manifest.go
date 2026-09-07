@@ -121,3 +121,10 @@ func hasDecisionAction(actions []string) bool {
 	}
 	return false
 }
+
+func decisionSkillSlugs(actions []string) []string {
+	if !hasDecisionAction(actions) {
+		return nil
+	}
+	return []string{decisionSkillSlug}
+}

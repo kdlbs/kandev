@@ -333,9 +333,10 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.Int("env_count", len(env)))
 
 	launchCtx := LaunchContext{
-		Prompt:    prompt,
-		Env:       env,
-		ProfileID: profileID,
+		Prompt:               prompt,
+		Env:                  env,
+		ProfileID:            profileID,
+		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
 	}
 	// launchAgent returns true only when the adapter was actually invoked.
 	// When it was, leave the run `claimed` and let the AgentCompleted/
@@ -591,7 +592,9 @@ func (si *SchedulerIntegration) launchAgent(
 		return launched
 	}
 	var err error
-	if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
+	if starter, ok := si.svc.taskStarter.(TaskStarterWithLaunchContext); ok {
+		err = starter.StartTaskWithLaunchContext(ctx, taskID, launch.ProfileID, launch)
+	} else if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
 		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil, launch.Env)
 	} else {

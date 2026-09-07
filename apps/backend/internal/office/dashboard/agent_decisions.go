@@ -28,9 +28,9 @@ type RecordAgentDecisionInput struct {
 	// SessionID, when features.officeSessionIdentity is on, names the
 	// decider's own calling session so RecordDecision re-evaluates against
 	// it instead of the task's most-recently-started ("active") session.
-	// Populated unconditionally by the MCP handler; gated here because the
-	// flag decision belongs with the rest of this service's behavior, not
-	// the transport layer.
+	// The runtime handler derives it from the signed RunContext and passes it
+	// unconditionally; gated here because the flag decision belongs with the
+	// rest of this service's behavior, not the transport layer.
 	SessionID string
 }
 

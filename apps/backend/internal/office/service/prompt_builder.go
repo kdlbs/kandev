@@ -310,8 +310,8 @@ func buildApprovalStagePrompt(pc *PromptContext) string {
 // the turn because a comment alone does not advance the workflow.
 func writeDecisionContract(b *strings.Builder) {
 	b.WriteString("\n\nUse this command as your final action for the turn:\n")
-	b.WriteString(`$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."`)
-	b.WriteString("\nUse an approved or rejected verdict with a non-empty reason, then stop. Posting a comment or using an approval-inbox command alone does not count as a workflow step decision.")
+	b.WriteString(`$KANDEV_CLI kandev task decision --decision approved --reason "..."`)
+	b.WriteString("\nUse `approved` as shown, or replace it with `rejected` when rejecting. Both require a non-empty reason, then stop. Posting a comment or using an approval-inbox command alone does not count as a workflow step decision.")
 }
 
 func buildShipStagePrompt(pc *PromptContext) string {

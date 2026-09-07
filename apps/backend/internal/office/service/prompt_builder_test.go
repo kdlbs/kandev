@@ -122,7 +122,7 @@ func TestBuildPrompt_TaskReviewRequestedUsesStageType(t *testing.T) {
 	if !strings.HasPrefix(prompt, "You are approving") {
 		t.Errorf("task_review_requested approver prompt = %q, want approver framing", prompt)
 	}
-	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."`) {
+	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
 		t.Errorf("task_review_requested prompt missing decision CLI contract: %q", prompt)
 	}
 }
@@ -430,7 +430,7 @@ func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testi
 	}
 	prompt := service.BuildPrompt(pc)
 
-	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."`) {
+	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
 		t.Fatalf("expected the decision CLI contract:\n%s", prompt)
 	}
 	allowedIdx := strings.Index(prompt, "- Allowed actions:")
@@ -454,7 +454,7 @@ func TestBuildPrompt_DecisionContractUsesCLIAsFinalAction(t *testing.T) {
 				AllowedActions: []string{officeruntime.AvailableActionRecordStepDecision},
 			})
 
-			if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."`) {
+			if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
 				t.Fatalf("%s prompt missing CLI decision contract:\n%s", stageType, prompt)
 			}
 			if !strings.Contains(prompt, "final action") {

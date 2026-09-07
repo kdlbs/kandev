@@ -33,17 +33,18 @@ func (m *Manager) runSkillDeploy(ctx context.Context, original, prepared *Launch
 			zap.Error(err))
 		return
 	}
-	if len(profile.SkillIDs) == 0 && len(profile.DesiredSkills) == 0 {
+	if len(profile.SkillIDs) == 0 && len(profile.DesiredSkills) == 0 && len(original.AdditionalSkillSlugs) == 0 {
 		// Fast path: shallow / kanban-flavour profiles with no enrichment to
 		// deploy. Most launches today land here.
 		return
 	}
 	req := SkillDeployRequest{
-		Profile:       profile,
-		WorkspacePath: prepared.WorkspacePath,
-		ExecutorType:  prepared.ExecutorType,
-		WorkspaceID:   profile.WorkspaceID,
-		SessionID:     original.SessionID,
+		Profile:              profile,
+		WorkspacePath:        prepared.WorkspacePath,
+		ExecutorType:         prepared.ExecutorType,
+		WorkspaceID:          profile.WorkspaceID,
+		SessionID:            original.SessionID,
+		AdditionalSkillSlugs: append([]string(nil), original.AdditionalSkillSlugs...),
 	}
 	result, err := m.skillDeployer.DeploySkills(ctx, req)
 	if err != nil {

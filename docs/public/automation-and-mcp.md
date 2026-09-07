@@ -607,7 +607,7 @@ runtime CLI. The command accepts only `approved` or `rejected` and requires a
 non-empty reason:
 
 ```bash
-$KANDEV_CLI kandev task decision --decision approved|rejected --reason "..."
+$KANDEV_CLI kandev task decision --decision approved --reason "..."
 ```
 
 The runtime derives the task, session, and agent identity from the signed run

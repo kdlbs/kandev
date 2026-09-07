@@ -35,11 +35,12 @@ func (a *skillDeployerAdapter) DeploySkills(ctx context.Context, req SkillDeploy
 		return SkillDeployResult{}, nil
 	}
 	res, err := a.inner.Deploy(ctx, skill.Request{
-		Profile:       req.Profile,
-		WorkspacePath: req.WorkspacePath,
-		ExecutorType:  req.ExecutorType,
-		WorkspaceID:   req.WorkspaceID,
-		SessionID:     req.SessionID,
+		Profile:              req.Profile,
+		WorkspacePath:        req.WorkspacePath,
+		ExecutorType:         req.ExecutorType,
+		WorkspaceID:          req.WorkspaceID,
+		SessionID:            req.SessionID,
+		AdditionalSkillSlugs: append([]string(nil), req.AdditionalSkillSlugs...),
 	})
 	if err != nil {
 		return SkillDeployResult{}, err
