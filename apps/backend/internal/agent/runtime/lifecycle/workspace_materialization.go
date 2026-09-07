@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"time"
@@ -133,7 +134,7 @@ func remoteWorkspaceSourceRoots(workspacePath string, repositories []WorkspaceRe
 	roots = append(roots, workspacePath)
 	for _, repository := range repositories {
 		if repository.Destination != "" {
-			roots = append(roots, filepath.Join(workspacePath, repository.Destination))
+			roots = append(roots, path.Join(workspacePath, repository.Destination))
 		}
 	}
 	return roots
@@ -362,7 +363,7 @@ func cloneWorkspaceAttachmentRoots(execution *AgentExecution, repositories []Wor
 		if repository.Destination == "" || filepath.Base(repository.Destination) != repository.Destination {
 			return nil, errors.New("clone workspace attachment is invalid")
 		}
-		root := filepath.Join(execution.WorkspacePath, repository.Destination)
+		root := path.Join(execution.WorkspacePath, repository.Destination)
 		if _, exists := seen[root]; exists {
 			continue
 		}

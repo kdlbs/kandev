@@ -73,6 +73,27 @@ func TestResolveGitMetadataRejectsSymlinkedGitEntry(t *testing.T) {
 	}
 }
 
+func TestResolveGitMetadataRejectsSymlinkedLinkedWorktreeHead(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	gitDir := runGitMetadata(t, checkout, "rev-parse", "--path-format=absolute", "--git-dir")
+	headPath := filepath.Join(gitDir, "HEAD")
+	headTarget := filepath.Join(t.TempDir(), "HEAD")
+	if err := os.WriteFile(headTarget, []byte("ref: refs/heads/task-branch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(headPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(headTarget, headPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want symlinked HEAD rejection", err)
+	}
+}
+
 func TestResolveGitMetadataRejectsTraversalCurrentBranchRef(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	checkout := filepath.Join(t.TempDir(), "task-checkout")

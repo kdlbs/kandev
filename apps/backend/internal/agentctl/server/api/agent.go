@@ -867,7 +867,7 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	var sessionID string
 	var err error
-	if rooted, ok := agentAdapter.(adapter.AdditionalDirectoriesSessionResetter); ok {
+	if rooted, ok := agentAdapter.(adapter.AdditionalDirectoriesSessionResetter); ok && len(s.procMgr.WorkspaceSourceRoots()) > 0 {
 		sessionID, err = rooted.ResetSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
 	} else {
 		sessionID, err = sr.ResetSession(ctx, mcpServers)

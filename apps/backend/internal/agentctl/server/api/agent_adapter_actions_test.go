@@ -60,6 +60,21 @@ type capableAgentAdapter struct {
 	modelState   *streams.SessionModelState
 }
 
+type rootedResetCaptureAdapter struct {
+	capableAgentAdapter
+	usedRootedPath bool
+}
+
+func (a *rootedResetCaptureAdapter) ResetSessionWithAdditionalDirectories(_ context.Context, _ []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
+	a.usedRootedPath = true
+	if resolveRoots != nil {
+		if _, err := resolveRoots(); err != nil {
+			return "", err
+		}
+	}
+	return "session-after-reset", nil
+}
+
 func (a *capableAgentAdapter) SetMode(_ context.Context, modeID string) error {
 	a.modeID = modeID
 	return a.failWith
@@ -309,6 +324,24 @@ func TestHandleWSResetSession_ReturnsNewSessionID(t *testing.T) {
 	}
 	if len(agentAdapter.resetServers) != 1 || agentAdapter.resetServers[0].Name != "external" {
 		t.Errorf("adapter received %+v, want the caller's MCP servers", agentAdapter.resetServers)
+	}
+}
+
+func TestHandleWSResetSessionUsesPlainPathWhenNoWorkspaceSourceRoots(t *testing.T) {
+	s := newTestServer(t)
+	adapter := &rootedResetCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(adapter)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.reset", NewSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := s.handleWSResetSession(context.Background(), msg)
+	if response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response: %s", response.Type, response.Payload)
+	}
+	if adapter.usedRootedPath {
+		t.Fatal("rooted reset path used when no workspace source roots are configured")
 	}
 }
 
