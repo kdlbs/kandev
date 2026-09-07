@@ -501,36 +501,8 @@ func taskIDFromPayload(payload string) string {
 	return taskID
 }
 
-// ClaimNextEligibleRun atomically claims the next queued run,
-// skipping runs with a scheduled retry time in the future and
-// agents that already have a claimed run. Agent status and cooldown
-// checks are performed in the service layer.
-func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, error) {
-	now := time.Now().UTC()
-	var req models.Run
-	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
-		UPDATE runs
-		SET status = 'claimed', claimed_at = ?
-		WHERE id = (
-			SELECT w.id FROM runs w
-			WHERE w.status = 'queued'
-			  AND (
-				SELECT COUNT(*) FROM runs cw
-				WHERE cw.agent_profile_id = w.agent_profile_id
-				  AND cw.status = 'claimed'
-			  ) = 0
-			  AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
-			  AND w.routing_blocked_status IS NULL
-			ORDER BY w.requested_at ASC
-			LIMIT 1
-		)
-		RETURNING *
-	`), now, now).StructScan(&req)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
+// ClaimNextEligibleRun is implemented in claim.go, which also holds
+// its ceiling/budget gate evaluation and launch-ledger append.
 
 // ScheduleRetry resets a run to queued with an incremented retry count
 // and a scheduled retry time.

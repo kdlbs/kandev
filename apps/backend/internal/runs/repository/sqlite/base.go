@@ -16,6 +16,10 @@ import (
 type Repository struct {
 	db *sqlx.DB // writer
 	ro *sqlx.DB // reader
+
+	// claimLimits backs REQ-OFFICE-LAUNCH-SAFETY-001/005's claim-time
+	// ceilings and budgets. See ClaimSafetyLimits and SetClaimSafetyLimits.
+	claimLimits ClaimSafetyLimits
 }
 
 // NewWithDB creates a new runs repository with existing database

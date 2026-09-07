@@ -43,12 +43,13 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 		t.Fatalf("repo: %v", err)
 	}
 	agent := &officemodels.AgentInstance{
-		ID:               "agent-1",
-		WorkspaceID:      "ws-1",
-		Name:             "ceo",
-		AgentDisplayName: "CEO",
-		Role:             officemodels.AgentRoleCEO,
-		Status:           officemodels.AgentStatusIdle,
+		ID:                    "agent-1",
+		WorkspaceID:           "ws-1",
+		Name:                  "ceo",
+		AgentDisplayName:      "CEO",
+		Role:                  officemodels.AgentRoleCEO,
+		Status:                officemodels.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
 	}
 	if err := repo.CreateAgentInstance(context.Background(), agent); err != nil {
 		t.Fatalf("seed agent: %v", err)
