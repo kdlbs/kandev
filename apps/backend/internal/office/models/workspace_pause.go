@@ -17,3 +17,11 @@ type WorkspacePause struct {
 	ReleasedBy     string     `json:"released_by,omitempty" db:"released_by"`
 	ReleasedReason string     `json:"released_reason,omitempty" db:"released_reason"`
 }
+
+// InflightRun is one queued-or-claimed run the halt sweep found for a
+// workspace: its id, for cancellation, and its payload task id (empty for
+// a taskless run), for checkout release and execution cancellation.
+type InflightRun struct {
+	RunID  string `db:"id"`
+	TaskID string `db:"task_id"`
+}
