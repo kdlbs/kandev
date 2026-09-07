@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -30,14 +31,21 @@ func (r *Repository) runMigrations() error {
 	}
 	r.migrateRunPayloadIndexes()
 	r.migrateCostEventContract()
-	if err := r.migrateTaskPriorityToText(); err != nil {
-		return fmt.Errorf("tasks.priority_text_rebuild: %w", err)
-	}
-	// Run migrateTaskFTS LAST so its triggers survive any subsequent
-	// recreate-table migrations (notably migrateTaskPriorityToText, which
-	// drops + rebuilds `tasks` and would otherwise wipe the FTS triggers).
-	if err := r.migrateTaskFTS(); err != nil {
-		return err
+	// These migrations implement SQLite-only task search and table-rebuild
+	// behavior. PostgreSQL has no rowid or FTS5 virtual tables, and its task
+	// repository already creates the portable task shape. Keep the branch
+	// explicit so an office store opened on PostgreSQL never probes SQLite's
+	// catalog or executes SQLite DDL.
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		if err := r.migrateTaskPriorityToText(); err != nil {
+			return fmt.Errorf("tasks.priority_text_rebuild: %w", err)
+		}
+		// Run migrateTaskFTS LAST so its triggers survive any subsequent
+		// recreate-table migrations (notably migrateTaskPriorityToText, which
+		// drops + rebuilds `tasks` and would otherwise wipe the FTS triggers).
+		if err := r.migrateTaskFTS(); err != nil {
+			return err
+		}
 	}
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.

@@ -113,6 +113,7 @@
     {"file": "internal/plugins/state/instance_store.go", "symbol": "Set", "rule": "boolean-integer", "reason": "The plugin instance-state schema stores deleted as an INTEGER tombstone"},
     {"file": "internal/plugins/state/instance_store.go", "symbol": "Delete", "rule": "boolean-integer", "reason": "The plugin instance-state schema stores deleted as an INTEGER tombstone"},
     {"file": "internal/prompts/store/sqlite.go", "symbol": "refreshLegacyChangesWalkthroughPrompt", "rule": "boolean-integer", "reason": "The prompts SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/prompts/store/sqlite.go", "symbol": "refreshLegacyCIAutoFixPrompt", "rule": "boolean-integer", "reason": "The prompts SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/task/repository/sqlite/defaults.go", "symbol": "hideBuiltinWorkflows", "rule": "boolean-integer", "reason": "The task SQLite schema stores hidden as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "initSchema", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin and enabled as INTEGER flags"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "migrateTemplatePlaceholders", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
