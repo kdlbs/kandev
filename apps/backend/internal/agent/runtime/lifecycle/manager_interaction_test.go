@@ -67,6 +67,13 @@ type restartConfigOption struct {
 	Value string `json:"value"`
 }
 
+func restartDefaultModelState() *streams.SessionModelState {
+	return &streams.SessionModelState{
+		CurrentModelID: "claude-sonnet-4-20250514",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-sonnet-4-20250514"}},
+	}
+}
+
 func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
 	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
 
@@ -436,6 +443,7 @@ func (m *restartMockAgentctlServer) getSetOptions() []restartConfigOption {
 func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -512,7 +520,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 
 	wsActions := mock.getWSActions()
-	if !slices.Equal(wsActions, []string{"agent.initialize", "agent.session.new"}) {
+	if !slices.Equal(wsActions, []string{"agent.initialize", "agent.session.new", "agent.session.set_model"}) {
 		t.Fatalf("unexpected WS action order: %v", wsActions)
 	}
 
@@ -747,6 +755,7 @@ func TestPromptAgentWithDispatchCallbackTracksExecutionActivityUntilCompletion(t
 func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, true, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -831,6 +840,7 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -871,6 +881,7 @@ func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
 func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -920,6 +931,7 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -1064,6 +1076,7 @@ func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testi
 		},
 	}
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
 
