@@ -8,6 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const ROUTE_REASON_KEYS: Record<string, string> = {
   candidate_order: "dynamicRouteReasonCandidateOrder",
@@ -30,6 +31,12 @@ type RouteActionResult = {
   pending_outcome?: string;
 };
 
+function isRouteActionResult(value: unknown): value is RouteActionResult {
+  if (typeof value !== "object" || value === null) return false;
+  const result = value as Partial<RouteActionResult>;
+  return typeof result.route_generation === "number" && typeof result.state === "string";
+}
+
 async function applyRouteAction(
   session: TaskSession,
   action: RouteAction,
@@ -47,7 +54,11 @@ async function applyRouteAction(
       30000,
     );
     return result;
-  } catch {
+  } catch (error) {
+    if (error instanceof WebSocketRequestError && error.code === "CONFLICT") {
+      const route = error.details?.route;
+      return isRouteActionResult(route) ? route : null;
+    }
     return null;
   }
 }

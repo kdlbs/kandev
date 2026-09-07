@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
@@ -8,7 +8,7 @@ import { settingsControlClassName } from "@/components/settings/settings-control
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 import type { Executor, ExecutorProfile, LocalRepository, Repository } from "@/lib/types/http";
 import type { TaskMode } from "@/lib/types/automation";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
@@ -63,25 +63,6 @@ const CLEAN_FIELDS = {
   executorProfileId: false,
   repositorySelections: false,
 };
-
-function useDiscoveredRepositories(workspaceId: string) {
-  const [items, setItems] = useState<LocalRepository[]>([]);
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((response) => {
-        if (!cancelled) setItems(response.repositories ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-  return items;
-}
 
 function executorProfiles(executors: Executor[]): ExecutorProfile[] {
   return executors.flatMap((executor) =>
@@ -147,6 +128,7 @@ function RepositoryAccess({
           repositories={repositories}
           discoveredRepositories={discovered}
           workspaceId={workspaceId}
+          showDiscoveryControls
           canAddMore={supportsMultiRepo || rows.length === 0}
           addLabel={t("task:addRepository")}
           allowDuplicateRepositories={false}
@@ -197,7 +179,7 @@ export function ConfigSection({
   );
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const { repositories } = useRepositories(workspaceId, true);
-  const discovered = useDiscoveredRepositories(workspaceId);
+  const discovered = useRepositoryDiscovery(workspaceId, true).repositories;
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const agents = useAgentProfileOptions(agentProfiles);

@@ -16,11 +16,11 @@ import {
   createRepositoryScriptAction,
   deleteRepositoryAction,
   deleteRepositoryScriptAction,
-  discoverRepositoriesAction,
   updateRepositoryAction,
   updateRepositoryScriptAction,
   validateRepositoryPathAction,
 } from "@/app/actions/workspaces";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 import {
   repositoryId as toRepositoryId,
   type LocalRepository,
@@ -29,7 +29,6 @@ import {
   type Workspace,
 } from "@/lib/types/http";
 import { useRequest } from "@/lib/http/use-request";
-import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import type { ManualValidation } from "@/app/settings/workspace/workspace-repositories-dialog";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
@@ -100,6 +99,28 @@ type RepoHandlerArgs = {
   savedRepositoriesById: Map<string, RepositoryWithScripts>;
   clearRepositoryScripts: (id: string) => void;
 };
+
+function selectDiscoveredRepository(
+  path: string,
+  setSelectedRepoPath: React.Dispatch<React.SetStateAction<string | null>>,
+  setManualRepoPath: React.Dispatch<React.SetStateAction<string>>,
+  setManualValidation: React.Dispatch<React.SetStateAction<ManualValidation>>,
+) {
+  setSelectedRepoPath(path);
+  setManualRepoPath("");
+  setManualValidation({ status: "idle" });
+}
+
+function changeManualRepositoryPath(
+  value: string,
+  setSelectedRepoPath: React.Dispatch<React.SetStateAction<string | null>>,
+  setManualRepoPath: React.Dispatch<React.SetStateAction<string>>,
+  setManualValidation: React.Dispatch<React.SetStateAction<ManualValidation>>,
+) {
+  setManualRepoPath(value);
+  setSelectedRepoPath(null);
+  setManualValidation({ status: "idle" });
+}
 
 async function saveNewRepository(
   repo: RepositoryItem,
@@ -316,19 +337,15 @@ function useRepositoryHandlers({
   };
 }
 
-function useDiscoverDialog(
-  workspace: Workspace | null,
-  toast: ReturnType<typeof useToast>["toast"],
-  t: TFunction,
-) {
+function useDiscoverDialog(workspace: Workspace | null, t: TFunction) {
   const [localRepoDialogOpen, setLocalRepoDialogOpen] = useState(false);
-  const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
   const [repoSearch, setRepoSearch] = useState("");
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(null);
   const [manualRepoPath, setManualRepoPath] = useState("");
   const [manualValidation, setManualValidation] = useState<ManualValidation>({ status: "idle" });
-  const discoverRequest = useRequest(discoverRepositoriesAction);
   const validateRequest = useRequest(validateRepositoryPathAction);
+  const discovery = useRepositoryDiscovery(workspace?.id ?? null, localRepoDialogOpen);
+  const discoveredRepositories = discovery.repositories;
 
   const filteredRepositories = useMemo(() => {
     const query = repoSearch.trim().toLowerCase();
@@ -340,25 +357,15 @@ function useDiscoverDialog(
 
   const handleDiscover = async () => {
     if (!workspace) return;
-    try {
-      const result = await discoverRequest.run(workspace.id);
-      setDiscoveredRepositories(result.repositories);
-    } catch (error) {
-      toast({
-        title: t("workspaces:failedToDiscoverRepositories"),
-        description: error instanceof Error ? error.message : t("common:requestFailed"),
-        variant: "error",
-      });
-    }
+    await discovery.refresh();
   };
 
-  const openDialog = async () => {
+  const openDialog = () => {
     setLocalRepoDialogOpen(true);
     setRepoSearch("");
     setSelectedRepoPath(null);
     setManualRepoPath("");
     setManualValidation({ status: "idle" });
-    await handleDiscover();
   };
 
   const handleValidateManualPath = async () => {
@@ -391,16 +398,10 @@ function useDiscoverDialog(
     }
   };
 
-  const handleSelectRepoPath = (path: string) => {
-    setSelectedRepoPath(path);
-    setManualRepoPath("");
-    setManualValidation({ status: "idle" });
-  };
-  const handleManualRepoPathChange = (value: string) => {
-    setManualRepoPath(value);
-    setSelectedRepoPath(null);
-    setManualValidation({ status: "idle" });
-  };
+  const handleSelectRepoPath = (path: string) =>
+    selectDiscoveredRepository(path, setSelectedRepoPath, setManualRepoPath, setManualValidation);
+  const handleManualRepoPathChange = (value: string) =>
+    changeManualRepositoryPath(value, setSelectedRepoPath, setManualRepoPath, setManualValidation);
   const canSave =
     Boolean(selectedRepoPath) ||
     (manualValidation.status === "success" && manualValidation.isValid === true);
@@ -418,10 +419,13 @@ function useDiscoverDialog(
     manualValidation,
     handleValidateManualPath,
     isValidating: validateRequest.isLoading,
-    isDiscovering: discoverRequest.isLoading,
+    isDiscovering: discovery.isLoading || discovery.isRefreshing,
     canSave,
     openDialog,
     discoveredRepositories,
+    desktopRuntime: discovery.desktopRuntime,
+    onRefreshDiscovery: () => void handleDiscover(),
+    workspaceId: workspace?.id ?? null,
   };
 }
 export function useWorkspaceRepositoriesPage(
@@ -429,7 +433,6 @@ export function useWorkspaceRepositoriesPage(
   repositories: RepositoryWithScripts[],
 ) {
   const router = useRouter();
-  const { toast } = useToast();
   const { t } = useTranslation();
   const clearRepositoryScripts = useAppStore((state) => state.clearRepositoryScripts);
   const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
@@ -457,23 +460,12 @@ export function useWorkspaceRepositoriesPage(
     handleDeleteRepository,
   } = handlers;
 
-  const discover = useDiscoverDialog(workspace, toast, t);
+  const discover = useDiscoverDialog(workspace, t);
   const {
-    localRepoDialogOpen,
     setLocalRepoDialogOpen,
-    filteredRepositories,
-    repoSearch,
-    setRepoSearch,
     selectedRepoPath,
-    handleSelectRepoPath,
     manualRepoPath,
-    handleManualRepoPathChange,
     manualValidation,
-    handleValidateManualPath,
-    isValidating,
-    isDiscovering,
-    canSave,
-    openDialog,
     discoveredRepositories,
   } = discover;
 
@@ -492,7 +484,6 @@ export function useWorkspaceRepositoriesPage(
 
   return {
     router,
-    toast,
     repositoryItems,
     savedRepositoriesById,
     handleUpdateRepository,
@@ -501,21 +492,7 @@ export function useWorkspaceRepositoriesPage(
     handleDeleteRepositoryScript,
     handleSaveRepository,
     handleDeleteRepository,
-    localRepoDialogOpen,
-    setLocalRepoDialogOpen,
-    filteredRepositories,
-    repoSearch,
-    setRepoSearch,
-    selectedRepoPath,
-    handleSelectRepoPath,
-    manualRepoPath,
-    handleManualRepoPathChange,
-    manualValidation,
-    handleValidateManualPath,
-    isValidating,
-    isDiscovering,
-    canSave,
-    openDialog,
+    ...discover,
     handleConfirmLocalRepository,
   };
 }

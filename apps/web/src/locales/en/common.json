@@ -166,6 +166,8 @@
   "failedToCreateFolder": "Failed to create folder",
   "failedToCreateRepository": "Failed to create repository",
   "failedToLoadDirectory": "Failed to load directory",
+  "nativeFolderPickerFailed": "The native folder picker could not open.",
+  "nativeFolderPickerUnavailable": "The native folder picker is unavailable. Reload Kandev and try again.",
   "failedToLoadRoutine": "Failed to load routine",
   "failedToLoadSetup": "Failed to load setup",
   "failedToRenderDiagram": "Failed to render diagram",

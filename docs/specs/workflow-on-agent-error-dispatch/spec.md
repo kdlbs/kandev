@@ -201,8 +201,9 @@ the engine resolved but `applyEngineTransition` then declines leaves it **marked
 ([AC-C7](#c-idempotency)).
 
 **The durability limit is real.** `workflowStore.IsOperationApplied` / `MarkOperationApplied`
-(`workflow_store.go:886`) are backed by an in-memory `sync.Map` (`appliedOps`), no persistence, no
-eviction — *exactly-once within one backend process lifetime*, not across a restart. Acceptable
+(`workflow_store.go:886`) are backed by an in-memory `sync.Map` (`ledger`), no
+persistence, no eviction — *exactly-once within one backend process lifetime*, not across a
+restart. Acceptable
 because `agent.failed` is a live bus event with no replay: a restart loses the event rather than
 redelivering it. A builder must not read "idempotent" as "durable".
 
@@ -458,7 +459,7 @@ closes it by construction. See [AC-E12 and AC-E13](#e-action-vocabulary-and-tran
 - **AC-C4** WHEN two distinct agent executions on one session fail in sequence, both shall dispatch.
   Suppressing the second is a defect, not idempotency.
 - **AC-C5** The exactly-once guarantee is scoped to one backend process lifetime, because
-  `workflowStore.appliedOps` is an in-memory `sync.Map`. This is a stated limit of the contract, not
+  `workflowStore.ledger` wraps an in-memory `sync.Map`. This is a stated limit of the contract, not
   a gap to be closed by adding durable marker storage in this card.
 - **AC-C6** IF an action in the list returns an error, THEN the operation shall be left **unmarked**
   (the engine's existing behaviour: `markOperationApplied` runs only after `processActions` succeeds)
@@ -817,7 +818,7 @@ Each entry is a named exclusion and part of the contract.
   concern shared by every consumer of `watcher.AgentEventData`, not a dispatch fix.
 - **The no-session failure branch.** It cannot dispatch: engine state is keyed on
   `(taskID, sessionID)` and there is no session to key on. Giving it one is not a dispatch fix.
-- **Durable operation markers.** AC-C5 states the process-scoped limit; making `appliedOps` durable
+- **Durable operation markers.** AC-C5 states the process-scoped limit; making the ledger durable
   is `workflow-on-enter-action-dispatch`'s step-entry-record territory.
 - **Synchronizing `s.workflowEngine`'s existing readers.** AC-E4 makes *this dispatch's* engine and
   registry one atomically-published value, read once. The field's other readers stay as they are: they

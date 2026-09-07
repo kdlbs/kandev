@@ -51,6 +51,7 @@ start.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12:** When a previously opened session is revisited after more than one message page was persisted while it was inactive, the transcript shall reconcile to a contiguous newest window and upward pagination shall reach every persisted user prompt without gaps or duplicate rows.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13:** When an upward lazy-load operation sizes its batch, it shall target 20 newly loaded text parts. Tool calls and other activity rows shall not advance that target; the operation can stop earlier when prompt `#1` is loaded, persisted history is exhausted, a request makes no progress, or its bounded safety limit is reached.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.14:** When a previously hidden transcript becomes visible with its restored viewport at the oldest loaded edge and older history remains, the transcript shall resume older-history loading without requiring the user to move away from and return to that edge.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.15:** When the task-description fallback has no valid persisted message timestamp, the transcript shall omit that row's timestamp affordance and shall not render an invalid-date placeholder.
 
 ## Exclusions
 

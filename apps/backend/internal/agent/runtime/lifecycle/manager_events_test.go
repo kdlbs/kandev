@@ -149,6 +149,45 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+// TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity pins that the
+// stream event's AgentProfileID is the acting agent's own office identity
+// (execution.officeProfileID()), not the concrete AgentProfileID the CLI
+// happens to run under. This is what lets office/service attribute a
+// session-bridged comment to the agent that actually ran the turn instead of
+// the task's assignee, without depending on task_sessions.agent_profile_id
+// (which only holds the acting agent when features.officeSessionIdentity is
+// on — off by default in every shipped profile).
+func TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-office-identity", "task-1", "session-1")
+	execution.AgentProfileID = "runner-pm"
+	execution.OfficeAgentProfileID = "critic"
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		SessionID:        execution.SessionID,
+		PromptGeneration: generation,
+	})
+
+	for _, payload := range eventBus.getStreamEvents() {
+		if payload.Data != nil && payload.Data.Type == streams.EventTypeComplete {
+			if payload.AgentProfileID != "critic" {
+				t.Fatalf("agent_profile_id = %q, want %q (the acting agent, not %q)",
+					payload.AgentProfileID, "critic", execution.AgentProfileID)
+			}
+			return
+		}
+	}
+	t.Fatal("no complete stream event published")
+}
+
 func TestHandleAgentEvent_RecordsStreamedAssistantTextForResumeContext(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())

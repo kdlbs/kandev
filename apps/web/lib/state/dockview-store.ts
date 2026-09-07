@@ -181,6 +181,12 @@ export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
   sessionIds?: string[];
 };
+export type TranscriptScrollTarget = {
+  sessionId: string;
+  messageId: string;
+  token: number;
+  hostPanelId: string;
+};
 
 type DockviewStore = {
   api: DockviewApi | null;
@@ -259,12 +265,7 @@ type DockviewStore = {
   addDevServerPanel: (groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
-  scrollTarget: {
-    sessionId: string;
-    messageId: string;
-    token: number;
-    hostPanelId: string;
-  } | null;
+  scrollTarget: TranscriptScrollTarget | null;
   scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => void;
   clearScrollTarget: (token: number) => void;
   clearScrollTargetForOwner: (sessionId: string, hostPanelId: string) => void;

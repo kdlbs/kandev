@@ -1,6 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
@@ -28,12 +29,14 @@ function makeTask(foregroundActivity?: ForegroundActivity | null): Task {
 function renderSwimlane(foregroundActivity?: ForegroundActivity | null) {
   return render(
     <StateProvider>
-      <SwimlaneGraphContent
-        workflowId="wf-1"
-        steps={STEPS}
-        tasks={[makeTask(foregroundActivity)]}
-        onPreviewTask={() => undefined}
-      />
+      <ToastProvider>
+        <SwimlaneGraphContent
+          workflowId="wf-1"
+          steps={STEPS}
+          tasks={[makeTask(foregroundActivity)]}
+          onPreviewTask={() => undefined}
+        />
+      </ToastProvider>
     </StateProvider>,
   );
 }
@@ -75,12 +78,14 @@ describe("SwimlaneGraphContent — waiting-for-input variants", () => {
     } as Task;
     return render(
       <StateProvider>
-        <SwimlaneGraphContent
-          workflowId="wf-1"
-          steps={STEPS}
-          tasks={[task]}
-          onPreviewTask={() => undefined}
-        />
+        <ToastProvider>
+          <SwimlaneGraphContent
+            workflowId="wf-1"
+            steps={STEPS}
+            tasks={[task]}
+            onPreviewTask={() => undefined}
+          />
+        </ToastProvider>
       </StateProvider>,
     );
   }

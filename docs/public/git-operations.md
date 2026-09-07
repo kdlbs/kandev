@@ -137,6 +137,21 @@ each repository, and a Git or snapshot persistence failure does not undo the acc
 
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
+### Deleting a task with local worktree changes
+
+Task deletion checks every owned worktree before it changes the task or starts
+cleanup. If Git reports tracked or untracked changes, deletion stops and the
+task remains visible. The confirmation dialog lists the affected worktrees and
+requires an explicit choice to permanently discard those changes before a
+retry.
+
+With that choice, Kandev removes the worktree and its local changes only after
+it passes the normal path-ownership, Git-registration, checkout-identity,
+shared-reference, and branch-safety checks. A branch with unique commits is
+preserved. If the checkout becomes dirty after admission, cleanup preserves the
+checkout and records a terminal failure instead of retrying the destructive
+operation automatically.
+
 ## Everyday operations
 
 All operations below run in the selected repository workspace.
@@ -270,11 +285,11 @@ Read-only Git actions used by the Changes panel include `session.commit_diff`, `
 
 Worktree cleanup audits the Git worktree and checkout before it runs the repository cleanup script. It then removes the Git worktree directory and may remove the local branch:
 
-- Normal task deletion audits each owned worktree before mutation. Tracked or untracked changes keep the checkout in place and make durable cleanup retry. A clean branch is removed only when its current commit is already contained by the recorded base or repository default; a clean branch with unique commits is preserved after its checkout is reclaimed. Remote branches are never deleted.
+- Normal task deletion audits each owned worktree before mutation. Tracked or untracked changes stop deletion and keep the task, checkout, and local branch in place until the user explicitly consents to discard them. With consent, cleanup removes the checkout only after the normal ownership and identity audits pass. A clean branch is removed only when its current commit is already contained by the recorded base or repository default; a clean branch with unique commits is preserved after its checkout is reclaimed. Remote branches are never deleted.
 - **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree but deliberately preserves the local branch, then the next launch materializes a fresh environment.
 - Office handoff cleanup also preserves the branch when it releases a worktree.
 
-Before deleting a task or performing a hard reset, commit and push anything you need. Kandev does not run a cleanup script when the audit finds uncommitted or untracked work. Cleanup scripts should perform transient teardown only; files they create are removed with the audited checkout. If an audited cleanup script fails, Kandev logs the failure and continues with the same recorded worktree. An audited directory is removed through its pinned no-follow handle, and un-audited fallback cleanup can remove a managed directory without following replacement links. Git metadata is then pruned. Registration pruning and local-branch deletion are verified before the durable cleanup job succeeds; a partial failure remains retryable.
+Before deleting a task or performing a hard reset, commit and push anything you need. Without discard consent, Kandev does not start a cleanup job when the audit finds uncommitted or untracked work. With consent, cleanup scripts run only after the normal worktree audit and perform transient teardown; files they create are removed with the audited checkout. If an audited cleanup script fails, Kandev logs the failure and continues with the same recorded worktree. An audited directory is removed through its pinned no-follow handle, and un-audited fallback cleanup can remove a managed directory without following replacement links. Git metadata is then pruned. Registration pruning and local-branch deletion are verified before the durable cleanup job succeeds; a partial failure remains retryable.
 
 ## Troubleshooting
 

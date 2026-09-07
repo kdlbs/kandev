@@ -15,7 +15,11 @@ import { PanelRoot } from "./panel-primitives";
 import { TaskSidebarScrollArea } from "./task-sidebar-scroll-area";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
-import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import {
+  useTaskActions,
+  useArchiveAndSwitchTask,
+  type TaskActionOptions,
+} from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
@@ -63,6 +67,9 @@ function useSidebarData(workspaceId: string | null) {
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const automaticColorSettings = useAppStore(
+    (state) => state.userSettings.sidebarTaskColorAutomation,
+  );
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -86,6 +93,12 @@ function useSidebarData(workspaceId: string | null) {
     const repositorySlugById = new Map(
       repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
     );
+    const repositoriesById = new Map(
+      Object.values(repositoriesByWorkspace)
+        .flat()
+        .map((repo: Repository) => [repo.id, repo]),
+    );
+    const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
@@ -97,6 +110,10 @@ function useSidebarData(workspaceId: string | null) {
       wipQueueByTaskId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
+      workspaceId: workspaceId ?? undefined,
+      repositoriesById,
+      stepColorById,
+      automaticColorSettings,
     };
     const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
@@ -104,7 +121,7 @@ function useSidebarData(workspaceId: string | null) {
       archivedState.archivedTaskId &&
       !items.some((t) => t.id === archivedState.archivedTaskId)
     ) {
-      items.unshift(buildArchivedSidebarItem(archivedState));
+      items.unshift(buildArchivedSidebarItem(archivedState, mapCtx));
     }
     return items;
   }, [
@@ -117,6 +134,7 @@ function useSidebarData(workspaceId: string | null) {
     wipQueueByTaskId,
     acknowledgedAgentErrors,
     dismissedAgentErrors,
+    automaticColorSettings,
   ]);
 
   return {
@@ -146,7 +164,7 @@ function useArchiveActions(store: StoreApi) {
   const [isArchiving, setIsArchiving] = useState(false);
 
   const runArchive = useCallback(
-    async (taskId: string, opts: { cascade?: boolean }) => {
+    async (taskId: string, opts: TaskActionOptions) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -163,7 +181,7 @@ function useArchiveActions(store: StoreApi) {
   );
 
   const handleArchiveTask = useCallback(
-    (taskId: string, opts?: { cascade?: boolean }) => {
+    (taskId: string, opts?: TaskActionOptions) => {
       if (opts) {
         void runArchive(taskId, opts);
         return;
@@ -224,7 +242,7 @@ function useDeleteActions(
   );
 
   const handleDeleteConfirm = useCallback(
-    async (opts: { cascade: boolean }) => {
+    async (opts: TaskActionOptions & { cascade: boolean; discardWorktreeChanges: boolean }) => {
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);

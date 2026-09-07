@@ -404,38 +404,137 @@ func TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive(t *testing.T) {
 	}
 }
 
+// TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration is the
+// regression test restoring the deferred recovery guard in
+// LaunchDynamicRouteAction for the timer-recovery path: persistDynamicPolicyRecovery
+// leaves a resumed route at "retrying" (resume never advances the generation),
+// so a launch that fails after that resume must still reach action_required
+// instead of sticking at "retrying" with a dead Retry/Stop banner.
+func TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "dynamic-retrying-action-required", Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("retrying-action-required-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"retrying-action-required-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	resumed, err := engine.ResumePendingNow(context.Background(), "retrying-action-required-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+	if resumed.Status != routeStatusRetrying {
+		t.Fatalf("precondition: resumed status = %q, want %q", resumed.Status, routeStatusRetrying)
+	}
+
+	decision, err := engine.MarkActionRequired(
+		context.Background(), "retrying-action-required-session", initial.Generation, "route_action_launch_failed",
+	)
+	if err != nil {
+		t.Fatalf("MarkActionRequired from retrying: %v", err)
+	}
+	if decision.Status != routeStatusActionRequired || decision.Generation != initial.Generation {
+		t.Fatalf("decision = %#v", decision)
+	}
+	state, ok := engine.State("retrying-action-required-session")
+	if !ok || state.Status != routeStatusActionRequired || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkActionRequired = %#v, ok=%v", state, ok)
+	}
+}
+
+// TestEngineMarkActiveFromRetryingThenActionRequiredIsNoOp is the regression
+// test for review finding F1: a resumed route (status "retrying") that then
+// launches successfully must reach "active" via MarkActive, exactly as a
+// freshly claimed "starting" route does. Without this, a resumed route stays
+// at "retrying" forever, and MarkActionRequired's starting-or-retrying guard
+// (widened for the resumed-then-FAILED case) would wrongly demote a healthy,
+// successfully launched route on any later unrelated failure.
+func TestEngineMarkActiveFromRetryingThenActionRequiredIsNoOp(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "dynamic-retrying-active", Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("retrying-active-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"retrying-active-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	resumed, err := engine.ResumePendingNow(context.Background(), "retrying-active-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+	if resumed.Status != routeStatusRetrying {
+		t.Fatalf("precondition: resumed status = %q, want %q", resumed.Status, routeStatusRetrying)
+	}
+
+	if err := engine.MarkActive(context.Background(), "retrying-active-session", initial.Generation); err != nil {
+		t.Fatalf("MarkActive from retrying: %v", err)
+	}
+	state, ok := engine.State("retrying-active-session")
+	if !ok || state.Status != routeStatusActive || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkActive = %#v, ok=%v, want active", state, ok)
+	}
+
+	// A later, unrelated failure that reaches the catch-all guard must not
+	// demote this healthy, successfully launched route.
+	decision, err := engine.MarkActionRequired(
+		context.Background(), "retrying-active-session", initial.Generation, "unrelated_declined_failure",
+	)
+	if err != nil {
+		t.Fatalf("MarkActionRequired on active route: %v", err)
+	}
+	if decision.Status != routeStatusActive {
+		t.Fatalf("decision.Status = %q, want unchanged %q", decision.Status, routeStatusActive)
+	}
+	state, ok = engine.State("retrying-active-session")
+	if !ok || state.Status != routeStatusActive {
+		t.Fatalf("state after no-op MarkActionRequired = %#v, ok=%v, want unchanged active", state, ok)
+	}
+}
+
 func TestEngineMarkRecoveryActionRequiredUnsticksManualRecoveryAfterFailedLaunch(t *testing.T) {
 	engine := NewEngine()
 	document := routingpolicy.DefaultDocument()
 	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
-	profile := Profile{ID: "launch-fail-policy", Version: 1, Candidates: []Candidate{
-		{ID: "first", Enabled: true, Policies: document},
-	}}
+	profile := Profile{ID: "launch-fail-policy", Version: 1, Candidates: []Candidate{{ID: "first", Enabled: true, Policies: document}}}
 	initial, err := engine.Select("launch-fail-session", profile, 0, "")
 	if err != nil {
 		t.Fatalf("initial Select: %v", err)
 	}
+	ctx := context.Background()
 	if _, err := engine.ApplyFailure(
 		"launch-fail-session", profile, initial.Generation, initial.ExecutionProfileID,
 		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
 	); !errors.Is(err, ErrRecoveryPending) {
 		t.Fatalf("ApplyFailure error = %v, want recovery pending", err)
 	}
-	ctx := context.Background()
 	if _, err := engine.ResumePendingNow(ctx, "launch-fail-session", initial.Generation); err != nil {
-		t.Fatalf("ResumePendingNow (simulated timer/manual claim): %v", err)
+		t.Fatalf("ResumePendingNow: %v", err)
 	}
-
-	// The durable state is now "retrying" — as if a launch was claimed but
-	// then failed before it could advance the state further. Every manual
-	// recovery path must reject it until the launch-failure handler syncs it.
 	if _, err := engine.ResumePendingNow(ctx, "launch-fail-session", initial.Generation); !errors.Is(err, ErrRecoveryPending) {
 		t.Fatalf("ResumePendingNow while stuck at retrying = %v, want recovery pending", err)
 	}
 	if _, err := engine.CancelPending(ctx, "launch-fail-session", initial.Generation, "manual_stop"); !errors.Is(err, ErrRecoveryPending) {
 		t.Fatalf("CancelPending while stuck at retrying = %v, want recovery pending", err)
 	}
-
+	if reclaimed, err := engine.ReclaimRetrying(ctx, "launch-fail-session", initial.Generation); !errors.Is(err, ErrRecoveryPending) || reclaimed {
+		t.Fatalf("ReclaimRetrying for owned claim = reclaimed %v, error %v, want recovery pending", reclaimed, err)
+	}
 	if err := engine.MarkRecoveryActionRequired(ctx, "launch-fail-session", initial.Generation); err != nil {
 		t.Fatalf("MarkRecoveryActionRequired: %v", err)
 	}
@@ -443,9 +542,6 @@ func TestEngineMarkRecoveryActionRequiredUnsticksManualRecoveryAfterFailedLaunch
 	if !exists || state.Status != routeStatusActionRequired || state.Generation != initial.Generation {
 		t.Fatalf("state after MarkRecoveryActionRequired = %#v, exists=%v", state, exists)
 	}
-
-	// Manual retry and stop are both unblocked now that the durable state
-	// reflects action_required instead of a launch that will never resolve.
 	if stopped, err := engine.CancelPending(ctx, "launch-fail-session", initial.Generation, "manual_stop"); err != nil {
 		t.Fatalf("CancelPending after sync: %v", err)
 	} else if stopped.Status != routeStatusActionRequired {
@@ -455,16 +551,12 @@ func TestEngineMarkRecoveryActionRequiredUnsticksManualRecoveryAfterFailedLaunch
 
 func TestEngineMarkRecoveryActionRequiredIsNoOpWhenStateMovedOn(t *testing.T) {
 	engine := NewEngine()
-	profile := Profile{ID: "no-op-policy", Version: 1, Candidates: []Candidate{
-		{ID: "first", Enabled: true},
-	}}
+	profile := Profile{ID: "no-op-policy", Candidates: []Candidate{{ID: "first", Enabled: true}}}
 	ctx := context.Background()
 	initial, err := engine.Select("no-op-session", profile, 0, "")
 	if err != nil {
 		t.Fatalf("initial Select: %v", err)
 	}
-
-	// Never entered "retrying" — no-op, not an error.
 	if err := engine.MarkRecoveryActionRequired(ctx, "no-op-session", initial.Generation); err != nil {
 		t.Fatalf("MarkRecoveryActionRequired on non-retrying state: %v", err)
 	}
@@ -472,13 +564,9 @@ func TestEngineMarkRecoveryActionRequiredIsNoOpWhenStateMovedOn(t *testing.T) {
 	if state.Status == routeStatusActionRequired {
 		t.Fatalf("state unexpectedly advanced to action_required: %#v", state)
 	}
-
-	// Stale generation — no-op, not an error.
 	if err := engine.MarkRecoveryActionRequired(ctx, "no-op-session", initial.Generation+1); err != nil {
 		t.Fatalf("MarkRecoveryActionRequired on stale generation: %v", err)
 	}
-
-	// Unknown session — no-op, not an error.
 	if err := engine.MarkRecoveryActionRequired(ctx, "unknown-session", 1); err != nil {
 		t.Fatalf("MarkRecoveryActionRequired on unknown session: %v", err)
 	}

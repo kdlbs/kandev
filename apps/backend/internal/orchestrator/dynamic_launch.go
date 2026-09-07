@@ -209,11 +209,12 @@ func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, 
 // durable action_required and mirrors the status onto the task-session
 // projection. It is the catch-all recovery marker every declined or failed
 // dynamic launch path falls back to, so a claimed route is never left
-// silently stuck at "starting" with no recovery affordance. The underlying
-// engine call only transitions a route that is still "starting" (see
-// Engine.MarkActionRequired), so calling this on a route a launch already
-// carried to "active" is a safe no-op: neither store is touched, and an
-// unrelated later failure cannot overwrite a healthy route's reason.
+// silently stuck at "starting" or "retrying" with no recovery affordance.
+// The underlying engine call only transitions a route that is still
+// "starting" or "retrying" (see Engine.MarkActionRequired), so calling this
+// on a route a launch already carried to "active" is a safe no-op: neither
+// store is touched, and an unrelated later failure cannot overwrite a
+// healthy route's reason.
 func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID string, generation int64, reason string) {
 	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
 		return
@@ -663,9 +664,10 @@ func (s *Service) routeDynamicAgentFailure(
 	// failed attempt, not the one this call started from. The guard is safe
 	// to arm this early even for a failure the classifier forbids fallback
 	// for: markDynamicRouteActionRequired only transitions a route that is
-	// still "starting", so it is a no-op once this generation's launch has
-	// already reached "active" (an ordinary runtime failure on a healthy
-	// session), and only fires for a route genuinely stranded mid-launch.
+	// still "starting" or "retrying", so it is a no-op once this generation's
+	// launch has already reached "active" (an ordinary runtime failure on a
+	// healthy session), and only fires for a route genuinely stranded
+	// mid-launch.
 	generation := session.RouteGeneration
 	handled := false
 	defer func() {
@@ -1053,11 +1055,30 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 			return false
 		}
 	}
-	if err := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateCreated, ""); err != nil {
+	// Reload immediately before the reset: StopExecution is I/O and a
+	// coordinator stop can commit a terminal state while it runs. A stale
+	// pre-stop snapshot would let this write resurrect a session the user
+	// already cancelled, so refuse on a reloaded terminal state and CAS the
+	// write on that same reload to catch a cancellation landing after it.
+	preResetState, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || preResetState == nil {
+		return false
+	}
+	if isTerminalSessionState(preResetState.State) {
+		return false
+	}
+	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
+		ctx, data.SessionID, preResetState.State, models.TaskSessionStateCreated, "",
+	)
+	if err != nil || !changed {
 		return false
 	}
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	officeAgentProfileID := data.AgentProfileID
+	if officeAgentProfileID == "" {
+		officeAgentProfileID = session.AgentProfileID
+	}
 	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
 	if officeErr == nil && !isOfficeTask {
 		_, err := s.StartCreatedSession(
@@ -1068,7 +1089,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	}
 	_, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           "",
 		Prompt:               prompt.text,
 		StartAgent:           true,

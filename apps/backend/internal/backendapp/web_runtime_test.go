@@ -30,3 +30,16 @@ func TestWebRuntimeConfigOmitsBlankTitlePrefix(t *testing.T) {
 		t.Fatalf("title prefix = %q, want empty", got)
 	}
 }
+
+func TestWebRuntimeConfigAdvertisesNativeFolderPickerOnlyForDesktopRuntime(t *testing.T) {
+	request := httptest.NewRequest("GET", "/", nil)
+	t.Setenv("KANDEV_DESKTOP_RUNTIME", "true")
+	if got := webRuntimeConfig(false, "", request).NativeFolderPickerAvailable; !got {
+		t.Fatal("native folder picker should be advertised for a desktop-launched backend")
+	}
+
+	t.Setenv("KANDEV_DESKTOP_RUNTIME", "false")
+	if got := webRuntimeConfig(false, "", request).NativeFolderPickerAvailable; got {
+		t.Fatal("native folder picker should not be advertised for a browser-launched backend")
+	}
+}

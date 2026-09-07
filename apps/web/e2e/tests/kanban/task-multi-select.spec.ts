@@ -86,6 +86,7 @@ test.describe("Multi-select bulk actions", () => {
 
     await kanban.bulkDeleteButton.click();
     await expect(kanban.bulkDeleteConfirm).toBeVisible();
+    await testPage.getByTestId("delete-discard-worktree-checkbox").click();
     await kanban.bulkDeleteConfirm.click();
 
     await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });
@@ -177,6 +178,7 @@ test.describe("Multi-select bulk actions", () => {
 
     await kanban.bulkDeleteButton.click();
     await expect(kanban.bulkDeleteConfirm).toBeVisible();
+    await testPage.getByTestId("delete-discard-worktree-checkbox").click();
     await kanban.bulkDeleteConfirm.click();
 
     await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });

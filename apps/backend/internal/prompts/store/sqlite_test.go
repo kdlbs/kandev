@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -332,5 +334,60 @@ func TestSQLiteRepository_PreservesUntouchedUnrecognizedChangesWalkthroughPrompt
 	}
 	if got.Content != customContent {
 		t.Fatalf("unrecognized untouched content was overwritten")
+	}
+}
+
+func TestSQLiteRepository_BoundsPromptListMaterialization(t *testing.T) {
+	repo, cleanup := createTestRepo(t)
+	defer cleanup()
+
+	now := time.Now().UTC()
+	for i := range maxPromptListItems {
+		if _, err := repo.db.Exec(
+			`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+			"bulk-"+strconv.Itoa(i), "bulk-"+strconv.Itoa(i), "content", now, now,
+		); err != nil {
+			t.Fatalf("insert prompt %d: %v", i, err)
+		}
+	}
+
+	if _, err := repo.ListPrompts(context.Background()); !errors.Is(err, ErrPromptListLimit) {
+		t.Fatalf("expected ErrPromptListLimit, got %v", err)
+	}
+}
+
+func TestSQLiteRepository_RejectsPromptWhenListLimitReached(t *testing.T) {
+	repo, cleanup := createTestRepo(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	var count int
+	if err := repo.db.GetContext(ctx, &count, "SELECT COUNT(*) FROM custom_prompts"); err != nil {
+		t.Fatalf("count prompts: %v", err)
+	}
+	now := time.Now().UTC()
+	for i := count; i < maxPromptListItems; i++ {
+		if _, err := repo.db.ExecContext(
+			ctx,
+			`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+			"limit-"+strconv.Itoa(i), "limit-"+strconv.Itoa(i), "content", now, now,
+		); err != nil {
+			t.Fatalf("insert prompt %d: %v", i, err)
+		}
+	}
+
+	err := repo.CreatePrompt(ctx, &models.Prompt{Name: "over-limit", Content: "content"})
+	if !errors.Is(err, ErrPromptListLimit) {
+		t.Fatalf("expected ErrPromptListLimit, got %v", err)
+	}
+}
+
+func TestSQLiteRepository_BoundsReferenceCandidateMaterialization(t *testing.T) {
+	repo, cleanup := createTestRepo(t)
+	defer cleanup()
+
+	_, _, err := repo.ListPromptsForReferenceExpansion(context.Background(), 100, 512, 1<<20, 1, 1)
+	if !errors.Is(err, ErrPromptReferenceCandidateLimit) {
+		t.Fatalf("expected ErrPromptReferenceCandidateLimit, got %v", err)
 	}
 }

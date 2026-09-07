@@ -20,6 +20,7 @@ import (
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 )
@@ -90,6 +91,76 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	}
 	if _, ok := degraded.Workspaces.(workspaces.Analysis); !ok {
 		t.Fatalf("workspace summary should remain available, got %#v", degraded.Workspaces)
+	}
+}
+
+func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
+	settings, _ := newStorageMaintenanceStores(t)
+	docker := dockerstore.NewProvider(
+		&overviewDockerClient{}, overviewContainerInventory{}, settings,
+	)
+	events := make(chan storagepkg.OverviewProgress, 16)
+	overview := &storageOverview{
+		settings:   settings,
+		quarantine: failingQuarantineSummarizer{err: errors.New("quarantine unavailable")},
+		workspaceAnalyze: func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
+			return workspaces.Analysis{TotalBytes: 10}, nil
+		},
+		goCacheAnalyze: func(context.Context) (gocache.Analysis, error) {
+			return gocache.Analysis{SizeBytes: 20}, nil
+		},
+		docker: docker,
+	}
+
+	if _, err := overview.SummaryWithProgress(context.Background(), func(progress storagepkg.OverviewProgress) {
+		events <- progress
+	}); err != nil {
+		t.Fatalf("SummaryWithProgress: %v", err)
+	}
+	seen := make(map[string]map[storagepkg.SourceStateName]bool)
+	for len(events) > 0 {
+		progress := <-events
+		if seen[progress.Source] == nil {
+			seen[progress.Source] = make(map[storagepkg.SourceStateName]bool)
+		}
+		seen[progress.Source][progress.State] = true
+	}
+	for _, source := range []string{
+		storagepkg.StorageSourceWorkspaces,
+		storagepkg.StorageSourceGoCache,
+		storagepkg.StorageSourceQuarantine,
+		storagepkg.StorageSourceTemporaryArtifacts,
+		storagepkg.StorageSourceDocker,
+	} {
+		if !seen[source][storagepkg.SourceStateScanning] {
+			t.Fatalf("source %q did not report scanning progress: %#v", source, seen[source])
+		}
+	}
+	if !seen[storagepkg.StorageSourceQuarantine][storagepkg.SourceStateFailed] {
+		t.Fatalf("quarantine source did not report failure: %#v", seen[storagepkg.StorageSourceQuarantine])
+	}
+}
+
+func TestStorageProgressReporterCompletionPreservesFilesystemCounters(t *testing.T) {
+	var events []storagepkg.OverviewProgress
+	reporter := newStorageProgressReporter(func(progress storagepkg.OverviewProgress) {
+		events = append(events, progress)
+	})
+	reporter.filesystem(storagepkg.StorageSourceWorkspaces)(filescan.Progress{
+		Phase: filescan.PartitionCompleted, CompletedPartitions: 2, TotalPartitions: 3,
+		BytesScanned: 42,
+	})
+	reporter.complete(storagepkg.StorageSourceWorkspaces, map[string]any{"total_bytes": int64(42)}, nil)
+
+	if len(events) != 2 {
+		t.Fatalf("progress event count = %d, want 2", len(events))
+	}
+	completion := events[1]
+	if completion.CompletedItems != 2 || completion.BytesScanned != 42 {
+		t.Fatalf("completion progress = %#v, want filesystem counters", completion)
+	}
+	if completion.TotalItems == nil || *completion.TotalItems != 3 {
+		t.Fatalf("completion total_items = %v, want 3", completion.TotalItems)
 	}
 }
 

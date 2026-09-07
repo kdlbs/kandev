@@ -17,6 +17,8 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
+import { ChatSubmitPluginDecoration } from "./chat-submit-plugin-decoration";
+import type { PluginPresentation } from "@/lib/plugins/types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -24,6 +26,9 @@ type SubmitButtonProps = {
   isAgentBusy: boolean;
   canCancelAgent?: boolean;
   sessionId: string | null;
+  /** Task context for the `chat-submit-decoration` plugin slot. */
+  taskId: string | null;
+  taskTitle?: string;
   hasContent: boolean;
   isDisabled: boolean;
   submitDisabledReason?: string;
@@ -32,12 +37,21 @@ type SubmitButtonProps = {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  presentation?: "desktop" | "mobile";
+  presentation?: PluginPresentation;
 };
 
 type SendSubmitButtonProps = Pick<
   SubmitButtonProps,
-  "isDisabled" | "isSending" | "planModeEnabled" | "onSubmit" | "submitShortcut" | "presentation"
+  | "isAgentBusy"
+  | "sessionId"
+  | "taskId"
+  | "taskTitle"
+  | "presentation"
+  | "isDisabled"
+  | "isSending"
+  | "planModeEnabled"
+  | "onSubmit"
+  | "submitShortcut"
 > & {
   tooltipDescription?: string;
 };
@@ -54,6 +68,10 @@ function submitTooltipDescription(
 }
 
 function SendSubmitButton({
+  isAgentBusy,
+  sessionId,
+  taskId,
+  taskTitle,
   isDisabled,
   isSending,
   planModeEnabled,
@@ -70,7 +88,7 @@ function SendSubmitButton({
       enabled={!isDisabled || !!tooltipDescription}
     >
       <span
-        className="inline-flex"
+        className="relative inline-flex"
         tabIndex={isDisabled && !!tooltipDescription ? 0 : undefined}
         aria-label={isDisabled ? (tooltipDescription ?? t("task:submitUnavailable")) : undefined}
       >
@@ -92,6 +110,16 @@ function SendSubmitButton({
           {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
           {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
         </Button>
+        <ChatSubmitPluginDecoration
+          sessionId={sessionId}
+          taskId={taskId}
+          taskTitle={taskTitle}
+          presentation={presentation}
+          isSending={isSending}
+          isAgentBusy={isAgentBusy}
+          isDisabled={isDisabled}
+          planModeEnabled={planModeEnabled}
+        />
       </span>
     </KeyboardShortcutTooltip>
   );
@@ -101,6 +129,8 @@ export function SubmitButton({
   isAgentBusy,
   canCancelAgent = isAgentBusy,
   sessionId,
+  taskId,
+  taskTitle,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -170,6 +200,10 @@ export function SubmitButton({
       )}
       {showSendButton && (
         <SendSubmitButton
+          isAgentBusy={isAgentBusy}
+          sessionId={sessionId}
+          taskId={taskId}
+          taskTitle={taskTitle}
           isDisabled={isDisabled}
           isSending={isSending}
           planModeEnabled={planModeEnabled}

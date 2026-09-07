@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { StorageQuarantineEntry, StorageSummary } from "@/lib/types/system";
+import type {
+  StorageQuarantineEntry,
+  StorageSummary,
+  StorageSummaryPartial,
+} from "@/lib/types/system";
 import { quarantineTotalBytes, storageAnalysisTotal } from "./storage-totals";
 
 const completeSummary: StorageSummary = {
@@ -77,6 +81,15 @@ describe("storageAnalysisTotal", () => {
     };
 
     expect(storageAnalysisTotal(summary)).toEqual({ bytes: 45, partial: false });
+  });
+
+  it("sums only completed values in a partial first-scan summary", () => {
+    const summary: StorageSummaryPartial = {
+      workspaces: { total_bytes: 12 },
+      quarantine: null,
+    };
+
+    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 12, partial: true });
   });
 });
 

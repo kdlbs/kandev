@@ -20,7 +20,7 @@ type manualMoveFeederPullRecorder struct {
 	once   sync.Once
 }
 
-func (r *manualMoveFeederPullRecorder) ReconcileFeederPulls(ctx context.Context, _, feederStepID string) {
+func (r *manualMoveFeederPullRecorder) ReconcileFeederPulls(ctx context.Context, _, feederStepID string) error {
 	task, err := r.repo.GetTask(ctx, "manual-feeder-barrier")
 	if err != nil {
 		r.err <- err
@@ -28,6 +28,7 @@ func (r *manualMoveFeederPullRecorder) ReconcileFeederPulls(ctx context.Context,
 		r.err <- &unexpectedStepError{got: task.WorkflowStepID, want: feederStepID}
 	}
 	r.once.Do(func() { close(r.called) })
+	return nil
 }
 
 type unexpectedStepError struct {

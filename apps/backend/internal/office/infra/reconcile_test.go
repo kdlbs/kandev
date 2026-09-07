@@ -104,6 +104,59 @@ func TestReconcileAgentRuntime_PreservesExistingStatus(t *testing.T) {
 	}
 }
 
+func TestReconcileAgentWorkingStatus_ClearsTerminalOwner(t *testing.T) {
+	r, repo := newTestReconciler(t)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:          "agent-orphaned-working",
+		Name:        "orphaned-worker",
+		WorkspaceID: "default",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	run := &models.Run{
+		ID:             "run-orphaned-working",
+		AgentProfileID: agent.ID,
+		Reason:         "test",
+		Payload:        `{}`,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	claimed, err := repo.ClaimRun(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("claim run: %v", err)
+	}
+	if _, err := repo.MarkAgentWorking(ctx, agent.ID, claimed.ID); err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	if err := repo.FinishRun(ctx, claimed.ID, "finished", nil); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+
+	r.ReconcileAll(ctx)
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if got.Status != models.AgentStatusIdle {
+		t.Fatalf("status = %q, want idle", got.Status)
+	}
+	var owner string
+	if err := repo.ReaderDB().GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, agent.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "" {
+		t.Fatalf("working_run_id = %q, want empty", owner)
+	}
+}
+
 func TestReconcileRoutineTriggers_NewRoutineCreatesTrigger(t *testing.T) {
 	r, repo := newTestReconciler(t)
 	ctx := context.Background()

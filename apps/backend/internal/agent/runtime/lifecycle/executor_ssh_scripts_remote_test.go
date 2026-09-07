@@ -64,7 +64,7 @@ func TestNormalizeSSHRemotePath(t *testing.T) {
 
 func TestSSHScriptWithEnvironment(t *testing.T) {
 	got := sshScriptWithEnvironment("echo hi")
-	if got != "set -ae\n. /dev/stdin\nset +a\nset -e\necho hi" {
+	if got != "set -ae\neval \"$(cat)\"\nset +a\nset -e\necho hi" {
 		t.Fatalf("sshScriptWithEnvironment = %q", got)
 	}
 }
@@ -224,7 +224,7 @@ func TestSSHExecutorRunPrepareScript(t *testing.T) {
 			t.Fatalf("prepare runs = %d, want 1", len(calls))
 		}
 		script := unwrapLoginShell(t, "zsh", calls[0].Command)
-		if !strings.HasPrefix(script, "set -ae\n. /dev/stdin\nset +a\nset -e\n") {
+		if !strings.HasPrefix(script, "set -ae\neval \"$(cat)\"\nset +a\nset -e\n") {
 			t.Fatalf("prepare script preamble missing:\n%s", script)
 		}
 		if !strings.Contains(script, "echo prepared") {

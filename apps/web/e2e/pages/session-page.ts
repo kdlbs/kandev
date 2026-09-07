@@ -721,9 +721,12 @@ export class SessionPage {
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Delete" });
+    const dialog = this.page.getByRole("alertdialog");
+    const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (await discard.isVisible()) {
+      await discard.click();
+    }
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
     await confirmButton.click();
   }
 
@@ -1711,6 +1714,16 @@ export class SessionPage {
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
     return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** The existing Files viewport that owns tree scrolling. */
+  fileTreeScrollViewport(): Locator {
+    return this.fileTree.fileTreeScrollViewport();
+  }
+
+  /** Visible tree rows, including only rows currently mounted by the tree. */
+  visibleFileTreeNodes(): Locator {
+    return this.fileTree.visibleFileTreeNodes();
   }
 
   /** Visible search button in the Files panel. */

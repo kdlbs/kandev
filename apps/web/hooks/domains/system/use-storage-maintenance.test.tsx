@@ -1,13 +1,24 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
 import type {
   StorageMaintenanceSettings,
   StorageOverviewResponse,
   StoragePolicyResponse,
 } from "@/lib/types/system";
+import {
+  cleanupJob,
+  cleanupJobId,
+  deferred,
+  disk,
+  overview,
+  settings,
+  STORAGE_BUSY_ERROR_MESSAGE,
+  TEST_COMMAND_BUSY_LABEL,
+  wrapper,
+} from "./use-storage-maintenance.test-fixtures";
 
 const mocks = vi.hoisted(() => ({
   adopt: vi.fn(),
@@ -51,96 +62,6 @@ import {
   useStorageMaintenance,
 } from "./use-storage-maintenance";
 
-const settings: StorageMaintenanceSettings = {
-  enabled: false,
-  check_interval_hours: 24,
-  idle_for_minutes: 10,
-  orphan_grace_hours: 168,
-  quarantine_retention_hours: 168,
-  workspaces: { enabled: true, dependency_cleanup_enabled: false },
-  kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
-  docker: {
-    dedicated_daemon_acknowledged: true,
-    build_cache_enabled: true,
-    build_cache_keep_bytes: 10737418240,
-    build_cache_unused_hours: 168,
-    unused_images_enabled: true,
-    unused_images_hours: 168,
-  },
-};
-
-const overview: StorageOverviewResponse = {
-  settings,
-  capabilities: {
-    managed_go_cache_path: "/data/cache/go-build",
-    go_cache_adoption_available: true,
-    temporary_artifacts_available: true,
-    docker_available: true,
-    docker_host: "unix:///var/run/docker.sock",
-    host_global_docker_cleanup_allowed: true,
-  },
-  summary: {
-    workspaces: { active_bytes: 10, candidate_bytes: 20 },
-    go_cache: { path: "/data/cache/go-build", size_bytes: 30, owned: true, enabled: false },
-    quarantine: { count: 2, size_bytes: 35 },
-    temporary_artifacts: {
-      available: true,
-      total_count: 0,
-      total_bytes: 0,
-      active_count: 0,
-      active_bytes: 0,
-      protected_count: 0,
-      protected_bytes: 0,
-      stale_count: 0,
-      stale_bytes: 0,
-      skipped_count: 0,
-    },
-    docker: {
-      available: true,
-      build_cache_bytes: 40,
-      unused_image_bytes: 50,
-      managed_container_count: 3,
-      managed_container_bytes: 60,
-    },
-  },
-  analyzed_at: "2026-07-23T12:00:00Z",
-  last_run: null,
-};
-
-const disk = {
-  path: "/data",
-  total_bytes: 100,
-  used_bytes: 80,
-  available_bytes: 20,
-  used_percent: 80,
-  available: true,
-};
-
-const cleanupJobId = "cleanup-job";
-const cleanupJob = {
-  id: cleanupJobId,
-  kind: "storage-cleanup",
-  state: "running",
-  started_at: "2026-07-15T00:00:00Z",
-};
-const STORAGE_BUSY_ERROR_MESSAGE = "storage cleanup is blocked by active Kandev work";
-const TEST_COMMAND_BUSY_LABEL = "A test command is running";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
-function wrapper({ children }: { children: ReactNode }) {
-  return <StateProvider>{children}</StateProvider>;
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchOverview.mockResolvedValue(overview);
@@ -158,7 +79,7 @@ beforeEach(() => {
   mocks.purge.mockResolvedValue({ job_id: "purge-job" });
 });
 
-describe("useStorageMaintenance", () => {
+describe("useStorageMaintenance loading", () => {
   it("publishes fast sections before a cold overview scan finishes", async () => {
     const overviewRequest = deferred<StorageOverviewResponse>();
     mocks.fetchOverview.mockReturnValueOnce(overviewRequest.promise);
@@ -191,7 +112,118 @@ describe("useStorageMaintenance", () => {
     expect(mocks.fetchDisk).toHaveBeenCalledTimes(1);
     expect(result.current.pendingAction).toBeNull();
   });
+});
 
+describe("useStorageMaintenance analysis updates", () => {
+  it("reloads only the overview when a live analysis event advances the revision", async () => {
+    let bumpRevision: (() => void) | undefined;
+    function CaptureRevisionAction() {
+      bumpRevision = useAppStoreApi().getState().bumpSystemStorageAnalysisRevision;
+      return null;
+    }
+    const capturedWrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider>
+        <CaptureRevisionAction />
+        {children}
+      </StateProvider>
+    );
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper: capturedWrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    mocks.fetchOverview.mockClear();
+    mocks.fetchPolicy.mockClear();
+    mocks.fetchDisk.mockClear();
+    mocks.fetchRuns.mockClear();
+    mocks.fetchQuarantine.mockClear();
+
+    await act(async () => {
+      bumpRevision?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mocks.fetchOverview).toHaveBeenCalledTimes(1));
+    expect(mocks.fetchPolicy).not.toHaveBeenCalled();
+    expect(mocks.fetchDisk).not.toHaveBeenCalled();
+    expect(mocks.fetchRuns).not.toHaveBeenCalled();
+    expect(mocks.fetchQuarantine).not.toHaveBeenCalled();
+  });
+
+  it("polls a scanning overview every 1.5 seconds and stops after completion", async () => {
+    vi.useFakeTimers();
+    try {
+      const scanning = {
+        ...overview,
+        summary: null,
+        analyzed_at: null,
+        analysis: { ...overview.analysis, state: "scanning" as const },
+      };
+      mocks.fetchOverview.mockReset().mockResolvedValueOnce(scanning).mockResolvedValue(overview);
+      const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.overview?.analysis.state).toBe("scanning");
+      mocks.fetchOverview.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1499);
+      });
+      expect(mocks.fetchOverview).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(1);
+      expect(result.current.overview?.analysis.state).toBe("ready");
+      mocks.fetchOverview.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(mocks.fetchOverview).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("useStorageMaintenance analysis refresh", () => {
+  it("requests a new overview when its refresh deadline arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-23T12:00:00Z"));
+      const dueOverview = {
+        ...overview,
+        analysis: {
+          ...overview.analysis,
+          refresh_due_at: "2026-07-23T12:00:00.500Z",
+        },
+      };
+      mocks.fetchOverview.mockReset().mockResolvedValue(dueOverview);
+      const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.overview).toEqual(dueOverview);
+      mocks.fetchOverview.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499);
+      });
+      expect(mocks.fetchOverview).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("useStorageMaintenance actions", () => {
   it("owns confirmed settings persistence and success feedback", async () => {
     const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
     await waitFor(() => expect(result.current.overview).toEqual(overview));
@@ -427,102 +459,6 @@ describe("useStorageMaintenance pending action tracking", () => {
       await savePromise;
     });
     expect(result.current.pendingAction).toBeNull();
-  });
-});
-
-describe("useStorageMaintenance terminal refresh", () => {
-  it("surfaces and retries a failed refresh after a cleanup job finishes", async () => {
-    mocks.fetchJob.mockResolvedValue({
-      ...cleanupJob,
-      state: "succeeded",
-      ended_at: "2026-07-15T00:01:00Z",
-    });
-    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
-    await waitFor(() => expect(result.current.overview).toEqual(overview));
-    mocks.fetchOverview.mockRejectedValueOnce(new Error("refresh unavailable"));
-
-    await act(async () => {
-      await result.current.runNow();
-    });
-
-    await waitFor(() => expect(String(result.current.error)).toContain("refresh unavailable"));
-    await waitFor(() => expect(mocks.fetchOverview).toHaveBeenCalledTimes(3), { timeout: 2500 });
-    await waitFor(() => expect(result.current.error).toBeNull());
-  });
-
-  it("backs off and stops after six terminal refresh attempts", async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.fetchJob.mockResolvedValue({
-        ...cleanupJob,
-        state: "succeeded",
-        ended_at: "2026-07-15T00:01:00Z",
-      });
-      const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
-      await act(async () => {
-        await Promise.resolve();
-      });
-      expect(result.current.overview).toEqual(overview);
-
-      mocks.fetchOverview.mockRejectedValue(new Error("refresh unavailable"));
-      await act(async () => {
-        await result.current.runNow();
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(2);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(999);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(2);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(3);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1999);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(3);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(4);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3999);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(4);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(5);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(7999);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(5);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(6);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(7999);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(6);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(7);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(60000);
-      });
-      expect(mocks.fetchOverview).toHaveBeenCalledTimes(7);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

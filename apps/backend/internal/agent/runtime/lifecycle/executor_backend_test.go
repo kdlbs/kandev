@@ -19,6 +19,7 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 		{name: "exact match executor_profile_id", key: "executor_profile_id", want: true},
 		{name: "exact match image_tag_override", key: MetadataKeyImageTagOverride, want: true},
 		{name: "exact match container_id", key: MetadataKeyContainerID, want: true},
+		{name: "exact match office agent identity", key: MetadataKeyOfficeAgentProfileID, want: true},
 		{name: "prefix env_secret_id_", key: "env_secret_id_SPRITES_API_TOKEN", want: true},
 		{name: "prefix env_secret_id_ another key", key: "env_secret_id_OPENAI_KEY", want: true},
 		{name: "not persistent task_description", key: "task_description", want: false},
@@ -70,6 +71,13 @@ func TestKubernetesRuntimeMetadataKeysPersistWithoutLocalForward(t *testing.T) {
 	}
 	require.False(t, ShouldPersistMetadataKey("kubernetes_local_forward_port"),
 		"local forwards are process-local and must rotate after restart")
+}
+
+func TestOfficeAgentIdentityMetadataIsSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyOfficeAgentProfileID),
+		"Office identity must survive same-session restart")
+	require.True(t, IsSessionScopedMetadataKey(MetadataKeyOfficeAgentProfileID),
+		"Office identity must not leak to a sibling session")
 }
 
 func TestFilterPersistentMetadata(t *testing.T) {

@@ -625,6 +625,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         agent_profile_id: seedData.agentProfileId,
         workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
       },
+      sidebar_task_color_automation: { enabled: false, rules: [] },
     });
   });
 });

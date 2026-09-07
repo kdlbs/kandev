@@ -186,7 +186,7 @@ export const ModeSelector = memo(function ModeSelector({
               size="sm"
               data-testid="session-mode-selector"
               className={cn(
-                "h-7 min-w-0 gap-1 overflow-hidden px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap",
+                "h-7 min-w-0 gap-1 overflow-hidden px-2 cursor-pointer whitespace-nowrap hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
                 triggerClassName,
               )}
             >

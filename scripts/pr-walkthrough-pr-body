@@ -14,6 +14,7 @@ END_MARKER = "<!-- kandev-pr-walkthrough-end -->"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 PUBLIC_SHA_LENGTH = 12
 UNCHANGED = 3
+NO_WALKTHROUGH = 4
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", required=True)
     parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument("--head-sha", required=True)
+    parser.add_argument(
+        "--require-existing",
+        action="store_true",
+        help="return a no-op when the PR body has no owned walkthrough block",
+    )
     return parser.parse_args()
 
 
@@ -93,6 +99,12 @@ def main() -> int:
     try:
         validate_url(args.url, args.pr_number, args.head_sha)
         body = load_pr(args.github_response, args.pr_number)
+        if (
+            args.require_existing
+            and START_MARKER not in body
+            and END_MARKER not in body
+        ):
+            return NO_WALKTHROUGH
         updated = update_body(body, args.url)
         if updated == body:
             return UNCHANGED

@@ -18,6 +18,7 @@ import type { Repository } from "@/lib/types/http";
 import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
 import { useDiscoveredRepositories } from "./use-discovered-repositories";
 import { useTranslation } from "react-i18next";
+import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
 
 type Props = {
   workspaceId: string | null;
@@ -117,6 +118,11 @@ export function ProjectRepositoryPicker({
         <TooltipContent>{t("office:pickAWorkspaceRepoADiscovered")}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-[420px] p-0" align="start" portal={false}>
+        <RepositoryDiscoveryControls
+          workspaceId={workspaceId}
+          enabled={open}
+          presentation="picker"
+        />
         <Command>
           <CommandInput
             placeholder={t("office:searchOrPasteAUrlOr")}

@@ -1437,6 +1437,16 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
+		// Workspace-only executions can be created from a session row that stores
+		// the task assignee. The launch request carries the acting Office identity,
+		// so refresh it before the execution starts emitting events.
+		if req.AgentProfileID != "" {
+			execution.OfficeAgentProfileID = req.AgentProfileID
+			// Persist the acting identity while the workspace-only execution is
+			// being promoted, so a restart before the first stream event can
+			// restore the same attribution.
+			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
+		}
 		agentTypeName, profileInfo, err := m.resolveAgentProfile(sharedCtx, req)
 		if err != nil {
 			return nil, err

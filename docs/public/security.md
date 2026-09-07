@@ -48,7 +48,7 @@ An executor decides where the agent process runs. It does not reduce permissions
 |---|---|---|
 | Worktree | A separate Git checkout | Isolates file state, not the host account, credentials, processes, ports, or network |
 | Local | The selected folder and Kandev host account | The agent can affect the same host resources its process can reach |
-| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container |
+| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container. User namespace support (per-profile opt-in) relaxes seccomp and AppArmor. See [executor ADR](../decisions/2026-08-18-executor-userns-security-options.md) for the exact boundary |
 | Kubernetes | A namespaced Pod plus cluster admission, workload identity, network, and storage policy | The Kandev API identity can create/exec/forward/delete Pods, while the administrator-authored Pod template can request privileged or host-integrated access |
 | SSH | The configured remote account and host | Remote directories and credentials require manual lifecycle review |
 | Sprites | A remote sandbox and its injected credentials | Destroying the sandbox can remove unpushed work; network and token scope still matter |

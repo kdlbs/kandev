@@ -45,6 +45,15 @@ func TestBlobType(t *testing.T) {
 	}
 }
 
+func TestByteLength(t *testing.T) {
+	if got := ByteLength(SQLite3, "name"); got != "length(CAST(name AS BLOB))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := ByteLength(PGX, "name"); got != "octet_length(name)" {
+		t.Errorf("postgres: got %q", got)
+	}
+}
+
 func TestJSONExtract(t *testing.T) {
 	got := JSONExtract(SQLite3, "metadata", "status")
 	if got != "json_extract(metadata, '$.status')" {

@@ -275,21 +275,33 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles SET
-			name = ?, role = ?, icon = ?, status = ?,
+			name = ?, role = ?, icon = ?,
+			status = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
+				ELSE ?
+			END,
 			reports_to = ?, permissions = ?, budget_monthly_cents = ?,
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			last_run_finished_at = ?,
 			skill_ids = ?, desired_skills = ?, executor_preference = ?,
-			pause_reason = ?, failure_threshold = ?, settings = ?,
+			pause_reason = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN pause_reason
+				ELSE ?
+			END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' THEN working_run_id
+				ELSE ''
+			END,
+			failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
 			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
-	`), agent.Name, string(agent.Role), agent.Icon, status,
+	`), agent.Name, string(agent.Role), agent.Icon, status, status,
 		agent.ReportsTo, permissions, agent.BudgetMonthlyCents,
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.LastRunFinishedAt,
 		skillIDs, desiredSkills, agent.ExecutorPreference,
-		agent.PauseReason, threshold, settings,
+		status, agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
 		agent.UpdatedAt, agent.ID)
 	return err
@@ -396,9 +408,15 @@ func (r *Repository) UpdateAgentStatusFields(
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET status = ?, pause_reason = ?, updated_at = ?
+		SET status = CASE WHEN ? = 'working' THEN status ELSE ? END,
+			pause_reason = CASE WHEN ? = 'working' THEN pause_reason ELSE ? END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' AND ? = 'working' THEN working_run_id
+				ELSE ''
+			END,
+			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
-	`), status, pauseReason, now, id)
+	`), status, status, status, pauseReason, status, now, id)
 	return err
 }
 

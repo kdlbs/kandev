@@ -55,6 +55,11 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if isValidationError(err) {
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
@@ -78,6 +83,13 @@ func taskErrorDetails(err error) map[string]interface{} {
 	}
 	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
 		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		return map[string]interface{}{
+			"error_code":      service.TaskDeleteDirtyWorktreeErrorCode,
+			"dirty_worktrees": dirtyWorktreeErr.DirtyWorktrees,
+		}
 	}
 	return nil
 }

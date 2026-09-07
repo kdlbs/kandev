@@ -9,13 +9,13 @@ status: implemented
 
 ## Overview
 
-Give plugins a typed, capability-gated path to read (phase 1) kandev domain data
+Give plugins a typed, capability-gated path to read and write kandev domain data
 over the existing `kandev.plugin.v1` Host gRPC channel, replacing direct SQLite
 access. Land the contract first (proto + regen) and the one net-new aggregation
 (per-session LOC), then the SDK's Go-native accessors, then kandev's server-side
 implementation, and finally the proof (rewrite the agent-stats plugin) plus tests
-and docs. Write RPCs (`CreateTask`/`UpdateTask`/`CreateComment`) are specified in
-the proto but deferred; handlers return `Unimplemented` this phase.
+and docs. The implemented write surface is `CreateTask`, `UpdateTask`, and
+`SendMessage`; workflow transitions use `MoveTask`.
 
 The draft contract at `docs/plans/plugins/HOST-DATA-API.proto` is largely settled
 — refine field-level details against the real DTOs (`apps/backend/pkg/api/v1/`),
@@ -26,7 +26,7 @@ do not redesign.
 ## Backend
 
 ### Proto contract (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
-Fold the read + (deferred) write RPCs and DTOs from
+Fold the read and write RPCs and DTOs from
 `docs/plans/plugins/HOST-DATA-API.proto` into the frozen plugin proto. Decide
 placement: add the RPCs to the existing `service Host` (simplest — reuses the
 single Host broker connection and the existing capability interceptor) rather
@@ -60,8 +60,9 @@ new Host data interface methods. Each read handler:
    the new aggregation for code stats) — never a repository directly;
 3. maps internal models → the Go-native DTOs with explicit code.
 Wire the new service dependencies into `plugins.Service` /
-`plugins.NewService` / `Provide`, and thread them into `hostForPlugin`. Write
-handlers return `codes.Unimplemented`.
+`plugins.NewService` / `Provide`, and thread them into `hostForPlugin`. The
+implemented writes route through the task service and orchestrator delivery
+path.
 
 ---
 
@@ -93,8 +94,8 @@ Extend the Go-native Host surface authors and kandev share:
   DTO for each resource, including nullable/optional and timestamp formatting.
 - **Capability gating (`internal/plugins/host_test.go`):** each read RPC returns
   `PermissionDenied` with `capability 'api_read:<resource>' not declared` when the
-  manifest omits the resource, and succeeds when it declares it. Write RPC returns
-  `Unimplemented`.
+  manifest omits the resource, and succeeds when it declares it. Write RPCs
+  enforce their `api_write` capabilities and return their task/message results.
 - **Per-session LOC aggregation (`internal/analytics/repository/sqlite/*_test.go`):**
   real SQLite fixture with commits + snapshots; assert committed sums and the
   peak-pending `MAX` semantics (peak, not latest; not double-counted).

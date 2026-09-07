@@ -2,11 +2,21 @@
 """Contract tests for the fork preview authorization workflow."""
 
 from pathlib import Path
+import re
 import unittest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "preview-env.yml"
+
+
+def workflow_job(workflow: str, name: str) -> str:
+    marker = f"  {name}:\n"
+    _, separator, remainder = workflow.partition(marker)
+    if not separator:
+        raise AssertionError(f"workflow job is missing: {name}")
+    next_job = re.search(r"^  [A-Za-z0-9_-]+:\n", remainder, re.MULTILINE)
+    return remainder[: next_job.start()] if next_job else remainder
 
 
 class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
@@ -30,7 +40,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
             deploy_job,
         )
-        self.assertEqual(workflow.count("persist-credentials: false"), 3)
+        self.assertEqual(workflow.count("persist-credentials: false"), 6)
 
     def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -44,6 +54,32 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("safe-to-test", deploy_job)
         self.assertNotIn("  strip-safe-to-test:", workflow)
         self.assertNotIn("github.rest.issues.removeLabel", workflow)
+
+    def test_description_mutation_isolated_from_preview_lifecycle_jobs(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        for name in ("deploy-same-repo", "deploy-fork", "cleanup-preview"):
+            job = workflow_job(workflow, name)
+            self.assertNotIn("concurrency:", job)
+
+        for name, command in (
+            ("update-description-same-repo", "update-description"),
+            ("update-description-fork", "update-description"),
+            ("cleanup-preview-description", "remove-description"),
+        ):
+            job = workflow_job(workflow, name)
+            self.assertIn("concurrency:", job)
+            self.assertIn(
+                "group: pr-description-${{ github.event.pull_request.number }}",
+                job,
+            )
+            self.assertIn("cancel-in-progress: false", job)
+            self.assertIn(f"go run ./cmd/preview {command}", job)
+
+        for name in ("deploy-same-repo", "deploy-fork"):
+            job = workflow_job(workflow, name)
+            self.assertIn("--skip-description", job)
+            self.assertIn("preview_url=", job)
+        self.assertIn("--skip-description", workflow_job(workflow, "cleanup-preview"))
 
 
 if __name__ == "__main__":

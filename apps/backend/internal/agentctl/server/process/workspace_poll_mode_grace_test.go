@@ -2,8 +2,11 @@ package process
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // waitForPollMode polls GetPollMode until it matches want or the deadline
@@ -66,13 +69,18 @@ func newGraceTestTracker(t *testing.T, grace time.Duration) *WorkspaceTracker {
 	return wt
 }
 
-// TestPollModeGrace_DemotesWhenNoPushArrives covers the leak this mechanism
+// TestPollModeGrace_FinalScansAndPausesWhenNoPushArrives covers the leak this mechanism
 // exists to close: the gateway only pushes a mode for workspaces a client
 // focuses or subscribes to, and it deliberately skips the paused push for a
-// workspace it has never pushed to. Without the grace demotion such a tracker
-// stays at the fast 2s/3s cadence for the life of the process.
-func TestPollModeGrace_DemotesWhenNoPushArrives(t *testing.T) {
+// workspace it has never pushed to. Without the grace transition such a
+// tracker stays at the fast 2s/3s cadence for the life of the process.
+func TestPollModeGrace_FinalScansAndPausesWhenNoPushArrives(t *testing.T) {
 	wt := newGraceTestTracker(t, graceFiresQuickly)
+	var scanCount atomic.Int32
+	wt.gitStatusObserver = func(context.Context) (types.GitStatusUpdate, error) {
+		scanCount.Add(1)
+		return types.GitStatusUpdate{Timestamp: time.Now()}, nil
+	}
 
 	if got := wt.GetPollMode(); got != PollModeFast {
 		t.Fatalf("construction mode = %v, want %v", got, PollModeFast)
@@ -81,7 +89,10 @@ func TestPollModeGrace_DemotesWhenNoPushArrives(t *testing.T) {
 	wt.Start(context.Background())
 	defer wt.Stop()
 
-	waitForPollMode(t, wt, PollModeSlow, 10*time.Second)
+	waitForPollMode(t, wt, PollModePaused, 10*time.Second)
+	if got := scanCount.Load(); got < 2 {
+		t.Fatalf("git scan count = %d after grace transition, want initial and final scans", got)
+	}
 }
 
 // TestPollModeGrace_ExplicitPushDisarmsDemotion verifies the gateway wins: once
@@ -167,5 +178,37 @@ func TestPollModeGrace_StopDisarmsTimer(t *testing.T) {
 	}
 	if got := wt.GetPollMode(); got != PollModeFast {
 		t.Errorf("Stop changed the poll mode to %v, want it left at %v", got, PollModeFast)
+	}
+}
+
+// TestPollModeGrace_StopJoinsFinalScan verifies the timer callback is owned by
+// the tracker wait group. Stop must cancel an in-flight final scan, wait for
+// it to return, and prevent the callback from changing the mode afterward.
+func TestPollModeGrace_StopJoinsFinalScan(t *testing.T) {
+	wt := newGraceTestTracker(t, graceFiresQuickly)
+	var scanCount atomic.Int32
+	finalScanStarted := make(chan struct{})
+	finalScanFinished := make(chan struct{})
+	wt.gitStatusObserver = func(ctx context.Context) (types.GitStatusUpdate, error) {
+		if scanCount.Add(1) == 2 {
+			close(finalScanStarted)
+			<-ctx.Done()
+			close(finalScanFinished)
+			return types.GitStatusUpdate{}, ctx.Err()
+		}
+		return types.GitStatusUpdate{Timestamp: time.Now()}, nil
+	}
+
+	wt.Start(context.Background())
+	<-finalScanStarted
+	wt.Stop()
+
+	select {
+	case <-finalScanFinished:
+	default:
+		t.Fatal("Stop returned before the final scan exited")
+	}
+	if got := wt.GetPollMode(); got != PollModeFast {
+		t.Fatalf("poll mode after canceled final scan = %v, want %v", got, PollModeFast)
 	}
 }

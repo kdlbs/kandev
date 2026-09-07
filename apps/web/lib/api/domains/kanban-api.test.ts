@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachTaskWorkspaceSources,
   detachTask,
+  deleteTask,
   listTasksByWorkspace,
   updateTask,
   updateTaskPortForwarding,
@@ -16,6 +17,25 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("deleteTask", () => {
+  it("sends cascade and discard consent independently", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await deleteTask(
+      "task-1",
+      { cascade: true, discardWorktreeChanges: true },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(
+      `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
+    );
+    expect(init?.method).toBe("DELETE");
+  });
+});
 
 describe("detachTask", () => {
   it("posts without a body to the canonical detach endpoint", async () => {

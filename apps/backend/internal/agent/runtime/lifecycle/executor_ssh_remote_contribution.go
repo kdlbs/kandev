@@ -46,7 +46,7 @@ func (r *SSHExecutor) materializeSSHRemoteContribution(
 
 	shell := sshShellForRemote(req.Metadata, platform)
 	inner := sshRemoteContributionScript(taskDir, targetURL, binding)
-	wrapped := WrapLoginShell(shell, "set -ae; . /dev/stdin; set +a\n"+inner)
+	wrapped := WrapLoginShell(shell, "set -ae; "+sshStdinEnvImport+"; set +a\n"+inner)
 	_, _, runErr := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if runErr != nil {
 		// Git may include a credentialed helper URL in stderr. Keep the error
@@ -163,7 +163,7 @@ func sshRemoteContributionSetupLines() []string {
 		"mkdir -p \"$(dirname \"$exclude_file\")\"",
 		"touch \"$exclude_file\"",
 		"grep -Fqx '/.kandev/' \"$exclude_file\" || printf '%%s\\n' '/.kandev/' >>\"$exclude_file\"",
-		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/$base_branch:refs/remotes/origin/$base_branch\" >/dev/null 2>&1; then",
+		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/${base_branch}:refs/remotes/origin/${base_branch}\" >/dev/null 2>&1; then",
 		"  echo 'kandev: target base branch is unavailable' >&2",
 		"  exit 1",
 		"fi",

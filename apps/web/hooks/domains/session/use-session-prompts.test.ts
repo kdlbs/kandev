@@ -10,6 +10,7 @@ const { listTaskSessionMessages, state, storeApi } = vi.hoisted(() => {
         session: { isLoading: false, isLoadingMore: false, hasMore: false, oldestCursor: null },
       },
       generationBySession: { session: 0 },
+      refreshGenerationBySession: { session: 0 },
     },
     connection: { status: "connected" },
     setPromptMessagesLoading: vi.fn(),
@@ -38,8 +39,9 @@ import { useSessionPrompts } from "./use-session-prompts";
 describe("useSessionPrompts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.connection.status = "connected";
     listTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false, cursor: null });
+    state.connection.status = "connected";
+    state.messagePrompts.refreshGenerationBySession.session = 0;
   });
 
   it("requests only user-authored prompt messages", async () => {
@@ -82,10 +84,12 @@ describe("useSessionPrompts", () => {
     renderHook(() => useSessionPrompts("session"));
 
     await waitFor(() => expect(listTaskSessionMessages).toHaveBeenCalledTimes(1));
-    expect(state.replacePromptMessages).toHaveBeenCalledWith("session", [], {
-      hasMore: false,
-      oldestCursor: null,
-    });
+    await waitFor(() =>
+      expect(state.replacePromptMessages).toHaveBeenCalledWith("session", [], {
+        hasMore: false,
+        oldestCursor: null,
+      }),
+    );
   });
 
   it("retries after a failed prompt fetch", async () => {
@@ -97,6 +101,17 @@ describe("useSessionPrompts", () => {
     await act(async () => result.current.retryPrompts());
 
     await waitFor(() => expect(listTaskSessionMessages).toHaveBeenCalledTimes(2));
-    expect(result.current.fetchFailed).toBe(false);
+    await waitFor(() => expect(result.current.fetchFailed).toBe(false));
+  });
+
+  it("does not refetch when a live prompt mutation advances the refresh revision", async () => {
+    const { rerender } = renderHook(() => useSessionPrompts("session"));
+
+    await waitFor(() => expect(listTaskSessionMessages).toHaveBeenCalledTimes(1));
+    state.messagePrompts.refreshGenerationBySession.session = 1;
+    rerender();
+
+    await Promise.resolve();
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
   });
 });

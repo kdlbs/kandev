@@ -18,6 +18,7 @@ func runDeploy(ctx context.Context, args []string) int {
 	repo := fs.String("repo", envOr("GITHUB_REPOSITORY", ""), "owner/repo")
 	port := fs.Int("port", ports.Backend, "kandev backend port exposed by the sprite")
 	skipWebInstall := fs.Bool("skip-web-install", false, "skip pnpm install (CI already ran it)")
+	skipDescription := fs.Bool("skip-description", false, "skip the PR description update")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
@@ -38,7 +39,7 @@ func runDeploy(ctx context.Context, args []string) int {
 		return 2
 	}
 	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" {
+	if ghToken == "" && !*skipDescription {
 		fmt.Fprintln(os.Stderr, "preview deploy: GH_TOKEN is required")
 		return 2
 	}
@@ -62,6 +63,9 @@ func runDeploy(ctx context.Context, args []string) int {
 	}
 
 	fmt.Printf("preview URL: %s\n", previewURL)
+	if *skipDescription {
+		return 0
+	}
 
 	section := buildDeploySection(previewURL, *sha)
 	if err := upsertDescriptionSection(ctx, ghToken, *repo, *pr, section); err != nil {

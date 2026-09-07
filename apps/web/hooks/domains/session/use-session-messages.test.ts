@@ -44,7 +44,7 @@ const mockState = {
   setActiveTurn: vi.fn(),
   reconcileActiveTurnAfterHydration: vi.fn(),
 };
-const mockStoreApi = { getState: () => mockState };
+const mockStore = { getState: () => mockState };
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   listSessionTurns: (...args: unknown[]) => mockListSessionTurns(...args),
@@ -56,7 +56,7 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => mockStoreApi,
+  useAppStoreApi: () => mockStore,
 }));
 
 import { taskId, sessionId } from "@/lib/types/ids";

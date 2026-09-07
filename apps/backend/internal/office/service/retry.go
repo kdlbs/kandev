@@ -103,6 +103,7 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		return err
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	return nil
 }
@@ -115,6 +116,7 @@ func (s *Service) escalateFailure(
 	if err := s.FailRun(ctx, run.ID); err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
 	if err != nil {

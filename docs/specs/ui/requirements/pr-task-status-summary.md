@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-06
-updated: 2026-08-26
+updated: 2026-09-05
 owners:
   - kandev
 ---
@@ -41,6 +41,7 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.17:** Each GitHub PR summary shall show the non-empty PR author login below the PR title. A missing author login shall not create an empty label.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.18:** On a coarse pointer, the task row shall remain the primary touch target. After task navigation, the existing PR-status drawer shall show the same author login.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.19:** TaskPR API and WebSocket payloads shall carry the owning workspace ID. The backend shall route typed PR events by that ID, and the frontend shall ignore missing or mismatched updates before changing the active workspace cache.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.20:** When an open GitHub pull request is a draft and has no active merge-queue entry, the task pull-request icon shall use the muted color even when its review or CI fields report a failure. Terminal and active-queue precedence shall remain unchanged.
 
 ## Migrated source detail
 

@@ -1,5 +1,5 @@
-// Package frontenderrors accepts bounded, best-effort reports for error toasts
-// already displayed by the browser.
+// Package frontenderrors accepts bounded, best-effort browser reports for
+// displayed error toasts and backend-reload recovery.
 package frontenderrors
 
 import (
@@ -21,13 +21,20 @@ import (
 )
 
 const (
-	maxRequestBodyBytes   = 64 * 1024
-	titleByteLimit        = 8 * 1024
-	descriptionByteLimit  = 8 * 1024
-	urlByteLimit          = 8 * 1024
-	taskIDByteLimit       = 128
-	browserFieldByteLimit = 2 * 1024
-	stackByteLimit        = 16 * 1024
+	maxRequestBodyBytes     = 64 * 1024
+	titleByteLimit          = 8 * 1024
+	descriptionByteLimit    = 8 * 1024
+	urlByteLimit            = 8 * 1024
+	taskIDByteLimit         = 128
+	browserFieldByteLimit   = 2 * 1024
+	stackByteLimit          = 16 * 1024
+	sourceSonner            = "sonner"
+	sourceToastProvider     = "toast-provider"
+	sourceBackendReload     = "backend-reload"
+	reloadBootIDChanged     = "boot_id_changed"
+	reloadInterlockRejected = "settings_interlock_rejected"
+	frontendErrorMessage    = "frontend error toast"
+	backendReloadMessage    = "frontend backend reload required"
 )
 
 type Viewport struct {
@@ -128,11 +135,20 @@ func decodeRequest(c *gin.Context) (Request, int, int, error) {
 }
 
 func normalize(request Request) (normalizedRequest, error) {
-	if request.Source != "sonner" && request.Source != "toast-provider" {
-		return normalizedRequest{}, errors.New("unsupported toast source")
+	if request.Source != sourceSonner && request.Source != sourceToastProvider &&
+		request.Source != sourceBackendReload {
+		return normalizedRequest{}, errors.New("unsupported report source")
 	}
 	if strings.TrimSpace(request.Title) == "" && strings.TrimSpace(request.Description) == "" {
 		return normalizedRequest{}, errors.New("title or description is required")
+	}
+	if request.Source == sourceBackendReload {
+		if request.Title != reloadBootIDChanged && request.Title != reloadInterlockRejected {
+			return normalizedRequest{}, errors.New("unsupported backend reload signal")
+		}
+		if request.Description != "" || request.Stack != "" || request.Error != nil {
+			return normalizedRequest{}, errors.New("backend reload report contains error data")
+		}
 	}
 	if request.ClientTimestamp != "" {
 		if _, err := time.Parse(time.RFC3339Nano, request.ClientTimestamp); err != nil {
@@ -208,5 +224,9 @@ func (s *Service) logRequest(userID string, request normalizedRequest) {
 			zap.String("error_stack", request.Error.Stack),
 		)
 	}
-	s.log.Error("frontend error toast", fields...)
+	if request.Source == sourceBackendReload {
+		s.log.Info(backendReloadMessage, fields...)
+		return
+	}
+	s.log.Error(frontendErrorMessage, fields...)
 }

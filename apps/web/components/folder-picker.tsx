@@ -15,6 +15,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { listDirectory, type DirectoryListing } from "@/lib/api/domains/fs-api";
+import {
+  isTauriWebview,
+  nativeFolderPicker,
+  NativeFolderPickerUnavailableError,
+} from "@/lib/desktop/folder-picker";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 type FolderPickerProps = {
@@ -25,6 +31,64 @@ type FolderPickerProps = {
   placeholder?: string;
 };
 
+type NativeFolderPickerTriggerProps = {
+  triggerClass: string;
+  hasValue: boolean;
+  triggerLabel: string;
+  loading: boolean;
+  error: string | null;
+  onChoose: () => void;
+};
+
+function NativeFolderPickerTrigger({
+  triggerClass,
+  hasValue,
+  triggerLabel,
+  loading,
+  error,
+  onChoose,
+}: NativeFolderPickerTriggerProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <button
+        type="button"
+        data-testid="folder-picker-trigger"
+        className={triggerClass}
+        disabled={loading}
+        aria-busy={loading}
+        onClick={onChoose}
+      >
+        {hasValue ? (
+          <IconFolder className="h-3.5 w-3.5 flex-shrink-0" />
+        ) : (
+          <IconBox className="h-3.5 w-3.5 flex-shrink-0" />
+        )}
+        <span className="truncate max-w-[260px]">
+          {loading ? t("common:loading") : triggerLabel}
+        </span>
+      </button>
+      {error && (
+        <p
+          role="alert"
+          data-testid="folder-picker-native-error"
+          className="text-xs text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function nativePickerErrorMessage(error: unknown, t: TFunction): string {
+  if (error instanceof NativeFolderPickerUnavailableError) {
+    return t("common:nativeFolderPickerUnavailable");
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return t("common:nativeFolderPickerFailed");
+}
+
 /**
  * Folder picker for repo-less tasks. Drives GET /api/v1/fs/list-dir on the
  * local kandev backend (browsers can't enumerate the host filesystem). The
@@ -33,13 +97,16 @@ type FolderPickerProps = {
 export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const { listing, loading, error, load } = useDirectoryListing(open, value);
+  const [nativeLoading, setNativeLoading] = useState(false);
+  const [nativeError, setNativeError] = useState<string | null>(null);
+  const tauriWebview = isTauriWebview();
+  const { listing, loading, error, load } = useDirectoryListing(open && !tauriWebview, value);
   const leaf = leafName(value);
   const triggerLabel = leaf || placeholder || t("common:scratchWorkspace");
   const hasValue = !!value;
 
   const triggerClass = cn(
-    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer",
+    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
     "border border-border/60 transition-colors",
     hasValue
       ? "bg-primary/10 text-foreground hover:bg-primary/15"
@@ -56,6 +123,39 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
       <span className="truncate max-w-[260px]">{triggerLabel}</span>
     </button>
   );
+
+  const chooseNativeFolder = async () => {
+    setNativeError(null);
+    if (!nativeFolderPicker.isAvailable()) {
+      setNativeError(t("common:nativeFolderPickerUnavailable"));
+      return;
+    }
+    setNativeLoading(true);
+    try {
+      const outcome = await nativeFolderPicker.pickDirectory();
+      if (outcome.status === "selected") onChange(outcome.path);
+      if (outcome.status === "failed") {
+        setNativeError(outcome.message || t("common:nativeFolderPickerFailed"));
+      }
+    } catch (error) {
+      setNativeError(nativePickerErrorMessage(error, t));
+    } finally {
+      setNativeLoading(false);
+    }
+  };
+
+  if (tauriWebview) {
+    return (
+      <NativeFolderPickerTrigger
+        triggerClass={triggerClass}
+        hasValue={hasValue}
+        triggerLabel={triggerLabel}
+        loading={nativeLoading}
+        error={nativeError}
+        onChoose={() => void chooseNativeFolder()}
+      />
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

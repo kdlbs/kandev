@@ -11,6 +11,7 @@ import {
 } from "@/lib/sidebar/apply-view";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 
 type BulkConfirmState = { ids: string[]; executorTypes: Array<string | null | undefined> };
 
@@ -22,7 +23,7 @@ type BulkConfirmState = { ids: string[]; executorTypes: Array<string | null | un
  */
 export function useBulkConfirmDialog(
   displayTasks: Array<{ id: string; remoteExecutorType?: string | null }>,
-  run: (ids: string[], opts?: { cascade?: boolean }) => Promise<void>,
+  run: (ids: string[], opts?: TaskActionOptions) => Promise<void>,
 ) {
   const [state, setState] = useState<BulkConfirmState | null>(null);
 
@@ -35,10 +36,10 @@ export function useBulkConfirmDialog(
   );
 
   const confirm = useCallback(
-    async ({ cascade }: { cascade: boolean }) => {
+    async ({ cascade, discardWorktreeChanges }: TaskActionOptions & { cascade: boolean }) => {
       if (!state) return;
       try {
-        await run(state.ids, { cascade });
+        await run(state.ids, { cascade, discardWorktreeChanges });
       } catch (error) {
         console.error("Bulk action failed:", error);
       } finally {
@@ -57,7 +58,7 @@ type Multi = ReturnType<typeof useSidebarMultiSelect>;
  * The selection-lifecycle effects (Escape-to-clear, prune-hidden) and the
  * memoized range/move/pin callbacks threaded into `TaskSwitcher`.
  */
-function useSelectionHandlers(args: {
+export function useSelectionHandlers(args: {
   multiSelect: Multi;
   pinTasks: (ids: string[]) => void;
   unpinTasks: (ids: string[]) => void;
@@ -67,7 +68,7 @@ function useSelectionHandlers(args: {
 }) {
   const { multiSelect, pinTasks, unpinTasks, pinnedTaskIds, visibleTaskIds, movableSelectedIds } =
     args;
-  const { isSelecting, clearSelection, selectRange, pruneToVisible } = multiSelect;
+  const { isSelecting, clearSelection, selectRange, pruneToVisible, bulkMove } = multiSelect;
 
   // Escape clears an active selection.
   useEffect(() => {
@@ -95,7 +96,7 @@ function useSelectionHandlers(args: {
   // the destination; drop workflow-less rows that can't be moved.
   const onBulkMove = useCallback(
     (ids: string[], targetWorkflowId: string, targetStepId: string) =>
-      multiSelect.bulkMove(
+      bulkMove(
         sortIdsByVisibleOrder(
           ids.filter((id) => movableSelectedIds.has(id)),
           visibleTaskIds,
@@ -103,7 +104,7 @@ function useSelectionHandlers(args: {
         targetWorkflowId,
         targetStepId,
       ),
-    [multiSelect, visibleTaskIds, movableSelectedIds],
+    [bulkMove, visibleTaskIds, movableSelectedIds],
   );
 
   const onBulkPin = useCallback(

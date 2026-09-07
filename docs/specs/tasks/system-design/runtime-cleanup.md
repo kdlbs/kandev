@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-31
+updated: 2026-09-05
 owners:
   - cfl
 ---
@@ -231,9 +231,8 @@ never holds filesystem, target-path, or repository Git locks.
 
 ## API Surface
 
-No new user-facing HTTP or WebSocket action is required. Existing task archive,
-task delete, session stop, and backend startup behavior gain stronger cleanup
-guarantees.
+No new action is required for the base contract. Dirty deletion admission is in
+[Dirty Worktree Task Deletion](dirty-worktree-deletion.md).
 
 `session.delete` keeps its existing request and response contract. Success means
 the session row is gone. It does not mean the task workspace was cleaned, and it

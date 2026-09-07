@@ -24,6 +24,7 @@ const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
 const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_NATIVE_NOTIFICATIONS_ENV: &str = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS";
+const DESKTOP_RUNTIME_ENV: &str = "KANDEV_DESKTOP_RUNTIME";
 const LAUNCHER_PARENT_PID_ENV: &str = "KANDEV_LAUNCHER_PARENT_PID";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
@@ -369,8 +370,9 @@ pub fn desktop_environment(
 ) -> BTreeMap<OsString, OsString> {
     let path = normalized_path(env.get(OsStr::new("PATH")), home_dir);
     env.retain(|key, _| {
-        !key.to_string_lossy()
-            .eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
+        let key = key.to_string_lossy();
+        !key.eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
+            && !key.eq_ignore_ascii_case(DESKTOP_RUNTIME_ENV)
     });
     env.insert(
         OsString::from("KANDEV_SERVER_HOST"),
@@ -384,6 +386,7 @@ pub fn desktop_environment(
         OsString::from(DESKTOP_NATIVE_NOTIFICATIONS_ENV),
         OsString::from("true"),
     );
+    env.insert(OsString::from(DESKTOP_RUNTIME_ENV), OsString::from("true"));
     env.insert(OsString::from("PATH"), path);
     env
 }
@@ -730,6 +733,10 @@ fn current_home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+pub(crate) fn picker_home_dir() -> Option<PathBuf> {
+    current_home_dir()
+}
+
 fn executable_name(name: &str) -> OsString {
     if cfg!(windows) {
         OsString::from(format!("{name}.exe"))
@@ -868,6 +875,10 @@ mod tests {
         assert_eq!(
             spec.env
                 .get(OsStr::new("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS")),
+            Some(&OsString::from("true"))
+        );
+        assert_eq!(
+            spec.env.get(OsStr::new("KANDEV_DESKTOP_RUNTIME")),
             Some(&OsString::from("true"))
         );
     }

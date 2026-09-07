@@ -48,15 +48,18 @@ func (s *Service) ListDirectory(ctx context.Context, path string) (DirectoryList
 
 	abs, err := resolveListingPath(path)
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.directory_listing", path, "picker_opened", err)
 		return DirectoryListing{}, err
 	}
 
 	entries, err := readSubdirsBoundedAtFilesystemRoot(abs)
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.directory_listing", abs, "picker_opened", err)
 		return DirectoryListing{}, err
 	}
 
 	_ = ctx
+	s.logFilesystemInfo("repository discovery directory listed", "repository.discovery.directory_listing", abs, "picker_opened")
 	return DirectoryListing{
 		Path:      abs,
 		Parent:    parentPath(abs),

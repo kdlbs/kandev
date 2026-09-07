@@ -98,6 +98,21 @@ describe("MessageActions timestamp tooltip", () => {
     expect(timeEl?.getAttribute("title")).toBe(new Date(MESSAGE_TIMESTAMP).toLocaleString());
   });
 
+  it.each(["", "not-a-date", "0", "2026-02-30T10:00:00Z"])(
+    "omits the timestamp affordance for invalid created_at value %j",
+    (createdAt) => {
+      const { container } = render(
+        <StateProvider>
+          <MessageActions message={assistantMessage({ created_at: createdAt })} />
+        </StateProvider>,
+      );
+
+      expect(container.querySelector("time")).toBeNull();
+      expect(container.textContent).not.toContain("Invalid Date");
+      expect(screen.getByRole("button", { name: /copy message to clipboard/i })).toBeTruthy();
+    },
+  );
+
   it("omits the timestamp element entirely when showTimestamp is false", () => {
     const { container } = render(
       <StateProvider>

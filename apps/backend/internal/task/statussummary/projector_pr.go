@@ -146,17 +146,20 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
-	if mergeable == prStateBlocked || mergeable == prStateDirty {
-		return prStateBlocked
-	}
 	if pullRequestHasFailure(pr, review, checks) {
 		return prStateFailure
 	}
 	if pullRequestHasPendingChecks(pr, checks) {
 		return prStatePending
 	}
-	if pullRequestAwaitsReview(pr, review) {
+	if pullRequestAwaitsReview(pr, review, checks) {
 		return prStateAwaiting
+	}
+	if review == prStatePending {
+		return prStatePending
+	}
+	if mergeable == prStateBlocked || mergeable == prStateDirty {
+		return prStateBlocked
 	}
 	if review == prStateApproved && (checks == "" || checks == prStateSuccess) {
 		return prStateReady
@@ -192,19 +195,29 @@ func pullRequestHasPendingChecks(pr pullRequestObservation, checks string) bool 
 		(pr.checksTotal > 0 && pr.checksPassing < pr.checksTotal && checks != prStateSuccess)
 }
 
-func pullRequestAwaitsReview(pr pullRequestObservation, review string) bool {
+func pullRequestAwaitsReview(pr pullRequestObservation, review, checks string) bool {
+	if !pullRequestChecksPassed(pr, checks) {
+		return false
+	}
 	return pr.pendingReviewCount > 0 || (pr.requiredReviews > 0 && review == prStatePending)
+}
+
+func pullRequestChecksPassed(pr pullRequestObservation, checks string) bool {
+	if checks == prStateSuccess {
+		return true
+	}
+	return checks == "" && pr.checksTotal > 0 && pr.checksPassing >= pr.checksTotal
 }
 
 func pullRequestStateRank(state string) int {
 	switch state {
 	case prStateFailure:
 		return 100
-	case prStateBlocked:
-		return 90
 	case prStatePending:
-		return 80
+		return 90
 	case prStateAwaiting:
+		return 80
+	case prStateBlocked:
 		return 70
 	case prStateReady:
 		return 60

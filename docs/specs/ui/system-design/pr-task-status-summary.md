@@ -55,6 +55,15 @@ inconsistent behavior.
 - `PRCIPopover` and `PRStatusChipDrawer` provide the existing detailed touch
   path after the user opens a task.
 
+### Status-color precedence
+
+`getPRStatusColor` in `apps/web/components/github/pr-task-icon.tsx` is the
+single source for the task-row GitHub pull-request icon color. It preserves
+terminal states first and active merge-queue membership next. For an open draft
+without an active queue entry, it returns the muted color before non-terminal
+review or check failures. The separate `PRStatusChip` keeps its CI-specific
+status derivation and is not a source for the task-row icon color.
+
 ## Data and contracts
 
 The design uses the existing `GET /api/v1/github/task-prs?task_ids=<id>`

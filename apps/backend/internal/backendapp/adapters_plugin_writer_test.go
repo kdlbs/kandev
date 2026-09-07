@@ -91,7 +91,7 @@ func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
 
 	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
-		Title: "Investigate", Description: "details", ParentID: "parent-1", Source: "plugin:acme",
+		Title: "Investigate", Description: "details", ParentID: "parent-1", Source: "plugin:acme", Priority: "critical",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "ws-1", svc.lastCreate.WorkspaceID)
@@ -99,6 +99,7 @@ func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
 	require.Equal(t, "step-1", svc.lastCreate.WorkflowStepID)
 	require.Equal(t, "parent-1", svc.lastCreate.ParentID)
 	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"], "provenance is stamped into task metadata")
+	require.Equal(t, "critical", svc.lastCreate.Priority)
 }
 
 func TestPluginsTaskWriter_CreateWithoutSourceOmitsMetadata(t *testing.T) {
@@ -154,12 +155,14 @@ func TestPluginsTaskWriter_UpdateMapsFieldMask(t *testing.T) {
 
 	title := "Renamed"
 	state := "IN_PROGRESS"
-	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", Title: &title, State: &state})
+	priority := "low"
+	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", Title: &title, State: &state, Priority: &priority})
 	require.NoError(t, err)
 	require.Equal(t, "task-1", svc.lastID)
 	require.Equal(t, "Renamed", *svc.lastUpdate.Title)
 	require.NotNil(t, svc.lastUpdate.State)
 	require.Equal(t, v1.TaskStateInProgress, *svc.lastUpdate.State)
+	require.Equal(t, "low", *svc.lastUpdate.Priority)
 	require.Nil(t, svc.lastUpdate.Description, "an unset field stays nil")
 }
 

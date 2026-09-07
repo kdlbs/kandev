@@ -95,6 +95,7 @@ message Task {
   bool is_ephemeral = 15;
   repeated TaskRepository repositories = 16;
   google.protobuf.Struct metadata = 17;  // free-form; plugin-tolerant
+  repeated string labels = 23 [deprecated = true]; // API v1 compatibility only.
 }
 message TaskRepository {
   string id = 1;
@@ -246,6 +247,7 @@ message CreateTaskRequest {
   repeated PluginTaskRepository repositories = 8;
   optional PluginTaskLaunchOptions launch = 9;
   google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
+  string priority = 11; // empty defaults to medium
 }
 message PluginTaskRepository {
   string repository_id = 1; // existing Kandev repository, or empty with remote below
@@ -280,6 +282,7 @@ message UpdateTaskRequest {
   optional string description = 3;
   optional string state = 4;
   optional string workflow_step_id = 5;
+  optional string priority = 6;
 }
 message UpdateTaskResponse { Task task = 1; }
 // SendMessage delivers a prompt to a task session (api_write:messages) through

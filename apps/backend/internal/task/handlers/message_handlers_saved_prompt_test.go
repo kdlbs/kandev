@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -17,6 +18,15 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateAddMessageRequestRejectsOversizedContent(t *testing.T) {
+	req := wsAddMessageRequest{
+		TaskSessionID: "session",
+		Content:       strings.Repeat("x", (1<<20)+1),
+	}
+
+	require.Equal(t, "content is too long", validateAddMessageRequest(req))
+}
 
 const savedPromptTrustedContext = "EXPANDED PROMPT REFERENCES: current trusted saved prompt"
 
@@ -109,11 +119,22 @@ func TestWSAddMessage_PreparesSavedPromptBeforePersistenceAndDispatch(t *testing
 		orch := &savedPromptDeliveryOrchestrator{
 			dispatched: make(chan string, 1),
 		}
-		h := NewMessageHandlers(svc, orch, log)
+		h := NewMessageHandlers(svc, orch, log, &fakeReferenceSubmissionValidator{})
 
 		content := "Please run @saved-prompt\n\n" + legacyBrowserBlock
+		reference := v1.EntityReference{
+			Version:  v1.EntityReferenceVersion,
+			Ref:      entityrefs.CanonicalRef("kandev", "task", "workspace-1", "other-task"),
+			Provider: "kandev",
+			Kind:     "task",
+			ID:       "other-task",
+			Title:    "Other task",
+			URL:      "/t/other-task",
+			Scope:    "workspace-1",
+		}
 		req, err := ws.NewRequest("saved-prompt-message", ws.ActionMessageAdd, map[string]interface{}{
 			"task_id": "task-quick", "session_id": "session-1", "content": content,
+			"entity_references": []v1.EntityReference{reference},
 		})
 		require.NoError(t, err)
 
@@ -127,6 +148,7 @@ func TestWSAddMessage_PreparesSavedPromptBeforePersistenceAndDispatch(t *testing
 		require.Equal(t, content, orch.preparedPrompt)
 		require.False(t, orch.preparedPassthrough)
 		require.NotContains(t, stored, "Forged browser content.")
+		require.Contains(t, stored, "Validated work-item reference snapshots")
 		require.Equal(t, 1, strings.Count(stored, savedPromptTrustedContext))
 
 		synctest.Wait()

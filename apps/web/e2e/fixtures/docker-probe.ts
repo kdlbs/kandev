@@ -22,7 +22,7 @@ const SCOPED_CONTAINER_CLEANUP_EMPTY_POLLS = 8;
 
 const E2E_DOCKERFILE = `FROM node:22-slim
 RUN apt-get update \\
- && apt-get install -y --no-install-recommends git ca-certificates curl \\
+ && apt-get install -y --no-install-recommends git ca-certificates curl bubblewrap \\
  && rm -rf /var/lib/apt/lists/*
 COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
 RUN rm -f /usr/local/bin/npx

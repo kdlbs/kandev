@@ -13,7 +13,10 @@ type BoundingBox = { x: number; y: number; width: number; height: number };
  *
  * Poll until two consecutive samples agree rather than sleeping for a budget
  * that is guessed rather than measured: this returns as soon as the element is
- * actually still, and keeps waiting when the scroll is slow.
+ * actually still, and keeps waiting when the scroll or an opening animation is
+ * slow. Position and dimensions are sampled together so a centered dialog
+ * cannot be reported settled while its scale animation is still changing its
+ * width.
  */
 export async function settledBoundingBox(locator: Locator, timeout = 5_000): Promise<BoundingBox> {
   await locator.scrollIntoViewIfNeeded();
@@ -30,7 +33,9 @@ export async function settledBoundingBox(locator: Locator, timeout = 5_000): Pro
     .poll(
       async () => {
         latest = await locator.boundingBox();
-        const current = latest ? `${Math.round(latest.x)},${Math.round(latest.y)}` : null;
+        const current = latest
+          ? [latest.x, latest.y, latest.width, latest.height].map(Math.round).join(",")
+          : null;
         agreeingReads = current !== null && current === previous ? agreeingReads + 1 : 0;
         previous = current;
         return agreeingReads >= 2;

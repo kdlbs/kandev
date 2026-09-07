@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -210,6 +211,58 @@ func TestManager_CleanupStaleExecution_SkipsStopWhenNoRuntime(t *testing.T) {
 	// Should still remove from store even without executor registry
 	if _, found := mgr.GetExecutionBySessionID("session-1"); found {
 		t.Error("expected execution to be removed from store")
+	}
+}
+
+func TestManager_CleanupStaleExecution_ReleasesAgentctlLockBeforeRemove(t *testing.T) {
+	mgr := newTestManager(t)
+	modes := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/workspace/poll-mode" {
+			modes <- r.Method
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	client := agentctl.NewClient("127.0.0.1", port, newTestLogger())
+	t.Cleanup(func() { client.Close() })
+	execution := &AgentExecution{
+		ID:            "exec-with-poll-client",
+		SessionID:     "session-with-poll-client",
+		WorkspacePath: "/tmp/workspace-with-poll-client",
+		agentctl:      client,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	// Runtime interest makes RemoveExecution publish the transition to paused.
+	// The cleanup path must detach the client before that transition attempts to
+	// acquire the client read lock.
+	mgr.pollAggregator.HandleRuntimeInterest(execution.SessionID, true)
+	select {
+	case <-modes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial poll-mode push")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.CleanupStaleExecutionBySessionID(context.Background(), execution.SessionID)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("cleanup stale execution: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("cleanup stale execution blocked while removing execution")
+	}
+
+	if _, found := mgr.GetExecutionBySessionID(execution.SessionID); found {
+		t.Fatal("expected stale execution to be removed")
 	}
 }
 

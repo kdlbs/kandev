@@ -67,6 +67,64 @@ func TestRelaunchDynamicTaskAfterFailure_DoesNotLaunchSuccessorWhenStopFails(t *
 	}
 }
 
+// TestRelaunchDynamicTaskAfterFailure_DoesNotResurrectCancelledSession proves
+// F-A: a coordinator stop that commits CANCELLED while the predecessor
+// teardown is in flight must win over the relaunch's own CREATED reset.
+// Before the fix, the reset at dynamic_launch.go was an unconditional
+// UpdateTaskSessionState write with no expected-state predicate, so it
+// silently overwrote CANCELLED with CREATED and StartCreatedSession then
+// launched a new agent on the session the user just stopped. This exercises
+// relaunchDynamicTaskAfterFailure directly because LaunchDynamicRouteAction
+// (the manual retry path) calls it without the detached-launch wrapper's
+// shouldDropSessionFailure guard.
+func TestRelaunchDynamicTaskAfterFailure_DoesNotResurrectCancelledSession(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-cancel-race"
+		sessionID   = "session-dynamic-cancel-race"
+		executionID = "execution-dynamic-cancel-race"
+	)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			// Simulate a coordinator stop committing CANCELLED between the
+			// route-selection CAS and this relaunch's own destructive reset.
+			return repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateCancelled, "")
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "retry the task"})
+
+	relaunched := svc.relaunchDynamicTaskAfterFailure(
+		ctx,
+		watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: executionID,
+		},
+		"fallback-profile",
+	)
+
+	if relaunched {
+		t.Fatal("relaunchDynamicTaskAfterFailure returned success over a concurrently cancelled session")
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want it to stay CANCELLED", session.State)
+	}
+	if len(agentManager.startAgentProcessCalls) != 0 {
+		t.Fatalf("successor launch started %d processes after a concurrent cancel", len(agentManager.startAgentProcessCalls))
+	}
+}
+
 // The agent.failed event that selects a fallback route is dispatched on the
 // lifecycle completion goroutine while it holds the execution's prompt
 // lifecycle lock. Stopping the predecessor needs that lock again, so the

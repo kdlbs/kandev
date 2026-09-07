@@ -8,6 +8,12 @@ import { stripSystemTags } from "@/lib/utils/system-tags";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ScrollToLastPromptButton } from "./scroll-to-last-prompt-button";
 import { useTranslation } from "react-i18next";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  usePromptMentionMarkdownComponents,
+  useStablePromptMentionNames,
+} from "./messages/prompt-mention-components";
 
 type AnchoredLastPromptBarProps = {
   /** Raw content of the user's last prompt. */
@@ -28,6 +34,7 @@ type AnchoredLastPromptBarProps = {
    * of it actually opening (see resolveLastPromptControls). */
   onHeightChange?: (height: number) => void;
 };
+const NO_ENTITY_REFERENCES: readonly never[] = [];
 
 /** Reports `contentRef`'s rendered height to `onHeightChange` on mount and
  * on every subsequent resize, and 0 once unmounted. */
@@ -128,6 +135,13 @@ export function AnchoredLastPromptBar({
   onHeightChange,
 }: AnchoredLastPromptBarProps) {
   const { t } = useTranslation();
+  const { prompts } = useCustomPrompts();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const promptNames = useStablePromptMentionNames(prompts.map((prompt) => prompt.name));
+  const promptMentionComponents = usePromptMentionMarkdownComponents(
+    promptNames,
+    NO_ENTITY_REFERENCES,
+  );
   const [expanded, setExpanded] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -169,7 +183,7 @@ export function AnchoredLastPromptBar({
             {showScrollToLastPrompt && (
               <ScrollToLastPromptButton
                 onClick={onScrollUp}
-                className="mt-0.5 h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                className="mt-0.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
               />
             )}
             {/* Mirrors the real user-message bubble (rounded-2xl bg-primary/30)
@@ -185,7 +199,11 @@ export function AnchoredLastPromptBar({
               )}
             >
               <div className="markdown-body markdown-body-user max-w-none">
-                <MemoizedMarkdown content={visible} />
+                <MemoizedMarkdown
+                  key={isVisible ? "visible" : "hidden"}
+                  content={visible}
+                  components={promptMentionComponents}
+                />
               </div>
             </div>
             {canExpand && (
@@ -197,7 +215,10 @@ export function AnchoredLastPromptBar({
                 aria-label={expanded ? t("task:collapseLastPrompt") : t("task:expandLastPrompt")}
                 aria-expanded={expanded}
                 data-testid="anchored-last-prompt-expand"
-                className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                className={cn(
+                  "shrink-0 cursor-pointer text-muted-foreground hover:text-foreground",
+                  isFinePointer ? "h-6 w-6" : "h-11 w-11",
+                )}
               >
                 {expanded ? (
                   <IconChevronUp className="h-3.5 w-3.5" />

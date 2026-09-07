@@ -135,6 +135,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_BACKEND_PID_FILE", class: "exclusion"},
 		{envVar: "KANDEV_DESKTOP_HEALTH_TOKEN", class: "exclusion"},
 		{envVar: "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", class: "exclusion"},
+		{envVar: "KANDEV_DESKTOP_RUNTIME", class: "exclusion"},
 		{envVar: "KANDEV_BUNDLE_DIR", class: "exclusion"},
 		{envVar: "KANDEV_WEB_DIST_DIR", class: "exclusion"},
 		{envVar: "KANDEV_TASK_ID", class: "exclusion"},

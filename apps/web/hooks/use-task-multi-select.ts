@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
 import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
@@ -129,9 +129,9 @@ function useBulkOperations({
 }) {
   const runBulk = useCallback(
     async (
-      per: (id: string, opts?: { cascade?: boolean }) => Promise<void>,
+      per: (id: string, opts?: TaskActionOptions) => Promise<void>,
       setBusy: (v: boolean) => void,
-      opts?: { cascade?: boolean },
+      opts?: TaskActionOptions,
     ) => {
       const ids = selectedIdsRef.current;
       if (!ids || ids.size === 0) return;
@@ -152,12 +152,12 @@ function useBulkOperations({
   );
 
   const bulkDelete = useCallback(
-    (opts?: { cascade?: boolean }) => runBulk(deleteTaskById, setIsDeleting, opts),
+    (opts?: TaskActionOptions) => runBulk(deleteTaskById, setIsDeleting, opts),
     [runBulk, deleteTaskById, setIsDeleting],
   );
 
   const bulkArchive = useCallback(
-    (opts?: { cascade?: boolean }) => runBulk(archiveTaskById, setIsArchiving, opts),
+    (opts?: TaskActionOptions) => runBulk(archiveTaskById, setIsArchiving, opts),
     [runBulk, archiveTaskById, setIsArchiving],
   );
 

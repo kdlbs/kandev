@@ -87,7 +87,18 @@ test.describe("Nested submodule Review", () => {
       await expect
         .poll(() => session.reviewDiffText(), { timeout: 45_000 })
         .toEqual(expect.stringContaining("parent working-tree change"));
-      for (const expected of ["outer committed change", "inner committed change"]) {
+      for (const [repositoryName, expected] of [
+        ["vendor/outer", "outer committed change"],
+        ["vendor/outer/vendor/inner", "inner committed change"],
+      ] as const) {
+        // Diff bodies load when they enter the viewport. Select each nested
+        // file in the tree so the review list scrolls to it before asserting
+        // its content, just as a reviewer would navigate the changes.
+        await review
+          .locator(
+            `[data-testid="review-file-row"][data-file-path="README.md"][data-repository-name="${repositoryName}"]`,
+          )
+          .click();
         await expect.poll(() => session.reviewDiffText(), { timeout: 45_000 }).toContain(expected);
       }
       await expectStickyReviewHeaderClearance(review, "mouse");

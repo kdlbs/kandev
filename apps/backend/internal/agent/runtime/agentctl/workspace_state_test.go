@@ -43,7 +43,7 @@ func TestSetWorkspacePollMode_PostsExpectedPayload(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"mode":"slow"}`))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	c := newHTTPOnlyClient(srv.URL)
 
@@ -65,12 +65,45 @@ func TestSetWorkspacePollMode_PostsExpectedPayload(t *testing.T) {
 	}
 }
 
+func TestRefreshWorkspace_PostsExpectedTrigger(t *testing.T) {
+	var got struct {
+		Path    string
+		Method  string
+		Trigger string
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Path = r.URL.Path
+		got.Method = r.Method
+		var body struct {
+			Trigger string `json:"trigger"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got.Trigger = body.Trigger
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newHTTPOnlyClient(srv.URL)
+	if err := c.RefreshWorkspace(context.Background(), "turn_complete"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Path != "/api/v1/workspace/refresh" {
+		t.Errorf("path = %q, want /api/v1/workspace/refresh", got.Path)
+	}
+	if got.Method != http.MethodPost {
+		t.Errorf("method = %q, want POST", got.Method)
+	}
+	if got.Trigger != "turn_complete" {
+		t.Errorf("trigger = %q, want turn_complete", got.Trigger)
+	}
+}
+
 func TestSetWorkspacePollMode_ReturnsErrorOnNon2xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"bad mode"}`))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	c := newHTTPOnlyClient(srv.URL)
 
@@ -89,7 +122,7 @@ func TestSetWorkspacePollMode_HonoursContextCancellation(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	c := newHTTPOnlyClient(srv.URL)
 

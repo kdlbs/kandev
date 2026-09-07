@@ -5,7 +5,7 @@ import { SessionPage } from "../../pages/session-page";
 const TARGET_TITLE = "Mobile inactive summary target";
 
 test.describe("Mobile task status summary", () => {
-  test("updates the native task switcher from bounded status revisions", async ({
+  test("keeps pending CI yellow in native task switcher status updates", async ({
     testPage,
     apiClient,
     seedData,
@@ -33,6 +33,26 @@ test.describe("Mobile task status summary", () => {
     const targetSession = await apiClient.seedTaskSession(targetTask.task_id, {
       state: "WAITING_FOR_INPUT",
       agentProfileId: seedData.agentProfileId,
+    });
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      task_id: targetTask.task_id,
+      owner: "kandev-e2e",
+      repo: "mobile-summary-fixtures",
+      pr_number: 43,
+      pr_url: "https://github.test/kandev-e2e/mobile-summary-fixtures/pull/43",
+      pr_title: "Mobile bounded summary fixture",
+      head_branch: "feature/mobile-summary",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+      review_state: "approved",
+      checks_state: "pending",
+      mergeable_state: "blocked",
+      required_reviews: 1,
+      checks_total: 2,
+      checks_passing: 1,
     });
 
     await testPage.goto(`/t/${navTask.task_id}`);
@@ -80,30 +100,12 @@ test.describe("Mobile task status summary", () => {
     });
     await expect(targetRow.getByTestId("task-agent-error-icon")).toBeVisible({ timeout: 15_000 });
 
-    await apiClient.mockGitHubAssociateTaskPR({
-      workspace_id: seedData.workspaceId,
-      task_id: targetTask.task_id,
-      owner: "kandev-e2e",
-      repo: "mobile-summary-fixtures",
-      pr_number: 43,
-      pr_url: "https://github.test/kandev-e2e/mobile-summary-fixtures/pull/43",
-      pr_title: "Mobile bounded summary fixture",
-      head_branch: "feature/mobile-summary",
-      base_branch: "main",
-      author_login: "e2e",
-      state: "open",
-      review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "clean",
-      required_reviews: 1,
-      checks_total: 1,
-      checks_passing: 1,
+    const prIcon = targetRow.getByTestId(`pr-task-icon-${targetTask.task_id}`);
+    await expect(prIcon).toHaveAttribute("data-pr-state", "Open", { timeout: 15_000 });
+    await expect(prIcon).toHaveClass(/text-yellow-500/);
+    await prCapture.screenshot("mobile-task-switcher-pending-ci", {
+      caption: "Mobile task switcher keeps pending CI yellow after reload",
     });
-    await expect(targetRow.getByTestId(`pr-task-icon-${targetTask.task_id}`)).toHaveAttribute(
-      "data-pr-state",
-      "open",
-      { timeout: 15_000 },
-    );
 
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();

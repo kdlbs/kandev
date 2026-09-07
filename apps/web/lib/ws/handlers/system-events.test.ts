@@ -13,6 +13,19 @@ const unavailable: AgentRuntimeAvailability = {
 const available: AgentRuntimeAvailability = { status: "available" };
 
 describe("registerSystemEventsHandlers", () => {
+  it("bumps the storage revision when analysis progress is published", () => {
+    const store = createAppStore();
+    const handlers = registerSystemEventsHandlers(store);
+
+    handlers["system.storage.analysis.updated"]?.({
+      type: "notification",
+      action: "system.storage.analysis.updated",
+      payload: { generation: 4, state: "scanning" },
+    });
+
+    expect(store.getState().system.storage.analysisRevision).toBe(1);
+  });
+
   it("replaces the complete runtime snapshot without touching domain state", () => {
     const store = createAppStore({
       agentRuntime: unavailable,

@@ -276,7 +276,7 @@ websocat ws://127.0.0.1:38429/ws
 
 ## Registered request action catalog
 
-The following 310 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
+The following 279 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
 
 Payloads are not uniform. Read the corresponding handler request struct before building a non-first-party client. Names below are exact, including `vscode.openFile` and underscore-separated `user_shell.*` actions.
 
@@ -550,48 +550,12 @@ github.task_pr.get
 github.task_pr.sync
 github.task_prs.list
 
-gitlab.action_presets.list
-gitlab.action_presets.reset
-gitlab.action_presets.update
 gitlab.check_session_mr
-gitlab.cleanup.issue_tasks
-gitlab.cleanup.review_tasks
-gitlab.issue_watches.create
-gitlab.issue_watches.delete
-gitlab.issue_watches.list
-gitlab.issue_watches.trigger
-gitlab.issue_watches.trigger_all
-gitlab.issue_watches.update
-gitlab.mr.approve
-gitlab.mr.discussion.new
-gitlab.mr.discussion.resolve
-gitlab.mr.merge
-gitlab.mr.set_assignees
-gitlab.mr.set_labels
-gitlab.mr.unapprove
-gitlab.mr_commits.get
-gitlab.mr_feedback.get
-gitlab.mr_files.get
-gitlab.mr_watches.delete
-gitlab.mr_watches.list
-gitlab.project.branches
-gitlab.project.merge_methods.get
-gitlab.projects.list
-gitlab.projects.search
-gitlab.review_watches.create
-gitlab.review_watches.delete
-gitlab.review_watches.list
-gitlab.review_watches.trigger
-gitlab.review_watches.trigger_all
-gitlab.review_watches.update
-gitlab.stats
-gitlab.status
-gitlab.task_mr.get
-gitlab.task_mr.sync
-gitlab.task_mrs.list
 ```
 
 Provider actions make outbound calls with the backend's configured GitHub or GitLab identity. Status and registration do not imply a provider is authenticated, reachable, or authorized for a repository.
+
+GitLab UI queries and mutations use the authenticated `/api/v1/gitlab/...` HTTP routes. The only remaining GitLab WebSocket request action is `gitlab.check_session_mr`, which refreshes a session's linked merge request.
 
 ### Jira, Linear, and Sprites
 
@@ -746,6 +710,8 @@ agent.install.finished
 github.task_pr.updated
 github.task_ci_options.updated
 github.rate_limit.updated
+gitlab.task_mr.updated
+gitlab.task_mr_options.updated
 system.job.update
 ```
 

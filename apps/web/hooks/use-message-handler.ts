@@ -19,6 +19,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
+  sanitizePromptReferenceSystemText,
 } from "@/lib/prompts/expand-prompt-references";
 import {
   deriveSessionInputMode,
@@ -131,7 +132,7 @@ export function buildContextFilesContext(
             promptExpansions.set(expansion.name, expansion.content);
           }
         }
-        return `### ${prompt.name}\n${prompt.content}`;
+        return `### ${sanitizePromptReferenceSystemText(prompt.name)}\n${sanitizePromptReferenceSystemText(prompt.content)}`;
       })
       .filter(Boolean);
 

@@ -23,8 +23,8 @@ interface TaskMultiSelectToolbarProps {
   isProcessing: boolean;
   canMove?: boolean;
   onClearSelection: () => void;
-  onBulkDelete: (opts?: { cascade?: boolean }) => Promise<void>;
-  onBulkArchive: (opts?: { cascade?: boolean }) => Promise<void>;
+  onBulkDelete: (opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => Promise<void>;
+  onBulkArchive: (opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => Promise<void>;
   onBulkMove: (targetStepId: string) => Promise<void>;
 }
 
@@ -95,7 +95,7 @@ function BulkDeleteDialog({
   taskIds: string[];
   executorTypes: Array<string | null | undefined>;
   isProcessing: boolean;
-  onConfirm: (opts: { cascade: boolean }) => void;
+  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -201,7 +201,9 @@ export function TaskMultiSelectToolbar({
         taskIds={taskIds}
         executorTypes={executorTypes}
         isProcessing={isProcessing}
-        onConfirm={({ cascade }) => onBulkDelete({ cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          onBulkDelete({ cascade, discardWorktreeChanges })
+        }
       />
 
       <Button

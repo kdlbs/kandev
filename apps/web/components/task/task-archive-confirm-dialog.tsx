@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -32,6 +32,7 @@ import { useTranslation } from "react-i18next";
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   taskTitle?: string;
   isBulkOperation?: boolean;
   count?: number;
@@ -106,6 +107,7 @@ function isArchiveActionDisabled(
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
+  focusReturnRef,
   taskTitle,
   isBulkOperation,
   count,
@@ -133,6 +135,12 @@ export function TaskArchiveConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
+  const confirmedRef = useRef(false);
+  const restoreFocus = () => {
+    if (confirmedRef.current) return;
+    const focusReturnTarget = focusReturnRef?.current;
+    if (focusReturnTarget?.isConnected) focusReturnTarget.focus();
+  };
   const requiresConfirmation = useArchiveConfirmationMode(
     open,
     confirmTaskArchive,
@@ -152,7 +160,10 @@ export function TaskArchiveConfirmDialog({
   const taskIsInFlight = computeTaskIsInFlight(isInFlight, storeInFlight);
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) setCascade(false);
+    if (!next) {
+      setCascade(false);
+      restoreFocus();
+    }
     onOpenChange(next);
   };
 
@@ -160,7 +171,16 @@ export function TaskArchiveConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocus();
+          confirmedRef.current = false;
+        }}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>
@@ -202,6 +222,7 @@ export function TaskArchiveConfirmDialog({
             data-testid={confirmTestId}
             onClick={() => {
               if (archiveDisabled) return;
+              confirmedRef.current = true;
               onConfirm({ cascade });
               handleOpenChange(false);
             }}

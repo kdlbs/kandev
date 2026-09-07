@@ -108,15 +108,21 @@ func (s *PlanService) authorize(ctx context.Context, taskID string) error {
 	return s.authorizeTask(ctx, taskID)
 }
 
-// validatePlanWrite applies the shared admission checks for a plan write.
-// Authorization runs first so a caller cannot learn the size constraint for a
-// task it cannot access. For an oversized write, the task lookup preserves the
-// existing not_found contract before the size error is returned. The plan
-// storage read and per-task write lock remain after this admission step.
+// validatePlanWrite applies CreatePlan's shared admission checks. Authorization
+// runs first so a caller cannot learn the size constraint for a task it cannot
+// access. The plan storage read and per-task write lock remain after this
+// admission step.
 func (s *PlanService) validatePlanWrite(ctx context.Context, taskID, content string) error {
 	if err := s.authorize(ctx, taskID); err != nil {
 		return err
 	}
+	return s.checkContentSize(ctx, taskID, content)
+}
+
+// checkContentSize applies the size ceiling once authorization has already
+// run. For an oversized write, the task lookup preserves the existing
+// not_found contract before the size error is returned.
+func (s *PlanService) checkContentSize(ctx context.Context, taskID, content string) error {
 	if len(content) <= MaxPlanContentBytes {
 		return nil
 	}
@@ -163,6 +169,12 @@ type CreatePlanRequest struct {
 	// write path does not, since the browser plan editor already shows the
 	// user a diff and revision history before they save.
 	EvaluateTruncation bool
+	// Mode selects replace-vs-append composition
+	// (REQ-TASKS-PLAN-APPEND-001). Only UpdatePlan's callers populate
+	// PlanWriteModeAppend; upsertPlan only composes when requireExistingHead
+	// is true, so this field is inert on the CreatePlan path regardless of
+	// what a caller sets it to.
+	Mode PlanWriteMode
 }
 
 // PlanWriteResult is returned by CreatePlan/UpdatePlan. Plan is always
@@ -197,15 +209,15 @@ const (
 	planHeadUnknown
 )
 
-func (s *PlanService) readPlanHead(ctx context.Context, taskID string) (*models.TaskPlan, planHeadState) {
+func (s *PlanService) readPlanHead(ctx context.Context, taskID string) (*models.TaskPlan, planHeadState, error) {
 	plan, err := s.repo.GetTaskPlan(ctx, taskID)
 	if err != nil {
-		return nil, planHeadUnknown
+		return nil, planHeadUnknown, err
 	}
 	if plan == nil {
-		return nil, planHeadAbsent
+		return nil, planHeadAbsent, nil
 	}
-	return plan, planHeadFound
+	return plan, planHeadFound, nil
 }
 
 // planRevisionState is the revision-history analog of planHeadState.
@@ -258,15 +270,40 @@ type UpdatePlanRequest struct {
 	AuthorName         string
 	ForceNewRevision   bool
 	EvaluateTruncation bool
+	Mode               PlanWriteMode
 }
 
 // UpdatePlan updates an existing plan (errors if missing).
+//
+// Authorization runs once, before either mode's content check: append's
+// content validity is validateAppendFragment; an explicit replace's is the
+// empty-content check below. A request with no mode at all (the browser write
+// path, which never sets this field) keeps its pre-existing behavior of
+// accepting empty content. That check is scoped to an explicit
+// PlanWriteModeReplace, which only the agent write path ever sends, so this
+// does not extend the agent-only requirement onto another surface.
+//
+// The size limit for an append is measured against the composed content
+// inside upsertPlan's lock, not the submitted fragment, so it is not part of
+// this admission step for that mode.
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
-	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
+	if err := s.authorize(ctx, req.TaskID); err != nil {
 		return PlanWriteResult{}, err
+	}
+	if req.Mode == PlanWriteModeAppend {
+		if err := validateAppendFragment(req.Content); err != nil {
+			return PlanWriteResult{}, err
+		}
+	} else {
+		if req.Mode == PlanWriteModeReplace && req.Content == "" {
+			return PlanWriteResult{}, ErrContentRequired
+		}
+		if err := s.checkContentSize(ctx, req.TaskID, req.Content); err != nil {
+			return PlanWriteResult{}, err
+		}
 	}
 	release := s.locks.acquire(req.TaskID)
 	defer release()
@@ -302,9 +339,30 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	// caller's write still fails - just at the transaction, not at an earlier read.
 	readCtx := context.WithoutCancel(ctx)
 
-	headPlan, headState := s.readPlanHead(readCtx, req.TaskID)
+	headPlan, headState, headErr := s.readPlanHead(readCtx, req.TaskID)
 	if requireExistingHead && headState == planHeadAbsent {
 		return planWriteOutcome{}, ErrTaskPlanNotFound
+	}
+
+	// Compose from this same read rather than reading HEAD again: a second
+	// read would reopen the window this read closes between an append's read
+	// and its commit. requireExistingHead is false for
+	// CreatePlan, so this never runs there even if a caller set Mode anyway.
+	if requireExistingHead && req.Mode == PlanWriteModeAppend {
+		if headState == planHeadUnknown {
+			s.logger.Error("read plan head for append",
+				zap.String("task_id", req.TaskID), zap.Error(headErr))
+			return planWriteOutcome{}, ErrPlanContentReadFailed
+		}
+		req.Content = composePlanAppend(headPlan.Content, req.Content)
+		if err := checkPlanContentSize(req.Content); err != nil {
+			return planWriteOutcome{}, err
+		}
+		// The truncation guard cannot fire on an append by construction (the
+		// composed content always contains the stored content in full), and
+		// must not force a revision split on its account either. Skip it at the
+		// source rather than trust every caller to leave this unset.
+		req.EvaluateTruncation = false
 	}
 
 	req, preserveTitle, preserveCreatedBy := s.resolveHeadFallbacks(ctx, req, headPlan, headState, requireExistingHead)
@@ -772,7 +830,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		authorName = defaultUserAuthorFallback
 	}
 
-	headPlan, headState := s.readPlanHead(readCtx, req.TaskID)
+	headPlan, headState, _ := s.readPlanHead(readCtx, req.TaskID)
 	plan := &models.TaskPlan{
 		TaskID:    req.TaskID,
 		Title:     target.Title,

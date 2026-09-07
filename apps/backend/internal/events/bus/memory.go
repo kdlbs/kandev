@@ -33,6 +33,13 @@ type memorySubscription struct {
 	mu      sync.Mutex
 }
 
+type memoryDelivery struct {
+	pattern      string
+	subscription *memorySubscription
+	queue        *queueGroup
+	queueKey     string
+}
+
 // queueGroup manages load balancing for queue subscriptions
 type queueGroup struct {
 	subscribers []*memorySubscription
@@ -100,9 +107,8 @@ func NewMemoryEventBus(log *logger.Logger) *MemoryEventBus {
 // not enough for the per-session/per-run suffixed subjects (see Event.Subject).
 func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Event) error {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	if b.closed {
+		b.mu.RUnlock()
 		return fmt.Errorf("event bus is closed")
 	}
 
@@ -110,10 +116,12 @@ func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Eve
 		event.Subject = subject
 	}
 
-	// Track which queue groups we've already delivered to
+	// Snapshot matching subscriptions before invoking handlers. A handler may
+	// publish another event or register a subscription. Holding the bus read
+	// lock while invoking it would block that nested operation and can deadlock
+	// when a subscriber-registration writer is waiting for the same lock.
+	deliveries := make([]memoryDelivery, 0)
 	deliveredQueues := make(map[string]bool)
-
-	// Find all matching subscriptions
 	for pattern, subs := range b.subscriptions {
 		for _, sub := range subs {
 			sub.mu.Lock()
@@ -133,17 +141,40 @@ func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Eve
 				queueKey := sub.queue + ":" + pattern
 				if !deliveredQueues[queueKey] {
 					deliveredQueues[queueKey] = true
-					b.publishToQueue(ctx, queueKey, subject, event)
+					deliveries = append(deliveries, memoryDelivery{
+						pattern:      pattern,
+						subscription: sub,
+						queue:        b.queues[queueKey],
+						queueKey:     queueKey,
+					})
 				}
 				continue
 			}
 
-			// Regular subscription - deliver to all synchronously to preserve ordering
-			if err := invokeHandler(ctx, b.logger, "regular", subject, pattern, event, sub.handler); err != nil {
-				b.logger.Error("Event handler error",
-					zap.String("subject", subject),
-					zap.Error(err))
-			}
+			deliveries = append(deliveries, memoryDelivery{
+				pattern:      pattern,
+				subscription: sub,
+			})
+		}
+	}
+	b.mu.RUnlock()
+
+	for _, delivery := range deliveries {
+		if delivery.subscription.queue != "" {
+			// Queue subscriptions select their target under the queue lock, then
+			// invoke the selected handler without holding the bus lock.
+			b.publishToQueue(ctx, delivery.queue, delivery.queueKey, subject, event)
+			continue
+		}
+		if !delivery.subscription.IsValid() {
+			continue
+		}
+
+		// Regular subscriptions are delivered synchronously to preserve ordering.
+		if err := invokeHandler(ctx, b.logger, "regular", subject, delivery.pattern, event, delivery.subscription.handler); err != nil {
+			b.logger.Error("Event handler error",
+				zap.String("subject", subject),
+				zap.Error(err))
 		}
 	}
 
@@ -348,9 +379,8 @@ func compilePattern(pattern string) *regexp.Regexp {
 }
 
 // publishToQueue delivers to one subscriber in the queue group (round-robin)
-func (b *MemoryEventBus) publishToQueue(ctx context.Context, queueKey, subject string, event *Event) {
-	qg, ok := b.queues[queueKey]
-	if !ok {
+func (b *MemoryEventBus) publishToQueue(ctx context.Context, qg *queueGroup, queueKey, subject string, event *Event) {
+	if qg == nil {
 		return
 	}
 

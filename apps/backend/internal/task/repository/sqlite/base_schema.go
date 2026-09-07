@@ -15,6 +15,7 @@ import (
 // added without growing the function's cyclomatic complexity.
 func (r *Repository) initSchema() error {
 	steps := []func() error{
+		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
@@ -173,6 +174,14 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 		dialect.JSONExtract(driver, "metadata", "pending_id"),
 	)
 	if _, err := r.db.Exec(pendingIndexLookup); err != nil {
+		return err
+	}
+	lookupIndex := dialect.PendingIDLookupIndexDDL(
+		driver,
+		"idx_messages_metadata_pending_id_lookup_ordered",
+		"task_session_messages",
+	)
+	if _, err := r.db.Exec(lookupIndex); err != nil {
 		return err
 	}
 	return nil

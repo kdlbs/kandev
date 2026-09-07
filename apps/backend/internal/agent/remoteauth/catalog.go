@@ -19,15 +19,16 @@ const (
 
 // Method describes one selectable remote authentication method.
 type Method struct {
-	MethodID      string   `json:"method_id"`
-	Type          string   `json:"type"`
-	EnvVar        string   `json:"env_var,omitempty"`
-	SetupHint     string   `json:"setup_hint,omitempty"`
-	SourceFiles   []string `json:"source_files,omitempty"`
-	TargetRelDir  string   `json:"target_rel_dir,omitempty"`
-	Label         string   `json:"label,omitempty"`
-	HasLocalFiles bool     `json:"has_local_files,omitempty"`
-	SetupScript   string   `json:"setup_script,omitempty"`
+	MethodID           string                              `json:"method_id"`
+	Type               string                              `json:"type"`
+	EnvVar             string                              `json:"env_var,omitempty"`
+	SetupHint          string                              `json:"setup_hint,omitempty"`
+	SourceFiles        []string                            `json:"source_files,omitempty"`
+	TargetRelDir       string                              `json:"target_rel_dir,omitempty"`
+	Label              string                              `json:"label,omitempty"`
+	HasLocalFiles      bool                                `json:"has_local_files,omitempty"`
+	SetupScript        string                              `json:"setup_script,omitempty"`
+	FileConflictPolicy agents.RemoteAuthFileConflictPolicy `json:"-"`
 }
 
 // Spec groups auth methods for one integration or agent.
@@ -92,12 +93,13 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 			case "files":
 				files := method.SourceFiles[currentOS]
 				entry := Method{
-					MethodID:      fmt.Sprintf("agent:%s:files:%d", ag.ID(), fileMethodIndex),
-					Type:          "files",
-					SourceFiles:   files,
-					TargetRelDir:  strings.Trim(method.TargetRelDir, "/"),
-					Label:         method.Label,
-					HasLocalFiles: anyFileExists(homeDir, files),
+					MethodID:           fmt.Sprintf("agent:%s:files:%d", ag.ID(), fileMethodIndex),
+					Type:               "files",
+					SourceFiles:        files,
+					TargetRelDir:       strings.Trim(method.TargetRelDir, "/"),
+					Label:              method.Label,
+					HasLocalFiles:      anyFileExists(homeDir, files),
+					FileConflictPolicy: method.FileConflictPolicy,
 				}
 				spec.Methods = append(spec.Methods, entry)
 				methodsByID[entry.MethodID] = entry

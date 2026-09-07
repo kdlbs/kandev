@@ -71,11 +71,18 @@ task agent without sending the same removal more than once.
   busy, the queue-recovery prompt shall use the existing durable auto-fix queue
   and coalescing rules.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.7:** When a user enables
-  auto-fix after Kandev retained an unhandled actionable removal for the
-  current head, the next evaluation shall send or queue one repair prompt.
+  auto-fix after Kandev retained an unhandled actionable removal with durable
+  queue-attempt evidence for the current head, the next evaluation shall send
+  or queue one repair prompt.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.8:** Kandev shall not
   treat the removal event's commit as a merge-group commit unless GitHub
   identifies it as such.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.9:** When Kandev first
+  observes an actionable removal after the active queue entry disappears, it
+  shall start auto-fix only when durable evidence from an attempted or adopted
+  queue entry matches the current pull-request head. A passive removal-only
+  baseline is not sufficient provenance, so Kandev shall fail closed when that
+  evidence is unavailable.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-003: Safe automatic requeue
 

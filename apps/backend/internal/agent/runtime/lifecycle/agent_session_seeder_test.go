@@ -84,6 +84,26 @@ func TestSeedAgentSessionDir_OnlyCopiesAuthFiles(t *testing.T) {
 	}
 }
 
+func TestSeedAgentSessionDir_OpenCodeCopiesAuthFile(t *testing.T) {
+	hostHome := seedTestHostHome(t)
+	writeFile(t, hostHome, ".local/share/opencode/auth.json", []byte(`{"openai":{"type":"oauth"}}`))
+
+	instanceRoot := InstanceSessionRoot(t.TempDir(), "opencode-auth")
+	if err := SeedAgentSessionDir(
+		context.Background(), agents.NewOpenCodeACP(), instanceRoot, newSeederTestLogger(t),
+	); err != nil {
+		t.Fatalf("SeedAgentSessionDir: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(instanceRoot, ".local/share/opencode/auth.json"))
+	if err != nil {
+		t.Fatalf("read copied auth: %v", err)
+	}
+	if string(data) != `{"openai":{"type":"oauth"}}` {
+		t.Fatalf("copied auth = %s", data)
+	}
+}
+
 func TestSeedAgentSessionDir_CopiesSelectedPortableConfig(t *testing.T) {
 	hostHome := seedTestHostHome(t)
 	writeFile(t, hostHome, ".codex/auth.json", []byte(`{"token":"abc"}`))

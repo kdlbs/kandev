@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
-	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -112,7 +111,6 @@ func newTestController(agentList map[string]agents.Agent) *Controller {
 	}
 	return &Controller{
 		agentRegistry: reg,
-		modelCache:    modelfetcher.NewCache(),
 		logger:        log,
 	}
 }

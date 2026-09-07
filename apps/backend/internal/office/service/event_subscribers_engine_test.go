@@ -427,12 +427,15 @@ func TestEngineDispatcher_AgentFailed_PostStartFallbackHandled_SkipsDispatch(t *
 	setTestTaskAssignee(t, svc, "task-1", "worker-1")
 	run := queueTaskAssignedRunForAgentFailedTests(t, svc, "worker-1", "task-1")
 	svc.ExecSQL(t, `UPDATE runs SET resolved_provider_id = 'test-provider' WHERE id = ?`, run.ID)
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'working', working_run_id = ? WHERE id = ?`, run.ID, "worker-1")
 
 	publishAgentFailed(t, eb, "task-1", "worker-1", "sess-err", "boom")
 
 	if calls := disp.Calls(); len(calls) != 0 {
 		t.Fatalf("dispatcher calls = %d, want 0 (post-start fallback handled)", len(calls))
 	}
+	assertAgentStatus(t, svc, context.Background(), "worker-1", models.AgentStatusIdle,
+		"after a handled post-start fallback")
 }
 
 // TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger pins

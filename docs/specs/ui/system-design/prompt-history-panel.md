@@ -7,6 +7,7 @@ created: 2026-08-13
 owners:
   - clem
 ---
+
 # Prompt History Panel System Design
 
 ## Purpose and boundaries
@@ -15,8 +16,8 @@ This design preserves the technical source detail for `REQ-UI-PROMPT-HISTORY-PAN
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                       | Design section                                    |
+| --------------------------------- | ------------------------------------------------- |
 | `REQ-UI-PROMPT-HISTORY-PANEL-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
@@ -43,6 +44,7 @@ Reviewing what was asked of an agent requires scrolling the transcript; past pro
 - When the prompt rows fit (the panel does not scroll), the indicator renders in the content flow directly under the last message.
 
 The panel root is a positioned outer wrapper whose scrollable content lives in a distinct inner scroller: the floating message anchors to the outer wrapper (the panel viewport) and is a sibling of the scroller, so it never scrolls with the content (an absolutely positioned child of a scroll container moves with its content). In both modes the sentinel stays the final in-flow child of the content wrapper (the indicator is either a sibling after the wrapper or an out-of-flow overlay, never an in-flow element before the sentinel), so the sentinel's geometry is stable while loading. While the user is pinned at the panel's bottom, a completed load scrolls the scroller back to the new bottom so the sentinel stays in view and the next older page loads without requiring a scroll-away/scroll-back; scrolling away from the bottom cancels the stick. The indicator stays mounted for a short grace window after each page settles so consecutive auto-loads (the sentinel re-arms while still intersecting) render one continuous indicator instead of a per-page flash; it disappears once a settle is not followed by another load within the window or pagination ends. A rejected or zero-result request disarms the sentinel until it observes the user scroll away and back; when short content prevents that false transition, a wheel/touch gesture on the panel root retries through the same user-gesture path. Loading stops automatically once the first prompt of the session is reached. Prompt history and transcript pagination have separate requests and metadata; each consumer serializes its own cursor, while WebSocket events fan out to both caches. The panel never renders a load-more button.
+
 - The expand button behaves like the anchored last-prompt bar: expanded rows show the full prompt untruncated (wrapping text) inside the row, capped at 40 % of the panel's height, with in-box scrolling. The cap is measured from the panel's own root element (the component's container, via a ref), not from any transcript selector; it re-measures on panel resize and falls back to 40 % of the viewport height when no container can be measured. The chevron toggles `aria-expanded` and shows the collapse state.
 - Clicking a row's arrow button navigates to that prompt in the transcript panel, the same way the scroll-to-last-prompt button navigates to the last prompt: the session's chat panel is activated (opened if absent, focused if present) and the transcript scrolls so the prompt message's top is aligned to the top of the transcript viewport, or to the nearest reachable position when the scroll range is shorter.
 - A session with no user prompts shows a neutral loading state while its initial message request is in flight, and shows the definitive empty state only once `entries` is empty, `has_more` is false, and loading has ended; while older pages remain (`has_more`), the panel remains paginatable instead of declaring the session empty. When entries are empty but an older-page request is in flight (`isLoadingMore`), older-page loading takes precedence: the panel shows the loading message in the content flow (an empty panel has nothing to scroll, so it never floats), not the neutral initial loading text or the empty state.
@@ -56,7 +58,7 @@ For each prompt message `M`, the agent-work duration is the wall-clock time from
 
 Duration is displayed only when such an end time exists, rounded down to whole seconds, clamped at zero. The last prompt (newest user message) shows a duration only when its turn is already completed; while the agent is still working on it, no duration is shown. A prompt whose `turn_id` is absent shows a duration only when a later prompt bounds it.
 
-Robustness rules: a prompt whose `created_at` is not parseable as a timestamp is excluded from the list (its ordering position is undefined). The "next prompt" bound is defined over the filtered prompt list only: after exclusion and sorting, the next prompt is the immediately following entry of the same session — so an unparseable user message can never become a next-prompt candidate, and a valid prompt followed by an invalid user message is bounded by the next *valid* prompt after it. Unparseable `Turn.completed_at` is treated as absent rather than producing `NaN`. Ordering is deterministic: prompts sort by `created_at` ascending, ties broken by `message id` ascending (entries are then displayed newest first). All associations are session-scoped: a turn only bounds a prompt when both share the same `session_id` (matched by `turn_id`), and only the next prompt of the same session bounds the duration.
+Robustness rules: a prompt whose `created_at` is not parseable as a timestamp is excluded from the list (its ordering position is undefined). The "next prompt" bound is defined over the filtered prompt list only: after exclusion and sorting, the next prompt is the immediately following entry of the same session — so an unparseable user message can never become a next-prompt candidate, and a valid prompt followed by an invalid user message is bounded by the next _valid_ prompt after it. Unparseable `Turn.completed_at` is treated as absent rather than producing `NaN`. Ordering is deterministic: prompts sort by `created_at` ascending, ties broken by `message id` ascending (entries are then displayed newest first). All associations are session-scoped: a turn only bounds a prompt when both share the same `session_id` (matched by `turn_id`), and only the next prompt of the same session bounds the duration.
 
 Prompt history derives entries from its own user-message projection. The projection is ordered by the backend's normalized microsecond timestamp and message ID, and older pages are prepended. The "next prompt" bound is evaluated over the prompts currently in this projection. The transcript cache remains a separate mixed-author projection and can contain rows that prompt history has not loaded yet.
 
@@ -66,7 +68,20 @@ Zustand owns `messagePrompts.bySession` and its per-session pagination metadata.
 
 ## Prompt navigation
 
-Selecting a row creates a session-scoped jump target and activates Chat. Chat first searches the loaded transcript. If the target is absent, it requests `GET /messages?around=<message-id>`, merges the target and newer rows, and retries after the row renders. Desktop and phone clear the target only after a successful scroll or a confirmed missing target. A request cannot consume a newer target or a target for another session.
+Selecting a row creates a session-scoped jump target and activates Chat. Chat first searches the loaded transcript. If the target is absent, it waits for the initial transcript request to settle before requesting `GET /messages?around=<message-id>`, merges the target and newer rows, and retries after the row renders. Desktop and phone compare-and-clear the exact target after a successful scroll, a confirmed missing target, or a failed containing-window request. A request cannot consume a newer target or a target for another session.
+
+After an around-window merge, the first rendered target scroll is treated as an initial placement rather than the final settled position. The existing scroll handle exposes success when it finds the row and starts the scroll; that return is the navigation completion boundary. The owner retains the target and starts a fixed 250 ms delay for exactly one reassertion, which must execute within one second of that boundary. The delay is not restarted by later rendered-message revisions. The reassertion uses the existing start-aligned scroll handle and then compare-and-clears the same target token. It runs only when the session, host panel, token, active visibility, and target row still match; a superseding target, session change, panel deactivation, panel teardown, missing target, or failed request cancels the retained intent. Already-loaded prompts keep the existing single-pass behavior, and no navigation path retries indefinitely.
+
+Around-window requests are gated behind initial transcript readiness and deduplicated by `(session_id, host_panel_id, target_token)`. Request-local settlement accounting releases every request's loading contribution, including stale or superseded requests; stale completions cannot publish loading/error state or clear a newer target.
+
+The phone `SessionMobileLayout` owns a separate non-Dockview target with the
+same session ID, message ID, and monotonic token plus the stable host key
+`mobile-chat`. The target is passed only while Chat is the selected mobile
+panel. Leaving Chat, changing the selected panel, or unmounting the Chat host
+cancels and clears the target and its delayed reassertion; returning to Chat
+cannot consume an abandoned intent. The phone hook receives active visibility
+explicitly, so its request deduplication and stale-result checks use the same
+identity and lifecycle guarantees as Dockview.
 
 ## API surface
 

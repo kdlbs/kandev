@@ -25,9 +25,11 @@ afterEach(cleanup);
 function ConfirmationHarness({
   onConfirm,
   onOpenChange,
+  forceDialog = false,
 }: {
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
+  forceDialog?: boolean;
 }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   return (
@@ -44,15 +46,20 @@ function ConfirmationHarness({
         executorType="worktree"
         onConfirm={onConfirm}
         confirmTestId={CONFIRM_TEST_ID}
+        forceDialog={forceDialog}
       />
     </>
   );
 }
 
-function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn()) {
+function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn(), forceDialog = false) {
   return render(
     <StateProvider>
-      <ConfirmationHarness onConfirm={onConfirm} onOpenChange={onOpenChange} />
+      <ConfirmationHarness
+        onConfirm={onConfirm}
+        onOpenChange={onOpenChange}
+        forceDialog={forceDialog}
+      />
     </StateProvider>,
   );
 }
@@ -97,6 +104,43 @@ describe("TaskArchiveConfirmation classification", () => {
     expect(confirmation).toBeTruthy();
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.getByTestId(CONFIRM_TEST_ID).className).toContain("h-11");
+  });
+
+  // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.8
+  it("uses the contained dialog when a coarse-pointer caller forces it", async () => {
+    getSubtaskCountMock.mockResolvedValue({ count: 0 });
+    const onConfirm = vi.fn();
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(onConfirm, onOpenChange, true);
+
+    const dialog = await screen.findByRole("alertdialog", { name: /Archive task/ });
+    expect(dialog).toBeTruthy();
+    expect(screen.queryByTestId(INLINE_CONFIRMATION_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toContain("Task One");
+
+    const archive = screen.getByTestId(CONFIRM_TEST_ID);
+    expect(archive.className).toContain("min-h-11");
+    expect(archive.className).toContain("w-full");
+    expect(archive.getAttribute("data-variant")).toBe("default");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    fireEvent.click(archive);
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ cascade: false }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the forced dialog archive action disabled while classification is pending", async () => {
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+
+    renderConfirmation(vi.fn(), vi.fn(), true);
+
+    const dialog = await screen.findByRole("alertdialog", { name: /Archive task/ });
+    expect(dialog).toBeTruthy();
+    expect(screen.queryByTestId(INLINE_CONFIRMATION_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(true);
   });
 
   it("uses the same semantic cleanup effect list and supporting notes as the dialog", async () => {

@@ -69,6 +69,10 @@ type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
 }
 
+type manualMoveLifecycleMarkerCleaner interface {
+	ClearManualMoveLifecycleMarkersIfCompleted(context.Context, string, time.Time) (bool, error)
+}
+
 type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
 }
@@ -916,17 +920,71 @@ func queuePromotionLifecycleToken(task *models.Task) interface{} {
 	return true
 }
 
-// lifecycleSweepStuckWarningInterval controls how long
-// reconcileTaskLifecycleTokens waits before logging a "still recovering"
-// warning while the sweep is still in flight. It is a var so tests can
-// shorten it. This is a log-only signal: it never cancels the sweep, because
-// the resume calls it drives run under context.WithoutCancel
+// lifecycleSweepStuckWarningInterval controls how often
+// reconcileTaskLifecycleTokens logs a "still recovering" warning while the
+// sweep is still in flight. It is a var so tests can shorten it. This is a
+// log-only signal: it never cancels an individual recovery, because the
+// resume calls it drives run under context.WithoutCancel
 // (task_operations.go), so cancellation would not work anyway.
 var lifecycleSweepStuckWarningInterval = 60 * time.Second
 
+// lifecycleSweepOverallDeadline bounds how long reconcileTaskLifecycleTokens
+// waits for its worker pool before giving up and returning. It is a var so
+// tests can shorten it.
+//
+// This deadline bounds admission and reporting, not an in-flight resume: the
+// resume path a worker is waiting on runs under context.WithoutCancel
+// (task_operations.go), so once a worker is inside waitForSessionReady this
+// deadline cannot abort it. What it does bound is the sweep function itself
+// returning, so a caller (Service.Stop, via stopLifecycleSweepAsync) is never
+// left joining a goroutine for as long as the interactive
+// constants.AgentLaunchTimeout budget allows. Workers still in flight when
+// the deadline fires keep running detached in the background; their eventual
+// completion is unreported.
+var lifecycleSweepOverallDeadline = 5 * time.Minute
+
+// lifecycleSweepInFlight tracks which task IDs a worker is currently
+// recovering, so a stuck-sweep warning (or a deadline-exceeded log) can name
+// them instead of reporting only a count.
+type lifecycleSweepInFlight struct {
+	mu  sync.Mutex
+	ids map[string]struct{}
+}
+
+func newLifecycleSweepInFlight() *lifecycleSweepInFlight {
+	return &lifecycleSweepInFlight{ids: make(map[string]struct{})}
+}
+
+func (f *lifecycleSweepInFlight) start(taskID string) {
+	f.mu.Lock()
+	f.ids[taskID] = struct{}{}
+	f.mu.Unlock()
+}
+
+func (f *lifecycleSweepInFlight) finish(taskID string) {
+	f.mu.Lock()
+	delete(f.ids, taskID)
+	f.mu.Unlock()
+}
+
+func (f *lifecycleSweepInFlight) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := make([]string, 0, len(f.ids))
+	for id := range f.ids {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // reconcileTaskLifecycleTokens scans durable lifecycle markers at startup.
 // A small fixed worker pool and bounded per-task attempts prevent a corrupted
-// or repeatedly failing row from creating an unbounded goroutine storm.
+// or repeatedly failing row from creating an unbounded goroutine storm. Job
+// dispatch and the worker pool run in their own goroutines so that even if
+// every worker is parked on a single task's interactive resume budget, this
+// function's own wait is still bounded by lifecycleSweepOverallDeadline
+// (or ctx cancellation) rather than by however long the worker pool takes to
+// drain every job.
 func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	lister, ok := s.repo.(lifecycleTaskMetadataLister)
 	if !ok {
@@ -999,12 +1057,21 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	s.logger.Info("startup lifecycle sweep starting", zap.Int("task_count", taskCount))
 
 	var processed atomic.Int64
+	inFlight := newLifecycleSweepInFlight()
 	sweepDone := make(chan struct{})
 	warnDone := make(chan struct{})
 	go func() {
 		defer close(warnDone)
-		s.warnIfLifecycleSweepStuck(taskCount, &processed, start, sweepDone)
+		s.warnIfLifecycleSweepStuck(taskCount, &processed, start, inFlight, sweepDone)
 	}()
+
+	// dispatchCtx is a locally cancellable child of ctx so the deadline branch
+	// below can stop the dispatcher without waiting on ctx itself (owned by the
+	// caller, not this function) to be cancelled. Accepted workers keep using
+	// ctx: the deadline is an admission/reporting bound, not a cancellation of
+	// work that already started.
+	dispatchCtx, dispatchCancel := context.WithCancel(ctx)
+	defer dispatchCancel()
 
 	jobIDs := make(chan string)
 	workerCount := 4
@@ -1017,39 +1084,85 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for taskID := range jobIDs {
+				inFlight.start(taskID)
 				s.recoverTaskLifecycleToken(ctx, taskID)
+				inFlight.finish(taskID)
 				processed.Add(1)
 			}
 		}()
 	}
-	for taskID := range jobs {
-		jobIDs <- taskID
-	}
-	close(jobIDs)
-	wg.Wait()
-	close(sweepDone)
-	<-warnDone
+	// Dispatch in its own goroutine: if every worker is parked on one task's
+	// interactive resume budget, sending the remaining job IDs would block
+	// this function on the same wait workersDone below is trying to bound.
+	// The dispatchCtx.Done branch matters independently of that: without it,
+	// once the deadline/cancel select case below fires and this function
+	// returns, an undispatched send blocks forever on the unbuffered channel
+	// — the dispatcher (and, transitively, the workers and the wg.Wait
+	// goroutine) outlives both the sweep's own deadline and Stop().
+	go func() {
+		defer close(jobIDs)
+		for taskID := range jobs {
+			select {
+			case jobIDs <- taskID:
+			case <-dispatchCtx.Done():
+				return
+			}
+		}
+	}()
 
-	s.logger.Info("startup lifecycle sweep finished",
-		zap.Int("task_count", taskCount),
-		zap.Duration("elapsed", time.Since(start)))
-}
+	workersDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(workersDone)
+	}()
 
-// warnIfLifecycleSweepStuck logs a warning if the startup lifecycle sweep is
-// still running after lifecycleSweepStuckWarningInterval, so a slow sweep is
-// diagnosable from logs instead of requiring a goroutine dump. It is
-// log-only: it never cancels the sweep, and it always exits (either the
-// timer fires once, or done closes first).
-func (s *Service) warnIfLifecycleSweepStuck(taskCount int, processed *atomic.Int64, start time.Time, done <-chan struct{}) {
-	timer := time.NewTimer(lifecycleSweepStuckWarningInterval)
-	defer timer.Stop()
 	select {
-	case <-done:
-	case <-timer.C:
-		s.logger.Warn("startup lifecycle sweep still running",
+	case <-workersDone:
+		close(sweepDone)
+		<-warnDone
+		s.logger.Info("startup lifecycle sweep finished",
 			zap.Int("task_count", taskCount),
 			zap.Int64("processed", processed.Load()),
 			zap.Duration("elapsed", time.Since(start)))
+	case <-ctx.Done():
+		dispatchCancel()
+		close(sweepDone)
+		<-warnDone
+		s.logger.Warn("startup lifecycle sweep cancelled; abandoning wait, in-flight tasks continue recovering in the background",
+			zap.Int("task_count", taskCount),
+			zap.Int64("processed", processed.Load()),
+			zap.Strings("in_flight_task_ids", inFlight.snapshot()),
+			zap.Duration("elapsed", time.Since(start)))
+	case <-time.After(lifecycleSweepOverallDeadline):
+		dispatchCancel()
+		close(sweepDone)
+		<-warnDone
+		s.logger.Warn("startup lifecycle sweep exceeded its deadline; abandoning wait, in-flight tasks continue recovering in the background",
+			zap.Int("task_count", taskCount),
+			zap.Int64("processed", processed.Load()),
+			zap.Strings("in_flight_task_ids", inFlight.snapshot()),
+			zap.Duration("elapsed", time.Since(start)))
+	}
+}
+
+// warnIfLifecycleSweepStuck logs a warning every lifecycleSweepStuckWarningInterval
+// while the startup lifecycle sweep is still running, so a slow sweep is
+// diagnosable from logs instead of requiring a goroutine dump. It is
+// log-only: it never cancels the sweep, and it always exits once done closes.
+func (s *Service) warnIfLifecycleSweepStuck(taskCount int, processed *atomic.Int64, start time.Time, inFlight *lifecycleSweepInFlight, done <-chan struct{}) {
+	ticker := time.NewTicker(lifecycleSweepStuckWarningInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			s.logger.Warn("startup lifecycle sweep still running",
+				zap.Int("task_count", taskCount),
+				zap.Int64("processed", processed.Load()),
+				zap.Strings("in_flight_task_ids", inFlight.snapshot()),
+				zap.Duration("elapsed", time.Since(start)))
+		}
 	}
 }
 
@@ -1092,7 +1205,19 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		}
 	}
 	if manualMoveLifecycleCompleted(task) {
-		s.continueManualMoveLifecycle(ctx, taskID)
+		completedAt := task.UpdatedAt
+		if err := s.continueManualMoveLifecycle(ctx, taskID); err != nil {
+			return true
+		}
+		// Clear both markers in one compare-and-clear operation. A new manual
+		// move removes the old completed marker and writes its own pending
+		// marker in one task update, so an unconditional pending-key remove here
+		// could erase live recovery work. The update-generation predicate also
+		// prevents an already-completed newer move from being cleared before its
+		// feeder continuation runs.
+		if _, err := s.clearManualMoveLifecycleMarkersIfCompleted(ctx, taskID, completedAt); err != nil {
+			return true
+		}
 	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
@@ -1992,20 +2117,47 @@ func (s *Service) persistManualMoveLifecycleCompletion(ctx context.Context, task
 	return true
 }
 
-func (s *Service) continueManualMoveLifecycle(ctx context.Context, taskID string) {
+func (s *Service) continueManualMoveLifecycle(ctx context.Context, taskID string) error {
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
-		return
+		if err != nil {
+			return err
+		}
+		return errors.New("manual move lifecycle task not found")
 	}
 	if !manualMoveLifecycleCompleted(latest) {
-		return
+		return nil
 	}
 	if s.feederPulls == nil {
 		s.logger.Warn("manual move lifecycle has no feeder reconciler",
 			zap.String("task_id", taskID))
-		return
+		return errors.New("manual move lifecycle feeder reconciler is unavailable")
 	}
-	s.feederPulls.ReconcileFeederPulls(ctx, latest.WorkflowID, latest.WorkflowStepID)
+	if err := s.feederPulls.ReconcileFeederPulls(ctx, latest.WorkflowID, latest.WorkflowStepID); err != nil {
+		s.logger.Warn("manual move lifecycle feeder reconciliation failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) clearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
+	cleaner, ok := s.repo.(manualMoveLifecycleMarkerCleaner)
+	if !ok {
+		return false, errors.New("repository cannot atomically clear manual move lifecycle markers")
+	}
+	cleared, err := cleaner.ClearManualMoveLifecycleMarkersIfCompleted(ctx, taskID, completedAt)
+	if err != nil {
+		s.logger.Warn("failed to clear manual move lifecycle markers",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false, err
+	}
+	if cleared {
+		if task, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && task != nil {
+			s.publishTaskUpdated(ctx, task)
+		}
+	}
+	return cleared, nil
 }
 
 // processManualMoveLifecycleWithFeederBarrier runs the original move lifecycle
@@ -2527,7 +2679,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 		// resolveDynamicLaunchExecution above may have claimed newSession's
 		// route generation as "starting"; nothing else transitions it if this
 		// workspace-only attach then fails. Safe to call unconditionally: it
-		// only fires while that generation is still "starting".
+		// only fires while that generation is still "starting" or "retrying".
 		s.markDynamicRouteActionRequired(ctx, sessionID, newSession.RouteGeneration, "workflow_replacement_launch_failed")
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
 	}

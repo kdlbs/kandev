@@ -167,7 +167,7 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 			t.Fatalf("buildSSHEnvInitScript: %v", err)
 		}
 		// Each line is a POSIX shell assignment; the line break separates
-		// entries so `. /dev/stdin` under `set -a` exports each one.
+		// entries so evaluating stdin under `set -a` exports each one.
 		if got != "FOO='bar baz'\n" {
 			t.Errorf("buildSSHEnvInitScript = %q, want \"FOO='bar baz'\\n\"", got)
 		}

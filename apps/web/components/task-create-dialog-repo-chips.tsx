@@ -131,7 +131,6 @@ export function RepoChipsRow({
   //   - "Fork a new branch" toggle is a separate flow that creates a NEW branch
   //     from the selected base
   // Other executors: branch is fully editable (no special pre-fill).
-  const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
   if (isTaskStarted) return null;
 
@@ -157,7 +156,7 @@ export function RepoChipsRow({
         fs={fs}
         repositories={repositories}
         workspaceId={workspaceId}
-        branchLocked={branchLocked}
+        branchLocked={false}
         isLocalExecutor={!!isLocalExecutor}
         canAddMore={canAddMore}
         addHint={addHint}
@@ -288,15 +287,8 @@ function ModeBody({
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
 }) {
-  const { t } = useTranslation();
   if (fs.noRepository) {
-    return (
-      <FolderPicker
-        value={fs.workspacePath}
-        onChange={onWorkspacePathChange ?? (() => {})}
-        placeholder={t("task:pickAStartingFolderOptional")}
-      />
-    );
+    return <NoRepositoryMode fs={fs} onWorkspacePathChange={onWorkspacePathChange} />;
   }
   if (fs.useRemote) {
     return (
@@ -330,18 +322,35 @@ function ModeBody({
       onRowPolicyChange={onRowPolicyChange}
       onPolicySelected={onPolicySelected}
       showBranchPolicies
+      showDiscoveryControls
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
       onRefreshRepositories={onRefreshRepositories}
       repositoriesRefreshing={repositoriesRefreshing}
       freshBranchToggle={
-        // Multi-repo runs use worktrees, so the existing-vs-fork choice
-        // is irrelevant — only surface the toggle for single-repo flows.
+        // Multi-repo worktrees do not need the existing-vs-fork choice.
         freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
           <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
         ) : null
       }
+    />
+  );
+}
+
+function NoRepositoryMode({
+  fs,
+  onWorkspacePathChange,
+}: {
+  fs: DialogFormState;
+  onWorkspacePathChange?: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FolderPicker
+      value={fs.workspacePath}
+      onChange={onWorkspacePathChange ?? (() => {})}
+      placeholder={t("task:pickAStartingFolderOptional")}
     />
   );
 }

@@ -45,9 +45,13 @@ func (e *PlanContentTooLargeError) Is(target error) bool {
 }
 
 // checkPlanContentSize is the shared write-seam admission check: a pure
-// function of the submitted content, called from both CreatePlan and
-// UpdatePlan after task access/existence checks and before plan storage or the
-// per-task write lock.
+// function of the content it is measuring, called from two different points
+// depending on mode. In replace mode (validatePlanWrite) it runs once, before
+// plan storage or the per-task write lock, against the submitted content. In
+// append mode (upsertPlan) it runs a second time, inside the per-task write
+// lock, against the composed content (stored content plus fragment) once
+// composition has produced it — not the submitted fragment alone, which
+// could be small enough to admit an oversized document.
 func checkPlanContentSize(content string) error {
 	if n := len(content); n > MaxPlanContentBytes {
 		return &PlanContentTooLargeError{Submitted: n, Limit: MaxPlanContentBytes}

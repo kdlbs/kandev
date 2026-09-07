@@ -33,6 +33,7 @@ import {
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import {
   DockerfileBuildCard,
+  UserNamespacesCard,
   type DockerBuildSuccess,
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
@@ -128,6 +129,7 @@ type BuildProfileConfigInput = {
   isRemote: boolean;
   isSprites: boolean;
   isDocker: boolean;
+  isLocalDocker: boolean;
   networkPolicyRules: NetworkPolicyRule[];
   remoteCredentials: string[];
   configBundleIds: string[];
@@ -138,13 +140,13 @@ type BuildProfileConfigInput = {
   gitUserEmail: string;
   dockerfile: string;
   imageTag: string;
+  allowUserNamespaces: boolean;
 };
 
 function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
   const {
     isRemote,
     isSprites,
-    isDocker,
     networkPolicyRules,
     remoteCredentials,
     configBundleIds,
@@ -153,8 +155,6 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
     localGitIdentity,
     gitUserName,
     gitUserEmail,
-    dockerfile,
-    imageTag,
   } = input;
   const config: Record<string, string> = {};
   if (isSprites && networkPolicyRules.length > 0) {
@@ -184,22 +184,22 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
       config.git_user_email = effectiveEmail;
     }
   }
-  applyDockerCreateConfig(config, isDocker, dockerfile, imageTag);
+  applyDockerCreateConfig(config, input);
   return Object.keys(config).length > 0 ? config : undefined;
 }
 
 function applyDockerCreateConfig(
   config: Record<string, string>,
-  isDocker: boolean,
-  dockerfile: string,
-  imageTag: string,
+  input: BuildProfileConfigInput,
 ): void {
-  if (!isDocker) return;
-  if (dockerfile.trim()) {
-    config.dockerfile = dockerfile;
+  if (input.isDocker && input.dockerfile.trim()) {
+    config.dockerfile = input.dockerfile;
   }
-  if (imageTag.trim()) {
-    config.image_tag = imageTag.trim();
+  if (input.isDocker && input.imageTag.trim()) {
+    config.image_tag = input.imageTag.trim();
+  }
+  if (input.isLocalDocker && input.allowUserNamespaces) {
+    config.allow_user_namespaces = "true";
   }
 }
 
@@ -221,6 +221,7 @@ function useCreateRemoteFlags(executorType: ExecutorType) {
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",
+    isLocalDocker: executorType === "local_docker",
     isSprites: executorType === "sprites",
   };
 }
@@ -301,6 +302,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const remoteAuth = useCreateRemoteAuthState();
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
+  const [allowUserNamespaces, setAllowUserNamespaces] = useState(false);
   const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);
   const flags = useCreateRemoteFlags(executorType);
   const gitIdentity = useCreateGitIdentityState(flags.isRemote);
@@ -368,6 +370,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setDockerfile,
     imageTag,
     setImageTag,
+    allowUserNamespaces,
+    setAllowUserNamespaces,
     recordDockerBuildSuccess,
     dockerImageBuilt,
     gitUserName: gitIdentity.gitUserName,
@@ -376,6 +380,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setGitUserEmail: gitIdentity.setGitUserEmail,
     isRemote: flags.isRemote,
     isDocker: flags.isDocker,
+    isLocalDocker: flags.isLocalDocker,
     isSprites: flags.isSprites,
     mcpPolicyErrorKey,
     buildEnvVars,
@@ -438,15 +443,24 @@ function CreateProfileSections({
         />
       )}
       {form.isDocker && (
-        <DockerfileBuildCard
-          dockerfile={form.dockerfile}
-          baselineDockerfile=""
-          onDockerfileChange={form.setDockerfile}
-          imageTag={form.imageTag}
-          baselineImageTag=""
-          onImageTagChange={form.setImageTag}
-          onBuildSuccess={form.recordDockerBuildSuccess}
-        />
+        <>
+          <DockerfileBuildCard
+            dockerfile={form.dockerfile}
+            baselineDockerfile=""
+            onDockerfileChange={form.setDockerfile}
+            imageTag={form.imageTag}
+            baselineImageTag=""
+            onImageTagChange={form.setImageTag}
+            onBuildSuccess={form.recordDockerBuildSuccess}
+          />
+          {form.isLocalDocker && (
+            <UserNamespacesCard
+              enabled={form.allowUserNamespaces}
+              baselineEnabled={false}
+              onChange={form.setAllowUserNamespaces}
+            />
+          )}
+        </>
       )}
       <CreateRemoteCredentialsSection executorType={executorType} form={form} secrets={secrets} />
       {form.isSprites && (
@@ -560,6 +574,7 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       isRemote: form.isRemote,
       isSprites: form.isSprites,
       isDocker: form.isDocker,
+      isLocalDocker: form.isLocalDocker,
       networkPolicyRules: form.networkPolicyRules,
       remoteCredentials: form.remoteCredentials,
       configBundleIds: form.configBundleIds,
@@ -570,6 +585,7 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       gitUserEmail: form.gitUserEmail,
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
+      allowUserNamespaces: form.allowUserNamespaces,
     }),
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,

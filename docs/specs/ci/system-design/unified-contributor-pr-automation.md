@@ -40,6 +40,7 @@ contracts after the shared authorization gate changes.
 | `.github/workflows/opencode-code-review.yml` | Runs the existing OpenCode fork review path with durable `safe-to-review` authorization. |
 | `.github/workflows/preview-env.yml` | Runs the existing privileged fork preview path. |
 | `.github/workflows/pr-walkthrough.yml` | Generates, publishes, and links walkthroughs for authorized fork and same-repository pull requests. |
+| `.github/workflows/pr-walkthrough-reconcile.yml` | Repairs an existing stale walkthrough callout after an authorized pull request description edit. |
 | `.github/scripts/*workflow_contract_test.py` | Protects job gates, labels, event filters, permissions, and trusted input provenance. |
 | `scripts/opencode-code-review.test.sh` | Keeps the standalone OpenCode workflow test aligned with the persistent-label contract. |
 
@@ -68,7 +69,9 @@ workflow run.
 ### Event contract
 
 - The walkthrough workflow keeps `pull_request_target` events for opened,
-  ready-for-review, reopened, synchronize, and labeled actions.
+  ready-for-review, reopened, synchronize, and labeled actions. A separate
+  trusted workflow handles `edited` for non-generating reconciliation when the
+  current public object is available.
 - A `generate-pr-walkthrough` label still requests a same-repository manual
   rerun. It does not authorize a contributor pull request.
 - The existing Claude workflow keeps its open and labeled fork review policy.
@@ -85,6 +88,14 @@ The walkthrough keeps the existing provider-neutral contract:
 3. Upload only HTML to the R2 bucket in the publication job.
 4. Validate the public response and exact HTML bytes.
 5. Add or replace the owned callout in the pull request body in the link job.
+
+The walkthrough link, reconciliation, and short preview-description jobs use
+one per-pull-request description-write concurrency group. Long-running preview
+deployment and cleanup jobs do not hold that lock. Each description writer
+fetches the body again before its PATCH, retries when the body changed, and
+reads the result back after the write. This protects the walkthrough and
+preview marker blocks from stale full-body updates while preserving contributor
+content.
 
 The public object key remains
 `pr/<number>/<first-12-lowercase-head-sha>.html`.
@@ -137,8 +148,13 @@ The public object key remains
 - A missing or mismatched pull request ref fails walkthrough context
   preparation before the agent starts. The exact SHA check prevents a result
   from being associated with a different head.
-- Existing walkthrough retry, artifact, R2 validation, and PR-body validation
-  behavior remains unchanged.
+- Existing walkthrough retry, artifact, and R2 validation behavior remains
+  unchanged. A stale or legacy walkthrough URL is repaired only when the
+  current canonical public object is available. Missing or malformed marker
+  state fails closed without rewriting the description.
+- A description-write race causes a fresh merge and bounded retry. A writer
+  reports failure if its post-write readback does not contain its expected
+  marker state.
 - Contract tests fail when the old label appears in an active authorization
   expression or when a privileged job loses its trust or permission boundary.
 
@@ -179,7 +195,9 @@ trigger.
 ## Observability
 
 - Existing workflow run status, job summaries, artifact diagnostics, R2 URL
-  validation, and PR-body marker behavior remain the operational signals.
+  validation, and PR-body marker behavior remain the operational signals. The
+  walkthrough reconciliation summary additionally reports no-op, repair,
+  unavailable-object, retry, and readback-failure outcomes.
 - Contract tests provide local evidence for every authorization expression,
   event filter, trusted checkout, exact SHA check, and sensitive permission.
 - Post-rollout verification must inspect a labeled fork run, an allowlisted

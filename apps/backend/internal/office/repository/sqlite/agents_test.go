@@ -429,7 +429,7 @@ func TestUpdateAgentInstance_PersistsEveryMutableField(t *testing.T) {
 	agent.Name = "After"
 	agent.Role = settingsmodels.AgentRole("engineer")
 	agent.Icon = "🛠"
-	agent.Status = settingsmodels.AgentStatus("working")
+	agent.Status = settingsmodels.AgentStatusPaused
 	agent.ReportsTo = "agent-boss"
 	agent.Permissions = `{"approve_budget":true}`
 	agent.BudgetMonthlyCents = 5150
@@ -506,6 +506,46 @@ func TestUpdateAgentInstance_NormalisesEmptyJSONAndStatus(t *testing.T) {
 	}
 	if got.FailureThreshold != nil {
 		t.Errorf("FailureThreshold = %d, want nil after clearing the override", *got.FailureThreshold)
+	}
+}
+
+func TestUpdateAgentInstance_DoesNotOverwriteWorkingOwner(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	agent := fullAgentInstance("u-working", "ws-1", "Working")
+	agent.Status = settingsmodels.AgentStatusIdle
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+
+	snapshot, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if _, err := repo.MarkAgentWorking(ctx, agent.ID, "run-working"); err != nil {
+		t.Fatalf("MarkAgentWorking: %v", err)
+	}
+
+	snapshot.Name = "Renamed while working"
+	if err := repo.UpdateAgentInstance(ctx, snapshot); err != nil {
+		t.Fatalf("UpdateAgentInstance: %v", err)
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance after update: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatusWorking {
+		t.Fatalf("Status = %q, want working", got.Status)
+	}
+	var owner string
+	if err := repo.ReaderDB().GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, agent.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "run-working" {
+		t.Fatalf("working_run_id = %q, want run-working", owner)
 	}
 }
 
@@ -602,6 +642,30 @@ func TestUpdateAgentStatusFields(t *testing.T) {
 	// Unrelated columns survive.
 	if got.Icon != "🤖" {
 		t.Errorf("Icon = %q, want it untouched", got.Icon)
+	}
+}
+
+func TestUpdateAgentStatusFields_ClearsWorkingOwner(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-working", "ws-1", "Status")
+	agent.Status = settingsmodels.AgentStatusIdle
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if _, err := repo.MarkAgentWorking(ctx, agent.ID, "run-status"); err != nil {
+		t.Fatalf("MarkAgentWorking: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "manual pause"); err != nil {
+		t.Fatalf("UpdateAgentStatusFields: %v", err)
+	}
+	var owner string
+	if err := repo.ReaderDB().GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, agent.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "" {
+		t.Fatalf("working_run_id = %q, want empty after pause", owner)
 	}
 }
 

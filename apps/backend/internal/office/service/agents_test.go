@@ -175,17 +175,13 @@ func TestStatusTransition_Valid(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// idle -> working
-	updated, err := svc.UpdateAgentStatus(ctx, agent.ID, models.AgentStatusWorking, "")
-	if err != nil {
-		t.Fatalf("idle->working: %v", err)
-	}
-	if updated.Status != models.AgentStatusWorking {
-		t.Errorf("status = %q, want working", updated.Status)
+	// The scheduler owns the idle -> working transition.
+	if _, err := svc.RepoForTest().MarkAgentWorking(ctx, agent.ID, "status-test-run"); err != nil {
+		t.Fatalf("scheduler mark working: %v", err)
 	}
 
 	// working -> paused
-	updated, err = svc.UpdateAgentStatus(ctx, agent.ID, models.AgentStatusPaused, "manual pause")
+	updated, err := svc.UpdateAgentStatus(ctx, agent.ID, models.AgentStatusPaused, "manual pause")
 	if err != nil {
 		t.Fatalf("working->paused: %v", err)
 	}
@@ -197,6 +193,27 @@ func TestStatusTransition_Valid(t *testing.T) {
 	_, err = svc.UpdateAgentStatus(ctx, agent.ID, models.AgentStatusIdle, "")
 	if err != nil {
 		t.Fatalf("paused->idle: %v", err)
+	}
+}
+
+func TestStatusTransition_WorkingIsSchedulerOwned(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := makeAgent("working-owned", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := svc.UpdateAgentStatus(ctx, agent.ID, models.AgentStatusWorking, ""); err == nil {
+		t.Fatal("expected idle->working to be rejected because the scheduler owns working")
+	}
+	updated, err := svc.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != models.AgentStatusIdle {
+		t.Fatalf("status = %q, want idle", updated.Status)
 	}
 }
 

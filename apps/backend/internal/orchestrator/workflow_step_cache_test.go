@@ -100,7 +100,7 @@ func TestWorkflowStore_LoadStep_CachesAcrossCalls(t *testing.T) {
 	stepGetter := newCountingStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Planning", Position: 0}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	var last engine.StepSpec
 	for i := 0; i < 4; i++ {
@@ -128,7 +128,7 @@ func TestWorkflowStore_LoadStep_ExpiresAfterTTL(t *testing.T) {
 	stepGetter := newCountingStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Planning"}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 	now := time.Now()
 	store.stepCache.now = func() time.Time { return now }
 
@@ -161,7 +161,7 @@ func TestStepSpecCache_UpdatedEventDropsStepEntry(t *testing.T) {
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Planning"}
 
 	svc := &Service{logger: testLogger()}
-	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if _, err := svc.workflowStore.LoadStep(ctx, "wf1", "step1"); err != nil {
 		t.Fatalf("LoadStep failed: %v", err)
@@ -194,7 +194,7 @@ func TestStepSpecCache_UpdatedEventDropsSameWorkflowPositionEntriesOnly(t *testi
 	stepGetter.steps["wf2-step2"] = &wfmodels.WorkflowStep{ID: "wf2-step2", WorkflowID: "wf2", Position: 1}
 
 	svc := &Service{logger: testLogger()}
-	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if _, err := svc.workflowStore.LoadNextStep(ctx, "wf1", 0); err != nil {
 		t.Fatalf("LoadNextStep(wf1) failed: %v", err)
@@ -256,7 +256,7 @@ func TestStepSpecCache_CreatedAndDeletedEventsInvalidate(t *testing.T) {
 			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
 
 			svc := &Service{logger: testLogger()}
-			svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+			svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 			if _, err := svc.workflowStore.LoadStep(ctx, "wf1", "step1"); err != nil {
 				t.Fatalf("LoadStep failed: %v", err)
@@ -283,7 +283,7 @@ func TestWorkflowStore_LoadStep_ErrorNotCached(t *testing.T) {
 	ctx := context.Background()
 	stepGetter := &erroringStepGetter{mockStepGetter: newMockStepGetter(), err: errors.New("boom")}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if _, err := store.LoadStep(ctx, "wf1", "step1"); err == nil {
 		t.Fatal("expected an error for a missing step")
@@ -303,7 +303,7 @@ func TestWorkflowStore_LoadNextStep_NoNextStepNotCached(t *testing.T) {
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Position: 0}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	_, err := store.LoadNextStep(ctx, "wf1", 0)
 	if err == nil {
@@ -371,7 +371,7 @@ func TestWorkflowStore_LoadPreviousStep_CachesAndInvalidates(t *testing.T) {
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Position: 1}
 
 	svc := &Service{logger: testLogger()}
-	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	spec, err := svc.workflowStore.LoadPreviousStep(ctx, "wf1", 1)
 	if err != nil {
@@ -419,7 +419,7 @@ func TestSubscribeWorkflowStepCacheEvents_DeliversThroughBus(t *testing.T) {
 
 	eventBus := bus.NewMemoryEventBus(testLogger())
 	svc := &Service{logger: testLogger(), eventBus: eventBus}
-	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 	svc.subscribeWorkflowStepCacheEvents()
 
 	for _, eventType := range []string{events.WorkflowStepCreated, events.WorkflowStepUpdated, events.WorkflowStepDeleted} {
@@ -453,7 +453,7 @@ func TestWorkflowStore_LoadStep_CoalescesConcurrentMisses(t *testing.T) {
 	stepGetter := newBlockingStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Planning"}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	const n = 10
 	var wg sync.WaitGroup

@@ -164,6 +164,8 @@
   "failedToCreateFolder": "Não foi possível criar a pasta",
   "failedToCreateRepository": "Não foi possível criar o repositório",
   "failedToLoadDirectory": "Não foi possível carregar o diretório",
+  "nativeFolderPickerFailed": "Não foi possível abrir o seletor de pastas nativo.",
+  "nativeFolderPickerUnavailable": "O seletor de pastas nativo não está disponível. Recarregue o Kandev e tente novamente.",
   "failedToLoadRoutine": "Não foi possível carregar a rotina",
   "failedToLoadSetup": "Não foi possível carregar a configuração",
   "failedToRenderDiagram": "Falha ao renderizar o diagrama",

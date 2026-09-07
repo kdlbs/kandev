@@ -351,7 +351,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		evidence := execution.promptAttemptEvidenceSnapshot()
 		failureEvidence = &evidence
 	}
-	m.releaseActivity(executionActivityKey(execution.ID))
+	m.finishExecutionWorkspaceActivity(execution, "turn_complete")
 
 	execution.markAgentActivity()
 

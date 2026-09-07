@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-23
-updated: 2026-08-28
+updated: 2026-09-05
 owners:
   - kandev
 ---
@@ -37,6 +37,8 @@ This behavior obscures actionable errors and makes diagnostic bundles harder to 
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.14:** **GIVEN** a child emits unstructured stderr, **WHEN** the launcher forwards the line, **THEN** the parent records it at warning level.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.15:** **GIVEN** a session references a missing task environment, **WHEN** workspace information is loaded, **THEN** the task fallback succeeds without a warning entry.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.16:** **GIVEN** a task-environment lookup returns another error, **WHEN** workspace information is loaded, **THEN** the existing fallback and warning behavior remains unchanged.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.17:** **GIVEN** an open page detects a changed backend `boot_id`, **WHEN** its recovery report is accepted, **THEN** the backend records one info-level reload entry. It records no `frontend error toast` error entry.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.18:** **GIVEN** Sonner or the legacy toast provider displays an error toast, **WHEN** its report is accepted, **THEN** the backend records one `frontend error toast` error entry.
 
 ## Migrated source detail
 
@@ -91,6 +93,9 @@ status and message path.
   The task fallback remains authoritative for workspace information.
 - Other task-environment lookup errors can indicate a storage problem and
   remain warnings.
+- A changed backend generation is an expected lifecycle condition. Its browser
+  report remains diagnostic evidence, but it is not an error-toast report.
+- Actual error toasts keep their error-level records.
 
 ## Persistence guarantees
 
@@ -125,6 +130,11 @@ persistence, or cleanup behavior across backend restarts.
 - **GIVEN** a task-environment lookup returns another error, **WHEN** workspace
   information is loaded, **THEN** the existing fallback and warning behavior
   remains unchanged.
+- **GIVEN** an open page detects a changed backend `boot_id`, **WHEN** its
+  recovery report is accepted, **THEN** one info entry records the event and no
+  `frontend error toast` error entry is emitted.
+- **GIVEN** an actual error toast is displayed, **WHEN** its report is accepted,
+  **THEN** the existing `frontend error toast` error entry remains unchanged.
 
 ## Out of scope
 
@@ -133,3 +143,5 @@ persistence, or cleanup behavior across backend restarts.
   or startup reconciliation.
 - Reclassifying integration failures, raw ACP frames, host-utility idle repair,
   network disconnects, or authentication warnings.
+- Changing backend-restart detection, the reload-required state, or the reload
+  alert.

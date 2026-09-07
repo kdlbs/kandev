@@ -17,6 +17,7 @@ func TestFromTaskWithSessionInfoIncludesPrimaryAgentProfileID(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		&profileID,
 		nil,
 		nil,

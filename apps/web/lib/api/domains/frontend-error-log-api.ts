@@ -8,7 +8,7 @@ const BROWSER_FIELD_LIMIT = 2 * 1024;
 const STACK_LIMIT = 16 * 1024;
 const MAX_REACT_TEXT_NODES = 32;
 
-export type FrontendErrorSource = "sonner" | "toast-provider";
+export type FrontendErrorSource = "sonner" | "toast-provider" | "backend-reload";
 
 export type FrontendErrorReportInput = {
   source: FrontendErrorSource;
@@ -49,16 +49,20 @@ export function buildFrontendErrorReport(input: FrontendErrorReportInput): Front
     client_timestamp: new Date().toISOString(),
     source: input.source,
     title: visibleText(input.title),
-    description: visibleText(input.description),
-    stack: bounded(new Error("error toast emitted").stack, STACK_LIMIT),
+    ...(input.source === "backend-reload" ? {} : { description: visibleText(input.description) }),
   };
+  if (input.source !== "backend-reload") {
+    report.stack = bounded(new Error("error toast emitted").stack, STACK_LIMIT);
+  }
   if (currentURL) {
     report.task_id = deriveTaskID(currentURL);
     report.url = bounded(`${currentURL.origin}${currentURL.pathname}`, TEXT_LIMIT);
   }
   addBrowserContext(report);
-  const error = errorDetails(input.error);
-  if (error) report.error = error;
+  if (input.source !== "backend-reload") {
+    const error = errorDetails(input.error);
+    if (error) report.error = error;
+  }
   return report;
 }
 

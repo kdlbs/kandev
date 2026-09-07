@@ -735,7 +735,14 @@ func (e *Executor) resolveModelSwitchExecutorConfig(
 	running *models.ExecutorRunning,
 ) (executorConfig, error) {
 	if running == nil || running.Runtime != agentruntime.RuntimeKubernetes {
-		return e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil), nil
+		metadata := cloneMetadata(task.Metadata)
+		if session.ExecutorProfileID != "" {
+			if metadata == nil {
+				metadata = make(map[string]interface{})
+			}
+			metadata[lifecycle.MetadataKeyExecutorProfileID] = session.ExecutorProfileID
+		}
+		return e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata), nil
 	}
 	metadata := cloneMetadata(session.Metadata)
 	if metadata == nil {
