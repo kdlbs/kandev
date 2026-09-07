@@ -54,8 +54,9 @@ the provisional branch also removes its loader-only import and markup.
 A non-rendering pending controller retains dismissal behavior without
 reintroducing a temporary confirmation. Escape closes the request and restores
 focus to the configured trigger; a new pointer interaction closes it without
-blocking that target. Closing disables descendant classification, so a late
-response cannot mount a confirmation after dismissal.
+blocking that target. It also closes the request when live data removes the
+originating anchor. Closing disables descendant classification, so a late
+response cannot mount a confirmation after dismissal or anchor removal.
 
 The existing coarse-pointer pending branch already renders no popup and is the
 nearest implementation precedent. `forceDialog`, bulk, inline, preference
@@ -118,11 +119,12 @@ mobile-parity check.
   `task-archive-confirm-popover` before the production change.
 - RED Chromium regression: failed with the same provisional popover while the
   intercepted descendant-count request remained pending.
-- Review-remediation RED component cases: 2 failed because the hidden pending
-  request did not retain Escape or outside-pointer dismissal.
+- Review-remediation RED component cases: 3 failed because the hidden pending
+  request did not retain Escape, outside-pointer dismissal, or the prior
+  connected-anchor lifecycle guard.
 - Review-remediation RED Chromium regression: failed because a late positive
   result mounted the cascade dialog after Escape dismissal.
-- Focused component suite: 12 passed.
+- Focused component suite: 13 passed.
 - Touched-file ESLint: passed with no findings.
 - Web typecheck: passed.
 - Mobile Chrome confirmation E2E: 2 passed.

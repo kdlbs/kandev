@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { StateProvider } from "@/components/state-provider";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
@@ -59,6 +59,43 @@ function ConfirmationHarness({
   );
 }
 
+function AnchorLifecycleHarness({
+  showAnchor,
+  onOpenChange,
+}: {
+  showAnchor: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
+
+  return (
+    <>
+      {showAnchor ? (
+        <button ref={anchorRef} type="button" data-testid="archive-anchor">
+          Archive source
+        </button>
+      ) : null}
+      <TaskArchiveConfirmation
+        open={open}
+        onOpenChange={handleOpenChange}
+        anchorRef={anchorRef}
+        taskId="task-1"
+        taskTitle="Task One"
+        executorType="worktree"
+        onConfirm={vi.fn()}
+      />
+    </>
+  );
+}
+
 function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn(), forceDialog = false) {
   return render(
     <StateProvider>
@@ -106,6 +143,26 @@ describe("TaskArchiveConfirmation pending dismissal", () => {
 
     fireEvent.pointerDown(screen.getByTestId("outside-action"));
 
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("dismisses the hidden desktop request when its anchor disappears", async () => {
+    pointerState.isFinePointer = true;
+    const deferredCount = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(deferredCount.promise);
+    const onOpenChange = vi.fn();
+    const renderHarness = (showAnchor: boolean) => (
+      <StateProvider>
+        <AnchorLifecycleHarness showAnchor={showAnchor} onOpenChange={onOpenChange} />
+      </StateProvider>
+    );
+    const view = render(renderHarness(true));
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    view.rerender(renderHarness(false));
+    await act(async () => deferredCount.resolve({ count: 2 }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

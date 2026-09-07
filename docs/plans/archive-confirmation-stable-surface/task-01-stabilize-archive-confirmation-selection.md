@@ -33,6 +33,8 @@ final confirmation route and the contained phone dialog.
   `TaskArchiveConfirmation` without changing its controlled request state.
 - Preserve Escape and outside-pointer dismissal while the pending request has
   no rendered confirmation shell.
+- Preserve dismissal when live data removes the originating anchor while the
+  pending request has no rendered confirmation shell.
 - Add a RED component regression that holds descendant classification pending,
   then resolves it to a positive count and observes only the cascade dialog.
 - Add a RED desktop Kanban E2E regression that deterministically holds the
@@ -55,6 +57,8 @@ final confirmation route and the contained phone dialog.
 - Escape restores focus to the configured trigger, outside pointer intent
   dismisses without being blocked, and a late result cannot mount a surface
   after either dismissal.
+- Removing the originating anchor dismisses the pending request, and a late
+  positive result cannot mount a stale dialog.
 - Resolved zero counts still mount the anchored popover, classification errors
   still fail safe to the full dialog, and callbacks/focus/preference behavior
   remain unchanged.
@@ -117,7 +121,8 @@ None.
   pointer dismissal while the request waits, then renders the existing
   resolved-zero popover or safe dialog only if it remains open.
 - Review-remediation RED cases exposed the missing hidden-state dismissal at
-  both component and Chromium boundaries before the controller was added.
-- Component suite: 12 passed. Touched-file ESLint and web typecheck passed.
+  both component and Chromium boundaries before the controller was added. A
+  later RED component case exposed the missing connected-anchor lifecycle guard.
+- Component suite: 13 passed. Touched-file ESLint and web typecheck passed.
 - Existing Mobile Chrome confirmation spec: 2 passed. Chromium cascade spec:
   6 passed, with a fresh desktop capture of the final cascade dialog.

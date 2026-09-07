@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useLayoutEffect, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
@@ -165,6 +165,11 @@ function PendingArchiveDismissal({
   focusReturnRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
 }) {
+  useLayoutEffect(() => {
+    if (anchorRef.current?.isConnected) return;
+    onOpenChange(false);
+  });
+
   useEffect(() => {
     const dismiss = () => onOpenChange(false);
     const handlePointerDown = () => dismiss();

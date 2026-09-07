@@ -139,10 +139,11 @@ adding cascade controls to the compact popover.
 A non-rendering pending-dismissal controller retains the lifecycle previously
 owned by the provisional popover. Escape closes the controlled request and
 returns focus to the configured trigger; a new pointer interaction closes it
-without preventing the new target's interaction. Closing disables the
-classification hook, whose cleanup ignores any late response, so a dismissed
-request cannot surface later. The controller mounts no role, action, or visual
-confirmation shell.
+without preventing the new target's interaction. If live data removes the
+originating anchor, the controller closes the request before classification can
+select a final surface. Closing disables the classification hook, whose cleanup
+ignores any late response, so a dismissed request cannot surface later. The
+controller mounts no role, action, or visual confirmation shell.
 
 Callers whose final presentation is already known keep their current behavior.
 Forced mobile Kanban and bulk operations may mount the full dialog immediately
