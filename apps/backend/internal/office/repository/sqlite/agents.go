@@ -23,6 +23,15 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 )
 
+// ErrAgentNotFound is wrapped (%w) into GetAgentInstance's not-found error
+// so a caller that specifically needs to distinguish "no such agent" from
+// any other read failure can errors.Is against it. It also wraps
+// sql.ErrNoRows itself, so errors.Is(err, sql.ErrNoRows) keeps working for
+// GetAgentFromConfig (service/config_read.go), which calls GetAgentInstance
+// directly and needs that distinction for AC-OFFICE-BUDGET-001.13 without a
+// second lookup or a second wrapped sentinel.
+var ErrAgentNotFound = fmt.Errorf("agent instance not found: %w", sql.ErrNoRows)
+
 // agentInstanceColumns is the SELECT projection that maps agent_profiles
 // columns onto the AgentInstance struct shape. Used by every read in this
 // file so the column ordering is centralised.
@@ -187,11 +196,12 @@ func (r *Repository) GetAgentInstance(ctx context.Context, id string) (*models.A
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE id = ? AND ` + agentInstanceFilter
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		// Wrapping (not just formatting) sql.ErrNoRows lets callers tell "no
-		// such agent" apart from a transient I/O failure via errors.Is,
-		// without a second lookup or a new sentinel type (AC-OFFICE-BUDGET-
-		// 001.13's two dispositions require exactly that distinction).
-		return nil, fmt.Errorf("agent instance not found: %s: %w", id, sql.ErrNoRows)
+		// Wrapping ErrAgentNotFound (which itself wraps sql.ErrNoRows) lets
+		// callers tell "no such agent" apart from a transient I/O failure via
+		// either errors.Is(err, sql.ErrNoRows) (AC-OFFICE-BUDGET-001.13's two
+		// dispositions require exactly that distinction) or
+		// errors.Is(err, ErrAgentNotFound), without a second lookup.
+		return nil, fmt.Errorf("agent instance not found: %s: %w", id, ErrAgentNotFound)
 	}
 	return &agent, err
 }

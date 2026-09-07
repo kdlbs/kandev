@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +310,27 @@ func TestGetAgentInstance_NotFoundAndOfficeScoping(t *testing.T) {
 	}
 	if deletedRows != 1 {
 		t.Errorf("soft-deleted rows = %d, want the audit row preserved", deletedRows)
+	}
+}
+
+// TestGetAgentInstance_NotFoundWrapsSentinel proves the wakeup dispatcher's
+// errors.Is(err, sqlite.ErrAgentNotFound) branch actually observes the
+// sentinel, while every existing strings.Contains caller (including the
+// text assertion above) keeps matching — the wrap only appends, it never
+// replaces the original "agent instance not found: <id>" message.
+func TestGetAgentInstance_NotFoundWrapsSentinel(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	_, err := repo.GetAgentInstance(ctx, "missing")
+	if err == nil {
+		t.Fatal("GetAgentInstance(missing) = nil error, want not-found")
+	}
+	if !errors.Is(err, sqlite.ErrAgentNotFound) {
+		t.Errorf("errors.Is(err, ErrAgentNotFound) = false, want true: %v", err)
+	}
+	if !strings.Contains(err.Error(), "agent instance not found: missing") {
+		t.Errorf("error = %q, want it to still name the missing agent", err)
 	}
 }
 
