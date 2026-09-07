@@ -420,6 +420,55 @@ func (r *Repository) UpdateAgentStatusFields(
 	return err
 }
 
+// UpdateAgentStatusFieldsIfCurrent updates status fields only when the
+// agent still has expectedStatus. The affected-row result makes a stale
+// caller observable instead of allowing it to overwrite a newer status.
+func (r *Repository) UpdateAgentStatusFieldsIfCurrent(
+	ctx context.Context, id, expectedStatus, status, pauseReason string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = CASE WHEN ? = 'working' THEN status ELSE ? END,
+			pause_reason = CASE WHEN ? = 'working' THEN pause_reason ELSE ? END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' AND ? = 'working' THEN working_run_id
+				ELSE ''
+			END,
+			updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), status, status, status, pauseReason, status, now, id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// ClearAgentPauseReasonIfCurrent clears only pause_reason when the agent
+// still has expectedStatus. This preserves a concurrent working or stopped
+// status while avoiding a stale status write.
+func (r *Repository) ClearAgentPauseReasonIfCurrent(
+	ctx context.Context, id, expectedStatus string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET pause_reason = '', updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), time.Now().UTC(), id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // GetAgentInstanceByNameAny returns the first agent instance matching a name
 // across all workspaces. Used for ID-or-name lookups without workspace context.
 func (r *Repository) GetAgentInstanceByNameAny(
@@ -535,8 +584,12 @@ func (r *Repository) DeleteAgentInstanceTx(ctx context.Context, tx *sqlx.Tx, id 
 
 func (r *Repository) deleteAgentInstance(ctx context.Context, ext sqlx.ExtContext, id string) error {
 	now := time.Now().UTC()
+	if _, err := ext.ExecContext(ctx, r.db.Rebind(
+		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id); err != nil {
+		return err
+	}
 	_, err := ext.ExecContext(ctx, r.db.Rebind(
-		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
+		`DELETE FROM office_agent_pause_recoveries WHERE agent_id = ?`), id)
 	return err
 }
 

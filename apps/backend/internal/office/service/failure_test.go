@@ -255,6 +255,133 @@ func TestMarkAgentPausedFixed_RecoversAgent(t *testing.T) {
 	}
 }
 
+func TestMarkAgentPausedFixed_RequeuesEachAffectedTask(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-multi-recover")
+	autoPauseAgent(t, svc, "ws-1", "agent-multi-recover", 3)
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-multi-recover"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, run := range runs {
+		if run.AgentProfileID != "agent-multi-recover" ||
+			run.Reason != service.RunReasonManualResumeAfterFailure {
+			continue
+		}
+		seen[taskIDFromPayload(t, run.Payload)] = true
+	}
+	for i := 0; i < 3; i++ {
+		taskID := "agent-multi-recover-task-" + uuidish("p", i)
+		if !seen[taskID] {
+			t.Errorf("missing recovery run for task %s; seen=%v", taskID, seen)
+		}
+	}
+}
+
+func TestMarkAgentPausedFixed_RetainsPendingRecoveryForRetry(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-retry-recover")
+	autoPaused := autoPauseAgent(t, svc, "ws-1", "agent-retry-recover", 3)
+	if err := svc.UpdateAgentStatusFields(ctx, "agent-retry-recover",
+		string(models.AgentStatusStopped), autoPaused.PauseReason); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-retry-recover"); err == nil {
+		t.Fatal("mark fixed while stopped = nil error, want queue failure")
+	}
+	if err := svc.UpdateAgentStatusFields(ctx, "agent-retry-recover",
+		string(models.AgentStatusIdle), ""); err != nil {
+		t.Fatalf("restore agent: %v", err)
+	}
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-retry-recover"); err != nil {
+		t.Fatalf("retry mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.AgentProfileID == "agent-retry-recover" &&
+			run.Reason == service.RunReasonManualResumeAfterFailure {
+			return
+		}
+	}
+	t.Fatal("retry did not queue a manual recovery run")
+}
+
+func TestMarkAgentRunFailedFixed_LeavesInboxWhenRequeueFails(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-task-retry")
+	taskID := "task-retry-after-queue-error"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-task-retry")
+	run := queueAndReadRun(t, svc, "agent-task-retry", taskID)
+	if err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if err := svc.UpdateAgentStatusFields(ctx, "agent-task-retry",
+		string(models.AgentStatusStopped), "manual stop"); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	if err := svc.MarkAgentRunFailedFixed(ctx, "user-1", run.ID); err == nil {
+		t.Fatal("mark fixed while stopped = nil error, want queue failure")
+	}
+	dismissed, err := svc.IsInboxItemDismissed(
+		ctx, "user-1", service.InboxKindAgentRunFailed, run.ID,
+	)
+	if err != nil {
+		t.Fatalf("check dismissal: %v", err)
+	}
+	if dismissed {
+		t.Fatal("failed requeue dismissed the inbox item before recovery succeeded")
+	}
+}
+
+func TestMarkAgentPausedFixed_UsesPauseSnapshot(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-snapshot")
+	oldTaskID := "old-failure-task"
+	insertSyntheticTask(t, svc, oldTaskID, "ws-1", "agent-snapshot")
+	oldRun := queueAndReadRun(t, svc, "agent-snapshot", oldTaskID)
+	if err := svc.HandleAgentFailure(ctx, oldRun, "old failure"); err != nil {
+		t.Fatalf("old failure: %v", err)
+	}
+	svc.RecordAgentSuccess(ctx, "agent-snapshot")
+
+	autoPauseAgent(t, svc, "ws-1", "agent-snapshot", 3)
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-snapshot"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.AgentProfileID == "agent-snapshot" &&
+			run.Reason == service.RunReasonManualResumeAfterFailure &&
+			taskIDFromPayload(t, run.Payload) == oldTaskID {
+			t.Fatalf("queued stale recovery for task %s", oldTaskID)
+		}
+	}
+}
+
 // Threshold-agnostic: the fix must not assume the default threshold
 // of 3. A per-agent override to a different value must still recover.
 func TestMarkAgentPausedFixed_ThresholdAgnostic(t *testing.T) {
