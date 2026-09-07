@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
@@ -495,6 +494,4 @@ func TestOnAssigneeChanged_DismissesPriorEntryWithoutResettingCounter(t *testing
 	if !dismissed {
 		t.Fatalf("expected run %s dismissed via _auto", w.ID)
 	}
-	// Sanity: settling time so any async event handlers complete.
-	time.Sleep(10 * time.Millisecond)
 }
