@@ -12,8 +12,9 @@ import { subscribeIntegrationAvailability } from "@/lib/integrations/integration
  * Effect-driven and imperative fetches share one generation guard so a stale
  * workspace response cannot overwrite the currently selected workspace.
  */
-export function useGitLabStatus() {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+export function useGitLabStatus(requestedWorkspaceId?: string | null) {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = requestedWorkspaceId ?? activeWorkspaceId;
   const statusSnapshot = useAppStore((state) => state.gitlabStatus);
   const ownsSnapshot = statusSnapshot.workspaceId === workspaceId;
   const status = ownsSnapshot ? statusSnapshot.data : null;

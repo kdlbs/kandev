@@ -62,6 +62,16 @@ describe("Azure DevOps browse hooks", () => {
     expect(result.current.data).toBeNull();
   });
 
+  it("reloads connection data on refresh", async () => {
+    apiMocks.config.mockResolvedValue({ hasSecret: true, lastOk: true });
+    const { result } = renderHook(() => useAzureDevOpsConnection(WORKSPACE_A));
+
+    await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(1));
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(2));
+  });
+
   it("ignores a work-item response from the previous workspace", async () => {
     const stale = deferred<{ items: Array<{ id: number }> }>();
     apiMocks.workItems.mockReturnValueOnce(stale.promise);

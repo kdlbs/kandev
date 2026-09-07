@@ -30,6 +30,7 @@ function useOperationGeneration(scope?: string) {
 }
 
 export function useAzureDevOpsConnection(workspaceId?: string) {
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [state, setState] = useState<AsyncResult<AzureDevOpsConfig | null>>({
     data: null,
     loading: true,
@@ -52,8 +53,9 @@ export function useAzureDevOpsConnection(workspaceId?: string) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
-  return state;
+  }, [refreshVersion, workspaceId]);
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
+  return { ...state, refresh };
 }
 
 export function useAzureDevOpsWorkItemSearch(workspaceId?: string) {

@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-07-17
-updated: 2026-07-31
+updated: 2026-09-07
 owners:
   - tbd
 ---
@@ -28,6 +28,9 @@ Teams whose source code and planning work live in Azure DevOps cannot use Kandev
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.6:** The Azure DevOps browser includes a Board mode alongside Work items and Pull requests. Board mode is the default connected view and selects context in Azure's hierarchy: project, then team, then board/backlog level.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.7:** Board mode initially selects the configured default project when available, the first accessible team, and the first visible requirement board (falling back to the first visible board). Users can change every level explicitly. Each user's last valid mode, preset, project, team, board, focused column, work-item filters, and pull-request filters are restored independently for each workspace on the next load.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.8:** The selected board shows Azure's columns, column item counts and limits, and work-item cards with ID, title, type, assignee, and tags.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.9:** When a user opens the task-creation Remote repository picker, Kandev shall request and show repositories only from source-control integrations that report an available connection for that workspace. An unconfigured integration shall not produce a repository-list error or a provider tab.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.10:** When repository listing fails for a source-control integration that reported an available connection, Kandev shall show that provider failure without removing repositories loaded from other providers, and the user shall be able to retry the listing.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.11:** Desktop and phone task-creation flows shall apply the same provider-availability and partial-failure behavior while preserving manual remote URL entry.
 
 ## System design
 

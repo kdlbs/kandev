@@ -159,3 +159,25 @@ describe("useGitLabStatus workspace ownership", () => {
     expect(result.current.status).toBeNull();
   });
 });
+
+describe("useGitLabStatus requested workspace", () => {
+  beforeEach(() => {
+    activeWorkspaceId = workspaceA;
+    cachedStatus = { workspaceId: workspaceA, data: null, loading: false, loadedAt: null };
+    fetchGitLabStatusMock.mockReset().mockResolvedValue({ host: gitLabAHost });
+    setStatus.mockReset();
+    setStatusLoading.mockReset();
+  });
+
+  it("uses the requested workspace instead of the active workspace", async () => {
+    renderHook(() => useGitLabStatus(workspaceB));
+
+    await waitFor(() =>
+      expect(fetchGitLabStatusMock).toHaveBeenCalledWith({
+        cache: "no-store",
+        workspaceId: workspaceB,
+      }),
+    );
+    expect(setStatus).toHaveBeenCalledWith(workspaceB, null);
+  });
+});
