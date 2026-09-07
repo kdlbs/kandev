@@ -45,6 +45,8 @@ afterEach(() => {
   cleanup();
   mockedListDirectory.mockReset();
   setPopoverOpen = undefined;
+  delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  delete (window as Window & { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__;
 });
 
 describe("FolderPicker", () => {
@@ -58,6 +60,27 @@ describe("FolderPicker", () => {
     render(<FolderPicker value="C:\\" onChange={vi.fn()} />);
 
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toBe("C:\\");
+  });
+
+  it("uses the native picker in a Tauri WebView without listing directories over HTTP", async () => {
+    const invoke = vi.fn(async () => ({ status: "selected", path: "/Users/example/Code" }));
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke },
+    });
+    Object.defineProperty(window, "__KANDEV_BOOT_PAYLOAD__", {
+      configurable: true,
+      value: { runtime: { nativeFolderPickerAvailable: true } },
+    });
+    const onChange = vi.fn();
+
+    render(<FolderPicker value="" onChange={onChange} />);
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("/Users/example/Code"));
+    expect(invoke).toHaveBeenCalledWith("pick_directory", undefined);
+    expect(mockedListDirectory).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("folder-picker-popover")).toBeNull();
   });
 
   it("builds Windows breadcrumbs with a virtual root and native drive paths", async () => {

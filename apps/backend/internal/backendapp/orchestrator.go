@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
 	"strings"
 
@@ -125,6 +126,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
@@ -183,6 +185,17 @@ func provideOrchestrator(
 	// resolves sessions through its own repo handle, so it does not inherit the
 	// task service's authorize* checks.
 	orchestratorSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	orchestratorSvc.SetSessionControlChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionControl)
+	})
+	// Starting, resuming, steering and dispatching a turn are writes, so they
+	// need session.prompt rather than mere reach.
+	orchestratorSvc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt)
+	})
+	orchestratorSvc.SetTaskPromptChecker(func(ctx context.Context, taskID string) error {
+		return taskSvc.AuthorizeTaskScope(ctx, taskID, authz.ScopeSessionPrompt)
+	})
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the

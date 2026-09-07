@@ -675,6 +675,11 @@ const (
 const (
 	DecisionApproved         = "approved"
 	DecisionChangesRequested = "changes_requested"
+	// DecisionRejected is the agent-path verdict literal
+	// (engine.DecisionRejected) for the same semantic as
+	// DecisionChangesRequested — the quorum engine already treats them as
+	// synonyms (isRejectionVerdict in internal/workflow/engine/quorum.go).
+	DecisionRejected = "rejected"
 
 	DeciderTypeUser  = "user"
 	DeciderTypeAgent = "agent"

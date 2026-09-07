@@ -115,6 +115,25 @@ type WorkspaceGroupCleaner interface {
 	CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error
 }
 
+// ConfigSyncCleaner removes config sync's ownership rows for a workspace
+// before DeleteWorkspace wipes the office repository (which owns every
+// entity config sync manages). office_config_sync_configs and
+// office_config_sync_manifest carry no FK/cascade onto the workspace row —
+// see the "Workspace deletion side tables" convention — so without this a
+// deleted workspace's poller keeps running and can resurrect entities into
+// it. This is not the release-semantics unlink path: the entities themselves
+// are being deleted by this same workspace teardown, so there is nothing to
+// release them back to. PurgeForWorkspaceDeletion returns the per-workspace
+// lock still held, via the returned unlock func: the caller must defer it
+// until the rest of this workspace's data has been deleted, so an in-flight
+// sync run queued behind the lock cannot write config sync rows back in
+// after teardown completes. A non-nil error returns a nil unlock func with
+// the lock already released. Implemented by *configsync.Service; declared
+// locally so this package stays configsync-free.
+type ConfigSyncCleaner interface {
+	PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) (unlock func(), err error)
+}
+
 // TaskStarterFunc adapts a function to the TaskStarter interface.
 // Useful for wrapping callers whose StartTask returns additional values.
 type TaskStarterFunc func(ctx context.Context, taskID, agentProfileID, executorID,
@@ -234,6 +253,7 @@ type Service struct {
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
 	workspaceGroupCleaner   WorkspaceGroupCleaner
+	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
@@ -364,6 +384,12 @@ func NewService(opts ServiceOptions) *Service {
 // constructs the shared HandoffService instance.
 func (s *Service) SetWorkspaceGroupCleaner(cleaner WorkspaceGroupCleaner) {
 	s.workspaceGroupCleaner = cleaner
+}
+
+// SetConfigSyncCleaner wires the config sync service after startup
+// constructs it, mirroring SetWorkspaceGroupCleaner.
+func (s *Service) SetConfigSyncCleaner(cleaner ConfigSyncCleaner) {
+	s.configSyncCleaner = cleaner
 }
 
 // SetAgentctlBinaryPath overrides the host path to the agentctl binary.

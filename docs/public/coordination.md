@@ -14,6 +14,14 @@ Kandev can coordinate several agents without turning every unit of work into a s
 3. Choose an isolated workspace for concurrent writers or a different repository.
 4. Send bounded messages and keep the human review gate explicit.
 
+![Coordination boundary decision tree with same-session, inherited subtask, new workspace, and multi-repository task choices.](../screenshots/coordination.svg)
+
+[Open full-size SVG diagram][coordination-diagram]
+
+[coordination-diagram]: ../../docs/screenshots/coordination.svg
+
+Start with the smallest boundary that preserves shared context. Increase the boundary only when workflow state, files, repositories, or credentials need isolation.
+
 ## Choose a coordination boundary
 
 | Need                                                                 | Use                                       | Filesystem relationship                    | Independent workflow state |

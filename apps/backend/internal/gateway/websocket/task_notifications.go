@@ -82,6 +82,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
 	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
+	b.subscribe(eventBus, events.SessionPendingActionChanged, ws.ActionSessionPendingActionChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
@@ -277,6 +278,12 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
+	case ws.ActionSessionPendingActionChanged:
+		// Pending action is a compact workspace projection. It must reach
+		// inactive session selectors, but an unattributed event must never
+		// fall back to a global broadcast when authentication is enforced.
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
+		return nil
 	case ws.ActionMessageQueueStatusChanged:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)

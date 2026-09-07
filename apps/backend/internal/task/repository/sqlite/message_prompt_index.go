@@ -106,6 +106,64 @@ func (r *Repository) allocatePromptSeq(ctx context.Context, execer messageBounda
 	return seq, nil
 }
 
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The durable sequence is not decremented when a message is
+// deleted, so this remains true after the transcript row is removed. An empty
+// sequence row is the reservation marker written by
+// ClaimInitialPromptFallback; it is also history for the one-time fallback
+// decision. The single-row lookup is bounded by the session primary key and
+// does not scan message history.
+func (r *Repository) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	var marker int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT 1 FROM task_session_prompt_seq WHERE task_session_id = ?`,
+	), sessionID).Scan(&marker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read session prompt history: %w", err)
+	}
+	return marker == 1, nil
+}
+
+// ClaimInitialPromptFallback atomically reserves the first prompt slot for an
+// empty workflow-step task-description fallback. User-message creation uses
+// the same per-session write boundary, so a direct prompt that commits first
+// wins the slot and a concurrent fallback cannot also qualify. A successful
+// claim writes a zero-valued reservation marker; the later visible fallback
+// message then receives prompt ordinal 1 without making the reservation itself
+// an empty transcript row.
+func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session ID is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin initial prompt fallback claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		VALUES (?, 0)
+		ON CONFLICT(task_session_id) DO NOTHING
+	`), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("claim initial prompt fallback: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit initial prompt fallback claim: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read initial prompt fallback claim result: %w", err)
+	}
+	return claimed > 0, nil
+}
+
 // readSessionMaxUserKey returns the session's newest user-message normalized
 // key in the exact key layout, and whether any user row exists. On SQLite the
 // key expression yields the text directly; on PostgreSQL the native TIMESTAMP

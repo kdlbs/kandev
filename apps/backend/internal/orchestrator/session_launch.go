@@ -156,6 +156,13 @@ func IsBenignLaunchTeardownErr(err error) bool {
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
+	// Launching a session starts an agent turn: session.prompt.
+	if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
+	// Existing-session launches must also prove that the supplied session and
+	// task belong together; independent reach checks do not establish that
+	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
@@ -409,7 +416,8 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
 	// Guard before the switch: "fresh_start" clears the resume token, so an
 	// unauthorized call would mutate the session even if the launch failed.
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	// Recovering a session resumes an agent turn: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	if err := s.authorizeTask(ctx, taskID); err != nil {

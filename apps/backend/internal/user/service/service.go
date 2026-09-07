@@ -79,7 +79,12 @@ type UpdateUserSettingsRequest struct {
 	SidebarViews                      *[]models.SidebarView
 	SidebarActiveViewID               *string
 	SidebarDraft                      **models.SidebarViewDraft
+	ThreadViews                       *[]models.ThreadView
+	ThreadActiveViewID                *string
+	ThreadViewDraft                   **models.ThreadViewDraft
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs
+	SidebarTaskColorAutomation        *models.SidebarTaskColorAutomation
+	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
 	JiraTaskPresets                   **json.RawMessage
@@ -98,6 +103,7 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	ResolveSessionHostnames           *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
@@ -191,7 +197,7 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
 	}
-	return s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
+	settings, err := s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
 		// The shallow copy is safe only while every apply* helper replaces
 		// reference fields (slices, maps, and json.RawMessage) instead of
 		// mutating them in place. In-place mutation would alias before and make
@@ -215,11 +221,52 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		if err := applySidebarViewState(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
+		if err := applyThreadViews(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyThreadViewState(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarTaskColorAutomation(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarTaskColors(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
 		if err := applyUserPreferenceBlobs(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		return !reflect.DeepEqual(*settings, before), nil
 	}, taskCreatePatch)
+	if err != nil {
+		return nil, err
+	}
+	return settings, nil
+}
+
+// applySidebarTaskColorAutomation replaces the complete personal automatic
+// color rule set after validating its discriminated target and output shape.
+func applySidebarTaskColorAutomation(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarTaskColorAutomation == nil {
+		return nil
+	}
+	value := *req.SidebarTaskColorAutomation
+	if err := models.ValidateSidebarTaskColorAutomation(value); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	var replacement models.SidebarTaskColorAutomation
+	if err := json.Unmarshal(encoded, &replacement); err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	if replacement.Rules == nil {
+		replacement.Rules = []models.SidebarTaskColorRule{}
+	}
+	settings.SidebarTaskColorAutomation = replacement
+	return nil
 }
 
 // updateUserSettingsCAS applies a full-blob user-settings write under
@@ -320,6 +367,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
 	if req.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *req.AppStatusBarEnabled
+	}
+	if req.ResolveSessionHostnames != nil {
+		settings.ResolveSessionHostnames = *req.ResolveSessionHostnames
 	}
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
@@ -952,7 +1002,12 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_views":                            settings.SidebarViews,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             settings.ThreadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
+		"sidebar_task_color_automation":            settings.SidebarTaskColorAutomation,
+		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,
@@ -971,6 +1026,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,

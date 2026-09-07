@@ -71,6 +71,59 @@ func TestCreateNewSessionForStep_ResolvesDynamicProfileBeforeWorkspaceAttach(t *
 	}
 }
 
+// TestCreateNewSessionForStep_MarksRouteActionRequiredWhenWorkspaceAttachFails
+// is the regression test for review finding F2: a dynamic route resolved and
+// claimed as "starting" by prepareWorkflowReplacementSession must not stay
+// there forever when the workspace attach that follows fails, since nothing
+// else transitions it — the replacement session is never actually started.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.3
+func TestCreateNewSessionForStep_MarksRouteActionRequiredWhenWorkspaceAttachFails(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, current := seedDynamicWorkflowSwitch(t)
+	const dynamicProfileID = "profile-dynamic"
+	const concreteProfileID = "profile-concrete"
+
+	resolver := newWorkflowDynamicProfileResolver(t, dynamicProfileID, concreteProfileID)
+	attachErr := fmt.Errorf("workspace attach failed")
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: taskRepo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, attachErr
+		},
+	}
+	schedulerRepo := newMockTaskRepo()
+	schedulerRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-work"] = &wfmodels.WorkflowStep{ID: "step-work", WorkflowID: "wf1", Name: "Work"}
+	svc := createTestServiceWithScheduler(taskRepo, stepGetter, schedulerRepo, agentManager)
+	svc.SetProfileExecutionResolver(resolver)
+
+	if _, err := svc.createNewSessionForStep(ctx, current.TaskID, current, dynamicProfileID); err == nil {
+		t.Fatal("createNewSessionForStep succeeded despite a failed workspace attach")
+	}
+
+	sessions, err := taskRepo.ListTaskSessions(ctx, current.TaskID)
+	if err != nil {
+		t.Fatalf("list task sessions: %v", err)
+	}
+	var replacement *models.TaskSession
+	for _, session := range sessions {
+		if session.ID != current.ID {
+			replacement = session
+		}
+	}
+	if replacement == nil {
+		t.Fatalf("expected the replacement session to remain for inspection, sessions = %+v", sessions)
+	}
+	if replacement.RouteGeneration == 0 {
+		t.Fatal("expected the replacement session to have claimed a route generation")
+	}
+	if replacement.RouteState != "action_required" {
+		t.Fatalf("replacement session route_state = %q, want action_required", replacement.RouteState)
+	}
+}
+
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1
 func TestCreateNewSessionForStep_RemovesPreparedSessionWhenDynamicResolutionFails(t *testing.T) {
 	ctx := context.Background()
@@ -162,6 +215,30 @@ func newWorkflowDynamicProfileResolverWithCandidate(
 	t *testing.T,
 	dynamicProfileID, concreteProfileID string,
 	candidateEnabled bool,
+	engineOptions ...dynamicruntime.EngineOption,
+) *agentruntime.ProfileExecutionResolver {
+	return newWorkflowDynamicProfileResolverWithCandidates(
+		t,
+		dynamicProfileID,
+		[]workflowDynamicCandidate{{
+			executionProfileID: concreteProfileID,
+			enabled:            candidateEnabled,
+		}},
+		engineOptions...,
+	)
+}
+
+type workflowDynamicCandidate struct {
+	executionProfileID string
+	enabled            bool
+	rulesJSON          string
+}
+
+func newWorkflowDynamicProfileResolverWithCandidates(
+	t *testing.T,
+	dynamicProfileID string,
+	candidates []workflowDynamicCandidate,
+	engineOptions ...dynamicruntime.EngineOption,
 ) *agentruntime.ProfileExecutionResolver {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -183,23 +260,35 @@ func newWorkflowDynamicProfileResolverWithCandidate(
 			t.Fatal(err)
 		}
 	}
-	for _, profile := range []*agentsettingsmodels.AgentProfile{
-		{ID: dynamicProfileID, AgentID: "dynamic", Name: "Cascade", Enabled: true},
-		{ID: concreteProfileID, AgentID: "concrete-agent", Name: "Concrete", Enabled: true},
-	} {
+	profiles := []*agentsettingsmodels.AgentProfile{{
+		ID: dynamicProfileID, AgentID: "dynamic", Name: "Cascade", Enabled: true,
+	}}
+	for _, candidate := range candidates {
+		profiles = append(profiles, &agentsettingsmodels.AgentProfile{
+			ID: candidate.executionProfileID, AgentID: "concrete-agent",
+			Name: candidate.executionProfileID, Enabled: true,
+		})
+	}
+	for _, profile := range profiles {
 		if err := repo.CreateAgentProfile(ctx, profile); err != nil {
 			t.Fatal(err)
 		}
 	}
+	routes := make([]agentsettingsmodels.DynamicAgentRoute, 0, len(candidates))
+	for position, candidate := range candidates {
+		routes = append(routes, agentsettingsmodels.DynamicAgentRoute{
+			DynamicProfileID:   dynamicProfileID,
+			Position:           position,
+			ExecutionProfileID: candidate.executionProfileID,
+			Enabled:            candidate.enabled,
+			RulesJSON:          candidate.rulesJSON,
+		})
+	}
 	if err := repo.CreateDynamicAgentProfile(ctx,
 		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
-		[]agentsettingsmodels.DynamicAgentRoute{{
-			DynamicProfileID:   dynamicProfileID,
-			ExecutionProfileID: concreteProfileID,
-			Enabled:            candidateEnabled,
-		}},
+		routes,
 	); err != nil {
 		t.Fatal(err)
 	}
-	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(), true)
+	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(engineOptions...), true)
 }

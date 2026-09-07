@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/lib/i18n";
-import { DataStorageSettings } from "./data-storage-settings";
+import { DataLogsSettings } from "./data-logs-settings";
 import { BACKUP_SQL_COMMAND } from "./system-route-shell";
 
 const databaseState = vi.hoisted(() => ({ value: null as unknown }));
@@ -17,10 +17,6 @@ vi.mock("@/components/settings/settings-target", () => ({
 vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
 vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
 vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
-vi.mock("./storage/storage-maintenance-settings", () => ({
-  StorageMaintenanceSettings: () => null,
-}));
-
 afterEach(() => {
   cleanup();
   databaseState.value = null;
@@ -63,7 +59,7 @@ const ROUTE_COPY: Array<{ route: string; titleKey: string; title: string; descri
     description: "Database driver, size, and available maintenance controls.",
   },
   {
-    // /settings/system/logs now redirects into Data & Storage, whose Logs
+    // /settings/system/logs now redirects into Data & Logs, whose Logs
     // section titles itself with `system:navLogs`. The description key is
     // unchanged, so the sentence users read is still pinned below.
     route: "logs",
@@ -121,18 +117,18 @@ describe("System route headers keep their pre-migration English", () => {
   });
 });
 
-describe("Data & Storage backup location copy", () => {
+describe("Data & Logs backup location copy", () => {
   it("renders the resolved SQLite backup directory", () => {
     const path = "/var/lib/kandev/backups";
     databaseState.value = { backup_directory: path };
 
-    render(createElement(DataStorageSettings));
+    render(createElement(DataLogsSettings));
 
     expect(screen.getByText(`VACUUM INTO snapshots stored under ${path}.`)).toBeTruthy();
   });
 
   it("omits the location when database information is unavailable", () => {
-    render(createElement(DataStorageSettings));
+    render(createElement(DataLogsSettings));
 
     expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
   });
@@ -140,9 +136,26 @@ describe("Data & Storage backup location copy", () => {
   it("omits the location when the backend has no backup directory", () => {
     databaseState.value = { backup_directory: "" };
 
-    render(createElement(DataStorageSettings));
+    render(createElement(DataLogsSettings));
 
     expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
+  });
+});
+
+describe("Data & Logs composition", () => {
+  it("keeps database, backups, and logs without the Storage section", () => {
+    render(createElement(DataLogsSettings));
+
+    expect(screen.getByText(t("system:navDatabase"))).toBeTruthy();
+    expect(screen.getByText(t("system:navBackups"))).toBeTruthy();
+    expect(screen.getByText(t("system:navLogs"))).toBeTruthy();
+    expect(screen.queryByText(t("system:storageTitle"))).toBeNull();
+  });
+
+  it("describes only database statistics, backups, and server logs", () => {
+    expect(t("system:dataStoragePageDescription")).toBe(
+      "Database statistics, backups, and server logs.",
+    );
   });
 });
 

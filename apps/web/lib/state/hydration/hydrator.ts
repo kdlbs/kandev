@@ -2,6 +2,7 @@ import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
+import { normalizeThreadViews } from "../slices/ui/thread-view-builtins";
 import {
   mergeHydratedQuickChatSessions,
   reconcileQuickTerminalTabs,
@@ -144,6 +145,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
+    bridgeThreadViewsFromUserSettings(draft, state.userSettings);
   }
 }
 
@@ -187,6 +189,32 @@ function bridgeSidebarViewsFromUserSettings(
     const nextPrefs = { ...userSettings.sidebarTaskPrefs };
     if (draft.sidebarTaskPrefs.syncError) nextPrefs.syncError = draft.sidebarTaskPrefs.syncError;
     draft.sidebarTaskPrefs = nextPrefs;
+  }
+}
+
+/** Applies server-side Threads saved-view preferences without touching sidebar state. */
+function bridgeThreadViewsFromUserSettings(
+  draft: Draft<AppState>,
+  userSettings: Partial<AppState["userSettings"]>,
+): void {
+  const serverViews = userSettings.threadViews;
+  if (serverViews) {
+    const normalized = normalizeThreadViews(serverViews);
+    draft.threadViews.views = normalized;
+  }
+  if (
+    userSettings.threadActiveViewId &&
+    draft.threadViews.views.some((view) => view.id === userSettings.threadActiveViewId)
+  ) {
+    draft.threadViews.activeViewId = userSettings.threadActiveViewId;
+  } else if (
+    draft.threadViews.views.length > 0 &&
+    !draft.threadViews.views.some((view) => view.id === draft.threadViews.activeViewId)
+  ) {
+    draft.threadViews.activeViewId = draft.threadViews.views[0].id;
+  }
+  if (userSettings.threadViewDraft !== undefined) {
+    draft.threadViews.draft = userSettings.threadViewDraft;
   }
 }
 

@@ -38,7 +38,7 @@ For remote access, protect the whole origin, including:
 - Streamable HTTP MCP at `/mcp`; and
 - SSE compatibility at `/mcp/sse` and `/mcp/message`.
 
-Use an authenticated reverse proxy that supports WebSockets and long-lived streaming, or keep the service on a private VPN. Block direct access to the backend so a client cannot bypass the proxy. See [Run Kandev as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for deployment-specific constraints.
+Use an authenticated reverse proxy that supports WebSockets and long-lived streaming, or keep the service on a private VPN. Block direct access to the backend so a client cannot bypass the proxy. See [Mobile Remote Access](mobile-remote-access.md), [Run Kandev as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for deployment-specific constraints.
 
 ## Understand executor access
 
@@ -48,7 +48,7 @@ An executor decides where the agent process runs. It does not reduce permissions
 |---|---|---|
 | Worktree | A separate Git checkout | Isolates file state, not the host account, credentials, processes, ports, or network |
 | Local | The selected folder and Kandev host account | The agent can affect the same host resources its process can reach |
-| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container |
+| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container. User namespace support (per-profile opt-in) relaxes seccomp and AppArmor. See [executor ADR](../decisions/2026-08-18-executor-userns-security-options.md) for the exact boundary |
 | Kubernetes | A namespaced Pod plus cluster admission, workload identity, network, and storage policy | The Kandev API identity can create/exec/forward/delete Pods, while the administrator-authored Pod template can request privileged or host-integrated access |
 | SSH | The configured remote account and host | Remote directories and credentials require manual lifecycle review |
 | Sprites | A remote sandbox and its injected credentials | Destroying the sandbox can remove unpushed work; network and token scope still matter |
@@ -180,6 +180,55 @@ Repository content, task attachments, issue and pull-request text, Slack message
 - Test automation templates with missing and adversarial payload fields.
 
 Task MCP is scoped to an active Kandev agent session, but it can still create or mutate tasks and coordinate other sessions. External MCP exposes configuration and task-management tools without Kandev authentication. Review every client's live tool list and approval policy before connecting it.
+
+## Isolated web applications
+
+> [!EXPERIMENTAL]
+> Agent-authored canvases are in progress. Enable `features.canvases` only for a trusted test instance and review every permission request.
+
+An isolated web app is a packaged static app that runs inside a sandboxed
+iframe. It is different from a native plugin bundle. Native bundles run as
+same-origin frontend code and belong to the privileged plugin boundary.
+
+The isolated web-app boundary has these rules:
+
+- The iframe allows packaged scripts and forms. It does not allow same-origin
+  access, top-level navigation, or popups.
+- The browser gives the app an opaque origin. The app cannot use Kandev cookies,
+  host authentication headers, the host DOM, or an injected JavaScript API.
+- The app uses relative `./_kandev/v1` protocol paths. The app receives only
+  the Kandev data, events, state, and actions that the host grants.
+- Kandev calculates effective access from the package declaration, instance
+  grant, trusted task or workspace scope, and current caller authorization.
+- External network access uses exact HTTPS origins approved by a user. A
+  wildcard, origin path, query string, credential, or remote script is not
+  accepted.
+- Forms cannot submit to an external origin. The runtime policy sets
+  `form-action 'none'`.
+- Kandev applies a response Content Security Policy to the entry and asset
+  routes. It also applies `no-store`, `nosniff`, `no-referrer`, and
+  cross-origin resource protections.
+- Runtime requests use a short-lived capability token. The host binds the
+  token to the user, instance, release, app key, placement, scope, and grant
+  generation, then checks those values on every request.
+
+External origin requests are direct browser requests and cannot be checked by
+Kandev after they leave the browser. When a release, grant, scope, archive,
+disable, or removal event changes authority, the host immediately unmounts the
+matching iframe. It loads a replacement only after a fresh metadata and
+runtime-binding check. Kandev runtime and protocol requests continue to
+revalidate on every request.
+
+Opaque origin storage is not a durable app store. `localStorage`,
+`sessionStorage`, IndexedDB, and service workers are unavailable. Use the
+canvas state protocol for small app-specific shared values and memory for
+temporary values. Do not copy task or workflow data into app state as a second
+source of truth.
+
+The host renders canvas controls outside the iframe. Keep the backend and its
+HTTP, WebSocket, and MCP routes behind the deployment boundary described at
+the top of this page. See [Agent-authored Canvases](canvases.md) for creation,
+promotion, Quick Chat editing, release review, and recovery.
 
 ## Operational checklist
 

@@ -30,6 +30,7 @@ apps/backend/
 │   │   ├── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
 │   │   └── planinjection/ # Bounds a task plan document before session-handover/dynamic-continuation injection
 │   ├── auth/             # Opt-in auth, per-user scoping, middleware, API, store
+│   ├── canvas/           # Agent-authored plugin web-app canvas lifecycle and governance
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -57,8 +58,8 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs,
-│   │                     # dashboard, infra, labels, onboarding, projects, repository, runtime,
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
+│   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
 │   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
@@ -291,7 +292,6 @@ When a PR fixup touches backend code, run the CI-style changed-file linter local
 golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 ```
 ## Further scoped notes
-
 - `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/`. The root `make dev` prebuilds only the copied launcher; the backend dev target builds the native agentctl and a linux/amd64 helper when the host is not Linux/amd64 (`docs/plans/go-dev-launcher/`).
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping

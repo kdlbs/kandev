@@ -137,6 +137,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	}
 
 	s.logger.Info("agent stream WebSocket connected")
+	streamID := uuid.NewString()
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
@@ -162,8 +163,11 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
-	go s.runAgentStreamWriter(ctx, conn, updatesCh, mcpRequestCh, writeMessage, &wg)
+	go s.runAgentStreamWriter(ctx, conn, streamID, updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
+	}
 }
 
 // runAgentStreamReader reads MCP responses and agent operation requests from the backend connection.
@@ -209,7 +213,7 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 }
 
 // runAgentStreamWriter sends agent events and MCP requests to the backend connection.
-func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
+func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, streamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -244,8 +248,17 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 				continue
 			}
 			if err := writeMessage(data); err != nil {
-				s.logger.Debug("failed to write MCP request", zap.Error(err))
+				s.logger.Warn("failed to write MCP request",
+					zap.String("request_id", mcpReq.ID),
+					zap.String("action", mcpReq.Action),
+					zap.Error(err))
+				if s.mcpBackendClient != nil {
+					s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+				}
 				return
+			}
+			if s.mcpBackendClient != nil {
+				s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 			}
 		}
 	}

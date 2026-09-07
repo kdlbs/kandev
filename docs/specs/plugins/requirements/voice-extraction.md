@@ -66,7 +66,7 @@ existing user has to do.
 | `voice.openAIApiKey` / `KANDEV_VOICE_OPENAI_API_KEY` | the plugin's own **OpenAI API key** setting |
 | `userSettings.voiceMode` (backend model, DTO, store, boot payload, frontend types) | the plugin's per-user `host.storage` entry |
 | The Voice Mode section of **Settings > Task Behavior** | **Settings > Plugins > Voice Mode** |
-| The `VOICE_INPUT_TOGGLE` core shortcut | the plugin keybinding, listed and rebindable in the same **Settings > Keyboard shortcuts** page |
+| The `VOICE_INPUT_TOGGLE` core shortcut | the plugin keybinding, with its configuration surface governed by [Plugin Shortcut Settings](plugin-shortcut-settings.md) |
 | `@huggingface/transformers` in `apps/web` | bundled inside the plugin's Whisper worker |
 
 ### Migration

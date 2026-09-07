@@ -122,8 +122,8 @@ func TestCreateMessageAppliesDefaultsStartsTurnAndPublishes(t *testing.T) {
 	}
 
 	types := eventTypes(bus.GetPublishedEvents())
-	if len(types) == 0 || types[len(types)-1] != events.MessageAdded {
-		t.Fatalf("published %v, want a trailing %s", types, events.MessageAdded)
+	if countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageAdded)
 	}
 }
 
@@ -260,8 +260,8 @@ func TestCreateMessageWithIDPersistsCallerID(t *testing.T) {
 		t.Fatalf("persisted lookup: %v", err)
 	}
 	types := eventTypes(bus.GetPublishedEvents())
-	if len(types) == 0 || types[len(types)-1] != events.MessageAdded {
-		t.Fatalf("published %v, want a trailing %s", types, events.MessageAdded)
+	if countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageAdded)
 	}
 }
 
@@ -347,8 +347,8 @@ func TestDeleteMessagePublishesDeletedEvent(t *testing.T) {
 	if err := svc.DeleteMessage(ctx, "msg-del"); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 1 || types[0] != events.MessageDeleted {
-		t.Fatalf("published %v, want exactly one %s", types, events.MessageDeleted)
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageDeleted) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageDeleted)
 	}
 	if _, err := repo.GetMessage(ctx, "msg-del"); err == nil {
 		t.Fatal("message row must be gone")
@@ -542,7 +542,7 @@ func TestUpdateToolCallMessageWithCreateFallsBackToCreation(t *testing.T) {
 	if created.Metadata["normalized"] == nil {
 		t.Fatal("normalized payload must be carried into the fallback message")
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) == 0 || types[len(types)-1] != events.MessageAdded {
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
 		t.Fatalf("published %v, want the fallback create to publish %s", types, events.MessageAdded)
 	}
 }
@@ -577,8 +577,8 @@ func TestUpdatePermissionMessageSetsStatus(t *testing.T) {
 	if stored.Metadata["status"] != string(models.PermissionStatusApproved) {
 		t.Fatalf("status = %v, want approved", stored.Metadata["status"])
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 1 || types[0] != events.MessageUpdated {
-		t.Fatalf("published %v, want exactly one %s", types, events.MessageUpdated)
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageUpdated) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageUpdated)
 	}
 
 	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-1", "pend-missing", models.PermissionStatusApproved); err == nil {

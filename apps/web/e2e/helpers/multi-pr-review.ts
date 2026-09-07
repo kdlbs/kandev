@@ -1,6 +1,6 @@
 import type { SeedData } from "../fixtures/test-base";
-import { expect } from "@playwright/test";
 import type { ApiClient } from "./api-client";
+import { pollUntil } from "./poll-until";
 
 export const REVIEW_OWNER = "testorg";
 export const REVIEW_SHARED_FILE = "shared-pr.ts";
@@ -103,16 +103,15 @@ export async function seedMultiPRReviewTask(
   // it, a cold worker could open the changes panel after only the first row
   // was visible to the frontend.
   const expectedNumbers = REVIEW_PRS.map((pr) => pr.number).sort((a, b) => a - b);
-  await expect
-    .poll(
-      async () =>
-        (await apiClient.listTaskPRs(task.id)).map((pr) => pr.pr_number).sort((a, b) => a - b),
-      {
-        timeout: 15_000,
-        message: "waiting for both seeded review PR associations",
-      },
-    )
-    .toEqual(expectedNumbers);
+  await pollUntil(
+    async () =>
+      (await apiClient.listTaskPRs(task.id)).map((pr) => pr.pr_number).sort((a, b) => a - b),
+    (numbers) =>
+      numbers.length === expectedNumbers.length &&
+      numbers.every((number, index) => number === expectedNumbers[index]),
+    15_000,
+    "waiting for both seeded review PR associations",
+  );
 
   return task;
 }

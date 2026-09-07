@@ -212,6 +212,10 @@ describe("useRemoteRepositories provider results", () => {
     expect(result.current.repos[1].defaultBranch).toBe("trunk");
     expect(result.current.repos[2].defaultBranch).toBe("");
     expect(result.current.availableProviders).toEqual(["github", "azure_devops"]);
+    expect(result.current.error).toEqual(new Error("GitLab unavailable"));
+    expect(result.current.sourceErrors).toEqual([
+      { provider: "gitlab", error: new Error("GitLab unavailable") },
+    ]);
     expect(result.current.unavailable).toBe(false);
   });
 
