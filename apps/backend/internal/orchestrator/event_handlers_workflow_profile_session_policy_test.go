@@ -694,6 +694,29 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOver
 	require.False(t, previous.IsPrimary)
 }
 
+func TestPrepareWorkflowStepSession_ExactProfileModelMismatchDoesNotReuseWhenProfileLookupFails(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.agentMgr.resolveProfileErr = errors.New("agent profile lookup failed")
+	fixture.current.AgentProfileID = "terra-work-profile"
+	fixture.current.Metadata = map[string]interface{}{
+		models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-luna"},
+	}
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+
+	workStep := &wfmodels.WorkflowStep{ID: "step-work", WorkflowID: "wf1", AgentProfileID: "terra-work-profile"}
+	humanQAStep := &wfmodels.WorkflowStep{ID: "step-human-qa", WorkflowID: "wf1", AgentProfileID: "terra-work-profile"}
+
+	_, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, humanQAStep)
+	require.ErrorContains(t, err, "resolve exact workflow profile")
+	require.False(t, switched)
+
+	stored, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	require.True(t, stored.IsPrimary)
+	require.Equal(t, models.TaskSessionStateRunning, stored.State)
+}
+
 func TestPrepareWorkflowStepSession_ExactProfileDoesNotPromoteParkedMismatchedRuntime(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
