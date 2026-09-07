@@ -30,9 +30,8 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // Keep the agent busy long enough for the task-switch and reload assertions
-    // to observe the backend-owned cancellation state on slower CI runners.
-    await session.sendMessage("/slow 30s");
+    // Keep the slow turn bounded so task navigation runs while cancellation is pending.
+    await session.sendMessage("/slow 8s");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });

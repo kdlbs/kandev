@@ -126,6 +126,14 @@ type taskEnvironmentTransitionPersister interface {
 	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
 }
 
+// taskEnvironmentTaskDirNameStamper claims the stable task-root identity on a
+// shared environment without rewriting unrelated environment fields. It is
+// optional so lightweight test and legacy stores can retain the compatibility
+// path in executor_execute.go.
+type taskEnvironmentTaskDirNameStamper interface {
+	SetTaskEnvironmentTaskDirNameIfEmpty(context.Context, string, string) (bool, error)
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories

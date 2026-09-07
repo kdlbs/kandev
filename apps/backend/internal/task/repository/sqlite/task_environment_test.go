@@ -102,6 +102,83 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestSetTaskEnvironmentTaskDirNameIfEmptyClaimsOnce(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-task-environment-task-dir"
+	taskID := "task-environment-task-dir"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-task-dir",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	claimed, err := repo.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, "task-root_abc")
+	if err != nil {
+		t.Fatalf("SetTaskEnvironmentTaskDirNameIfEmpty: %v", err)
+	}
+	if !claimed {
+		t.Fatal("first task directory claim = false, want true")
+	}
+	claimed, err = repo.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, "other-root_def")
+	if err != nil {
+		t.Fatalf("second SetTaskEnvironmentTaskDirNameIfEmpty: %v", err)
+	}
+	if claimed {
+		t.Fatal("second task directory claim = true, want false")
+	}
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.TaskDirName != "task-root_abc" {
+		t.Fatalf("persisted TaskDirName = %q, want task-root_abc", persisted.TaskDirName)
+	}
+}
+
+func TestUpdateTaskEnvironmentDoesNotClearTaskDirNameFromStaleWriter(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-task-environment-stale-task-dir"
+	taskID := "task-environment-stale-task-dir"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-stale-task-dir",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+		TaskDirName:  "canonical-root_abc",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	stale := *env
+	stale.TaskDirName = ""
+	stale.WorkspacePath = "/workspace/canonical-root_abc/repo"
+	if err := repo.UpdateTaskEnvironment(ctx, &stale); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.TaskDirName != env.TaskDirName {
+		t.Fatalf("stale update cleared TaskDirName = %q, want %q", persisted.TaskDirName, env.TaskDirName)
+	}
+}
+
 // @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
 func TestTransferTaskEnvironmentAdvancesGenerationAndHonorsCleanupBarrier(t *testing.T) {
 	repo := newRepoForEntityTests(t)

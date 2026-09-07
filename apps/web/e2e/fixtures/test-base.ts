@@ -356,6 +356,18 @@ export const test = backendFixture.extend<
         sidebar_views: [DEFAULT_SIDEBAR_VIEW],
         sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
         sidebar_draft: null,
+        thread_views: [
+          {
+            id: "view-all-threads",
+            name: "All threads",
+            task_scope: { mode: "all", task_ids: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            max_columns: 5,
+          },
+        ],
+        thread_active_view_id: "view-all-threads",
+        thread_view_draft: null,
         saved_layouts: [],
         lsp_auto_start_languages: [],
         lsp_auto_install_languages: [],
@@ -513,14 +525,14 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   });
 }
 
-/** Restores the shared seed checkout to its clean main branch. */
+/** Restores the shared seed checkout to the immutable fixture origin/main baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
   const env = makeGitEnv(tmpDir);
   execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
     env,
     stdio: "ignore",
   });
-  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
+  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "origin/main"], {
     env,
     stdio: "ignore",
   });
@@ -603,6 +615,18 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       sidebar_views: [DEFAULT_SIDEBAR_VIEW],
       sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
       sidebar_draft: null,
+      thread_views: [
+        {
+          id: "view-all-threads",
+          name: "All threads",
+          task_scope: { mode: "all", task_ids: [] },
+          filters: [],
+          sort: { key: "attention", direction: "asc" },
+          max_columns: 5,
+        },
+      ],
+      thread_active_view_id: "view-all-threads",
+      thread_view_draft: null,
       saved_layouts: [],
       // Status-surface specs opt in from their local beforeEach hooks; unrelated
       // tests start from the portable setting's default-off state.
