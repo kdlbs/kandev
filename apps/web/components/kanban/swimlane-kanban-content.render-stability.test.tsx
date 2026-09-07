@@ -42,6 +42,7 @@ vi.mock("./virtualized-column-task-list", () => ({
 }));
 
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { defaultState } from "@/lib/state/default-state";
@@ -73,24 +74,26 @@ const HANDLERS = {
 
 function Content({ tasks }: { tasks: Task[] }) {
   return (
-    <StateProvider
-      initialState={{
-        workspaces: { ...defaultState.workspaces, activeId: "workspace-1" },
-        repositories: { ...defaultState.repositories, itemsByWorkspaceId: {} },
-        mobileKanban: {
-          ...defaultState.mobileKanban,
-          activeStepIdByWorkflowId: { [WORKFLOW_ID]: STEPS[0].id },
-        },
-      }}
-    >
-      <SwimlaneKanbanContent
-        workflowId={WORKFLOW_ID}
-        steps={STEPS}
-        moveTargetSteps={STEPS}
-        tasks={tasks}
-        {...HANDLERS}
-      />
-    </StateProvider>
+    <ToastProvider>
+      <StateProvider
+        initialState={{
+          workspaces: { ...defaultState.workspaces, activeId: "workspace-1" },
+          repositories: { ...defaultState.repositories, itemsByWorkspaceId: {} },
+          mobileKanban: {
+            ...defaultState.mobileKanban,
+            activeStepIdByWorkflowId: { [WORKFLOW_ID]: STEPS[0].id },
+          },
+        }}
+      >
+        <SwimlaneKanbanContent
+          workflowId={WORKFLOW_ID}
+          steps={STEPS}
+          moveTargetSteps={STEPS}
+          tasks={tasks}
+          {...HANDLERS}
+        />
+      </StateProvider>
+    </ToastProvider>
   );
 }
 

@@ -7,6 +7,7 @@ import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/t
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskOrigin,
   TaskPriority,
   TaskState,
   TaskSessionState,
@@ -36,6 +37,7 @@ export type TaskLike = {
   position?: number;
   state?: TaskState;
   priority?: TaskPriority;
+  origin?: TaskOrigin | string | null;
   repositories?: Array<{
     id?: string;
     repository_id: string;
@@ -69,12 +71,12 @@ export type TaskLike = {
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
+  primary_executor_profile_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
   primary_agent_profile_id?: string | null;
   labels?: string | string[] | null;
-  origin?: string | null;
   is_remote_executor?: boolean;
   parent_id?: string | null;
   assignee_user_id?: string;
@@ -166,6 +168,16 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
   return source.workspace_folders?.map((folder) => ({ ...folder }));
 }
 
+function primaryExecutorProjection(source: TaskLike) {
+  return {
+    primaryExecutorId: source.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: source.primary_executor_profile_id ?? undefined,
+    primaryExecutorType: source.primary_executor_type ?? undefined,
+    primaryExecutorName: source.primary_executor_name ?? undefined,
+    isRemoteExecutor: source.is_remote_executor ?? false,
+  };
+}
+
 /**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
@@ -218,6 +230,7 @@ export function preserveOmittedExecutorFields(merged: KanbanTask, existing: Kanb
 
 export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
   merged.primaryExecutorId = existing.primaryExecutorId;
+  merged.primaryExecutorProfileId = existing.primaryExecutorProfileId;
   merged.primaryExecutorType = existing.primaryExecutorType;
   merged.primaryExecutorName = existing.primaryExecutorName;
   merged.isRemoteExecutor = existing.isRemoteExecutor;
@@ -245,6 +258,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,
+    origin: source.origin,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
@@ -260,14 +274,10 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
-    primaryExecutorId: source.primary_executor_id ?? undefined,
-    primaryExecutorType: source.primary_executor_type ?? undefined,
-    primaryExecutorName: source.primary_executor_name ?? undefined,
+    ...primaryExecutorProjection(source),
     primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
-    origin: source.origin ?? undefined,
-    isRemoteExecutor: source.is_remote_executor ?? false,
     assigneeUserId: pickAssignee(source.assignee_user_id),
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),

@@ -290,7 +290,12 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: { bySession: {}, metaBySession: {}, generationBySession: {} },
+  messagePrompts: {
+    bySession: {},
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+  },
   turns: {
     bySession: {},
     activeBySession: {},

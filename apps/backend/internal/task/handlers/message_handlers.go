@@ -568,11 +568,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	var trustedPromptContext string
-	storedContent, trustedPromptContext = h.prepareDirectPrompt(
-		ctx, storedContent, sessionResp.Session.IsPassthrough,
+	storedContent, trustedPromptContext := h.prepareDirectPrompt(
+		ctx, req.Content, sessionResp.Session.IsPassthrough,
 	)
+	// Resolve browser prompt definitions before appending the server-owned
+	// entity block. The prompt sanitizer removes untrusted browser blocks and
+	// must not consume the opening tag of this trusted context.
+	storedContent = orchestrator.AppendEntityReferenceContext(storedContent, req.EntityReferences)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
@@ -743,8 +745,13 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	}
 }
 
+const maxMessageContentBytes = 1 << 20
+
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
+	if len(req.Content) > maxMessageContentBytes {
+		return "content is too long"
+	}
 	if req.TaskSessionID == "" {
 		return "session_id is required"
 	}

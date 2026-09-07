@@ -111,9 +111,13 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	}
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
 	}
 	return result, err
 }
@@ -133,9 +137,13 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	}
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
 	result, err := m.sessionManager.SendPromptSteerWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
 	}
 	return result, err
 }
@@ -535,7 +543,9 @@ func (m *Manager) reapplySessionModelAfterReset(
 		m.sessionManager.publishModelSelectionWarningEvent(execution, newSessionID, decision)
 	}
 	if decision.EffectiveModel != "" &&
-		(decision.Outcome == ModelSelectionOutcomeApplied || decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
+		(decision.Outcome == ModelSelectionOutcomeApplied ||
+			decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
+			decision.Outcome == ModelSelectionOutcomeUniqueVariation) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
@@ -1763,8 +1773,15 @@ func (m *Manager) MarkReady(executionID string) error {
 //
 // Publishes events.AgentBootReady. Returns error if execution not found.
 func (m *Manager) MarkBootReady(executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if exists {
+		m.finalWorkspaceRefresh(execution, "startup_grace")
+	}
 	err := m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady, false)
 	if err == nil {
+		if exists {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
 		m.releaseActivity(executionActivityKey(executionID))
 	}
 	return err

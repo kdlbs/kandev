@@ -58,6 +58,9 @@
       "digestAlgorithm": "sha256",
       "timestampUrl": "https://timestamp.digicert.com",
       "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ./windows-sign.ps1 %1"
+    },
+    "macOS": {
+      "infoPlist": "Info.plist"
     }
   }
 }

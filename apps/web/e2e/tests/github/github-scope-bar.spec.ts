@@ -167,6 +167,26 @@ test.describe("Desktop /github scope bar", () => {
       await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
       await expect(title).toContainText("Assigned");
       await expect(repoFilter).toContainText("All repos");
+
+      await savedMenu.click();
+      await deleteIssueSavedQuery.click();
+      const deleteConfirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+      await expect(deleteConfirmation).toHaveAccessibleName(`Delete ${issueDefaultLabel}?`);
+      await expect(testPage.getByRole("menu")).toBeVisible();
+      await deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+      await expect(issueSavedQuery).toBeVisible();
+      await expect(testPage.getByRole("menu")).toBeVisible();
+
+      await deleteIssueSavedQuery.click();
+      const deleteResponse = testPage.waitForResponse(
+        (response) =>
+          response.ok() &&
+          response.request().method() === "PUT" &&
+          response.url().includes("/api/v1/github/workspace-settings"),
+      );
+      await deleteConfirmation.getByRole("button", { name: `Delete ${issueDefaultLabel}` }).click();
+      await deleteResponse;
+      await expect(issueSavedQuery).toHaveCount(0);
     });
   });
 

@@ -88,6 +88,25 @@ curl -fsS http://127.0.0.1:38429/api/v1/system/health
 
 This diagnostic checks the Git executable, GitHub authentication/rate limits, agent discovery, and Linux inotify pressure. It returns a JSON `healthy` field and issue list, but normally uses HTTP 200 even when `healthy` is false; do not substitute it for `/health` in a status-only probe.
 
+Required local persistence has a separate authenticated diagnostic endpoint:
+
+```bash
+curl -fsS http://127.0.0.1:38429/api/v1/system/diagnostics/persistence
+```
+
+It reports the database driver, aggregate state, and one sanitized row for
+each required store. The rows include stable store IDs, state, last check
+time, and a safe error description. They never include credentials, DSNs,
+SQL, database paths, or row data.
+
+After startup, a failed required-store probe makes `/ready` return HTTP 503
+with `reason: "persistence"` and the affected `store_ids`. Stateful API and
+WebSocket requests return HTTP 503 with the stable code
+`persistence_unavailable` and an action to check the database and persistence
+diagnostics. A later successful probe restores readiness and stateful traffic
+without a process restart. `/health` remains a pure liveness check and stays
+HTTP 200 while the process is alive.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:
@@ -172,8 +191,15 @@ only when the active task work can tolerate cleanup running alongside it.
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
-snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
-clears the in-memory snapshot.
+snapshot was last analyzed. The first read can return before the scan finishes. The card then shows
+which sources are complete and labels the total as **Counted so far**. When an older snapshot
+expires, Kandev keeps it visible while the replacement scan runs. A failed replacement also keeps
+the last successful snapshot and shows the failure state.
+
+Select **Analyze** to force a fresh read-only scan. The timing information beside the completed
+snapshot shows the scan duration, the 15-minute cache lifetime, and the next refresh time. A page
+that remains open requests a new overview at that time. Restarting the backend clears the
+in-memory snapshot, so the next Storage-page read starts a new scan.
 
 The page also shows the current percentage used on the filesystem containing Kandev's storage,
 along with used, available, and total capacity. This is host-volume capacity, not just the bytes

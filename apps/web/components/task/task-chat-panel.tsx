@@ -52,8 +52,10 @@ import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
+import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { isTaskLaunchErrorOwnedBySession } from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 
 /** Returns a `clarificationKey` that increments each time a pending
@@ -1024,6 +1026,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const activeLaunchError = launchStatusSummary?.active_error;
+  const launchErrorOwned = Boolean(
+    isTypedTaskLaunchError(activeLaunchError) &&
+    isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
+  );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
@@ -1087,10 +1094,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
-  const { isMobile } = useResponsiveBreakpoint();
-  // The anchored bar is a desktop-only, opt-in affordance; mobile always
-  // falls back to the scroll button.
-  const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  // The anchored bar is a desktop-only, fine-pointer affordance; coarse
+  // pointers use the compact scroll control instead.
+  const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
   const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
@@ -1165,7 +1172,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             taskId={launchErrorContext.taskId}
             workspaceId={launchErrorContext.workspaceId}
             statusSummary={launchStatusSummary}
-            runErrors={[]}
+            sessionId={resolvedSessionId}
             repositories={launchErrorContext.repositories}
           />
         )}
@@ -1197,6 +1204,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             onFirstMessageHiddenChange={setIsFirstMessageHidden}
             anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
             isVisible={transcriptIsVisible}
+            launchErrorOwned={launchErrorOwned}
+            launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
+            launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
             stickyPromptBar={
               showAnchoredBar && lastPromptMessage ? (
                 <AnchoredLastPromptBar
@@ -1251,6 +1261,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         onScrollToStart={scrollToStart}
         statusTaskId={statusTaskId ?? taskIdHint}
         showAgentStartHint={showAgentStartHint}
+        launchErrorOwned={launchErrorOwned}
       />
     </PanelRoot>
   );
@@ -1279,6 +1290,7 @@ type ChatFooterProps = {
   statusTaskId: string | null;
   /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
   showAgentStartHint: boolean;
+  launchErrorOwned: boolean;
 };
 
 /**
@@ -1306,6 +1318,7 @@ function ChatFooter({
   onScrollToStart,
   statusTaskId,
   showAgentStartHint,
+  launchErrorOwned,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -1335,6 +1348,7 @@ function ChatFooter({
       onScrollToStart={onScrollToStart}
       statusTaskId={statusTaskId}
       showAgentStartHint={showAgentStartHint}
+      launchErrorOwned={launchErrorOwned}
     />
   );
 }

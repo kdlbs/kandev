@@ -27,6 +27,7 @@ const (
 	taskLaunchRecoveryRetryDefault = models.RecoveryActionRetryDefault
 	taskLaunchRecoveryPickBranch   = models.RecoveryActionPickBaseBranch
 	taskLaunchRecoveryMarkDone     = models.RecoveryActionMarkReviewDone
+	taskLaunchRecoveryRetryLaunch  = models.RecoveryActionRetryLaunch
 )
 
 // TaskLaunchRecoveryRequest is the server-side shape of task.launch.recover.
@@ -118,6 +119,11 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 		if err != nil {
 			return nil, err
 		}
+	case taskLaunchRecoveryRetryLaunch:
+		responseSessionID, err = s.relaunchAndClearTaskLaunchRecovery(ctx, req, source)
+		if err != nil {
+			return nil, err
+		}
 	case taskLaunchRecoveryMarkDone:
 		if err := s.markTaskLaunchReviewDone(ctx, req, source); err != nil {
 			return nil, err
@@ -159,11 +165,11 @@ func (s *Service) validateTaskLaunchRecoveryRequest(req *TaskLaunchRecoveryReque
 		return ErrTaskLaunchRecoveryInvalid
 	}
 	switch req.Action {
-	case taskLaunchRecoveryRetryDefault, taskLaunchRecoveryPickBranch, taskLaunchRecoveryMarkDone:
+	case taskLaunchRecoveryRetryDefault, taskLaunchRecoveryPickBranch, taskLaunchRecoveryRetryLaunch, taskLaunchRecoveryMarkDone:
 	default:
 		return fmt.Errorf("unsupported task launch recovery action %q", req.Action)
 	}
-	if req.Action != taskLaunchRecoveryMarkDone && strings.TrimSpace(req.TaskRepositoryID) == "" {
+	if (req.Action == taskLaunchRecoveryRetryDefault || req.Action == taskLaunchRecoveryPickBranch) && strings.TrimSpace(req.TaskRepositoryID) == "" {
 		return fmt.Errorf("task_repository_id is required for %s", req.Action)
 	}
 	if req.Action == taskLaunchRecoveryPickBranch && strings.TrimSpace(req.BaseBranch) == "" {
@@ -195,11 +201,13 @@ func (s *Service) loadTaskLaunchRecoverySource(ctx context.Context, req *TaskLau
 			return nil, err
 		}
 	}
-	if req.Action != taskLaunchRecoveryMarkDone {
+	if req.Action == taskLaunchRecoveryRetryDefault || req.Action == taskLaunchRecoveryPickBranch {
 		activeRepositoryID := source.taskRepositoryID()
 		if activeRepositoryID == "" || activeRepositoryID != req.TaskRepositoryID {
 			return nil, fmt.Errorf("task_repository_id does not match the active launch error")
 		}
+	} else if req.Action == taskLaunchRecoveryRetryLaunch && req.TaskRepositoryID != "" && source.taskRepositoryID() != req.TaskRepositoryID {
+		return nil, fmt.Errorf("task_repository_id does not match the active launch error")
 	}
 	return source, nil
 }
@@ -250,6 +258,7 @@ func (s *Service) loadAuthoritativeTaskLaunchRecoveryError(
 				Stamp:            lastError.Stamp(),
 				OccurredAt:       lastError.OccurredAt,
 				Preview:          lastError.Message,
+				Details:          lastError.Details,
 				Category:         lastError.Code,
 				RecoveryActions:  lastError.RecoveryActions,
 			},
@@ -261,6 +270,7 @@ func (s *Service) loadAuthoritativeTaskLaunchRecoveryError(
 			Stamp:            launchError.Stamp(),
 			OccurredAt:       launchError.OccurredAt,
 			Preview:          launchError.Message,
+			Details:          launchError.Details,
 			Category:         launchError.Code,
 			RecoveryActions:  launchError.RecoveryActions,
 		}

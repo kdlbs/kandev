@@ -13,6 +13,11 @@ type SetPollModeRequest struct {
 	Mode string `json:"mode"`
 }
 
+// RefreshWorkspaceRequest is the body for POST /api/v1/workspace/refresh.
+type RefreshWorkspaceRequest struct {
+	Trigger string `json:"trigger,omitempty"`
+}
+
 // handleSetPollMode updates the workspace tracker's poll mode based on the
 // gateway's view of UI subscription/focus state for sessions in this workspace.
 //
@@ -49,4 +54,21 @@ func (s *Server) handleSetPollMode(c *gin.Context) {
 	s.logger.Debug("workspace poll mode updated", zap.String("mode", req.Mode))
 
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
+}
+
+// handleRefreshWorkspace performs one explicit file and Git scan. Lifecycle
+// callers use the turn_complete trigger; browser callers use the default
+// manual_refresh trigger, which also retries a tracker paused by denial.
+func (s *Server) handleRefreshWorkspace(c *gin.Context) {
+	var req RefreshWorkspaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	trigger := req.Trigger
+	if trigger == "" {
+		trigger = "manual_refresh"
+	}
+	s.procMgr.RefreshWorkspace(c.Request.Context(), trigger)
+	c.JSON(http.StatusOK, gin.H{"trigger": process.NormalizeWorkspaceTrigger(trigger)})
 }

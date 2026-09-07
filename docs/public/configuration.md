@@ -314,6 +314,20 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 
 Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](git-operations.md).
 
+The `repositoryDiscovery.roots` setting belongs to the backend process. A
+server-launched backend uses these configured roots and, when no configured
+root is available, its server user's Home directory. A desktop-launched
+backend keeps the configured roots but does not use Home as an implicit
+fallback. In Desktop, use **Add Local Repository** to choose one or more
+install-wide discovery folders. Those selections are stored in Kandev's
+database, not copied into `config.yaml`, and are shared by workspaces in that
+desktop installation. See [Desktop app repository discovery](desktop-app.md#repository-discovery-and-macos-access).
+
+The desktop process marker and native picker capability are internal launch
+details. A browser can connect to a desktop backend and use the HTTP folder
+picker; the browser's picker capability does not change the backend's
+discovery policy.
+
 ### Debug configuration
 
 | YAML key | Environment variable | Default | Current behavior |

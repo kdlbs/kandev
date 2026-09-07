@@ -389,6 +389,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
@@ -430,6 +431,7 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPReportPRAutoFixOutcome     = "mcp.report_pr_auto_fix_outcome"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"

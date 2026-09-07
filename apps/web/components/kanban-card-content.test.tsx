@@ -2,6 +2,12 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAppState = {
+  auth: {
+    mode: "enabled",
+    authenticated: true,
+    user: { id: "user-1" },
+    ssoProviders: [],
+  },
   workspaces: { activeId: "ws-1" },
   kanban: { tasks: [] as Array<{ id: string; title: string; parentTaskId?: string }> },
   kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },

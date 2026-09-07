@@ -305,6 +305,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	taskPRAutoFixOutcome   TaskPRAutoFixOutcomeService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
@@ -470,6 +471,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPReportPRAutoFixOutcome, h.handleReportTaskPRAutoFixOutcome)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
@@ -4086,18 +4088,29 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
+//
+// Mode validity is checked before anything else, ahead of PlanService's own
+// task-reach authorization: the tool's schema
+// already publishes the two accepted values, so rejecting an unrecognized
+// one discloses nothing about the target task. Both modes' content checks —
+// replace's "empty content" rejection and append's fragment validation — run
+// inside PlanService.UpdatePlan, after authorization, so a caller the
+// authorizer denies never learns anything about content validity for a task
+// it cannot reach.
 func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID    string `json:"task_id"`
 		Title     string `json:"title"`
 		Content   string `json:"content"`
 		CreatedBy string `json:"created_by"`
+		Mode      string `json:"mode"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.Content == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	mode, err := service.ParsePlanWriteMode(req.Mode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
 	createdBy := req.CreatedBy
@@ -4110,7 +4123,8 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Title:              req.Title,
 		Content:            req.Content,
 		CreatedBy:          createdBy,
-		EvaluateTruncation: true,
+		EvaluateTruncation: mode == service.PlanWriteModeReplace,
+		Mode:               mode,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)

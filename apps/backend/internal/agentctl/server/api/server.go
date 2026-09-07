@@ -116,6 +116,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace state (poll mode driven by gateway focus signal)
 		api.POST("/workspace/poll-mode", s.handleSetPollMode)
+		api.POST("/workspace/refresh", s.handleRefreshWorkspace)
 
 		// Workspace rescan: triggered by the kandev backend after a new
 		// sibling worktree appears on disk (multi-branch add_branch flow).
@@ -140,6 +141,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/html-previews", s.handleWorkspacePreviewPublish)
 		api.POST("/workspace/file/create", s.handleFileCreate)
 		api.POST("/workspace/file/upload", s.handleFileUpload)
 		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
