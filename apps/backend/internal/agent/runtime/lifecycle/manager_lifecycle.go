@@ -72,6 +72,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.recoveryGuard.AcquireOrObserve(sessionID)
 	}
 
+	// AC-EXECUTORS-SURVIVAL-005.3: the same classification also decides what
+	// re-tracking may reach. A confirmed-passthrough session owns a real
+	// agentctl instance that does outlive this backend, so without this the
+	// enumeration would correlate it to its record and re-track a session
+	// whose PTY agent died with the backend -- reporting it as having
+	// survived, which the AC forbids. Only standalone records reach here
+	// (ListLiveStandaloneExecutorsRunning), and StandaloneExecutor is the
+	// only backend that reads them, so this narrows nothing else.
+	records = recoverableRecords(records, guardedSessions)
+
 	// AC-EXECUTORS-SURVIVAL-003.7: bound this pass's
 	// adoption+enumeration+reconstruction work with a single deadline, clocked
 	// from this launch's first control-server contact (or, absent one, from

@@ -973,7 +973,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// The capability covers only the standalone (worktree/local) runtime --
 	// every other runtime's StopAllAgents call must still terminate normally
 	// even while the capability is globally enabled for the installation.
-	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NameStandalone {
+	// A passthrough session is excluded too (AC-EXECUTORS-SURVIVAL-005.3,
+	// design 02 "Passthrough scope"): its agent runs on a terminal this
+	// backend process owns, so it dies with the backend regardless, and
+	// detaching would leave an executors_running row claiming a live agent
+	// with no agent.stopped published. See isPassthroughExecution.
+	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
+		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
 		return m.detachAgentExecution(executionID, execution)
 	}
 
