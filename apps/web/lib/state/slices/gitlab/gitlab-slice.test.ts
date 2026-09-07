@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitLabSlice } from "./gitlab-slice";
 import type { GitLabSlice } from "./types";
-import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { GitLabStatus, TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
@@ -50,6 +50,18 @@ function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     updated_at: "2026-01-01T00:00:00Z",
     mr_states: [],
     mr_options: [],
+    ...overrides,
+  };
+}
+
+function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
+  return {
+    authenticated: true,
+    username: "alice",
+    auth_method: "pat",
+    host: "https://gitlab.example",
+    token_configured: true,
+    required_scopes: [],
     ...overrides,
   };
 }
@@ -189,6 +201,35 @@ describe("resetTaskMRs", () => {
     store.getState().resetTaskMRs();
 
     expect(store.getState().taskMRs.byWorkspaceId).toEqual({});
+  });
+});
+
+describe("GitLab status", () => {
+  it("keeps status and loading state isolated by workspace", () => {
+    const store = makeStore();
+    const workspaceAStatus = makeStatus();
+
+    store.getState().setGitLabStatus("ws-a", workspaceAStatus);
+    store.getState().setGitLabStatusLoading("ws-b", true);
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: workspaceAStatus, loading: false, loadedAt: expect.any(Number) },
+      "ws-b": { data: null, loading: true, loadedAt: null },
+    });
+  });
+
+  it("resets one workspace status without affecting another", () => {
+    const store = makeStore();
+    store.getState().setGitLabStatus("ws-a", makeStatus());
+    store.getState().setGitLabStatusLoading("ws-a", true);
+    store.getState().setGitLabStatus("ws-b", makeStatus());
+
+    store.getState().resetGitLabStatus("ws-a");
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: null, loading: false, loadedAt: null },
+      "ws-b": { data: expect.any(Object), loading: false, loadedAt: expect.any(Number) },
+    });
   });
 });
 

@@ -41,6 +41,10 @@ export type BootRuntime = {
    * which never renders through the shell.
    */
   titlePrefix?: string;
+  /** True only when the Tauri shell launched the backend with its picker bridge. */
+  nativeFolderPickerAvailable?: boolean;
+  /** True when the backend was launched by the desktop shell. */
+  desktopRuntime?: boolean;
 };
 
 export type BootRouteData = {
@@ -176,6 +180,8 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
     titlePrefix: readString(value.titlePrefix),
+    nativeFolderPickerAvailable: value.nativeFolderPickerAvailable === true ? true : undefined,
+    desktopRuntime: value.desktopRuntime === true ? true : undefined,
   };
 }
 

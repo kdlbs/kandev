@@ -51,6 +51,7 @@ async function startCreateAtRoot(testPage: Page) {
     const menuItem = testPage.getByRole("menuitem", { name: "New file" });
     await expect(menuItem).toBeVisible({ timeout: 5_000 });
     await menuItem.click();
+    await expect(menuItem).toHaveCount(0);
   }
   const input = testPage.getByPlaceholder("filename...");
   await expect(input).toBeVisible({ timeout: 5_000 });

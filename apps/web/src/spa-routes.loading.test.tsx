@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { SpaRoutes } from "./spa-routes";
 
 vi.mock("./settings-routes", () => new Promise(() => undefined));
@@ -17,7 +18,11 @@ describe("lazy SPA route loading", () => {
   ])("shows one accessible status while %s is loading", (pathname, routeName) => {
     window.history.replaceState({}, "", pathname);
 
-    render(<SpaRoutes />);
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
 
     const statuses = screen.getAllByRole("status");
     expect(statuses).toHaveLength(1);

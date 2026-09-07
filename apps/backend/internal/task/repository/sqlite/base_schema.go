@@ -15,6 +15,7 @@ import (
 // added without growing the function's cyclomatic complexity.
 func (r *Repository) initSchema() error {
 	steps := []func() error{
+		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
@@ -236,6 +237,14 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.Exec(pendingIndexLookup); err != nil {
 		return err
 	}
+	lookupIndex := dialect.PendingIDLookupIndexDDL(
+		driver,
+		"idx_messages_metadata_pending_id_lookup_ordered",
+		"task_session_messages",
+	)
+	if _, err := r.db.Exec(lookupIndex); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -265,12 +274,12 @@ func (r *Repository) ensurePromptOrderIndex() error {
 // would error with "no such table". Stubs created here are minimal —
 // the workflow repo's init still runs and adds the rest of its columns
 // via idempotent ALTER and CREATE statements.
-func (r *Repository) ensureRunnerProjectionTables() {
+func (r *Repository) ensureRunnerProjectionTables() error {
 	// workflow_steps: matches the full schema declared in the workflow
 	// repo so workflow.NewWithDB's later ALTER ADD COLUMNs become no-ops
-	// (column-already-exists errors are swallowed). Mirrors
+	// (only column-already-exists errors are tolerated). Mirrors
 	// internal/workflow/repository/sqlite.go (the canonical owner).
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
 			workflow_id TEXT NOT NULL DEFAULT '',
@@ -293,8 +302,10 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			pull_from_step_id TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`)
-	_, _ = r.db.Exec(`
+		)`); err != nil {
+		return fmt.Errorf("create workflow_steps projection table: %w", err)
+	}
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_step_participants (
 			id TEXT PRIMARY KEY,
 			step_id TEXT NOT NULL DEFAULT '',
@@ -305,7 +316,10 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			position INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
 			provenance TEXT NOT NULL DEFAULT 'manual'
-		)`)
+		)`); err != nil {
+		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initCoreSchema() error {
@@ -350,6 +364,7 @@ const infraSchemaDDL = `
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		owner_id TEXT DEFAULT '',
+		org_id TEXT NOT NULL DEFAULT '',
 		default_executor_id TEXT DEFAULT '',
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
@@ -357,6 +372,24 @@ const infraSchemaDDL = `
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS workspace_members (
+		workspace_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'collaborator',
+		added_by TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, user_id),
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		-- No foreign key to users: that table belongs to internal/user/store,
+		-- which initializes independently of this repository, so a reference
+		-- here fails schema init whenever the task repository is created
+		-- first. Account removal clears membership through
+		-- DeleteWorkspaceMembersByUser instead, matching how this codebase
+		-- handles every other cross-store side table.
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
 
 	CREATE TABLE IF NOT EXISTS executors (
 		id TEXT PRIMARY KEY,

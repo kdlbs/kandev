@@ -14,6 +14,16 @@ type SQLiteStore struct {
 	reader *sqlx.DB
 }
 
+// Override is one persisted runtime flag override, including its database
+// timestamps. It is useful to callers that need to distinguish an upserted
+// row from a value reconstructed from the effective flag registry.
+type Override struct {
+	Key       string
+	Value     bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
 	store := &SQLiteStore{writer: writer, reader: reader}
 	if err := store.initSchema(); err != nil {
@@ -59,6 +69,22 @@ func (s *SQLiteStore) ListOverrides(ctx context.Context) (map[string]bool, error
 		return nil, fmt.Errorf("iterate runtime flag overrides: %w", err)
 	}
 	return out, nil
+}
+
+// GetOverride reads one override and its persisted timestamps.
+func (s *SQLiteStore) GetOverride(ctx context.Context, key string) (Override, error) {
+	var row struct {
+		Key       string    `db:"key"`
+		Value     int       `db:"value"`
+		CreatedAt time.Time `db:"created_at"`
+		UpdatedAt time.Time `db:"updated_at"`
+	}
+	if err := s.reader.GetContext(ctx, &row, s.reader.Rebind(`
+		SELECT key, value, created_at, updated_at FROM runtime_flag_overrides WHERE key = ?
+	`), key); err != nil {
+		return Override{}, err
+	}
+	return Override{Key: row.Key, Value: row.Value != 0, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 
 func (s *SQLiteStore) SetOverride(ctx context.Context, key string, value bool) error {

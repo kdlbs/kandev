@@ -11,44 +11,114 @@ import (
 )
 
 const (
-	sectionStart  = "<!-- kandev-preview-start -->"
-	sectionEnd    = "<!-- kandev-preview-end -->"
-	githubAPIBase = "https://api.github.com"
+	sectionStart                = "<!-- kandev-preview-start -->"
+	sectionEnd                  = "<!-- kandev-preview-end -->"
+	githubAPIBase               = "https://api.github.com"
+	maxDescriptionWriteAttempts = 3
 )
 
 // upsertDescriptionSection appends (or updates) the kandev preview section at
 // the end of the PR description. Other bots may also append sections; we only
 // touch the block delimited by our own markers.
 func upsertDescriptionSection(ctx context.Context, token, repo string, pr int, section string) error {
-	body, err := getPRBody(ctx, token, repo, pr)
-	if err != nil {
-		return fmt.Errorf("get PR body: %w", err)
-	}
-
-	newBody := replaceOrAppendSection(body, section)
-	return updatePRBody(ctx, token, repo, pr, newBody)
+	marked := markedSection(section)
+	return mutatePRBody(
+		ctx,
+		token,
+		repo,
+		pr,
+		func(body string) string { return replaceOrAppendSection(body, section) },
+		func(body string) bool { return strings.Contains(body, marked) },
+	)
 }
 
 // removeDescriptionSection removes the kandev preview section from the PR
 // description on cleanup. If no section is present this is a no-op.
 func removeDescriptionSection(ctx context.Context, token, repo string, pr int) error {
-	body, err := getPRBody(ctx, token, repo, pr)
-	if err != nil {
-		return fmt.Errorf("get PR body: %w", err)
+	return mutatePRBody(
+		ctx,
+		token,
+		repo,
+		pr,
+		func(body string) string {
+			if !strings.Contains(body, sectionStart) {
+				return body
+			}
+			return stripSection(body)
+		},
+		func(body string) bool {
+			if !strings.Contains(body, sectionStart) {
+				return true
+			}
+			return !strings.Contains(body, sectionEnd)
+		},
+	)
+}
+
+func mutatePRBody(
+	ctx context.Context,
+	token, repo string,
+	pr int,
+	merge func(string) string,
+	verify func(string) bool,
+) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxDescriptionWriteAttempts; attempt++ {
+		body, err := getPRBody(ctx, token, repo, pr)
+		if err != nil {
+			lastErr = fmt.Errorf("get PR body: %w", err)
+			continue
+		}
+
+		candidate := merge(body)
+		if candidate == body {
+			if verify(body) {
+				return nil
+			}
+			lastErr = fmt.Errorf("merged PR body failed verification without a write")
+			continue
+		}
+
+		latest, err := getPRBody(ctx, token, repo, pr)
+		if err != nil {
+			lastErr = fmt.Errorf("refresh PR body: %w", err)
+			continue
+		}
+		if latest != body {
+			lastErr = fmt.Errorf("PR body changed before update")
+			continue
+		}
+
+		if err := updatePRBody(ctx, token, repo, pr, candidate); err != nil {
+			lastErr = fmt.Errorf("update PR body: %w", err)
+			continue
+		}
+
+		updated, err := getPRBody(ctx, token, repo, pr)
+		if err != nil {
+			lastErr = fmt.Errorf("verify PR body: %w", err)
+			continue
+		}
+		if updated == candidate && verify(updated) {
+			return nil
+		}
+		if updated != candidate {
+			lastErr = fmt.Errorf("updated PR body differs from the merged body")
+		} else {
+			lastErr = fmt.Errorf("updated PR body failed verification")
+		}
 	}
 
-	if !strings.Contains(body, sectionStart) {
-		return nil // nothing to remove
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no body update attempt completed")
 	}
-
-	newBody := stripSection(body)
-	return updatePRBody(ctx, token, repo, pr, newBody)
+	return fmt.Errorf("PR body update did not converge after %d attempts: %w", maxDescriptionWriteAttempts, lastErr)
 }
 
 // replaceOrAppendSection replaces an existing kandev section in body with
 // section, or appends it if none exists. Preserves any trailing newline.
 func replaceOrAppendSection(body, section string) string {
-	marked := sectionStart + "\n" + section + "\n" + sectionEnd
+	marked := markedSection(section)
 	if strings.Contains(body, sectionStart) {
 		return replaceSection(body, marked)
 	}
@@ -57,6 +127,10 @@ func replaceOrAppendSection(body, section string) string {
 		sep = ""
 	}
 	return body + sep + marked
+}
+
+func markedSection(section string) string {
+	return sectionStart + "\n" + section + "\n" + sectionEnd
 }
 
 // replaceSection replaces everything between our markers (inclusive) with marked.

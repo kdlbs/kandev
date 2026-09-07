@@ -2,22 +2,23 @@
 
 Kandev invokes these managed npm-provided ACP runtimes with the exact effective
 version. The default values below are the reviewed pins in
-`managed_npm_runtime_versions.json` at this commit. An operator selection
-replaces the default for that installation until **Use Kandev default** clears
-it.
+`managed_npm_runtime_versions.json` at this commit. An operator selection takes
+precedence for the current default generation. It remains effective until
+**Use Kandev default** clears it or a later shipped package/default generation
+resets it during startup.
 
 | Agent | Package | Default version | ACP arguments |
 | --- | --- | --- | --- |
-| Claude | `@agentclientprotocol/claude-agent-acp` | `0.70.0` | none |
-| Codex | `@agentclientprotocol/codex-acp` | `1.6.0` | none |
-| OpenCode | `opencode-ai` | `1.18.18` | `acp --print-logs --log-level ERROR` |
-| Copilot | `@github/copilot` | `1.0.75` | `--acp` |
-| Gemini | `@google/gemini-cli` | `0.52.0` | `--acp` |
+| Claude | `@agentclientprotocol/claude-agent-acp` | `0.75.1` | none |
+| Codex | `@agentclientprotocol/codex-acp` | `1.10.0` | none |
+| OpenCode | `opencode-ai` | `1.18.29` | `acp --print-logs --log-level ERROR` |
+| Copilot | `@github/copilot` | `1.0.83` | `--acp` |
+| Gemini | `@google/gemini-cli` | `0.58.0` | `--acp` |
 
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline package@effective-version` with the ACP
 arguments above. For example, an unmodified Claude installation currently
-launches `npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp@0.70.0`.
+launches `npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp@0.75.1`.
 OpenCode's error-only log flags
 are part of its managed command so agentctl can observe terminal provider
 diagnostics without reading OpenCode's private log files. The exact top-level
@@ -41,6 +42,12 @@ modes, commands, and configuration options used for later launches.
 Already-running sessions continue with their existing process. The normal
 launch path remains offline-preferred; the update path is online-preferred so
 it can refresh stale npm metadata.
+
+At startup, Kandev records the package and default version as the agent's
+default generation. If either value changes, it removes the prior operator
+selection before runtime consumers start. An unchanged generation preserves
+the selection. The reset affects future probes and launches only; an active
+agent process continues to run with its current runtime.
 
 ACP protocol negotiation and advertised capabilities are the compatibility
 boundary. Kandev does not maintain an exact package-version allowlist or

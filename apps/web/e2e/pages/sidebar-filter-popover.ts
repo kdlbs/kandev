@@ -167,6 +167,7 @@ export class SidebarFilterPopoverPage {
   }
 
   async setSort(keyLabel: string, direction?: "asc" | "desc"): Promise<void> {
+    await this.openSortSettings();
     const keyTrigger = this.popover.getByTestId("sort-key-select");
     await keyTrigger.click();
     await this.page.getByRole("option", { name: keyLabel, exact: true }).click();
@@ -178,9 +179,22 @@ export class SidebarFilterPopoverPage {
   }
 
   async setGroup(groupLabel: string): Promise<void> {
+    await this.openGroupSettings();
     const trigger = this.popover.getByTestId("group-key-select");
     await trigger.click();
     await this.page.getByRole("option", { name: groupLabel, exact: true }).click();
+  }
+
+  async openSortSettings(): Promise<void> {
+    const toggle = this.popover.getByTestId("sidebar-sort-settings-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await expect(this.popover.getByTestId("sort-key-select")).toBeVisible();
+  }
+
+  async openGroupSettings(): Promise<void> {
+    const toggle = this.popover.getByTestId("sidebar-group-settings-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await expect(this.popover.getByTestId("group-key-select")).toBeVisible();
   }
 
   get taskRowSettings(): Locator {
@@ -226,7 +240,23 @@ export class SidebarFilterPopoverPage {
     await this.popover.getByTestId("view-discard-button").click();
   }
 
-  async deleteActiveView(): Promise<void> {
+  get deleteConfirmation(): Locator {
+    return this.page.getByTestId("saved-task-view-delete-confirmation");
+  }
+
+  async beginDeleteActiveView(name: string): Promise<void> {
     await this.popover.getByTestId("view-delete-button").click();
+    await expect(this.deleteConfirmation).toBeVisible();
+    await expect(this.deleteConfirmation).toHaveAccessibleName(`Delete ${name}?`);
+  }
+
+  async cancelDeleteActiveView(): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
+  }
+
+  async confirmDeleteActiveView(name: string): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: `Delete ${name}` }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
   }
 }

@@ -20,6 +20,13 @@ type Store struct {
 	reader *sqlx.DB
 }
 
+// Activation is one persisted contract activation row.
+type Activation struct {
+	Key         string    `db:"key"`
+	Version     int       `db:"version"`
+	ActivatedAt time.Time `db:"activated_at"`
+}
+
 // NewWithDB creates telemetry_activations idempotently and returns a Store.
 func NewWithDB(writer, reader *sqlx.DB) (*Store, error) {
 	if _, err := writer.Exec(`
@@ -52,6 +59,25 @@ func (s *Store) Activate(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// GetActivation reads one activation row.
+func (s *Store) GetActivation(ctx context.Context, key string, version int) (Activation, error) {
+	var activation Activation
+	err := s.reader.GetContext(ctx, &activation, s.reader.Rebind(`
+		SELECT contract_key AS key, contract_version AS version, activated_at
+		FROM telemetry_activations WHERE contract_key = ? AND contract_version = ?
+	`), key, version)
+	return activation, err
+}
+
+// DeleteActivation removes one activation row. It is intended for lifecycle
+// cleanup and conformance probes, not for normal boot activation.
+func (s *Store) DeleteActivation(ctx context.Context, key string, version int) error {
+	_, err := s.writer.ExecContext(ctx, s.writer.Rebind(`
+		DELETE FROM telemetry_activations WHERE contract_key = ? AND contract_version = ?
+	`), key, version)
+	return err
 }
 
 // contractHealth is one registered contract's boot-time health snapshot.

@@ -2,7 +2,10 @@ import { expect, test } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
+  createModelVariationProfile,
   createMismatchedProfile,
+  MODEL_VARIATION_BASE,
+  UNIQUE_MODEL_VARIATION,
   UNADVERTISED_MODEL,
 } from "../session/model-mismatch-warning-helpers";
 
@@ -37,6 +40,46 @@ test.describe("executor-authoritative model selection on mobile", () => {
           .filter({ hasText: warningText }),
       ).toBeVisible();
       await assertNoDocumentHorizontalOverflow(testPage, "mobile model mismatch selector");
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
+    }
+  });
+
+  test("opens the unique variation advisory by touch without overflow", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const profile = await createModelVariationProfile(
+      apiClient,
+      "Mobile unique host variation profile",
+      "unique",
+    );
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await testPage.reload({ waitUntil: "networkidle" });
+      await testPage.getByRole("button", { name: "Add task" }).tap();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      const selector = dialog.getByTestId("agent-profile-selector");
+      await selector.tap();
+
+      const option = testPage
+        .getByRole("listbox")
+        .getByRole("option", { name: profile.name, exact: false });
+      await expect(option).toBeVisible();
+      await expect(option).toBeEnabled();
+      const warning = option.getByTestId("agent-profile-model-probe-warning");
+      await expect(warning).toBeVisible();
+      const warningText = `The host probe found one possible variation of ${MODEL_VARIATION_BASE}: ${UNIQUE_MODEL_VARIATION}. The selected executor will decide the model at launch.`;
+      await warning.tap();
+      await expect(
+        testPage
+          .locator('[data-slot="drawer-content"][data-state="open"]')
+          .filter({ hasText: warningText }),
+      ).toBeVisible();
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile unique variation advisory");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
     }

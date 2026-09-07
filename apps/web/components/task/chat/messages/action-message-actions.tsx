@@ -16,10 +16,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { useArchiveAndSwitchTask, useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { deleteTask } from "@/lib/api/domains/kanban-api";
 import type { MessageAction } from "@/components/task/chat/types";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 
 export const ACTION_ICON_MAP: Record<string, ElementType> = {
   archive: IconArchive,
@@ -67,25 +68,36 @@ export function ActionButtons({
   );
 }
 
-export function ActionButton({
-  action,
-  messageTaskId,
-  onCompleted,
-  compact = false,
-  labelOverride,
-}: {
+type ActionButtonProps = {
   action: MessageAction;
   messageTaskId?: string;
   onCompleted?: () => void;
   compact?: boolean;
   labelOverride?: string;
-}): ReactElement | null {
+};
+
+export function ActionButton(props: ActionButtonProps): ReactElement | null {
+  if (props.action.type === "delete_task") {
+    return <DeleteActionButton {...(props as DeleteActionButtonProps)} />;
+  }
+  return <StandardActionButton {...(props as StandardActionButtonProps)} />;
+}
+
+type StandardActionButtonProps = Omit<ActionButtonProps, "action"> & {
+  action: MessageAction & { type: "archive_task" | "ws_request" };
+};
+
+function StandardActionButton({
+  action,
+  messageTaskId,
+  onCompleted,
+  compact = false,
+  labelOverride,
+}: StandardActionButtonProps): ReactElement | null {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const taskId = messageTaskId || activeTaskId;
-  const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { removeTaskFromBoard } = useTaskRemoval({ store });
 
   const execute = useCallback(async () => {
     if (state === "busy") return;
@@ -94,17 +106,6 @@ export function ActionButton({
       switch (action.type) {
         case "archive_task": {
           if (taskId) await archiveAndSwitch(taskId);
-          break;
-        }
-        case "delete_task": {
-          if (taskId) {
-            const { activeTaskId, activeSessionId } = store.getState().tasks;
-            await deleteTask(taskId);
-            await removeTaskFromBoard(taskId, {
-              wasActiveTaskId: activeTaskId,
-              wasActiveSessionId: activeSessionId,
-            });
-          }
           break;
         }
         case "ws_request": {
@@ -124,7 +125,7 @@ export function ActionButton({
       setState("error");
       setTimeout(() => setState("idle"), 3000);
     }
-  }, [action, state, taskId, store, archiveAndSwitch, removeTaskFromBoard, onCompleted]);
+  }, [action, state, taskId, archiveAndSwitch, onCompleted]);
 
   // Once a ws_request has been fired, hide this button: it's no longer
   // actionable. If the recovery succeeds the whole ActionMessage unmounts via
@@ -164,4 +165,107 @@ export function ActionButton({
     );
   }
   return button;
+}
+
+type DeleteActionButtonProps = Omit<ActionButtonProps, "action"> & {
+  action: MessageAction & { type: "delete_task" };
+};
+
+function DeleteActionButton({
+  action,
+  messageTaskId,
+  compact = false,
+  labelOverride,
+}: DeleteActionButtonProps): ReactElement {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const taskId = messageTaskId || activeTaskId;
+  const messageTask = useAppStore((s) =>
+    taskId ? findTaskInSnapshots(taskId, s.kanbanMulti.snapshots, s.kanban.tasks) : null,
+  );
+  const store = useAppStoreApi();
+  const { deleteTaskById } = useTaskActions();
+  const { removeTaskFromBoard } = useTaskRemoval({ store });
+
+  const handleDeleteConfirm = useCallback(
+    async ({
+      cascade,
+      discardWorktreeChanges,
+    }: {
+      cascade: boolean;
+      discardWorktreeChanges: boolean;
+    }) => {
+      if (!taskId || state === "busy") return;
+      setState("busy");
+      try {
+        const { activeTaskId, activeSessionId } = store.getState().tasks;
+        await deleteTaskById(taskId, { cascade, discardWorktreeChanges });
+        await removeTaskFromBoard(taskId, {
+          wasActiveTaskId: activeTaskId,
+          wasActiveSessionId: activeSessionId,
+        });
+        setState("done");
+      } catch {
+        setState("error");
+        setTimeout(() => setState("idle"), 3000);
+      }
+    },
+    [state, taskId, store, deleteTaskById, removeTaskFromBoard],
+  );
+
+  const execute = useCallback(() => {
+    if (state !== "busy") setDeleteDialogOpen(true);
+  }, [state]);
+
+  const Icon = action.icon ? ACTION_ICON_MAP[action.icon] : null;
+  const disabled = state === "busy" || state === "done";
+  const button = (
+    <Button
+      variant={compact ? "ghost" : "outline"}
+      size="sm"
+      className={cn(
+        compact
+          ? "h-auto min-h-11 shrink-0 px-2 text-xs cursor-pointer sm:min-h-8"
+          : "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
+        "text-destructive hover:text-destructive",
+      )}
+      disabled={disabled}
+      onClick={execute}
+      data-testid={action.test_id}
+    >
+      {Icon && <Icon className="h-3 w-3" />}
+      {labelOverride ?? action.label}
+    </Button>
+  );
+  const dialog = (
+    <TaskDeleteConfirmDialog
+      open={deleteDialogOpen}
+      onOpenChange={setDeleteDialogOpen}
+      taskTitle={messageTask?.title}
+      taskId={taskId ?? undefined}
+      executorType={messageTask?.primaryExecutorType}
+      requireDiscardConsent={messageTask?.primaryExecutorType == null}
+      isDeleting={state === "busy"}
+      onConfirm={(opts) => void handleDeleteConfirm(opts)}
+    />
+  );
+
+  if (action.tooltip) {
+    return (
+      <>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side="top">{action.tooltip}</TooltipContent>
+        </Tooltip>
+        {dialog}
+      </>
+    );
+  }
+  return (
+    <>
+      {button}
+      {dialog}
+    </>
+  );
 }

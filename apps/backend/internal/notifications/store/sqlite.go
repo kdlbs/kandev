@@ -292,7 +292,9 @@ func (r *sqliteRepository) migrateLegacySubscriptions() error {
 }
 
 func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.Provider) error {
-	provider.ID = uuid.New().String()
+	if provider.ID == "" {
+		provider.ID = uuid.New().String()
+	}
 	now := time.Now().UTC()
 	provider.CreatedAt = now
 	provider.UpdatedAt = now

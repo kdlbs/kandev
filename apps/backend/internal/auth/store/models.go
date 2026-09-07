@@ -51,10 +51,12 @@ type APIToken struct {
 
 // Invite is a tokenized invitation URL minted by an admin.
 type Invite struct {
-	ID        string     `db:"id" json:"id"`
-	TokenHash string     `db:"token_sha256" json:"-"`
-	Email     string     `db:"email" json:"email"`
-	Role      string     `db:"role" json:"role"`
+	ID        string `db:"id" json:"id"`
+	TokenHash string `db:"token_sha256" json:"-"`
+	Email     string `db:"email" json:"email"`
+	Role      string `db:"role" json:"role"`
+	// OrgID is the organization the accepted account will join.
+	OrgID     string     `db:"org_id" json:"org_id,omitempty"`
 	CreatedBy string     `db:"created_by" json:"created_by"`
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
 	ExpiresAt time.Time  `db:"expires_at" json:"expires_at"`
