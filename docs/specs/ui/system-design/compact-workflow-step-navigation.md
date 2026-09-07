@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001
 ---
 
-# Compact Workflow Step Navigation System Design
+# Compact step navigation
 
 ## Purpose and boundaries
 

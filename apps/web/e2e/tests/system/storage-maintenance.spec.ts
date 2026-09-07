@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import {
+  mockProgressiveStorageOverview,
   mockTemporaryArtifactOverview,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
@@ -55,7 +56,7 @@ test.describe("System storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
     await expect(trigger).toContainText("0.05 GB");
     await trigger.click();
@@ -86,7 +87,7 @@ test.describe("System storage maintenance", () => {
     const overviewResponse = testPage.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/system/storage",
     );
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await overviewResponse;
     // The preceding temporary-artifact scenario loads and caches a Storage
     // snapshot. Force a fresh read after seeding this test's cache so this
@@ -130,7 +131,7 @@ test.describe("System storage maintenance", () => {
   });
 
   test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     const initialAnalyzedAt = await analyzedTime.getAttribute("datetime");
@@ -199,7 +200,7 @@ test.describe("System storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage");
       await overviewObserved;
 
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
@@ -229,12 +230,43 @@ test.describe("System storage maintenance", () => {
     }
   });
 
+  test("shows progressive source values and timing disclosure", async ({ testPage, prCapture }) => {
+    const progressive = await mockProgressiveStorageOverview(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Counted so far");
+    await expect(testPage.getByTestId("storage-analysis-source-go_cache")).toContainText(
+      "Measuring 1 of 4",
+    );
+    await expect(testPage.getByTestId("storage-analysis-source-quarantine")).toContainText(
+      "Waiting to measure",
+    );
+
+    progressive.complete();
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Total counted");
+    const timingHelp = testPage.getByTestId("storage-analysis-timing-help");
+    await timingHelp.focus();
+    await expect(
+      testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
+    ).toContainText("Scan duration");
+    await testPage.mouse.move(4, 4);
+    await timingHelp.click();
+    await expect(
+      testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
+    ).toContainText("Analyze refreshes this data immediately");
+    await prCapture.screenshot("progressive-analysis", {
+      caption: "Desktop storage shows counted-so-far progress and scan timing",
+    });
+  });
+
   test("persists policy and analyzes, quarantines, and restores an orphan workspace", async ({
     testPage,
     backend,
   }) => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
+    await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
+    await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();
     expect(overviewBox).not.toBeNull();
@@ -344,7 +376,7 @@ test.describe("System storage maintenance", () => {
       )
       .toBe("RUNNING");
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const responsePromise = testPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -435,7 +467,7 @@ test.describe("System storage maintenance", () => {
         body: JSON.stringify({ job_id: "eligible-purge" }),
       });
     });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await expect(
       testPage.getByTestId("storage-quarantine-eligible-entry").getByText("Eligible now"),
     ).toBeVisible();

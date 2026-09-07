@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-CHANGES-FILE-ROW-CONTAINMENT-001
 ---
 
-# Changes File Row Containment System Design
+# File-row containment
 
 ## Purpose and boundaries
 

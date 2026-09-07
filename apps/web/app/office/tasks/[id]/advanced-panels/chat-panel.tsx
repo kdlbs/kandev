@@ -14,6 +14,7 @@ import { useFileEditors } from "@/hooks/use-file-editors";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { generateUUID } from "@/lib/utils";
@@ -213,16 +214,23 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
 
   return (
     <div className="flex flex-col h-full">
-      <MessageList
-        messages={messages}
-        isLoading={isLoading}
+      <TaskMarkdownFileLinkProvider
         taskId={taskId}
         sessionId={sessionId}
         worktreePath={getSessionWorkspacePath(session)}
         onOpenFile={openFile}
-        activeTurnId={activeTurnId}
-        scrollRef={scrollRef}
-      />
+      >
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          taskId={taskId}
+          sessionId={sessionId}
+          worktreePath={getSessionWorkspacePath(session)}
+          onOpenFile={openFile}
+          activeTurnId={activeTurnId}
+          scrollRef={scrollRef}
+        />
+      </TaskMarkdownFileLinkProvider>
       {!hideInput && (
         <ChatInput
           message={message}

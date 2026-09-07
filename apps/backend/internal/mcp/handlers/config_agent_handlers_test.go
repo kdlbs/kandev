@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	settingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -32,8 +34,95 @@ func newAgentSettingsHandlers(t *testing.T) (*Handlers, settingsstore.Repository
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cleanup() })
 
-	ctrl := agentsettingscontroller.NewController(repo, nil, registry.NewRegistry(log), nil, log)
+	agentRegistry := registry.NewRegistry(log)
+	agentRegistry.LoadDefaults()
+	ctrl := agentsettingscontroller.NewController(repo, nil, agentRegistry, nil, log)
 	return &Handlers{logger: log, agentSettingsCtrl: ctrl}, repo, ctrl
+}
+
+func decodeAgentProfileResponse(t *testing.T, resp *ws.Message) settingsdto.AgentProfileDTO {
+	t.Helper()
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "unexpected response: %s", string(resp.Payload))
+	var profile settingsdto.AgentProfileDTO
+	require.NoError(t, json.Unmarshal(resp.Payload, &profile))
+	return profile
+}
+
+func TestHandleCreateAgentProfile_PersistsAutoApprove(t *testing.T) {
+	h, repo, _ := newAgentSettingsHandlers(t)
+	ctx := context.Background()
+	agent := &settingsmodels.Agent{Name: "codex-acp"}
+	require.NoError(t, repo.CreateAgent(ctx, agent))
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateAgentProfile, map[string]interface{}{
+		"agent_id":     agent.ID,
+		"name":         "Auto approve",
+		"model":        "gpt-5",
+		"auto_approve": true,
+	})
+	resp, err := h.handleCreateAgentProfile(ctx, msg)
+	require.NoError(t, err)
+	created := decodeAgentProfileResponse(t, resp)
+	require.True(t, created.AutoApprove)
+
+	stored, err := repo.GetAgentProfile(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, stored.AutoApprove)
+}
+
+func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial bool
+		update  bool
+	}{
+		{name: "enable", initial: false, update: true},
+		{name: "disable", initial: true, update: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, repo, _ := newAgentSettingsHandlers(t)
+			ctx := context.Background()
+			profile := &settingsmodels.AgentProfile{
+				AgentID: "agent-1", Name: "Profile", Model: "gpt-5", AutoApprove: tt.initial,
+			}
+			require.NoError(t, repo.CreateAgentProfile(ctx, profile))
+
+			msg := makeWSMessage(t, ws.ActionMCPUpdateAgentProfile, map[string]interface{}{
+				"profile_id": profile.ID, "auto_approve": tt.update,
+			})
+			resp, err := h.handleUpdateAgentProfile(ctx, msg)
+			require.NoError(t, err)
+			updated := decodeAgentProfileResponse(t, resp)
+			require.Equal(t, tt.update, updated.AutoApprove)
+
+			stored, err := repo.GetAgentProfile(ctx, profile.ID)
+			require.NoError(t, err)
+			require.Equal(t, tt.update, stored.AutoApprove)
+		})
+	}
+}
+
+func TestHandleUpdateAgentProfile_OmittedAutoApprovePreservesValue(t *testing.T) {
+	h, repo, _ := newAgentSettingsHandlers(t)
+	ctx := context.Background()
+	profile := &settingsmodels.AgentProfile{
+		AgentID: "agent-1", Name: "Profile", Model: "gpt-5", AutoApprove: true,
+	}
+	require.NoError(t, repo.CreateAgentProfile(ctx, profile))
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateAgentProfile, map[string]interface{}{
+		"profile_id": profile.ID, "name": "Renamed",
+	})
+	resp, err := h.handleUpdateAgentProfile(ctx, msg)
+	require.NoError(t, err)
+	updated := decodeAgentProfileResponse(t, resp)
+	require.True(t, updated.AutoApprove)
+
+	stored, err := repo.GetAgentProfile(ctx, profile.ID)
+	require.NoError(t, err)
+	require.True(t, stored.AutoApprove)
 }
 
 // stubUtilityDeps reports a fixed set of utility agents bound to a profile so

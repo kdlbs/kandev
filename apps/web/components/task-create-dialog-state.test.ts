@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useDialogFormState } from "./task-create-dialog-state";
@@ -208,6 +208,25 @@ describe("useDialogFormState — remoteRepos mode", () => {
         source: "paste",
       }),
     ]);
+  });
+});
+
+describe("useDialogFormState — canvas task preset", () => {
+  it("restores the repository-free source and launch-only local preference", async () => {
+    const { result } = renderHook(() =>
+      useDialogFormState(true, "ws-1", null, {
+        title: "Create a canvas",
+        description: "Build a canvas",
+        noRepository: true,
+        preferLocalExecutor: true,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.noRepository).toBe(true));
+    expect(result.current.workspacePath).toBe("");
+    expect(result.current.preferLocalExecutor).toBe(true);
+    expect(result.current.repositories).toEqual([]);
+    expect(result.current.useRemote).toBe(false);
   });
 });
 

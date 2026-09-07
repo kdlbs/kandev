@@ -162,6 +162,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.hermes",
 	}},
+	{func() Agent { return NewGooseACP() }, acpAgentSpec{
+		id: "goose-acp", displayName: "Goose", detectBinaries: []string{"goose"},
+		expectedArgv:       []string{"goose", "acp"},
+		inferenceArgv:      []string{"goose", "acp"},
+		passthroughArgv:    []string{"goose"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.local/share/goose",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {

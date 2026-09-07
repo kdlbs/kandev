@@ -16,9 +16,9 @@ import (
 // transaction. Runtime code must never reference the legacy schema; only this
 // migration knows it.
 //
-// This migration returns every error directly. It never uses the
-// best-effort MigrateLogger path, whose contract swallows unexpected
-// failures.
+// This migration returns every error directly. It does not rely on the
+// compatibility migration logger because the cutover is a single transactional
+// schema operation whose failure must abort the required task store.
 
 const (
 	executorTypeLocalPC          = "local_pc"
@@ -38,6 +38,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 		CREATE TABLE IF NOT EXISTS %s (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
+			ownership_generation INTEGER NOT NULL DEFAULT 1,
 			executor_type TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',

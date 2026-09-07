@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
 import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
+import { routeMarkReadResponseHold } from "../../helpers/mark-read-response-hold";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+
+const END_TOLERANCE_PX = 10;
 
 test.describe("Unread divider", () => {
   test.beforeEach(async ({ apiClient }) => {
@@ -179,6 +183,68 @@ test.describe("Unread divider", () => {
     // instead.
     const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
+  });
+
+  test("completed task switch keeps each read cursor and returns to the bottom", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskA = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor desktop A",
+    );
+    const taskB = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor desktop B",
+    );
+    const responseHold = await routeMarkReadResponseHold(testPage, taskA.sessionId);
+
+    const session = await openTaskSession(testPage, taskA.taskId);
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+    await expect(session.activeChat().getByTestId("unread-divider")).toBeVisible();
+    await responseHold.waitUntilHeld();
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    const taskBMarkRead = testPage.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/task-sessions/${taskB.sessionId}/mark-read`) &&
+        response.request().method() === "POST",
+    );
+    await session.sidebarTaskItem("Completed read cursor desktop B").click();
+    await waitForStableActiveSession(testPage, taskB.sessionId);
+    await taskBMarkRead;
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    await responseHold.releaseHeldResponse();
+    await session.sidebarTaskItem("Completed read cursor desktop A").click();
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+
+    const activeChat = session.activeChat();
+    const scrollContainer = activeChat.locator(".chat-message-list");
+    await expect(activeChat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      )
+      .toBeLessThan(END_TOLERANCE_PX);
   });
 
   test("reserves room for the anchored last-prompt bar so it does not cover the New divider on visit start", async ({

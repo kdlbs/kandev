@@ -3,8 +3,9 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
+const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
 
-const mockState = {};
+const mockState = { userSettings: { keyboardShortcuts: {} } };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
@@ -50,7 +51,7 @@ vi.mock("./pr-archive-banners", () => ({
 }));
 
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
-  useKeyboardShortcut: () => undefined,
+  useKeyboardShortcut: useKeyboardShortcutMock,
 }));
 
 vi.mock("@/hooks/use-message-handler", () => ({
@@ -78,11 +79,12 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-import { resolveInputPlaceholder, useSubmitHandler } from "./chat-input-area";
+import { resolveInputPlaceholder, useChatPanelHandlers, useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
   handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
+  useKeyboardShortcutMock.mockReset();
 });
 
 afterEach(() => {
@@ -140,6 +142,20 @@ describe("useSubmitHandler", () => {
         "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
       variant: "error",
     });
+  });
+});
+
+describe("useChatPanelHandlers", () => {
+  it("can disable the global focus shortcut for embedded panels", () => {
+    renderHook(() =>
+      useChatPanelHandlers("session-1", { current: null }, { enableFocusShortcut: false }),
+    );
+
+    expect(useKeyboardShortcutMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ enabled: false }),
+    );
   });
 });
 

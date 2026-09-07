@@ -253,12 +253,66 @@ func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID str
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }
 
+// ListTaskCIAutoFixStates returns all persisted PR automation state rows for
+// startup reconciliation.
+func (s *Service) ListTaskCIAutoFixStates(ctx context.Context) ([]*TaskCIPRAutomationState, error) {
+	if s.store == nil {
+		return nil, errStoreUnavailable
+	}
+	return s.store.ListAllTaskCIPRStates(ctx)
+}
+
 // RecordTaskCIFixAttempt records an auto-fix attempt.
 func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
 	if s.store == nil {
 		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIFixAttempt(ctx, attempt)
+}
+
+// BindTaskCIAutoFixAttemptTurn binds a queued or direct auto-fix attempt to
+// the exact accepted agent turn.
+func (s *Service) BindTaskCIAutoFixAttemptTurn(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.BindTaskCIAutoFixAttemptTurn(ctx, binding)
+}
+
+// ReportTaskCIAutoFixOutcome accepts the first explicit disposition from a
+// matching auto-fix turn.
+func (s *Service) ReportTaskCIAutoFixOutcome(ctx context.Context, report TaskCIAutoFixOutcomeReport) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReportTaskCIAutoFixOutcome(ctx, report)
+}
+
+// ReconcileTaskCIAutoFixTurnCompletion marks an undispositioned matching turn
+// retryable after normal completion or recoverable failure.
+func (s *Service) ReconcileTaskCIAutoFixTurnCompletion(ctx context.Context, taskID, sessionID, turnID string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixTurnCompletion(ctx, taskID, sessionID, turnID)
+}
+
+// ReconcileTaskCIAutoFixQueuedDispatchFailure releases a queued reservation
+// when delivery fails before agent acceptance.
+func (s *Service) ReconcileTaskCIAutoFixQueuedDispatchFailure(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixQueuedDispatchFailure(ctx, binding)
+}
+
+// ReconcileTaskCIAutoFixProviderProgress advances an action_taken attempt when
+// a settled provider generation changes or its progress deadline expires.
+func (s *Service) ReconcileTaskCIAutoFixProviderProgress(ctx context.Context, progress TaskCIAutoFixProviderProgress) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixProviderProgress(ctx, progress)
 }
 
 // RefreshTaskCIFixCheckpoint records the current CI checkpoint without recording a prompt dispatch.

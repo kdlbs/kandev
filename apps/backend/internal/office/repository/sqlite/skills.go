@@ -401,7 +401,18 @@ func (r *Repository) UpdateSkillConfigFields(
 
 // DeleteSkill deletes a skill by ID.
 func (r *Repository) DeleteSkill(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+	return r.deleteSkill(ctx, r.db, id)
+}
+
+// DeleteSkillTx is DeleteSkill scoped to a caller-owned transaction, letting
+// config sync delete a removed-upstream skill and its ownership manifest row
+// atomically (AC-OFFICE-CONFIG-SYNC-003.14).
+func (r *Repository) DeleteSkillTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	return r.deleteSkill(ctx, tx, id)
+}
+
+func (r *Repository) deleteSkill(ctx context.Context, ext sqlx.ExtContext, id string) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM office_skills WHERE id = ?`), id)
 	return err
 }

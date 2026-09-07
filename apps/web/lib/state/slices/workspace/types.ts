@@ -12,6 +12,13 @@ export type WorkspaceState = {
     name: string;
     description?: string | null;
     owner_id: string;
+    /** The unit this workspace sits in; reach follows the tree. */
+    unit_id?: string;
+    /** The requesting user's role here. */
+    viewer_role?: string;
+    /** Scopes the requesting user holds here; gates every owner-only control. */
+    scopes?: string[];
+    member_count?: number;
     default_executor_id?: string | null;
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;

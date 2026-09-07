@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -110,5 +111,20 @@ func TestHTTPCreatePrompt_BuiltinName_Returns409(t *testing.T) {
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPCreatePrompt_AllowsValidContentWithJSONEnvelope(t *testing.T) {
+	router, cleanup := newTestRouter(t)
+	defer cleanup()
+
+	// JSON syntax and escaping make a valid one-megabyte field larger than the
+	// field limit. The request cap must allow the complete envelope through to
+	// service-level validation.
+	rec := postJSON(t, router, "/api/v1/prompts", map[string]string{
+		"name": "large", "content": strings.Repeat("x", (1<<20)-32),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
 	}
 }

@@ -7,6 +7,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 import { waitForStableActiveSession } from "../../helpers/session-store";
+import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
 
 type E2EMessageStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
@@ -146,6 +147,160 @@ async function waitForOverflow(testPage: Page) {
 }
 
 test.describe("Transcript auto-scroll toggle", () => {
+  test("environment-changing task switch restores the incoming transcript", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Env switch transcript A",
+      seedData.agentProfileId,
+      {
+        description: overflowScript("Environment A history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Env switch transcript B",
+      seedData.agentProfileId,
+      {
+        description: overflowScript("Environment B history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskA.session_id || !taskB.session_id) {
+      throw new Error("createTaskWithAgent did not return both session ids");
+    }
+    await waitForSessionDone(apiClient, taskA.id, taskA.session_id, "task A should finish");
+    await waitForSessionDone(apiClient, taskB.id, taskB.session_id, "task B should finish");
+    const [sessionsA, sessionsB] = await Promise.all([
+      apiClient.listTaskSessions(taskA.id),
+      apiClient.listTaskSessions(taskB.id),
+    ]);
+    const envA = sessionsA.sessions.find(
+      (session) => session.id === taskA.session_id,
+    )?.task_environment_id;
+    const envB = sessionsB.sessions.find(
+      (session) => session.id === taskB.session_id,
+    )?.task_environment_id;
+    expect(envA).toBeTruthy();
+    expect(envB).toBeTruthy();
+    expect(envA).not.toBe(envB);
+
+    const refreshHold = await routeMainWebSocketWithMessageListResponseHold(testPage);
+    const olderPageRequests: string[] = [];
+    testPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === `/api/v1/task-sessions/${taskA.session_id}/messages` &&
+        url.searchParams.has("before")
+      ) {
+        olderPageRequests.push(url.toString());
+      }
+    });
+
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await waitForOverflow(testPage);
+
+    await session.sidebarTaskItem("Env switch transcript B").click();
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    await session.showSessionContext();
+    await waitForOverflow(testPage);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    olderPageRequests.length = 0;
+    await session.sidebarTaskItem("Env switch transcript A").click();
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await session.showSessionContext();
+    const list = chatList(testPage);
+    await waitForOverflow(testPage);
+    await expect
+      .poll(refreshHold.heldCount, {
+        timeout: 5_000,
+        message: "returning task should issue a latest-window refresh",
+      })
+      .toBe(1);
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 2_000,
+        message: "cached enabled transcript should be at the bottom before refresh release",
+      })
+      .toBeLessThan(10);
+    expect(olderPageRequests).toHaveLength(0);
+
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 15_000,
+        message: "enabled transcript should settle at the bottom after an environment switch",
+      })
+      .toBeLessThan(10);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "negative assertion window for an unwanted older-page request after placement unlock",
+    );
+    expect(olderPageRequests).toHaveLength(0);
+
+    const targetScrollTop = await list.evaluate((el) => {
+      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      el.dispatchEvent(new Event("scroll"));
+      return el.scrollTop;
+    });
+    expect(targetScrollTop).toBeGreaterThan(100);
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await session.sidebarTaskItem("Env switch transcript B").click();
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    olderPageRequests.length = 0;
+    await session.sidebarTaskItem("Env switch transcript A").click();
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await session.showSessionContext();
+    await expect
+      .poll(refreshHold.heldCount, {
+        timeout: 5_000,
+        message: "disabled return should issue a latest-window refresh",
+      })
+      .toBe(1);
+    await expect
+      .poll(async () => Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop), {
+        timeout: 2_000,
+        message: "cached disabled transcript should restore its position before refresh release",
+      })
+      .toBeLessThanOrEqual(20);
+    expect(olderPageRequests).toHaveLength(0);
+
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () => Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop), {
+        timeout: 15_000,
+        message: "disabled transcript should restore its own offset after an environment switch",
+      })
+      .toBeLessThanOrEqual(20);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "negative assertion window for pagination after disabled position restoration",
+    );
+    expect(olderPageRequests).toHaveLength(0);
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("inactive session transcript reopens at the bottom after refresh and hidden updates", async ({
     testPage,
     apiClient,

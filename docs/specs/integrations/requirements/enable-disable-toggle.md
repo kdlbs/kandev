@@ -50,7 +50,7 @@ corrected here, and the requirements below now describe the per-workspace toggle
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.4:** Toggling the slider in either location SHALL keep both locations in sync for that workspace (same underlying per-integration, per-workspace enabled state).
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.5:** The enabled state for Azure DevOps, GitHub and GitLab is purely a presentation/navigation-visibility switch: it MUST NOT change whether their existing PR/work-item/board/MR features function. This mirrors that those three integrations have no existing UI surface gated on an "available" concept beyond navigation and their own settings page banner.
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.6:** The integrations index page SHALL gain one new setting, **"Hide disabled integrations from left panel navigation"**, disabled (off) by default.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.7:** When that setting is **off** (default), a disabled-but-configured integration MUST still appear in the left panel navigation (the sidebar's Integrations section, its mobile-menu equivalent, and — whenever a tree menu mode renders it; the default flat menu lists no per-workspace rows at all — the Settings left panel's per-workspace Integrations list under Settings → Workspaces → <workspace>) exactly as it does today for an enabled integration — only credential/health status controls nav visibility.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.7:** When that setting is **off** (default), a disabled-but-configured integration MUST still appear in the left panel navigation (the sidebar's Integrations section, its mobile-menu equivalent, and, whenever a tree menu mode renders it, the Settings left panel's per-workspace Integrations list under Settings → Workspaces → <workspace>) exactly as it does today for an enabled integration — only credential/health status controls nav visibility. Accordion tree is the default and shows these rows when opened.
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.8:** When that setting is **on**, a disabled integration MUST be hidden from all of those left-panel surfaces regardless of its credential/health status. An enabled, healthy integration is unaffected. Only integrations whose enable/disable toggle is off are hidden — an enabled-but-unconfigured integration stays listed (the Settings tree keeps its own configured-status badge convention).
 
 ## Migrated source detail
@@ -86,12 +86,11 @@ corrected here, and the requirements below now describe the per-workspace toggle
   integrations from left panel navigation"**, disabled (off) by default.
 - When that setting is **off** (default), a disabled-but-configured
   integration MUST still appear in the left panel navigation (the sidebar's
-  Integrations section, its mobile-menu equivalent, and — whenever a tree
-  menu mode renders it; the default flat menu lists no per-workspace rows at
-  all — the Settings left panel's per-workspace Integrations list under
-  Settings → Workspaces → <workspace>) exactly as it does today for an
-  enabled integration — only credential/health status controls nav
-  visibility.
+  Integrations section, its mobile-menu equivalent, and, whenever a tree
+  menu mode renders it, the Settings left panel's per-workspace Integrations
+  list under Settings → Workspaces → <workspace>) exactly as it does today for
+  an enabled integration — only credential/health status controls nav
+  visibility. Accordion tree is the default and shows these rows when opened.
 - When that setting is **on**, a disabled integration MUST be hidden from all
   of those left-panel surfaces regardless of its credential/health status. An
   enabled, healthy integration is unaffected. Only integrations whose

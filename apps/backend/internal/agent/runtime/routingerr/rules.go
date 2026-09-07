@@ -25,7 +25,7 @@ var providerRules = map[string][]rule{
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),
 	},
 	"opencode-acp": {
-		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b\d+[- ]hour(?:s)?\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
 		mustRule("opencode.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
@@ -44,6 +44,15 @@ var providerRules = map[string][]rule{
 
 func mustRule(id, pat string, code Code, conf Confidence) rule {
 	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf}
+}
+
+// HasProviderRules reports whether providerID is a rules catalogue key (an
+// agent ID such as "opencode-acp"). Diagnostics can carry a different
+// provider identity, e.g. OpenCode's model-provider ID "opencode-go", which
+// must not be used for rule lookup.
+func HasProviderRules(providerID string) bool {
+	_, ok := providerRules[providerID]
+	return ok
 }
 
 func matchProviderRules(providerID, text string) (*Error, bool) {

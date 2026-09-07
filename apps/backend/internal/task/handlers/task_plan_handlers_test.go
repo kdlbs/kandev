@@ -307,6 +307,32 @@ func TestPlanWSActionsSucceed(t *testing.T) {
 	})
 }
 
+// TestPlanWSUpdateIgnoresUnexpectedModeField pins AC-TASKS-PLAN-APPEND-005.3:
+// the browser write path has no mode field in its payload contract, and an
+// unrecognized "mode" key is ignored rather than rejected — the same
+// behavior the browser gets for any other unknown field, so it always takes
+// the replace default even if a client sends one.
+func TestPlanWSUpdateIgnoresUnexpectedModeField(t *testing.T) {
+	h := newPlanTestHandlers(t)
+	ctx := context.Background()
+
+	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID: planTaskID, Content: "step one", CreatedBy: "user",
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	out, err := h.wsUpdateTaskPlan(ctx, planMsg(t, ws.ActionTaskPlanUpdate,
+		`{"task_id":"`+planTaskID+`","content":"replacement content","mode":"append"}`))
+	if err != nil {
+		t.Fatalf("wsUpdateTaskPlan: %v", err)
+	}
+	plan := decodePlanPayload(t, out)
+	if plan["content"] != "replacement content" {
+		t.Errorf("content = %v, want exactly \"replacement content\" (mode must be ignored, not composed onto the stored plan)", plan["content"])
+	}
+}
+
 func decodePlanPayload(t *testing.T, out *ws.Message) map[string]any {
 	t.Helper()
 	if out.Type != ws.MessageTypeResponse {

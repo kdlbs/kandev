@@ -64,7 +64,7 @@ export function useRemoteContributionRelation(
     () =>
       classifyRemoteContribution({
         hasSelectedPR: Boolean(selectedPR),
-        providerCommits: commitsState.commits,
+        providerCommits: commitsState.authoritativeCommits,
         providerHead: commitsState.providerHead,
         providerCommitsComplete: commitsState.providerCommitsComplete,
         providerLoading: commitsState.loading,
@@ -78,7 +78,7 @@ export function useRemoteContributionRelation(
       }),
     [
       selectedPR,
-      commitsState.commits,
+      commitsState.authoritativeCommits,
       commitsState.providerHead,
       commitsState.providerCommitsComplete,
       commitsState.loading,

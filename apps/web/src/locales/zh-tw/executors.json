@@ -157,6 +157,7 @@
   "profileSaved": "設定已儲存",
   "profiles": "設定",
   "provideSecret": "提供金鑰",
+  "provideSecretForEnvVar": "為 {{envVar}} 提供金鑰",
   "quickPresets": "快速預設",
   "refresh": "重新整理",
   "relatedDockerContainersRemoved_one": "還將移除 {{count}} 個相關 Docker 容器。",
@@ -393,5 +394,9 @@
   "portableConfigInfoTitle": "可遷移的代理程式設定檔",
   "portableConfigNotFound": "未找到",
   "portableConfigNotFoundHint": "這只是編輯提示。你可以先儲存設定，稍後再新增該檔案。",
-  "portableConfigTitle": "代理程式設定檔"
+  "portableConfigTitle": "代理程式設定檔",
+  "allowUserNamespacesTitle": "使用者命名空間支援",
+  "allowUserNamespacesDescription": "允許在容器內建立無特權的使用者命名空間和執行掛載操作。啟用如 bwrap 的沙盒工具。",
+  "allowUserNamespacesNote": "此設定僅影響新建立的容器。現有任務環境必須重設才能使變更生效。",
+  "allowUserNamespacesWarning": "這會為選擇啟用的容器停用 Docker 預設的 AppArmor 限制。僅應為需要使用者命名空間沙盒的可信代理執行環境啟用。"
 }

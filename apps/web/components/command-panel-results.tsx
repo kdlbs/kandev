@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
-import { IconArrowRight, IconLoader2 } from "@tabler/icons-react";
+import { IconArchive, IconArrowRight, IconLoader2 } from "@tabler/icons-react";
 import { CommandEmpty, CommandGroup, CommandItem, CommandShortcut } from "@kandev/ui/command";
 import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
@@ -22,8 +22,6 @@ import {
   resolveTaskResultActivity,
   type CommandPanelLiveTask,
 } from "@/lib/commands/task-result-activity";
-
-const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 
 export const MODE_COMMANDS: CommandPanelMode = "commands";
 export const MODE_SEARCH_TASKS: CommandPanelMode = "search-tasks";
@@ -116,7 +114,8 @@ function TaskResultItem({
 }: TaskResultItemProps) {
   const { t } = useTranslation();
   const locale = useDateLocale();
-  const isArchived = ARCHIVED_STATES.has(task.state);
+  const isArchived = task.archived_at != null;
+  const archivedLabel = t("tasks:archived");
   const activity = resolveTaskResultActivity(
     task,
     liveTasksById.get(task.id),
@@ -139,23 +138,46 @@ function TaskResultItem({
       key={task.id}
       value={getTaskResultValue(task)}
       onSelect={() => onSelect(task)}
-      className={isArchived ? "opacity-60" : ""}
       forceMount
     >
       <div className="flex items-center gap-2 min-w-0 w-full">
-        <TaskStateIcon {...activity} accessibleLabel={t(getTaskStateIconLabelKey(activity))} />
+        {isArchived ? (
+          <IconArchive
+            role="img"
+            aria-label={archivedLabel}
+            data-testid="task-state-archived"
+            className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          />
+        ) : (
+          <TaskStateIcon {...activity} accessibleLabel={t(getTaskStateIconLabelKey(activity))} />
+        )}
         {/* The title identifies the row, so it takes the free space and the
             non-shrinking badge and metadata cannot squeeze it away. Metadata is
             secondary and steps aside entirely on a phone. */}
-        <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
-        {step && (
+        <span
+          className={`min-w-0 flex-1 truncate font-medium${
+            isArchived ? " text-muted-foreground" : ""
+          }`}
+        >
+          {task.title}
+        </span>
+        {isArchived ? (
           <Badge
-            variant="secondary"
-            className="text-[0.6rem] shrink-0"
-            style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
+            variant="outline"
+            className="text-[0.6rem] shrink-0 border-muted-foreground/50 text-muted-foreground"
           >
-            {step.name}
+            {archivedLabel}
           </Badge>
+        ) : (
+          step && (
+            <Badge
+              variant="secondary"
+              className="text-[0.6rem] shrink-0"
+              style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
+            >
+              {step.name}
+            </Badge>
+          )
         )}
         {details.length > 0 && (
           <span className="hidden shrink-0 truncate text-[0.6rem] text-muted-foreground sm:inline">

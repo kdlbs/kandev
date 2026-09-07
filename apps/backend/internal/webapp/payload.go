@@ -40,6 +40,7 @@ type ActivePluginPayload struct {
 type RuntimeConfig struct {
 	APIPrefix                         string   `json:"apiPrefix"`
 	WebSocketPath                     string   `json:"webSocketPath"`
+	BootID                            string   `json:"bootId,omitempty"`
 	LSPAutoInstallPreferenceLanguages []string `json:"lspAutoInstallPreferenceLanguages,omitempty"`
 	Debug                             bool     `json:"debug,omitempty"`
 	// NonProduction marks a dev or e2e build. Distinct from Debug (which the SPA
@@ -58,6 +59,15 @@ type RuntimeConfig struct {
 	// same "<prefix> Kandev" for the
 	// /api/v1/app-state boot path, which never renders through the shell.
 	TitlePrefix string `json:"titlePrefix,omitempty"`
+	// NativeFolderPickerAvailable is true only when the desktop shell launched
+	// this backend and can service the narrow native folder-picker command.
+	// Browsers must continue to use the HTTP directory picker.
+	NativeFolderPickerAvailable bool `json:"nativeFolderPickerAvailable,omitempty"`
+	// DesktopRuntime identifies the launch policy selected by the backend
+	// process marker. It is separate from the native picker capability so an
+	// ordinary browser connected to a desktop backend keeps desktop discovery
+	// policy while using the HTTP picker.
+	DesktopRuntime bool `json:"desktopRuntime,omitempty"`
 }
 
 // BootError is a serializable non-fatal boot-data error for partial hydration.

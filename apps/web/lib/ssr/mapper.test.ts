@@ -78,6 +78,18 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  // The server-rendered boot payload is the first thing a board paints from,
+  // so a dropped assignee here shows every card as unassigned until the first
+  // WS update happens to arrive.
+  it("hydrates the human assignee into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].assignee_user_id = "user-7";
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.assigneeUserId).toBe("user-7");
+  });
+
   it("hydrates task metadata into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);
     snapshot.tasks[0].metadata = {
@@ -118,6 +130,33 @@ describe("snapshotToState", () => {
       expect(state.kanban?.tasks[0]?.autoStartFailed).toBe(expected);
     },
   );
+
+  it("maps parked-on-background-work fields so a REST refresh cannot silently clear them", () => {
+    // Regression guard: snapshotToState previously omitted these three fields
+    // entirely, so hooks/use-workflow-snapshot's REST-based refresh stripped
+    // an already-parked task's icon on every re-fetch after the initial
+    // boot-hydration skip (AC-68/AC-73/AC-62).
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].parked_on_background_work = true;
+    snapshot.tasks[0].parked_revision = 3;
+    snapshot.tasks[0].parked_epoch = 2;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]).toMatchObject({
+      parkedOnBackgroundWork: true,
+      parkedRevision: 3,
+      parkedEpoch: 2,
+    });
+  });
+
+  it("leaves parked-on-background-work fields unset when the snapshot omits them", () => {
+    const state = snapshotToState(snapshotWithPendingAction(undefined));
+
+    expect(state.kanban?.tasks[0]?.parkedOnBackgroundWork).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.parkedRevision).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.parkedEpoch).toBeUndefined();
+  });
 
   it("hydrates the task status summary into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);

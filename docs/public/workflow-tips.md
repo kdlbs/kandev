@@ -126,7 +126,7 @@ Workflow-level settings include the name and default agent profile. Each step ca
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
 | Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
-| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, so a Start step with no entry actions is a genuine parking column. |
+| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, including in plan mode. Thus, a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
 | Reset agent context | Starts the step with fresh conversation context. It is disabled when the step changes agent profile because the destination step's session start setting controls whether that switch reuses or creates a conversation. |

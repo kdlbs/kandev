@@ -25,6 +25,8 @@ import {
   getLastTurnGroupId,
   getStreamingAgentMessageId,
   canReassertDividerScroll,
+  filterLaunchErrorItems,
+  filterLaunchErrorMessages,
   resolveLastPromptEdge,
   isElementFullyVisible,
 } from "./message-list-shared";
@@ -87,6 +89,7 @@ type NativeMessageListScrollParams = {
   anchoredBarHeight?: number;
   /** Initial/refetch loading: the sentinel's hard block. */
   messagesLoading: boolean;
+  historyRefreshPending: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -106,6 +109,7 @@ type ScrollToDividerOptions = {
   sessionId?: string | null;
   isProgrammaticScrollLocked?: () => boolean;
   isVisible?: boolean;
+  historyRefreshPending?: boolean;
 };
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
@@ -120,6 +124,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     dividerBeforeItemKey,
     anchoredBarHeight,
     messagesLoading,
+    historyRefreshPending,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -146,6 +151,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     enabled,
     hasUnreadDivider: Boolean(dividerBeforeItemKey),
     messagesLoading,
+    historyRefreshPending,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -162,6 +168,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     sessionId,
     isProgrammaticScrollLocked,
     isVisible,
+    historyRefreshPending,
   });
   useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
     handleScrollToMessage,
@@ -219,7 +226,7 @@ function MessageRow({
       id={`msg-${key}`}
       data-turn-id={getItemTurnId(item)}
       tabIndex={-1}
-      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
+      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] md:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
       {dividerBeforeItemKey === key && <UnreadDivider />}
@@ -266,6 +273,9 @@ type NativeMessageListBodyProps = {
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
   autoScrollEnabled: boolean;
   dividerBeforeItemKey?: string | null;
+  launchErrorOwned: boolean;
+  launchErrorStamp?: string;
+  launchErrorOccurredAt?: string;
 };
 
 /**
@@ -318,6 +328,7 @@ export function useScrollToDividerOrBottom(
     sessionId = null,
     isProgrammaticScrollLocked = () => false,
     isVisible = true,
+    historyRefreshPending = false,
   } = options;
   const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   const isUserScrollingRef = useDividerUserScrolling(scrollRef);
@@ -347,7 +358,7 @@ export function useScrollToDividerOrBottom(
       settlingDeadlineRef.current = Date.now() + DIVIDER_SETTLING_WINDOW_MS;
     }
     const el = scrollRef.current;
-    if (!el || itemCount === 0) return;
+    if (!el || itemCount === 0 || historyRefreshPending) return;
 
     const placeInitialPosition = () => {
       if (!isVisibleRef.current) return;
@@ -415,6 +426,7 @@ export function useScrollToDividerOrBottom(
     sessionId,
     isProgrammaticScrollLocked,
     isVisible,
+    historyRefreshPending,
     scrollRef,
   ]);
 }
@@ -467,6 +479,9 @@ function NativeMessageListBody({
   onScrollToMessage,
   autoScrollEnabled,
   dividerBeforeItemKey,
+  launchErrorOwned,
+  launchErrorStamp,
+  launchErrorOccurredAt,
 }: NativeMessageListBodyProps) {
   return (
     <div className="p-4">
@@ -508,6 +523,9 @@ function NativeMessageListBody({
         messages={messages}
         isWorking={isWorking}
         footerActionMessages={footerActionMessages}
+        launchErrorOwned={launchErrorOwned}
+        launchErrorStamp={launchErrorStamp}
+        launchErrorOccurredAt={launchErrorOccurredAt}
       />
 
       {/* Bottom anchor keeps the view pinned while auto-scroll is enabled.
@@ -538,6 +556,7 @@ export const NativeMessageList = memo(
       taskId,
       sessionId,
       messagesLoading,
+      historyRefreshPending = false,
       isWorking,
       sessionState,
       worktreePath,
@@ -550,14 +569,43 @@ export const NativeMessageList = memo(
       dividerBeforeItemKey,
       anchoredBarHeight,
       isVisible = true,
+      launchErrorOwned = false,
+      launchErrorStamp,
+      launchErrorOccurredAt,
     }: MessageListProps,
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    const visibleItems = useMemo(
+      () =>
+        filterLaunchErrorItems(items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt),
+      [items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
+    );
+    const visibleMessages = useMemo(
+      () =>
+        filterLaunchErrorMessages(
+          messages,
+          launchErrorOwned,
+          launchErrorStamp,
+          launchErrorOccurredAt,
+        ),
+      [messages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
+    );
+    const visibleFooterActionMessages = useMemo(
+      () =>
+        filterLaunchErrorMessages(
+          footerActionMessages ?? [],
+          launchErrorOwned,
+          launchErrorStamp,
+          launchErrorOccurredAt,
+        ),
+      [footerActionMessages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
+    );
+
     const { isInitialLoading, showLoadingState } = getConversationLoadingState({
       messagesLoading,
-      messagesCount: messages.length,
+      messagesCount: visibleMessages.length,
       isWorking,
       sessionState,
     });
@@ -566,21 +614,22 @@ export const NativeMessageList = memo(
     });
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
-    const streamingMessageId = getStreamingAgentMessageId(messages);
-    const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
+    const streamingMessageId = getStreamingAgentMessageId(visibleMessages);
+    const lastTurnGroupId = useMemo(() => getLastTurnGroupId(visibleItems), [visibleItems]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
     const { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery } =
       useNativeMessageListScroll({
         scrollRef,
         ref,
-        items,
-        messages,
+        items: visibleItems,
+        messages: visibleMessages,
         isWorking,
         sessionId,
         enabled: autoScrollEnabled,
         dividerBeforeItemKey,
         anchoredBarHeight,
         messagesLoading,
+        historyRefreshPending,
         hasMore,
         isLoadingMore,
         loadMore,
@@ -608,9 +657,9 @@ export const NativeMessageList = memo(
       >
         {stickyPromptBar}
         <NativeMessageListBody
-          items={items}
-          messages={messages}
-          footerActionMessages={footerActionMessages}
+          items={visibleItems}
+          messages={visibleMessages}
+          footerActionMessages={visibleFooterActionMessages}
           permissionsByToolCallId={permissionsByToolCallId}
           childrenByParentToolCallId={childrenByParentToolCallId}
           taskId={taskId}
@@ -633,6 +682,9 @@ export const NativeMessageList = memo(
           onScrollToMessage={handleScrollToMessage}
           autoScrollEnabled={autoScrollEnabled}
           dividerBeforeItemKey={dividerBeforeItemKey}
+          launchErrorOwned={launchErrorOwned}
+          launchErrorStamp={launchErrorStamp}
+          launchErrorOccurredAt={launchErrorOccurredAt}
         />
       </SessionPanelContent>
     );

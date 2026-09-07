@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -124,7 +125,30 @@ func (r *Repository) CreateRoutine(ctx context.Context, routine *models.Routine)
 	if routine.CatchUpMax <= 0 {
 		routine.CatchUpMax = 25
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.insertRoutine(ctx, r.db, routine)
+}
+
+// CreateRoutineTx is CreateRoutine scoped to a caller-owned transaction,
+// letting config sync write a new routine and its ownership manifest row
+// atomically (AC-OFFICE-CONFIG-SYNC-003.14).
+func (r *Repository) CreateRoutineTx(ctx context.Context, tx *sqlx.Tx, routine *models.Routine) error {
+	if routine.ID == "" {
+		routine.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	routine.CreatedAt = now
+	routine.UpdatedAt = now
+	if routine.CatchUpPolicy == "" {
+		routine.CatchUpPolicy = "enqueue_missed_with_cap"
+	}
+	if routine.CatchUpMax <= 0 {
+		routine.CatchUpMax = 25
+	}
+	return r.insertRoutine(ctx, tx, routine)
+}
+
+func (r *Repository) insertRoutine(ctx context.Context, ext sqlx.ExtContext, routine *models.Routine) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_routines (
 			id, workspace_id, name, description, task_template,
 			assignee_agent_profile_id, status, concurrency_policy,
@@ -205,8 +229,22 @@ type RoutineConfigFields struct {
 func (r *Repository) UpdateRoutineConfigFields(
 	ctx context.Context, id string, fields RoutineConfigFields,
 ) error {
+	return r.updateRoutineConfigFields(ctx, r.db, id, fields)
+}
+
+// UpdateRoutineConfigFieldsTx is UpdateRoutineConfigFields scoped to a
+// caller-owned transaction.
+func (r *Repository) UpdateRoutineConfigFieldsTx(
+	ctx context.Context, tx *sqlx.Tx, id string, fields RoutineConfigFields,
+) error {
+	return r.updateRoutineConfigFields(ctx, tx, id, fields)
+}
+
+func (r *Repository) updateRoutineConfigFields(
+	ctx context.Context, ext sqlx.ExtContext, id string, fields RoutineConfigFields,
+) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_routines SET
 			description = ?, task_template = ?, concurrency_policy = ?, updated_at = ?
 		WHERE id = ?
@@ -216,7 +254,16 @@ func (r *Repository) UpdateRoutineConfigFields(
 
 // DeleteRoutine deletes a routine by ID.
 func (r *Repository) DeleteRoutine(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+	return r.deleteRoutine(ctx, r.db, id)
+}
+
+// DeleteRoutineTx is DeleteRoutine scoped to a caller-owned transaction.
+func (r *Repository) DeleteRoutineTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	return r.deleteRoutine(ctx, tx, id)
+}
+
+func (r *Repository) deleteRoutine(ctx context.Context, ext sqlx.ExtContext, id string) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM office_routines WHERE id = ?`), id)
 	return err
 }

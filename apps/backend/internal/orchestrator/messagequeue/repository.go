@@ -61,6 +61,11 @@ type Repository interface {
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
 
+	// ListDurableLifecycleEntries returns every durable lifecycle entry across
+	// sessions. It is used by startup recovery to remove rows whose owning
+	// workflow reservation was not committed before a process crash.
+	ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error)
+
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 

@@ -83,6 +83,28 @@ func TestSQLiteRepository_InsertList(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ListDurableLifecycleEntries(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	for _, msg := range []*QueuedMessage{
+		{SessionID: "s1", TaskID: "t1", Content: "ordinary", QueuedBy: QueuedByUser},
+		{SessionID: "s2", TaskID: "t2", Content: "lifecycle", QueuedBy: QueuedByWorkflow,
+			Metadata: map[string]interface{}{MetadataLifecycleDurable: true}},
+	} {
+		if err := repo.Insert(ctx, msg, 0); err != nil {
+			t.Fatalf("insert %q: %v", msg.Content, err)
+		}
+	}
+
+	entries, err := repo.ListDurableLifecycleEntries(ctx)
+	if err != nil {
+		t.Fatalf("list durable lifecycle entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "lifecycle" {
+		t.Fatalf("durable lifecycle entries = %+v, want lifecycle row only", entries)
+	}
+}
+
 func TestSQLiteRepository_HasTaskActivityIndex(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	sqliteRepo := repo.(*sqliteRepository)

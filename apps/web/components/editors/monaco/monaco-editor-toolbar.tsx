@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconDeviceFloppy,
   IconLoader2,
+  IconDownload,
   IconTrash,
   IconTextWrap,
   IconTextWrapDisabled,
@@ -23,6 +24,7 @@ import {
 } from "@/components/editors/external-vcs-file-link";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
 import type { LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 import { useTranslation } from "react-i18next";
@@ -209,22 +211,71 @@ function DeleteButton({ onDelete }: { onDelete?: () => void }) {
   );
 }
 
-function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => void }) {
+function DownloadButton({ onDownload }: { onDownload?: () => void }) {
   const { t } = useTranslation();
+  if (!onDownload) return null;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           size="sm"
           variant="ghost"
-          onClick={onTogglePreview}
-          className="h-8 w-8 p-0 cursor-pointer"
-          data-testid="markdown-preview-toggle"
+          onClick={onDownload}
+          aria-label={t("editors:downloadFile")}
+          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
         >
-          <IconEye className="h-4 w-4" />
+          <IconDownload className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
+      <TooltipContent>{t("editors:downloadFile")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PreviewButton({
+  previewKind,
+  onTogglePreview,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
+}: {
+  previewKind: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (previewKind === "none") return null;
+  const isHtml = previewKind === "html";
+  const action = isHtml ? onPreviewHtml : onTogglePreview;
+  if (!action) return null;
+  const label = isHtml ? t("editors:previewHtml") : t("editors:previewMarkdown");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={action}
+          disabled={isHtml && isPublishingHtmlPreview}
+          aria-label={label}
+          title={isHtml ? t("task:htmlPreviewTrustedCode") : undefined}
+          className="h-8 w-8 p-0 cursor-pointer"
+          data-testid={isHtml ? "html-preview-toggle" : "markdown-preview-toggle"}
+        >
+          {isHtml && isPublishingHtmlPreview ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconEye className="h-4 w-4" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{label}</p>
+        {isHtml && (
+          <p className="mt-1 max-w-xs text-muted-foreground">{t("task:htmlPreviewTrustedCode")}</p>
+        )}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -253,7 +304,11 @@ interface MonacoEditorToolbarProps {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
-  onToggleMarkdownPreview?: () => void;
+  onDownload?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
 }
 
 export function MonacoEditorToolbar({
@@ -280,7 +335,11 @@ export function MonacoEditorToolbar({
   onSave,
   onReloadFromAgent,
   onDelete,
-  onToggleMarkdownPreview,
+  onDownload,
+  previewKind = "none",
+  onTogglePreview,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
 }: MonacoEditorToolbarProps) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
@@ -314,8 +373,13 @@ export function MonacoEditorToolbar({
               onToggle={onToggleDiffIndicators}
             />
           )}
-          {onToggleMarkdownPreview && (
-            <MarkdownPreviewButton onTogglePreview={onToggleMarkdownPreview} />
+          {(onTogglePreview || onPreviewHtml) && (
+            <PreviewButton
+              previewKind={previewKind}
+              onTogglePreview={onTogglePreview}
+              onPreviewHtml={onPreviewHtml}
+              isPublishingHtmlPreview={isPublishingHtmlPreview}
+            />
           )}
           <WrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
           <ReloadFromAgentButton
@@ -331,6 +395,7 @@ export function MonacoEditorToolbar({
             size="sm"
           />
           <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
+          <DownloadButton onDownload={onDownload} />
           <DeleteButton onDelete={onDelete} />
           <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
         </div>

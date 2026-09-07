@@ -3869,6 +3869,64 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 	})
 }
 
+// TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails is
+// the regression test for review finding F2: PrepareTaskSession's own
+// background workspace launch resolves and claims a dynamic route ahead of
+// the actual agent start (see resolveExecutionForLaunchSession), but this
+// launch never starts the agent — it only reaches "active" later, via
+// StartCreatedSession. If it fails here, nothing else revisits the claim, so
+// it must not stay "starting" forever.
+func TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails(t *testing.T) {
+	const taskID = "task-dynamic-prepare-launch-fail"
+	const dynamicProfileID = "profile-dynamic"
+	const concreteProfileID = "profile-concrete"
+
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkflowID: "wf1", Title: "Test Task", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", Title: "Test Task", State: v1.TaskStateInProgress}
+	launchErr := errors.New("workspace launch failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	svc.SetProfileExecutionResolver(newWorkflowDynamicProfileResolver(t, dynamicProfileID, concreteProfileID))
+
+	sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, dynamicProfileID, "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+
+	require.Eventually(t, func() bool {
+		session, getErr := repo.GetTaskSession(context.Background(), sessionID)
+		return getErr == nil && session.RouteState == "action_required"
+	}, time.Second, 10*time.Millisecond, "expected the claimed dynamic route to reach action_required after the workspace launch failed")
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.RouteGeneration == 0 {
+		t.Fatal("expected the session to have claimed a route generation before the launch failed")
+	}
+}
+
 func TestHandleSessionLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)

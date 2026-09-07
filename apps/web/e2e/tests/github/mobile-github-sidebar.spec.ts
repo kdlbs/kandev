@@ -179,6 +179,7 @@ test.describe("Mobile /github sidebar", () => {
   test("saved query defaults to its chosen repository and persists by touch", async ({
     testPage,
     apiClient,
+    prCapture,
   }) => {
     const savedQuery = "Mobile default repo issues";
     await apiClient.mockGitHubReset();
@@ -264,5 +265,39 @@ test.describe("Mobile /github sidebar", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+
+    await page.mobileMenuButton.tap();
+    const deleteAction = page.mobileSidebar.getByRole("button", {
+      name: `Delete ${savedQuery} saved query`,
+    });
+    const deleteBox = await deleteAction.boundingBox();
+    expect(deleteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(deleteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    await deleteAction.tap();
+    const deleteConfirmation = page.mobileSidebar.getByTestId(
+      "saved-task-view-delete-confirmation",
+    );
+    await expect(deleteConfirmation).toHaveAccessibleName(`Delete ${savedQuery}?`);
+    await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    await prCapture.screenshot("saved-query-delete-mobile", {
+      caption: "A saved integration query confirms inline without nesting another sheet.",
+    });
+    await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(page.savedQueryByLabel(savedQuery)).toBeVisible();
+
+    await deleteAction.tap();
+    const deleteResponse = testPage.waitForResponse(
+      (response) =>
+        response.ok() &&
+        response.request().method() === "PUT" &&
+        response.url().includes("/api/v1/github/workspace-settings"),
+    );
+    await page.mobileSidebar
+      .getByTestId("saved-task-view-delete-confirmation")
+      .getByRole("button", { name: `Delete ${savedQuery}` })
+      .tap();
+    await deleteResponse;
+    await expect(page.savedQueryByLabel(savedQuery)).toHaveCount(0);
+    await expect(page.mobileSidebar).toBeVisible();
   });
 });
