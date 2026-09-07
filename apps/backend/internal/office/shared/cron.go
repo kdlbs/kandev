@@ -44,7 +44,7 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 	if candidate.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
 	}
-	if isAmbiguousFallBack(candidate, loc) {
+	for isAmbiguousFallBack(candidate) {
 		candidate = schedule.Next(candidate)
 		if candidate.IsZero() {
 			return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
@@ -68,14 +68,27 @@ func resolveLocation(timezone string) (*time.Location, error) {
 
 // isAmbiguousFallBack reports whether candidate is the second occurrence of
 // a local wall-clock time made ambiguous by a DST fall-back transition.
-// Reconstructing the same wall-clock fields with time.Date always resolves
-// to the first (pre-transition) offset; a mismatch means candidate is the
-// later, repeated occurrence.
-func isAmbiguousFallBack(candidate time.Time, loc *time.Location) bool {
-	canonical := time.Date(
-		candidate.Year(), candidate.Month(), candidate.Day(),
-		candidate.Hour(), candidate.Minute(), candidate.Second(), candidate.Nanosecond(),
-		loc,
-	)
-	return !canonical.Equal(candidate)
+//
+// time.Date's disambiguation of ambiguous wall-clock fields is documented as
+// implementation-defined ("the choice of time zone, and therefore the time,
+// is not guaranteed"), and in practice resolves to different occurrences in
+// different zone families (e.g. it picks the earlier instant in
+// America/New_York but the later one in zones with a UTC+0 winter offset
+// such as Europe/London). This instead reasons from candidate's own zone
+// transition: candidate's period starts at the most recent offset change;
+// if that change was a fall-back (offset decreased), the first
+// offsetDelta-wide slice of the new period repeats wall-clock times already
+// seen under the old offset.
+func isAmbiguousFallBack(candidate time.Time) bool {
+	start, _ := candidate.ZoneBounds()
+	if start.IsZero() {
+		return false
+	}
+	_, currentOffset := candidate.Zone()
+	_, priorOffset := start.Add(-time.Second).Zone()
+	if priorOffset <= currentOffset {
+		return false // not a fall-back transition (spring-forward or no change)
+	}
+	repeatedWindow := time.Duration(priorOffset-currentOffset) * time.Second
+	return candidate.Before(start.Add(repeatedWindow))
 }

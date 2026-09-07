@@ -257,6 +257,87 @@ func TestNextCronTime_DSTFallBack_FiresOnce(t *testing.T) {
 	}
 }
 
+// TestNextCronTime_DSTFallBack_DenseExpression_NoDoubleFire is a regression
+// test for a fall-back suppression that only re-checked the single
+// replacement candidate: an expression with multiple matching slots inside
+// the repeated hour must not double-fire on any of them.
+func TestNextCronTime_DSTFallBack_DenseExpression_NoDoubleFire(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-11-01 is fall-back in America/New_York; 01:00 and 01:30 each
+	// occur twice (EDT, then EST).
+	after := time.Date(2026, 10, 31, 12, 0, 0, 0, loc)
+
+	fire1, err := NextCronTime("0,30 1 * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("fire1: unexpected error: %v", err)
+	}
+	wantFire1 := time.Date(2026, 11, 1, 1, 0, 0, 0, loc)
+	if !fire1.Equal(wantFire1) {
+		t.Fatalf("fire1: got %v, want %v", fire1, wantFire1)
+	}
+
+	fire2, err := NextCronTime("0,30 1 * * *", "America/New_York", fire1)
+	if err != nil {
+		t.Fatalf("fire2: unexpected error: %v", err)
+	}
+	wantFire2 := time.Date(2026, 11, 1, 1, 30, 0, 0, loc)
+	if !fire2.Equal(wantFire2) {
+		t.Fatalf("fire2: got %v, want %v", fire2, wantFire2)
+	}
+
+	// Both repeated fall-back occurrences (EST 01:00 and 01:30) must be
+	// suppressed: the next fire is the following day's 01:00, not a
+	// same-day repeat of either slot.
+	fire3, err := NextCronTime("0,30 1 * * *", "America/New_York", fire2)
+	if err != nil {
+		t.Fatalf("fire3: unexpected error: %v", err)
+	}
+	wantFire3 := time.Date(2026, 11, 2, 1, 0, 0, 0, loc)
+	if !fire3.Equal(wantFire3) {
+		t.Errorf("fire3: got %v, want %v (both repeated fall-back slots must be suppressed)", fire3, wantFire3)
+	}
+}
+
+// TestNextCronTime_DSTFallBack_ZeroOffsetZone is a regression test for
+// disambiguation logic that assumed time.Date resolves an ambiguous wall
+// clock to its pre-transition offset. That assumption does not hold in
+// zones whose standard-time UTC offset is zero (e.g. Europe/London), where
+// it resolves to the later, repeated occurrence instead.
+func TestNextCronTime_DSTFallBack_ZeroOffsetZone(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-10-25 is fall-back in Europe/London; 01:30 occurs twice (BST
+	// then GMT). Build expectations from explicit UTC instants so the
+	// assertions don't themselves depend on ambiguous local reconstruction.
+	after := time.Date(2026, 10, 24, 12, 0, 0, 0, loc)
+
+	fire1, err := NextCronTime("30 1 * * *", "Europe/London", after)
+	if err != nil {
+		t.Fatalf("fire1: unexpected error: %v", err)
+	}
+	// First occurrence: 01:30 BST (UTC+1) = 00:30 UTC.
+	wantFire1 := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC)
+	if !fire1.Equal(wantFire1) {
+		t.Fatalf("fire1: got %v (%s), want %v", fire1, fire1.In(loc), wantFire1)
+	}
+
+	fire2, err := NextCronTime("30 1 * * *", "Europe/London", fire1)
+	if err != nil {
+		t.Fatalf("fire2: unexpected error: %v", err)
+	}
+	// The second occurrence (01:30 GMT = 01:30 UTC) must be suppressed:
+	// the next fire is the following day, not the same-day repeat.
+	wantFire2 := time.Date(2026, 10, 26, 1, 30, 0, 0, time.UTC)
+	if !fire2.Equal(wantFire2) {
+		t.Errorf("fire2: got %v (%s), want %v", fire2, fire2.In(loc), wantFire2)
+	}
+}
+
 // TestNextCronTime_Unsatisfiable verifies an impossible expression (Feb 30th)
 // returns ErrUnsatisfiableCron instead of a silent +24h fallback.
 func TestNextCronTime_Unsatisfiable(t *testing.T) {

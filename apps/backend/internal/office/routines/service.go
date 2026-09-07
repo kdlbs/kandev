@@ -415,11 +415,12 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	// expressions (no fixed interval — we walk NextCronTime).
 	runCount, advanceTo, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {
-		s.logger.Warn("compute routine catch-up failed",
+		// ClaimTrigger already cleared next_run_at; leave it cleared rather
+		// than re-arming to `now`, which would make the trigger due again
+		// on the very next tick and dispatch a run every cycle forever.
+		s.logger.Error("compute routine catch-up failed; trigger left disarmed",
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
-		// Fall through with sane defaults: fire once, advance one tick.
-		runCount = 1
-		advanceTo = now
+		return err
 	}
 	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &advanceTo); err != nil {
 		s.logger.Warn("update trigger next_run_at failed",
