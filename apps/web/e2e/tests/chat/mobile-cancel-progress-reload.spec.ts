@@ -11,8 +11,7 @@ test.describe("Mobile cancel progress across reloads", () => {
     test.setTimeout(120_000);
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile cancel progress");
-    // A single-stage sleep keeps the accepted cancellation operation alive
-    // through reload without staged emitter boundaries.
+    // /sleep 30 keeps the backend cancellation alive long enough to survive a reload.
     await session.sendMessageViaButton("/sleep 30");
 
     const cancel = session.activeChat().getByTestId("cancel-agent-button");

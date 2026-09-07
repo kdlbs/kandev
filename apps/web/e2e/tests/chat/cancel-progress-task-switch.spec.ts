@@ -30,8 +30,7 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // A single-stage sleep keeps the accepted cancellation operation alive
-    // through task navigation and reload without staged emitter boundaries.
+    // /sleep 30 keeps the backend cancellation alive long enough for a task switch and reload.
     await session.sendMessage("/sleep 30");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
