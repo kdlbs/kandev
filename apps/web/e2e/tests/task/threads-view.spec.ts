@@ -332,7 +332,11 @@ test.describe("Threads view", () => {
       first: testPage.getByTestId(`thread-column-${first.id}`),
       second: testPage.getByTestId(`thread-column-${second.id}`),
     };
-    for (const column of Object.values(columns)) await expect(column).toBeVisible();
+    // The board shell can render before the workflow snapshot carrying the
+    // second completed session reaches the client after navigation.
+    for (const column of Object.values(columns)) {
+      await expect(column).toBeVisible({ timeout: 30_000 });
+    }
 
     // The composer's own border tracks agent state, not the caret, so the
     // column has to carry the focus mark or a deck of composers gives the

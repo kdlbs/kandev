@@ -11,10 +11,11 @@ import (
 )
 
 // TestFetchBranchToLocal_PRNumberUsesPullRefspec verifies that when a PR
-// number is supplied, the manager fetches refs/pull/<N>/head into the local
-// branch. This is the fork-PR path: the head branch does not exist on origin
-// by name (only as a pull/<N>/head ref), so the previous branch-name fetch
-// would fail with "couldn't find remote ref".
+// number is supplied, the manager fetches refs/pull/<N>/head into an isolated
+// Kandev-owned ref. This is the fork-PR path: the head branch does not
+// exist on origin by name (only as a pull/<N>/head ref), so the previous
+// branch-name fetch would fail with "couldn't find remote ref" or overwrite a
+// local branch with the same name.
 func TestFetchBranchToLocal_PRNumberUsesPullRefspec(t *testing.T) {
 	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/enrich-linear-issue-hap")
 
@@ -36,9 +37,66 @@ func TestFetchBranchToLocal_PRNumberUsesPullRefspec(t *testing.T) {
 		t.Fatalf("expected no warning, got %q", result.Warning)
 	}
 
-	gotSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/enrich-linear-issue-hap"))
+	if result.StartPoint != pullRequestSnapshotRef(974) {
+		t.Fatalf("start point = %q, want %q", result.StartPoint, pullRequestSnapshotRef(974))
+	}
+	gotSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", pullRequestSnapshotRef(974)))
 	if gotSHA != prHeadSHA {
-		t.Fatalf("local branch SHA = %q, want %q (PR head)", gotSHA, prHeadSHA)
+		t.Fatalf("isolated PR ref SHA = %q, want %q (PR head)", gotSHA, prHeadSHA)
+	}
+}
+
+func TestFetchBranchToLocal_PRNumberSnapshotSurvivesPruneAndOriginPRBranch(t *testing.T) {
+	const prNumber = 976
+	const headBranch = "feature/pr-snapshot"
+	repoPath, prHeadSHA := initGitRepoWithPullRef(t, prNumber, headBranch)
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, headBranch, prNumber)
+	if err != nil {
+		t.Fatalf("fetchBranchToLocal(pr=%d) unexpected error: %v", prNumber, err)
+	}
+	const expectedRef = "refs/kandev/pull/976/head"
+	if result.StartPoint != expectedRef {
+		t.Fatalf("start point = %q, want %q", result.StartPoint, expectedRef)
+	}
+
+	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+	remoteClone := filepath.Join(t.TempDir(), "origin-pr-branch")
+	runGit(t, filepath.Dir(remoteClone), "clone", originURL, remoteClone)
+	runGit(t, remoteClone, "config", "user.email", "remote@example.com")
+	runGit(t, remoteClone, "config", "user.name", "Remote User")
+	runGit(t, remoteClone, "config", "commit.gpgsign", "false")
+	runGit(t, remoteClone, "checkout", "-b", "pr/976", "main")
+	writeTestFile(t, filepath.Join(remoteClone, "origin-pr-branch.txt"), "origin branch\n")
+	runGit(t, remoteClone, "add", "origin-pr-branch.txt")
+	runGit(t, remoteClone, "commit", "-m", "origin pr branch")
+	originPRBranchSHA := strings.TrimSpace(runGit(t, remoteClone, "rev-parse", "HEAD"))
+	runGit(t, remoteClone, "push", "origin", "HEAD:refs/heads/pr/976")
+
+	// A routine refresh must not prune or overwrite the Kandev-owned snapshot.
+	runGit(t, repoPath, "fetch", "--all", "--prune")
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", expectedRef)); got != prHeadSHA {
+		t.Fatalf("Kandev PR snapshot SHA = %q, want %q", got, prHeadSHA)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/remotes/origin/pr/976")); got != originPRBranchSHA {
+		t.Fatalf("origin/pr/976 SHA = %q, want real branch SHA %q", got, originPRBranchSHA)
+	}
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-pr-snapshot", SessionID: "session-pr-snapshot", TaskTitle: "PR snapshot",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, BaseBranch: "main",
+		CheckoutBranch: headBranch, PRNumber: prNumber, RemoteSyncHandled: true,
+		TaskDirName: "task-pr-snapshot", RepoName: "repo-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() should use the Kandev snapshot after normal fetch: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != prHeadSHA {
+		t.Fatalf("worktree HEAD = %q, want PR snapshot %q", got, prHeadSHA)
 	}
 }
 
@@ -109,14 +167,9 @@ func TestCreateWorktree_PRNumberCreatesWorktreeFromForkRef(t *testing.T) {
 }
 
 // TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR exercises the
-// retry-path regression flagged in PR #990 review: when a fork PR's head
-// branch is already checked out in another worktree, the refspec fetch is
-// refused and the manager retries with a bare `pull/<N>/head` fetch. That
-// retry updates FETCH_HEAD but does NOT create `origin/<branch>` because
-// the branch doesn't exist on origin — so returning `StartPoint:
-// "origin/<branch>"` would make the downstream `git worktree add` fail
-// with an invalid ref. Empty StartPoint must be returned so the caller
-// falls back to the local branch (already at the PR head from task 1).
+// PR-head isolation when two worktrees use the same source branch name. Each
+// worktree must point at the immutable PR ref while its local branch remains
+// unique.
 func TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR(t *testing.T) {
 	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
 

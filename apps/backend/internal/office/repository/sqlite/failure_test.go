@@ -601,6 +601,64 @@ func TestListFailedRunsForAgent(t *testing.T) {
 	}
 }
 
+func TestAgentPauseRecoveries_SnapshotsNewestFailures(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedSummaryRun(t, repo, "pause-old", "agent-a", "failed",
+		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", `{"task_id":"old"}`)
+	seedSummaryRun(t, repo, "pause-new-a", "agent-a", "failed",
+		"2026-01-02 09:00:00", "", "2026-01-02 10:00:00", `{"task_id":"new-a"}`)
+	seedSummaryRun(t, repo, "pause-new-b", "agent-a", "failed",
+		"2026-01-03 09:00:00", "", "2026-01-03 10:00:00", `{"task_id":"new-b"}`)
+
+	if err := repo.ReplaceAgentPauseRecoveries(ctx, "agent-a", 2); err != nil {
+		t.Fatalf("replace pause recoveries: %v", err)
+	}
+	recoveries, err := repo.ListAgentPauseRecoveries(ctx, "agent-a")
+	if err != nil {
+		t.Fatalf("list pause recoveries: %v", err)
+	}
+	if len(recoveries) != 2 {
+		t.Fatalf("recoveries = %+v, want two newest tasks", recoveries)
+	}
+	if recoveries[0].TaskID != "new-a" || recoveries[0].FailedRunID != "pause-new-a" {
+		t.Errorf("first recovery = %+v, want new-a/pause-new-a", recoveries[0])
+	}
+	if recoveries[1].TaskID != "new-b" || recoveries[1].FailedRunID != "pause-new-b" {
+		t.Errorf("second recovery = %+v, want new-b/pause-new-b", recoveries[1])
+	}
+
+	if err := repo.DeleteAgentPauseRecovery(ctx, "agent-a", "new-a"); err != nil {
+		t.Fatalf("delete pause recovery: %v", err)
+	}
+	recoveries, err = repo.ListAgentPauseRecoveries(ctx, "agent-a")
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if len(recoveries) != 1 || recoveries[0].TaskID != "new-b" {
+		t.Fatalf("recoveries after delete = %+v, want only new-b", recoveries)
+	}
+}
+
+func TestGetLatestRunForAgentTask_IncludesNewestState(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedSummaryRun(t, repo, "latest-failed", "agent-a", "failed",
+		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", `{"task_id":"task-a"}`)
+	seedSummaryRun(t, repo, "latest-queued", "agent-a", "queued",
+		"2026-01-02 09:00:00", "", "", `{"task_id":"task-a"}`)
+
+	latest, err := repo.GetLatestRunForAgentTask(ctx, "agent-a", "task-a")
+	if err != nil {
+		t.Fatalf("get latest run: %v", err)
+	}
+	if latest == nil || latest.ID != "latest-queued" || latest.Status != "queued" {
+		t.Fatalf("latest = %+v, want latest-queued/queued", latest)
+	}
+}
+
 func TestHasPriorTasklessFailedRun(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

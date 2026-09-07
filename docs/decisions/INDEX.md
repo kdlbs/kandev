@@ -248,5 +248,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-bounded-clarification-response-path | [Bound Clarification Responses with Indexed Lookup](2026-09-05-bounded-clarification-response-path.md) | accepted | backend, frontend, protocol | 2026-09-05 |
 | 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
 | 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |
+| 2026-09-06-explicit-pr-auto-fix-outcomes | [Require Explicit Outcomes for PR Auto-Fix Attempts](2026-09-06-explicit-pr-auto-fix-outcomes.md) | proposed | backend, frontend, protocol, workflow, GitHub | 2026-09-06 |
 | 2026-09-05-bounded-progressive-storage-analysis | [Use bounded progressive storage analysis](2026-09-05-bounded-progressive-storage-analysis.md) | accepted | backend, frontend, protocol | 2026-09-05 |
 | 2026-09-07-separate-runtime-permissions-and-advisory-actions | [Keep MCP availability separate from runtime permissions](2026-09-07-separate-runtime-permissions-and-advisory-actions.md) | accepted | backend, protocol | 2026-09-07 |
+| 2026-09-05-script-capable-html-preview-isolation | [Capability-Free Runtime for Script-Capable HTML Preview](2026-09-05-script-capable-html-preview-isolation.md) | proposed | frontend, desktop, security | 2026-09-05 |
+| 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |

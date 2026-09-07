@@ -285,6 +285,7 @@ func (s *Service) completeTurnForStreamEvent(
 	if len(capturedTurnIDs) > 0 {
 		capturedTurnID = capturedTurnIDs[0]
 	}
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, payload.TaskID, payload.SessionID, capturedTurnID)
 	if capturedTurnID != "" {
 		// A durable turn ID is authoritative. If the event is stale and an
 		// accepted successor exists, preserve that successor while settling
