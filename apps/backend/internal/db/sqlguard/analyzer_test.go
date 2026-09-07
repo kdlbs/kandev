@@ -129,3 +129,102 @@ func TestAnalyzeSourceFindsStandalonePragma(t *testing.T) {
 		t.Fatalf("AnalyzeSource() findings = %#v, want sqlite-catalog finding", findings)
 	}
 }
+
+func TestAnalyzeSourceFindsAssignedRawPlaceholder(t *testing.T) {
+	source := `package fixture
+func unsafe(db interface{ Exec(string, ...any) }) {
+	query := "SELECT value FROM settings WHERE key = ?"
+	db.Exec(query)
+}
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	if !hasRule(findings, RuleRawPlaceholder) {
+		t.Fatalf("AnalyzeSource() findings = %#v, want assigned raw-placeholder finding", findings)
+	}
+}
+
+func TestAnalyzeSourceRequiresRebindAfterSQLxIn(t *testing.T) {
+	unsafeSource := `package fixture
+func unsafe(db interface{ Exec(string, ...any) }) {
+	db.Exec(sqlx.In("SELECT value FROM settings WHERE key IN (?)", []string{"x"}))
+}
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(unsafeSource), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource(unsafe) error = %v", err)
+	}
+	if !hasRule(findings, RuleRawPlaceholder) {
+		t.Fatalf("AnalyzeSource(unsafe) findings = %#v, want raw-placeholder finding", findings)
+	}
+
+	safeSource := `package fixture
+func safe(db interface{ Exec(string, ...any) }) {
+	db.Exec(db.Rebind(sqlx.In("SELECT value FROM settings WHERE key IN (?)", []string{"x"})))
+}
+`
+	findings, err = AnalyzeSource("fixture.go", []byte(safeSource), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource(safe) error = %v", err)
+	}
+	if hasRule(findings, RuleRawPlaceholder) {
+		t.Fatalf("AnalyzeSource(safe) findings = %#v, want no raw-placeholder finding", findings)
+	}
+
+	assignedSafeSource := `package fixture
+func safeAssigned(db interface{ Exec(string, ...any) }) {
+	query, args, err := sqlx.In("SELECT value FROM settings WHERE key IN (?)", []string{"x"})
+	if err != nil { return }
+	db.Exec(db.Rebind(query), args...)
+}
+`
+	findings, err = AnalyzeSource("fixture.go", []byte(assignedSafeSource), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource(assigned safe) error = %v", err)
+	}
+	if hasRule(findings, RuleRawPlaceholder) {
+		t.Fatalf("AnalyzeSource(assigned safe) findings = %#v, want no raw-placeholder finding", findings)
+	}
+}
+
+func TestAnalyzeSourceFindsBooleanIntegerComparison(t *testing.T) {
+	source := `package fixture
+var query = "UPDATE settings SET enabled = 1 WHERE key = 'x'"
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	if !hasRule(findings, RuleBooleanInteger) {
+		t.Fatalf("AnalyzeSource() findings = %#v, want boolean-integer comparison finding", findings)
+	}
+}
+
+func TestAnalyzeSourceIgnoresPortableAndNonBooleanComparisons(t *testing.T) {
+	source := `package fixture
+var portable = "UPDATE settings SET enabled = TRUE WHERE status = 1"
+var numeric = "UPDATE settings SET retry_count = 1 WHERE status = 0"
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	if hasRule(findings, RuleBooleanInteger) {
+		t.Fatalf("AnalyzeSource() findings = %#v, want no boolean-integer finding", findings)
+	}
+}
+
+func TestAnalyzeSourceFindsKnownBooleanColumnComparison(t *testing.T) {
+	source := `package fixture
+var query = "SELECT id FROM settings WHERE is_enabled != 0"
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	if !hasRule(findings, RuleBooleanInteger) {
+		t.Fatalf("AnalyzeSource() findings = %#v, want boolean-integer comparison finding", findings)
+	}
+}

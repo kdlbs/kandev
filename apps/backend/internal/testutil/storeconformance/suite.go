@@ -179,7 +179,6 @@ func Run(t testingT, catalog []requiredstores.Descriptor, adapters []Adapter, op
 				callbacks := adapter.Engines[engineName]
 				runScenario(t, "fresh", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, callbacks.Fresh)
 				runScenario(t, "replay", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, callbacks.Replay)
-				runScenario(t, "engine-behavior", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, engineBehaviorScenario)
 				runScenario(t, "crud", ScenarioContext{Context: context.Background(), Engine: engineName, StoreID: adapter.ID, DB: engine.DB}, adapter.Scenarios.CRUD)
 				for _, capability := range adapter.Scenarios.Capabilities {
 					capabilityName := capabilityName(capability.Capability)
@@ -187,6 +186,29 @@ func Run(t testingT, catalog []requiredstores.Descriptor, adapters []Adapter, op
 				}
 			})
 		}
+	}
+}
+
+// RunHarnessSelfTest exercises the runner's own portable SQL fixture. It is
+// intentionally separate from Run so the generated table cannot make a
+// domain adapter appear to cover its owning schema.
+func RunHarnessSelfTest(t testingT, options RunOptions) {
+	t.Helper()
+	engines := options.Engines
+	if len(engines) == 0 {
+		engines = []EngineName{EngineSQLite, EnginePostgres}
+	}
+	for _, engineName := range engines {
+		if err := validateEngine(engineName); err != nil {
+			t.Fatalf("store conformance harness options: %v", err)
+		}
+		engineName := engineName
+		t.Run("harness/"+string(engineName), func(t *testing.T) {
+			engine := openEngine(t, engineName, options.PostgresDSN)
+			runScenario(t, "engine-behavior", ScenarioContext{
+				Context: context.Background(), Engine: engineName, StoreID: "harness", DB: engine.DB,
+			}, engineBehaviorScenario)
+		})
 	}
 }
 

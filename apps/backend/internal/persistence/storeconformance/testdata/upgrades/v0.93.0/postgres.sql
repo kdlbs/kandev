@@ -3392,5 +3392,47 @@ INSERT INTO kandev_meta (key, value)
 VALUES ('fixture.sentinel', 'v0.93.0-postgres-sentinel')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
+INSERT INTO workspaces (id, name, description, created_at, updated_at)
+VALUES ('fixture-v0930-task-workspace', 'Fixture Task Workspace', 'preserved task workspace', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+VALUES ('fixture-v0930-task', 'fixture-v0930-task-workspace', 'Fixture Task', 'preserved task row', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+VALUES ('fixture-v0930-analytics-task', 'fixture-v0930-task-workspace', 'Fixture Analytics Task', 'preserved analytics row', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
+VALUES ('fixture-v0930-workflow-template', 'Fixture Workflow Template', 'preserved workflow template', 0, '[]', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+VALUES ('fixture-v0930-workflow-step', 'fixture-v0930-workflow', 'Fixture Workflow Step', 0, '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO agents (id, name, created_at, updated_at)
+VALUES ('fixture-v0930-agent', 'Fixture Agent', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, created_at, updated_at)
+VALUES ('fixture-v0930-agent-profile', 'fixture-v0930-agent', 'fixture-profile', 'Fixture Agent Profile', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO users (id, email, display_name, role, status, created_at, updated_at)
+VALUES ('fixture-v0930-user', 'fixture-v0930@example.test', 'Fixture User', 'admin', 'active', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO notification_providers (id, user_id, name, type, config, enabled, created_at, updated_at)
+VALUES ('fixture-v0930-notification-provider', 'fixture-v0930-user', 'Fixture Notification Provider', 'webhook', '{}', 1, '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO editors (id, type, name, kind, command, scheme, created_at, updated_at)
+VALUES ('fixture-v0930-editor', 'fixture-editor', 'Fixture Editor', 'local', 'fixture-editor', 'fixture', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+VALUES ('fixture-v0930-prompt', 'Fixture Prompt', 'preserved prompt content', 0, '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO utility_agents (id, name, description, prompt, created_at, updated_at)
+VALUES ('fixture-v0930-utility', 'Fixture Utility', 'preserved utility', 'preserved utility prompt', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO office_projects (id, workspace_id, name, description, status, created_at, updated_at)
+VALUES ('fixture-v0930-office-project', 'fixture-v0930-task-workspace', 'Fixture Office Project', 'preserved office project', 'active', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO runs (id, agent_profile_id, reason, status, requested_at)
+VALUES ('fixture-v0930-run', 'fixture-v0930-agent-profile', 'fixture run', 'queued', '2024-01-02 03:04:05+00:00');
+INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name)
+VALUES ('fixture-v0930-terminal', 'fixture-v0930-task', 'fixture-v0930-environment', 0, 'Fixture Terminal');
+INSERT INTO quick_terminal_tabs (tab_id, user_id, workspace_id, sequence, status)
+VALUES ('fixture-v0930-quick-terminal', 'fixture-v0930-user', 'fixture-v0930-task-workspace', 0, 'connecting');
+INSERT INTO runtime_flag_overrides (key, value, created_at, updated_at)
+VALUES ('fixture.v0930.flag', 1, '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO auth_identities (id, user_id, provider, subject, password_hash, created_at, updated_at)
+VALUES ('fixture-v0930-identity', 'fixture-v0930-user', 'local', 'fixture-v0930-subject', 'fixture-v0930-hash', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO auth_sessions (id, user_id, token_sha256, created_at, expires_at, last_seen_at)
+VALUES ('fixture-v0930-session', 'fixture-v0930-user', 'fixture-v0930-token-hash', '2024-01-02 03:04:05+00:00', '2034-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO secrets (id, name, scope, workspace_id, encrypted_value, nonce, created_at, updated_at)
+VALUES ('fixture-v0930-secret', 'Fixture Secret', 'global', '', '', '', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO telemetry_activations (contract_key, contract_version, activated_at)
+VALUES ('fixture.v0930.contract', 7, '2024-01-02 03:04:05+00:00');
 
 

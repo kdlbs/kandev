@@ -31,7 +31,7 @@ var knownRules = map[Rule]string{
 	RuleSQLiteCatalog:      "SQLite catalog or PRAGMA syntax",
 	RuleConflictSyntax:     "SQLite conflict syntax",
 	RuleRawPlaceholder:     "raw question-mark placeholder",
-	RuleBooleanInteger:     "integer default for a BOOLEAN column",
+	RuleBooleanInteger:     "integer literal for a SQL boolean column",
 	RuleSQLiteDateFunction: "SQLite-only date function",
 	RuleDateTimeType:       "direct DATETIME type",
 }
@@ -59,10 +59,14 @@ var (
 	sqliteCatalogPattern  = regexp.MustCompile(`(?i)\b(?:sqlite_master|sqlite_schema|pragma(?:_[a-z0-9_]+)?)\b`)
 	conflictPattern       = regexp.MustCompile(`(?i)\bINSERT\s+OR\s+IGNORE\b`)
 	booleanIntegerPattern = regexp.MustCompile(`(?is)\bBOOLEAN\b.{0,100}?\bDEFAULT\s+[01]\b`)
-	sqliteDatePattern     = regexp.MustCompile(`(?i)\b(?:date|datetime|strftime|julianday)\s*\(`)
-	datetimeTypePattern   = regexp.MustCompile(`(?i)(?:^|[\s(,])DATETIME(?:\s|[,);]|$)`)
-	pragmaPattern         = regexp.MustCompile(`(?i)\bpragma(?:_[a-z0-9_]+)?\b`)
-	sqlPattern            = regexp.MustCompile(`(?i)\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|WITH)\b`)
+	// These names are the boolean columns used by the built-in SQL schemas.
+	// The list is deliberately explicit: fields such as status, priority, and
+	// is_ephemeral are integer state values, not SQL BOOLEAN columns.
+	booleanComparisonPattern = regexp.MustCompile(`(?i)\b(?:enabled|is_enabled|active|is_active|hidden|is_hidden|deleted|is_deleted|builtin|is_builtin|installed|is_installed|last_ok|poll_enabled|user_modified|cli_passthrough|auto_approve)\b\s*(?:<>|!=|<=|>=|=|<|>)\s*[01]\b`)
+	sqliteDatePattern        = regexp.MustCompile(`(?i)\b(?:date|datetime|strftime|julianday)\s*\(`)
+	datetimeTypePattern      = regexp.MustCompile(`(?i)(?:^|[\s(,])DATETIME(?:\s|[,);]|$)`)
+	pragmaPattern            = regexp.MustCompile(`(?i)\bpragma(?:_[a-z0-9_]+)?\b`)
+	sqlPattern               = regexp.MustCompile(`(?i)\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|WITH)\b`)
 )
 
 type analysisResult struct {
@@ -91,7 +95,7 @@ func analyzeSource(filename string, source []byte, exemptions []Exemption) (anal
 		return analysisResult{}, fmt.Errorf("parse %s: %w", filename, err)
 	}
 	parents := parentNodes(file)
-	values := stringValues(file)
+	values := topLevelStringValues(file)
 	result := analysisResult{used: make(map[string]struct{})}
 	analyzeStringLiterals(filename, file, fileSet, parents, exemptions, &result)
 	analyzeExecutorCalls(filename, file, fileSet, parents, values, exemptions, &result)
@@ -141,7 +145,7 @@ func analyzeSQLLiteral(
 	}{
 		{RuleSQLiteCatalog, sqlText && sqliteCatalogPattern.MatchString(value), "SQLite catalog or PRAGMA syntax must stay behind a dialect boundary"},
 		{RuleConflictSyntax, sqlText && conflictPattern.MatchString(value), "use portable conflict syntax"},
-		{RuleBooleanInteger, sqlText && booleanIntegerPattern.MatchString(value), "use a dialect-rendered boolean default"},
+		{RuleBooleanInteger, sqlText && (booleanIntegerPattern.MatchString(value) || booleanComparisonPattern.MatchString(value)), "use a boolean value or a dialect-rendered boolean default"},
 		{RuleSQLiteDateFunction, sqlText && sqliteDatePattern.MatchString(value), "use an internal/db/dialect date helper"},
 		{RuleDateTimeType, sqlText && datetimeTypePattern.MatchString(value), "use a dialect-rendered timestamp type"},
 	}
@@ -170,31 +174,116 @@ func analyzeExecutorCalls(
 	file *ast.File,
 	fileSet *token.FileSet,
 	parents map[ast.Node]ast.Node,
-	values map[string]string,
+	values map[string]queryValue,
 	exemptions []Exemption,
 	result *analysisResult,
 ) {
 	seen := make(map[string]struct{})
+	scopes := make([]functionScope, 0, len(file.Decls))
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		scopes = append(scopes, functionScope{body: function.Body, params: function.Type.Params})
+	}
 	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || !isExecutorCall(call) {
-			return true
+		if literal, ok := node.(*ast.FuncLit); ok {
+			scopes = append(scopes, functionScope{body: literal.Body, params: literal.Type.Params})
+			return false
 		}
-		query, value, ok := queryArgument(call, values)
-		if !ok || isBoundQuery(query) {
-			return true
-		}
-		if pragmaPattern.MatchString(value) {
-			position := fileSet.Position(query.Pos())
-			symbol := sourceSymbol(query, parents)
-			analyzeSQLLiteral(filename, value, symbol, position, exemptions, seen, result, true)
-		}
-		if !rawPlaceholder(value) {
-			return true
-		}
-		analyzeRawPlaceholder(filename, query, fileSet, parents, exemptions, seen, result)
 		return true
 	})
+	for _, scope := range scopes {
+		functionValues := cloneQueryValues(values)
+		for name := range localStringNames(scope.body) {
+			delete(functionValues, name)
+		}
+		for _, field := range scope.params.List {
+			for _, name := range field.Names {
+				delete(functionValues, name.Name)
+			}
+		}
+		ast.Inspect(scope.body, func(node ast.Node) bool {
+			// A function literal introduces its own parameter and assignment
+			// scope. It is analyzed separately when it is a top-level value;
+			// treating its parameters as the enclosing function's values would
+			// make an unrelated package-level query look executable here.
+			if literal, ok := node.(*ast.FuncLit); ok {
+				_ = literal
+				return false
+			}
+			switch node := node.(type) {
+			case *ast.ValueSpec:
+				recordStringValueSpec(node, functionValues)
+			case *ast.AssignStmt:
+				recordStringAssignments(node, functionValues)
+			case *ast.RangeStmt:
+				analyzeRangeSQLValues(node, functionValues)
+			case *ast.CallExpr:
+				analyzeExecutorCall(filename, node, fileSet, parents, functionValues, exemptions, seen, result)
+			}
+			return true
+		})
+	}
+}
+
+type functionScope struct {
+	body   *ast.BlockStmt
+	params *ast.FieldList
+}
+
+func analyzeRangeSQLValues(
+	rangeStmt *ast.RangeStmt,
+	values map[string]queryValue,
+) {
+	valueName, ok := rangeStmt.Value.(*ast.Ident)
+	if !ok {
+		return
+	}
+	composite, ok := rangeStmt.X.(*ast.CompositeLit)
+	if !ok {
+		return
+	}
+	// Keep one unsafe representative for the loop variable. The eventual
+	// executor call still decides whether that value is wrapped by Rebind, so
+	// a loop over raw query strings does not produce a false positive when the
+	// body correctly rebinds each query.
+	for _, element := range composite.Elts {
+		query, ok := resolveQueryValue(element, values)
+		if ok && !query.bound && rawPlaceholder(query.value) {
+			query.expression = element
+			values[valueName.Name] = query
+			return
+		}
+	}
+}
+
+func analyzeExecutorCall(
+	filename string,
+	call *ast.CallExpr,
+	fileSet *token.FileSet,
+	parents map[ast.Node]ast.Node,
+	values map[string]queryValue,
+	exemptions []Exemption,
+	seen map[string]struct{},
+	result *analysisResult,
+) {
+	if !isExecutorCall(call) {
+		return
+	}
+	query, value, bound, ok := queryArgument(call, values)
+	if !ok || bound || isBoundQuery(query) {
+		return
+	}
+	if pragmaPattern.MatchString(value) {
+		position := fileSet.Position(query.Pos())
+		symbol := sourceSymbol(query, parents)
+		analyzeSQLLiteral(filename, value, symbol, position, exemptions, seen, result, true)
+	}
+	if rawPlaceholder(value) {
+		analyzeRawPlaceholder(filename, query, fileSet, parents, exemptions, seen, result)
+	}
 }
 
 func analyzeRawPlaceholder(
@@ -316,49 +405,158 @@ func parentNodes(root ast.Node) map[ast.Node]ast.Node {
 	return parents
 }
 
-func stringValues(file *ast.File) map[string]string {
-	values := make(map[string]string)
-	ast.Inspect(file, func(node ast.Node) bool {
-		valueSpec, ok := node.(*ast.ValueSpec)
+type queryValue struct {
+	expression ast.Expr
+	value      string
+	bound      bool
+}
+
+func topLevelStringValues(file *ast.File) map[string]queryValue {
+	values := make(map[string]queryValue)
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
 		if !ok {
-			return true
+			continue
 		}
-		for index, name := range valueSpec.Names {
-			if index >= len(valueSpec.Values) {
-				continue
+		for _, specification := range general.Specs {
+			if valueSpec, ok := specification.(*ast.ValueSpec); ok {
+				recordStringValueSpec(valueSpec, values)
 			}
-			if value, ok := literalValue(valueSpec.Values[index], values); ok {
-				values[name.Name] = value
+		}
+	}
+	return values
+}
+
+func cloneQueryValues(values map[string]queryValue) map[string]queryValue {
+	clone := make(map[string]queryValue, len(values))
+	for name, value := range values {
+		clone[name] = value
+	}
+	return clone
+}
+
+func localStringNames(root ast.Node) map[string]struct{} {
+	names := make(map[string]struct{})
+	ast.Inspect(root, func(node ast.Node) bool {
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		switch node := node.(type) {
+		case *ast.ValueSpec:
+			for _, name := range node.Names {
+				names[name.Name] = struct{}{}
+			}
+		case *ast.AssignStmt:
+			for _, target := range node.Lhs {
+				if name, ok := target.(*ast.Ident); ok {
+					names[name.Name] = struct{}{}
+				}
 			}
 		}
 		return true
 	})
-	return values
+	return names
 }
 
-func literalValue(expression ast.Expr, values map[string]string) (string, bool) {
+func recordStringValueSpec(specification *ast.ValueSpec, values map[string]queryValue) {
+	for index, name := range specification.Names {
+		if index >= len(specification.Values) {
+			continue
+		}
+		if value, ok := resolveQueryValue(specification.Values[index], values); ok {
+			value.expression = specification.Values[index]
+			values[name.Name] = value
+		}
+	}
+}
+
+func recordStringAssignments(assignment *ast.AssignStmt, values map[string]queryValue) {
+	for index, target := range assignment.Lhs {
+		name, ok := target.(*ast.Ident)
+		if !ok || index >= len(assignment.Rhs) {
+			continue
+		}
+		if value, ok := resolveQueryValue(assignment.Rhs[index], values); ok {
+			value.expression = assignment.Rhs[index]
+			values[name.Name] = value
+		}
+	}
+}
+
+func resolveQueryValue(expression ast.Expr, values map[string]queryValue) (queryValue, bool) {
 	switch expression := expression.(type) {
 	case *ast.BasicLit:
-		if expression.Kind != token.STRING {
-			return "", false
-		}
-		value, err := strconv.Unquote(expression.Value)
-		return value, err == nil
+		return resolveBasicLiteral(expression)
 	case *ast.Ident:
-		value, ok := values[expression.Name]
-		return value, ok
+		return resolveIdentifier(expression, values)
 	case *ast.BinaryExpr:
-		if expression.Op != token.ADD {
-			return "", false
-		}
-		left, leftOK := literalValue(expression.X, values)
-		right, rightOK := literalValue(expression.Y, values)
-		return left + right, leftOK && rightOK
+		return resolveBinaryQueryValue(expression, values)
 	case *ast.ParenExpr:
-		return literalValue(expression.X, values)
+		return resolveParenthesizedQueryValue(expression, values)
+	case *ast.CallExpr:
+		return resolveCallQueryValue(expression, values)
 	default:
-		return "", false
+		return queryValue{}, false
 	}
+}
+
+func resolveBasicLiteral(expression *ast.BasicLit) (queryValue, bool) {
+	if expression.Kind != token.STRING {
+		return queryValue{}, false
+	}
+	value, err := strconv.Unquote(expression.Value)
+	return queryValue{expression: expression, value: value}, err == nil
+}
+
+func resolveIdentifier(expression *ast.Ident, values map[string]queryValue) (queryValue, bool) {
+	value, ok := values[expression.Name]
+	if ok {
+		value.expression = expression
+	}
+	return value, ok
+}
+
+func resolveBinaryQueryValue(expression *ast.BinaryExpr, values map[string]queryValue) (queryValue, bool) {
+	if expression.Op != token.ADD {
+		return queryValue{}, false
+	}
+	left, leftOK := resolveQueryValue(expression.X, values)
+	right, rightOK := resolveQueryValue(expression.Y, values)
+	if !leftOK || !rightOK {
+		return queryValue{}, false
+	}
+	return queryValue{expression: expression, value: left.value + right.value, bound: left.bound && right.bound}, true
+}
+
+func resolveParenthesizedQueryValue(expression *ast.ParenExpr, values map[string]queryValue) (queryValue, bool) {
+	value, ok := resolveQueryValue(expression.X, values)
+	if ok {
+		value.expression = expression
+	}
+	return value, ok
+}
+
+func resolveCallQueryValue(expression *ast.CallExpr, values map[string]queryValue) (queryValue, bool) {
+	if len(expression.Args) == 0 {
+		return queryValue{}, false
+	}
+	value, ok := resolveQueryValue(expression.Args[0], values)
+	if !ok {
+		return queryValue{}, false
+	}
+	switch functionName(expression.Fun) {
+	case "Rebind":
+		value.bound = true
+	case "In":
+		// sqlx.In expands '?' placeholders but does not rebind them to
+		// the target driver's syntax. It is safe only when wrapped by
+		// Rebind at the final database boundary.
+		value.bound = false
+	default:
+		return queryValue{}, false
+	}
+	value.expression = expression
+	return value, true
 }
 
 func sourceSymbol(node ast.Node, parents map[ast.Node]ast.Node) string {
@@ -384,14 +582,14 @@ func isExecutorCall(call *ast.CallExpr) bool {
 	}
 }
 
-func queryArgument(call *ast.CallExpr, values map[string]string) (ast.Expr, string, bool) {
+func queryArgument(call *ast.CallExpr, values map[string]queryValue) (ast.Expr, string, bool, bool) {
 	for _, argument := range call.Args {
-		value, ok := literalValue(argument, values)
-		if ok && (sqlPattern.MatchString(value) || pragmaPattern.MatchString(value)) {
-			return argument, value, true
+		resolved, ok := resolveQueryValue(argument, values)
+		if ok && (sqlPattern.MatchString(resolved.value) || pragmaPattern.MatchString(resolved.value)) {
+			return resolved.expression, resolved.value, resolved.bound, true
 		}
 	}
-	return nil, "", false
+	return nil, "", false, false
 }
 
 func isBoundQuery(expression ast.Expr) bool {
@@ -400,7 +598,7 @@ func isBoundQuery(expression ast.Expr) bool {
 		return false
 	}
 	name := functionName(call.Fun)
-	return name == "Rebind" || name == "In"
+	return name == "Rebind"
 }
 
 func functionName(expression ast.Expr) string {

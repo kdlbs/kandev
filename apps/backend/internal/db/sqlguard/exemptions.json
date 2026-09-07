@@ -104,6 +104,20 @@
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "sqlite-catalog", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/workflow/repository/sqlite.go", "symbol": "DeleteStep", "rule": "sqlite-catalog", "reason": "The workflow SQLite repository owns this catalog probe"},
-    {"file": "internal/workflowsync/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"}
+    {"file": "internal/workflowsync/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
+    {"file": "internal/agent/settings/store/sqlite.go", "symbol": "UpdateAgentProfileEnabled", "rule": "boolean-integer", "reason": "The agent settings schema stores user_modified as an INTEGER flag"},
+    {"file": "internal/office/configsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The Office config-sync schema stores last_ok as an INTEGER flag"},
+    {"file": "internal/office/repository/sqlite/routines.go", "symbol": "GetDueTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
+    {"file": "internal/plugins/marketplace/sourcestore.go", "symbol": "EnsureBuiltin", "rule": "boolean-integer", "reason": "The marketplace source schema stores enabled and builtin as INTEGER flags"},
+    {"file": "internal/plugins/state/instance_store.go", "symbol": "List", "rule": "boolean-integer", "reason": "The plugin instance-state schema stores deleted as an INTEGER tombstone"},
+    {"file": "internal/plugins/state/instance_store.go", "symbol": "Set", "rule": "boolean-integer", "reason": "The plugin instance-state schema stores deleted as an INTEGER tombstone"},
+    {"file": "internal/plugins/state/instance_store.go", "symbol": "Delete", "rule": "boolean-integer", "reason": "The plugin instance-state schema stores deleted as an INTEGER tombstone"},
+    {"file": "internal/prompts/store/sqlite.go", "symbol": "refreshLegacyChangesWalkthroughPrompt", "rule": "boolean-integer", "reason": "The prompts SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/task/repository/sqlite/defaults.go", "symbol": "hideBuiltinWorkflows", "rule": "boolean-integer", "reason": "The task SQLite schema stores hidden as an INTEGER flag"},
+    {"file": "internal/utility/store/sqlite.go", "symbol": "initSchema", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin and enabled as INTEGER flags"},
+    {"file": "internal/utility/store/sqlite.go", "symbol": "migrateTemplatePlaceholders", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/utility/store/sqlite.go", "symbol": "NormalizeEmptyBuiltinBinding", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/utility/store/sqlite.go", "symbol": "DeleteAgent", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"}
   ]
 }

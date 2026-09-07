@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -29,6 +30,15 @@ type upgradeFixture struct {
 	File      string                     `json:"file"`
 	SHA256    string                     `json:"sha256"`
 	Sentinels map[string]string          `json:"sentinels"`
+	OwnerRows []ownerRowSentinel         `json:"owner_rows"`
+}
+
+type ownerRowSentinel struct {
+	Owner     string            `json:"owner"`
+	Table     string            `json:"table"`
+	KeyColumn string            `json:"key_column"`
+	KeyValue  string            `json:"key_value"`
+	Values    map[string]string `json:"values"`
 }
 
 func TestUpgradeFixtureManifest(t *testing.T) {
@@ -64,13 +74,75 @@ func TestUpgradeFixtureManifest(t *testing.T) {
 		if got := hex.EncodeToString(checksum[:]); got != fixture.SHA256 {
 			t.Errorf("fixture %s checksum = %s, want %s", fixture.File, got, fixture.SHA256)
 		}
+		if len(fixture.OwnerRows) == 0 {
+			t.Errorf("fixture %s has no owner row sentinels", fixture.File)
+		}
+		if err := validateOwnerRowCoverage(fixture, manifest.KnownMissingRequiredStore); err != nil {
+			t.Errorf("fixture %s owner row coverage: %v", fixture.File, err)
+		}
+		for _, row := range fixture.OwnerRows {
+			if !validUpgradeIdentifier(row.Owner) || !validUpgradeIdentifier(row.Table) ||
+				!validUpgradeIdentifier(row.KeyColumn) || row.KeyValue == "" || len(row.Values) == 0 {
+				t.Errorf("fixture %s has invalid owner row sentinel %#v", fixture.File, row)
+			}
+			for column := range row.Values {
+				if !validUpgradeIdentifier(column) {
+					t.Errorf("fixture %s owner row %s has invalid column %q", fixture.File, row.Owner, column)
+				}
+			}
+		}
 	}
 	if !seenEngines[testconformance.EngineSQLite] || !seenEngines[testconformance.EnginePostgres] {
 		t.Fatalf("fixture engines = %#v, want both engines", seenEngines)
 	}
-	if len(manifest.KnownMissingRequiredStore) == 0 {
+	catalogIDs := make(map[string]struct{}, len(requiredstores.Catalog()))
+	for _, descriptor := range requiredstores.Catalog() {
+		catalogIDs[descriptor.ID] = struct{}{}
+	}
+	seenMissing := make(map[string]struct{}, len(manifest.KnownMissingRequiredStore))
+	for _, id := range manifest.KnownMissingRequiredStore {
+		if _, ok := catalogIDs[id]; !ok {
+			t.Errorf("manifest lists unknown missing required store %q", id)
+		}
+		if _, duplicate := seenMissing[id]; duplicate {
+			t.Errorf("manifest lists duplicate missing required store %q", id)
+		}
+		seenMissing[id] = struct{}{}
+	}
+	if len(seenMissing) == 0 {
 		t.Fatal("manifest has no partial-store provenance")
 	}
+}
+
+func validateOwnerRowCoverage(fixture upgradeFixture, knownMissing []string) error {
+	missing := make(map[string]struct{}, len(knownMissing))
+	for _, id := range knownMissing {
+		missing[id] = struct{}{}
+	}
+	present := make(map[string]bool)
+	catalogIDs := make(map[string]struct{}, len(requiredstores.Catalog()))
+	for _, descriptor := range requiredstores.Catalog() {
+		catalogIDs[descriptor.ID] = struct{}{}
+	}
+	for _, row := range fixture.OwnerRows {
+		if _, ok := catalogIDs[row.Owner]; !ok {
+			return fmt.Errorf("owner row names unknown catalog store %q", row.Owner)
+		}
+		if _, ok := missing[row.Owner]; ok {
+			return fmt.Errorf("owner row exists for known-missing store %q", row.Owner)
+		}
+		present[row.Owner] = true
+	}
+	for _, descriptor := range requiredstores.Catalog() {
+		_, expectedMissing := missing[descriptor.ID]
+		if present[descriptor.ID] == expectedMissing {
+			if expectedMissing {
+				return fmt.Errorf("known-missing store %q has an owner row", descriptor.ID)
+			}
+			return fmt.Errorf("present store %q has no owner row", descriptor.ID)
+		}
+	}
+	return nil
 }
 
 func TestPreviousStableUpgrade(t *testing.T) {
@@ -86,11 +158,23 @@ func TestPreviousStableUpgrade(t *testing.T) {
 			if err := applyFixture(t, database, fixture); err != nil {
 				t.Fatalf("apply %s fixture: %v", engine, err)
 			}
+			if err := validateKnownMissingRequiredStores(database, manifest.KnownMissingRequiredStore); err != nil {
+				t.Fatalf("fixture store inventory: %v", err)
+			}
+			if err := checkSentinels(database, fixture); err != nil {
+				t.Fatalf("fixture sentinels before initialization: %v", err)
+			}
 			if err := runCurrentInitialization(database); err != nil {
 				t.Fatalf("current initialization: %v", err)
 			}
+			if err := checkSentinels(database, fixture); err != nil {
+				t.Fatalf("sentinels after initialization: %v", err)
+			}
 			if err := runCurrentInitialization(database); err != nil {
 				t.Fatalf("schema replay: %v", err)
+			}
+			if err := checkSentinels(database, fixture); err != nil {
+				t.Fatalf("sentinels after schema replay: %v", err)
 			}
 			if err := runCurrentScenarios(database); err != nil {
 				t.Fatalf("conformance scenarios: %v", err)
@@ -190,5 +274,95 @@ func checkSentinels(engine testconformance.Engine, fixture upgradeFixture) error
 			return fmt.Errorf("sentinel %q = %q, want %q", key, got, want)
 		}
 	}
+	for _, sentinel := range fixture.OwnerRows {
+		columns := make([]string, 0, len(sentinel.Values))
+		for column := range sentinel.Values {
+			columns = append(columns, column)
+		}
+		sort.Strings(columns)
+		selectColumns := make([]string, 0, len(columns))
+		for _, column := range columns {
+			selectColumns = append(selectColumns, "CAST("+column+" AS TEXT)")
+		}
+		query := fmt.Sprintf(
+			"SELECT %s FROM %s WHERE %s = ?",
+			strings.Join(selectColumns, ", "), sentinel.Table, sentinel.KeyColumn,
+		)
+		values := make([]any, len(columns))
+		destinations := make([]any, len(values))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := engine.DB.QueryRowxContext(context.Background(), engine.DB.Rebind(query), sentinel.KeyValue).Scan(destinations...); err != nil {
+			return fmt.Errorf("read %s owner row %s: %w", sentinel.Owner, sentinel.Table, err)
+		}
+		for index, column := range columns {
+			got := fmt.Sprint(values[index])
+			if got != sentinel.Values[column] {
+				return fmt.Errorf("owner row %s.%s %s = %q, want %q", sentinel.Table, sentinel.KeyColumn, column, got, sentinel.Values[column])
+			}
+		}
+	}
 	return nil
+}
+
+func validateKnownMissingRequiredStores(engine testconformance.Engine, expected []string) error {
+	actual := make([]string, 0)
+	for _, descriptor := range requiredstores.Catalog() {
+		present := true
+		for _, table := range descriptor.RequiredTables {
+			if exists, err := requiredTableExists(engine, table); err != nil {
+				return fmt.Errorf("check %s.%s: %w", descriptor.ID, table, err)
+			} else if !exists {
+				present = false
+				break
+			}
+		}
+		if !present {
+			actual = append(actual, descriptor.ID)
+		}
+	}
+	got := append([]string(nil), actual...)
+	want := append([]string(nil), expected...)
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		return fmt.Errorf("known missing required stores = %v, want %v", got, want)
+	}
+	return nil
+}
+
+func requiredTableExists(engine testconformance.Engine, table string) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = ?
+	)`
+	if engine.Name == testconformance.EngineSQLite {
+		query = `SELECT EXISTS (
+		SELECT 1 FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+	)`
+	}
+	err := engine.DB.QueryRowxContext(context.Background(), engine.DB.Rebind(query), table).Scan(&exists)
+	return exists, err
+}
+
+func validUpgradeIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, character := range value {
+		if !validUpgradeIdentifierCharacter(character) {
+			return false
+		}
+		if index == 0 && (character >= '0' && character <= '9' || character == '-' || character == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func validUpgradeIdentifierCharacter(character rune) bool {
+	return character == '_' || character == '-' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
 }

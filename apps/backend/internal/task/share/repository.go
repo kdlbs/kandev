@@ -58,10 +58,17 @@ func NewRepository(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, er
 }
 
 func (r *Repository) initSchema() error {
-	mig := db.NewMigrateLogger(r.writer, r.log)
-	mig.Apply("table.task_shares", dialect.MustRenderSchema(r.writer.DriverName(), shareTableSchema))
-	mig.Apply("index.task_shares_session",
-		`CREATE INDEX IF NOT EXISTS idx_task_shares_session ON task_shares(task_session_id)`)
+	mig := db.NewRequiredMigrateLogger(r.writer, r.log)
+	if err := mig.Apply("table.task_shares", dialect.MustRenderSchema(r.writer.DriverName(), shareTableSchema)); err != nil {
+		return fmt.Errorf("required task share migration: %w", err)
+	}
+	if err := mig.Apply("index.task_shares_session",
+		`CREATE INDEX IF NOT EXISTS idx_task_shares_session ON task_shares(task_session_id)`); err != nil {
+		return fmt.Errorf("required task share migration: %w", err)
+	}
+	if err := mig.Err(); err != nil {
+		return fmt.Errorf("required task share migration: %w", err)
+	}
 	return nil
 }
 

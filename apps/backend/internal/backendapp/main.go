@@ -1251,6 +1251,19 @@ func startGatewayAndServe(
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
+	// Record the version only after every required store, the immediate health
+	// probe, and the complete HTTP wiring have succeeded. A late startup
+	// failure must leave the previous version marker intact so the next boot
+	// still takes the upgrade backup.
+	if err := recordSchemaVersionAfterPersistence(
+		repos.RequiredStores.ValidateComplete,
+		func() error { return persistenceHealth.Check(ctx) },
+		func() { recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log) },
+	); err != nil {
+		log.Error("Required persistence changed before readiness", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
 
 	// Flip readiness before swapping in the fully wired router — see
 	// publishReadiness for why the order matters and
@@ -2318,14 +2331,17 @@ func buildHTTPServer(
 		addCleanup,
 	)
 
-	// Opt-in authentication. Runs after CORS; in disabled mode it only
-	// injects the synthetic single-user identity (behavior unchanged).
-	router.Use(authhttpmw.Middleware(services.Auth))
 	var requiredHealth *requiredstores.Health
 	if len(persistenceHealth) > 0 {
 		requiredHealth = persistenceHealth[0]
 	}
+	// Gate stateful requests before authentication can query the required
+	// stores. This preserves the actionable persistence_unavailable 503 when
+	// auth is enabled and the database is unhealthy.
 	router.Use(requiredPersistenceMiddleware(requiredHealth))
+	// Opt-in authentication. In disabled mode it only injects the synthetic
+	// single-user identity (behavior unchanged).
+	router.Use(authhttpmw.Middleware(services.Auth))
 	// Per-user workspace ownership on the third-party integration route
 	// groups (jira/gitlab/github/...), which resolve a caller-supplied
 	// workspace_id with no gate of their own. No-op when auth is disabled.

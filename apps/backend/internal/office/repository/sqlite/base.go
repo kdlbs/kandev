@@ -73,7 +73,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		db:         writer,
 		ro:         reader,
 		log:        log,
-		migrate:    db.NewMigrateLogger(writer, log),
+		migrate:    db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
@@ -117,7 +117,9 @@ func (r *Repository) initSchema() error {
 	if err := r.createExtensionTables(); err != nil {
 		return err
 	}
-	r.runMigrations()
+	if err := r.runMigrations(); err != nil {
+		return fmt.Errorf("required office migration: %w", err)
+	}
 	r.activateRunOutcome()
 	return nil
 }

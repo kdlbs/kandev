@@ -54,6 +54,25 @@ func TestSchemaInitializerRejectsUnmappedDescriptor(t *testing.T) {
 	}
 }
 
+func TestOwnerBehaviorCoverage(t *testing.T) {
+	for _, descriptor := range requiredstores.Catalog() {
+		behavior, ok := ownerBehaviors[descriptor.ID]
+		if !ok {
+			t.Errorf("store %q has no owning API behavior", descriptor.ID)
+			continue
+		}
+		if len(behavior.actions) == 0 {
+			t.Errorf("store %q has no owning API actions", descriptor.ID)
+		}
+		for _, action := range behavior.actions {
+			if action.create == nil || action.read == nil || action.update == nil || action.delete == nil {
+				t.Errorf("store %q action %q is incomplete", descriptor.ID, action.name)
+			}
+		}
+	}
+}
+
 func TestStoreConformance(t *testing.T) {
+	testconformance.RunHarnessSelfTest(t, testconformance.RunOptions{})
 	testconformance.Run(t, requiredstores.Catalog(), Adapters(), testconformance.RunOptions{})
 }

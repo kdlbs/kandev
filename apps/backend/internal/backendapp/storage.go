@@ -122,10 +122,6 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	}
 	activateTelemetryContracts(ctx, telemetryStore, log)
 
-	// All repositories have finished their initSchema calls. Record the
-	// current binary version so the next boot can detect upgrades correctly.
-	recordSchemaVersion(writer, cfg.Database.Driver, version, log)
-
 	repos := &Repositories{
 		RequiredStores: tracker,
 		Task:           taskRepoImpl,
@@ -250,4 +246,22 @@ func recordSchemaVersion(writer *sqlx.DB, _ string, version string, log *logger.
 	if log != nil {
 		log.Info("schema version recorded", zap.String(versionFieldKey, version))
 	}
+}
+
+// recordSchemaVersionAfterPersistence keeps the version marker behind the
+// final required-store and health gates. Callers can therefore safely use it
+// as the last startup action before readiness publication.
+func recordSchemaVersionAfterPersistence(
+	validate func() error,
+	healthCheck func() error,
+	record func(),
+) error {
+	if err := validate(); err != nil {
+		return fmt.Errorf("required-store validation before readiness: %w", err)
+	}
+	if err := healthCheck(); err != nil {
+		return fmt.Errorf("required-store health check before readiness: %w", err)
+	}
+	record()
+	return nil
 }

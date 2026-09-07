@@ -67,10 +67,10 @@ func (r *Repository) backfillWorkspaceOwnerMembers() error {
 //
 // No migration currently recreates `workspaces`. If one is ever added, this
 // column has to be in its replacement CREATE TABLE and its INSERT ... SELECT
-// list: a rebuild copies a fixed column list, and MigrateLogger.Apply swallows
-// errors, so a column added before a rebuild disappears without a sound. That
-// is recorded in apps/backend/AGENTS.md and has already cost this branch a
-// silent loss once, on `tasks`.
+// list: a rebuild copies a fixed column list, so a column added before a
+// rebuild disappears unless the replacement explicitly carries it forward.
+// Required-store startup now reports unexpected migration failures instead of
+// allowing that omission to pass silently.
 func (r *Repository) ensureOrgUnitPlacement() {
 	r.migrate.Apply(
 		"workspaces.unit_id",
