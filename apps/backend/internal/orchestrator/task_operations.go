@@ -79,6 +79,14 @@ var ErrAgentPromptInProgress = errors.New("agent is currently processing a promp
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
+// ErrSessionRuntimeUnavailable is returned by promptTask when
+// ensureSessionRunning fails before any prompt reached the agent — e.g. a
+// session promoted by a workflow step move whose runtime has not finished
+// launching yet. Callers can safely queue the prompt for delivery once the
+// runtime comes up instead of reporting it as failed, because nothing was
+// dispatched.
+var ErrSessionRuntimeUnavailable = errors.New("session runtime unavailable")
+
 type primarySessionTaskStateUpdater interface {
 	UpdateTaskStateIfPrimarySessionState(
 		ctx context.Context,
@@ -4325,7 +4333,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
-		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
+		return nil, fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
 	}
 
 	// Reload session after ensureSessionRunning. If a resume happened, ResumeSession

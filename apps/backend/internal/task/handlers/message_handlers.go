@@ -972,9 +972,54 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
-		if !isAgentReportedError(err) {
+		if !isAgentReportedError(err) &&
+			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) {
 			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
 		}
+	}
+}
+
+// queuePromptIfRuntimeUnavailable handles the window where a workflow step
+// move has promoted a new primary session but its runtime has not finished
+// launching: PromptTask fails with orchestrator.ErrSessionRuntimeUnavailable
+// before anything reached the agent, so the message is safe to queue for
+// delivery once the runtime comes up instead of being reported as failed.
+// Returns true when the message was queued, so the caller must not also
+// report promptErr as an error.
+func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptErr error,
+) bool {
+	if !errors.Is(promptErr, orchestrator.ErrSessionRuntimeUnavailable) {
+		return false
+	}
+	session, err := h.service.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || isTerminalSessionState(session.State) {
+		return false
+	}
+	if queueErr := h.orchestrator.QueueUserPrompt(
+		ctx, taskID, sessionID, content, model, planMode, attachments, nil, true,
+	); queueErr != nil {
+		h.logger.Warn("failed to queue prompt after runtime-unavailable prompt failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(queueErr))
+		return false
+	}
+	return true
+}
+
+// isTerminalSessionState reports whether a session in this state can no
+// longer accept a queued prompt for later delivery.
+func isTerminalSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+		return true
+	default:
+		return false
 	}
 }
 
