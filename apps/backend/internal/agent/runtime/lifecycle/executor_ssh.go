@@ -613,9 +613,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	delete(r.sessions, instance.InstanceID)
 	r.mu.Unlock()
 	if state == nil {
-		r.logger.Debug("stop: no tracked SSH session state for instance",
-			zap.String("instance_id", instance.InstanceID))
-		return nil
+		return r.stopPersistedRemoteAgentctl(ctx, instance, force)
 	}
 	if state.forwarder != nil {
 		_ = state.forwarder.Close()
@@ -661,6 +659,63 @@ func sshShouldStopRemoteAgentctl(instance *ExecutorInstance, force bool) bool {
 
 func sshRemoteCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), sshAgentctlCleanupTimeout)
+}
+
+// stopPersistedRemoteAgentctl reaps a remote agentctl process whose in-memory
+// session state did not survive a backend restart, dialing fresh from the
+// pid, session directory, and connection details persisted in
+// executors_running.metadata (see persistentMetadataKeys). It is the only
+// path that can stop a session the executor never tracked in this process
+// lifetime — every other stop reuses the SSH client opened at CreateInstance
+// or ResumeRemoteInstance.
+func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	pid, sessionDir, ok := persistedSSHAgentctlTarget(instance.Metadata)
+	if !ok {
+		r.logger.Debug("stop: no tracked SSH session state for instance",
+			zap.String("instance_id", instance.InstanceID))
+		return nil
+	}
+	if !sshShouldStopRemoteAgentctl(instance, force) {
+		return nil
+	}
+	target, err := r.targetFromMetadata(instance.Metadata)
+	if err != nil {
+		return fmt.Errorf("ssh: resolve persisted target for instance %q: %w", instance.InstanceID, err)
+	}
+	cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+	defer cancel()
+	client, err := dialSSH(cleanupCtx, target)
+	if err != nil {
+		return fmt.Errorf("ssh: dial persisted target for instance %q: %w", instance.InstanceID, err)
+	}
+	defer func() { _ = r.closeSSHClient(client) }()
+
+	stopRemote := r.stopRemote
+	if stopRemote == nil {
+		stopRemote = stopRemoteAgentctl
+	}
+	if err := stopRemote(cleanupCtx, client, sessionDir, pid); err != nil {
+		r.logger.Warn("failed to stop persisted remote agentctl",
+			zap.String("instance_id", instance.InstanceID), zap.Error(err))
+	}
+	return nil
+}
+
+// persistedSSHAgentctlTarget extracts the remote pid and session directory a
+// persisted-metadata stop needs. Either being missing or the pid being
+// non-positive means there is nothing durable to act on — never build a
+// kill/rm-rf command from an empty or zero value.
+func persistedSSHAgentctlTarget(metadata map[string]interface{}) (pid int, sessionDir string, ok bool) {
+	pidStr := getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPID)
+	sessionDir = strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteSessionDir))
+	if pidStr == "" || sessionDir == "" {
+		return 0, "", false
+	}
+	parsedPID, err := strconv.Atoi(pidStr)
+	if err != nil || parsedPID <= 0 {
+		return 0, "", false
+	}
+	return parsedPID, sessionDir, true
 }
 
 // RecoverInstances re-opens SSH connections for sessions that were live before
