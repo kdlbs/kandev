@@ -13,6 +13,7 @@ import (
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
+	canvasservice "github.com/kandev/kandev/internal/canvas"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/gitcredentials"
@@ -25,6 +26,8 @@ import (
 	office "github.com/kandev/kandev/internal/office"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/orgunit"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
@@ -74,19 +77,23 @@ type Services struct {
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
-	User                     *userservice.Service
-	Editor                   *editorservice.Service
-	Notification             *notificationservice.Service
-	Prompts                  *promptservice.Service
-	Utility                  *utilityservice.Service
-	Workflow                 *workflowservice.Service
-	GitHub                   *github.Service
-	GitLab                   *gitlab.Service
-	GitLabCleanup            func() error
-	AzureDevOps              *azuredevops.Service
-	Jira                     *jira.Service
-	Linear                   *linear.Service
-	Sentry                   *sentry.Service
+	// Org owns organizations. Always non-nil; Enabled() reports whether the
+	// multi-tenancy feature is on.
+	Org           *org.Service
+	OrgUnits      *orgunit.Service
+	User          *userservice.Service
+	Editor        *editorservice.Service
+	Notification  *notificationservice.Service
+	Prompts       *promptservice.Service
+	Utility       *utilityservice.Service
+	Workflow      *workflowservice.Service
+	GitHub        *github.Service
+	GitLab        *gitlab.Service
+	GitLabCleanup func() error
+	AzureDevOps   *azuredevops.Service
+	Jira          *jira.Service
+	Linear        *linear.Service
+	Sentry        *sentry.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
@@ -113,6 +120,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// Canvas is the gated lifecycle service for agent-authored plugin web
+	// applications. It is nil while features.canvases is disabled.
+	Canvas *canvasservice.Service
 	// GitCredentials is the shared provider-neutral lease broker used by the
 	// GitHub HTTP endpoint and task executor helper leases.
 	GitCredentials *gitcredentials.Broker

@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  Children,
-  memo,
-  useState,
-  useCallback,
-  useMemo,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-} from "react";
-import type { Components } from "react-markdown";
+import { memo, useState, useCallback, useMemo } from "react";
 import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -19,13 +10,6 @@ import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
-import { useAppStore } from "@/components/state-provider";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
-import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
-import {
-  buildPromptMentionNames,
-  splitPreparedPromptMentionSegments,
-} from "@/lib/prompts/prompt-mention-segments";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -33,9 +17,11 @@ import {
   type WorkflowStepMessageInfo,
 } from "./workflow-step-message-badge";
 import { AgentMessageContent } from "./agent-message-content";
-import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import {
+  usePromptMentionMarkdownComponents,
+  usePromptMentionNames,
+} from "./prompt-mention-components";
 import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
-import type { EntityReference } from "@/lib/types/entity-reference";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
@@ -117,164 +103,6 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_session_id?: string;
   sender_session_name?: string;
 };
-
-type PromptMentionMarkdownTag =
-  | "p"
-  | "li"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "h4"
-  | "h5"
-  | "h6"
-  | "blockquote"
-  | "td"
-  | "th";
-
-type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsWithoutRef<T> & {
-  children?: ReactNode;
-  node?: unknown;
-};
-
-function usePromptMentionNames() {
-  const prompts = useAppStore((state) => state.prompts.items);
-  return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
-}
-
-function usePromptMentionMarkdownComponents(
-  promptNames: string[],
-  entityReferences: readonly EntityReference[],
-): Components | undefined {
-  return useMemo(() => {
-    const mentionNames = buildPromptMentionNames(promptNames);
-    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
-    if (mentionNames.length === 0) {
-      return entityReferences.length === 0 ? undefined : baseComponents;
-    }
-    const renderChildren = (children: ReactNode, keyPrefix: string) =>
-      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
-    return {
-      ...baseComponents,
-      p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
-        void node;
-        return <p {...props}>{renderChildren(children, "p")}</p>;
-      },
-      li: ({ children, node, ...props }: MarkdownChildrenProps<"li">) => {
-        void node;
-        return <li {...props}>{renderChildren(children, "li")}</li>;
-      },
-      h1: ({ children, node, ...props }: MarkdownChildrenProps<"h1">) => {
-        void node;
-        return <h1 {...props}>{renderChildren(children, "h1")}</h1>;
-      },
-      h2: ({ children, node, ...props }: MarkdownChildrenProps<"h2">) => {
-        void node;
-        return <h2 {...props}>{renderChildren(children, "h2")}</h2>;
-      },
-      h3: ({ children, node, ...props }: MarkdownChildrenProps<"h3">) => {
-        void node;
-        return <h3 {...props}>{renderChildren(children, "h3")}</h3>;
-      },
-      h4: ({ children, node, ...props }: MarkdownChildrenProps<"h4">) => {
-        void node;
-        return <h4 {...props}>{renderChildren(children, "h4")}</h4>;
-      },
-      h5: ({ children, node, ...props }: MarkdownChildrenProps<"h5">) => {
-        void node;
-        return <h5 {...props}>{renderChildren(children, "h5")}</h5>;
-      },
-      h6: ({ children, node, ...props }: MarkdownChildrenProps<"h6">) => {
-        void node;
-        return <h6 {...props}>{renderChildren(children, "h6")}</h6>;
-      },
-      blockquote: ({ children, node, ...props }: MarkdownChildrenProps<"blockquote">) => {
-        void node;
-        return <blockquote {...props}>{renderChildren(children, "blockquote")}</blockquote>;
-      },
-      td: ({ children, node, ...props }: MarkdownChildrenProps<"td">) => {
-        void node;
-        return <td {...props}>{renderChildren(children, "td")}</td>;
-      },
-      th: ({ children, node, ...props }: MarkdownChildrenProps<"th">) => {
-        void node;
-        return <th {...props}>{renderChildren(children, "th")}</th>;
-      },
-    };
-  }, [promptNames, entityReferences]);
-}
-
-function renderChildrenWithPromptMentions(
-  children: ReactNode,
-  promptNames: string[],
-  keyPrefix: string,
-) {
-  return Children.toArray(children).flatMap((child, index) => {
-    if (typeof child !== "string") return child;
-    return renderTextWithPromptMentions(child, promptNames, `${keyPrefix}-${index}`);
-  });
-}
-
-function renderTextWithPromptMentions(text: string, promptNames: string[], keyPrefix: string) {
-  return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
-    if (segment.kind === "text") return segment.value;
-    return (
-      <PromptMentionChip
-        key={`${keyPrefix}-prompt-${index}`}
-        name={segment.name}
-        value={segment.value}
-      />
-    );
-  });
-}
-
-const PROMPT_MENTION_CHIP_CLASS =
-  "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
-
-/**
- * Renders a saved-prompt @mention as a chip. When the referenced prompt is
- * loaded in the store, hovering the chip reveals its contents so the reader
- * doesn't need to switch to the raw message view.
- */
-function PromptMentionChip({ name, value }: { name: string; value: string }) {
-  const { t } = useTranslation();
-  const content = useAppStore(
-    useCallback(
-      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
-      [name],
-    ),
-  );
-
-  if (!content) {
-    return (
-      <span
-        data-testid="custom-prompt-mention"
-        data-prompt-name={name}
-        title={t("task:customPromptNamed", { name })}
-        className={PROMPT_MENTION_CHIP_CLASS}
-      >
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <HoverCard openDelay={300} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <span
-          data-testid="custom-prompt-mention"
-          data-prompt-name={name}
-          tabIndex={0}
-          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
-        >
-          {value}
-        </span>
-      </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
-        <PromptPreview content={content} />
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;

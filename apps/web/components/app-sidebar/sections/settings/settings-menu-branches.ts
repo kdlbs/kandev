@@ -1,5 +1,4 @@
 import type { ComponentType } from "react";
-
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
@@ -11,7 +10,7 @@ import {
   executorProfileSettingsPath,
 } from "@/lib/settings/executor-settings-routes";
 import {
-  WORKSPACE_SETTINGS_TABS,
+  getWorkspaceSettingsTabs,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
 import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
@@ -126,6 +125,11 @@ export type BranchExecutor = {
   profiles?: ReadonlyArray<{ id: string; name: string }>;
 };
 
+export type WorkspaceBranchOptions = {
+  pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined;
+  canvasesEnabled?: boolean;
+};
+
 /** The menu rows that grow a branch. */
 export const BRANCHED_SETTINGS_HREFS = [
   WORKSPACES_SETTINGS_HREF,
@@ -214,10 +218,30 @@ export function buildWorkspacesBranch(
    */
   visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
-  pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined,
+  { pluginIntegrationEnabled, canvasesEnabled = false }: WorkspaceBranchOptions = {},
 ): SettingsMenuNode[] {
   return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
+    const workspaceTabs = getWorkspaceSettingsTabs(canvasesEnabled)
+      .filter(({ tab }) => tab !== "overview")
+      .map(({ tab, labelKey, icon }) => ({
+        key: `workspace:${workspace.id}:${tab}`,
+        href: workspaceSettingsHref(workspace.id, tab),
+        label: { key: labelKey },
+        icon,
+        ...(tab === "integrations"
+          ? {
+              children: integrationNodes(
+                workspace.id,
+                integrationsHref,
+                visibleIntegrationSlugsFor?.(workspace.id),
+                integrationContributions,
+                pluginIntegrationEnabled,
+              ),
+              integrationsWorkspaceId: workspace.id,
+            }
+          : {}),
+      }));
     return {
       key: `workspace:${workspace.id}`,
       href: workspaceSettingsHref(workspace.id, "overview"),
@@ -229,26 +253,7 @@ export function buildWorkspacesBranch(
       // Same badge the workspace list and the workspace switcher show, so the
       // menu does not leave you guessing which one commands land in.
       ...(workspace.id === activeWorkspaceId ? { badge: "active" as const } : {}),
-      children: WORKSPACE_SETTINGS_TABS.filter(({ tab }) => tab !== "overview").map(
-        ({ tab, labelKey, icon }) => ({
-          key: `workspace:${workspace.id}:${tab}`,
-          href: workspaceSettingsHref(workspace.id, tab),
-          label: { key: labelKey },
-          icon,
-          ...(tab === "integrations"
-            ? {
-                children: integrationNodes(
-                  workspace.id,
-                  integrationsHref,
-                  visibleIntegrationSlugsFor?.(workspace.id),
-                  integrationContributions,
-                  pluginIntegrationEnabled,
-                ),
-                integrationsWorkspaceId: workspace.id,
-              }
-            : {}),
-        }),
-      ),
+      children: [...workspaceTabs],
     };
   });
 }

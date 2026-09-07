@@ -166,6 +166,8 @@
   "failedToCreateFolder": "创建文件夹失败",
   "failedToCreateRepository": "创建仓库失败",
   "failedToLoadDirectory": "加载目录失败",
+  "nativeFolderPickerFailed": "无法打开原生文件夹选择器。",
+  "nativeFolderPickerUnavailable": "原生文件夹选择器不可用。请重新加载 Kandev 后重试。",
   "failedToLoadRoutine": "加载例程失败",
   "failedToLoadSetup": "加载设置失败",
   "failedToRenderDiagram": "图表渲染失败",

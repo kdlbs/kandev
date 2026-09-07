@@ -23,8 +23,10 @@ import (
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/org"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -323,6 +325,14 @@ func setBuildInfo(build BuildInfo) {
 
 // run initializes all services and runs the server. Returns false on fatal startup error.
 func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCleanups func()) bool {
+	// Organizations without authentication is the one configuration that
+	// cannot work: a tenant boundary needs identities to belong to it. Refuse
+	// at startup rather than booting an instance whose boundary is decorative.
+	if err := org.ValidateStartup(cfg.Features.MultiTenancy, cfg.Features.Auth); err != nil {
+		log.Error("Invalid feature configuration", zap.Error(err))
+		return false
+	}
+
 	addCleanup := func(fn func() error) { *cleanups = append(*cleanups, fn) }
 
 	// 3. Create context with cancellation
@@ -417,6 +427,30 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
+	taskservice.SetTenancyEnforced(cfg.Features.MultiTenancy)
+	if services.Org != nil && services.Org.Enabled() {
+		services.Auth.SetAdminCreatedHook(services.Org.ClaimSetupAdmin)
+		services.Org.SetFirstAdminCreator(services.Auth.CreateUserInOrg)
+		// Workspace fan-out needs to know which organization a user belongs
+		// to, so an org-visible workspace reaches its own org only.
+		services.Task.SetUserOrgResolver(func(ctx context.Context, userID string) (string, error) {
+			user, err := repos.UserAccounts.GetUser(ctx, userID)
+			if err != nil || user == nil {
+				return "", err
+			}
+			return user.OrgID, nil
+		})
+	}
+	if services.Org != nil && services.Org.Enabled() {
+		// A suspended organization fails every session and token closed, which
+		// is what makes suspension a real lever rather than a label. An
+		// unreadable status fails closed too: an org we cannot verify does not
+		// get to keep serving requests.
+		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
+			record, err := services.Org.Get(ctx, orgID)
+			return err == nil && record.Active()
+		})
+	}
 	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
 	if err != nil {
 		log.Error("Failed to initialize session hostname cache", zap.Error(err))
@@ -564,7 +598,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	worktreeMgr, _, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
+	worktreeMgr, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
 		return false
@@ -918,6 +952,9 @@ func startGatewayAndServe(
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
+	if cfg.Features.Canvases {
+		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
+	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
@@ -1105,7 +1142,7 @@ func startGatewayAndServe(
 		TaskSessions:         repos.Task,
 	})
 	storageComposition, err := provideStorageComposition(
-		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)
@@ -1418,6 +1455,11 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// Human assignee writes from the office PATCH surface go through the task
+	// service, which authorizes the caller and validates the assignee. That
+	// route carries no :wsId, so it is not covered by the office
+	// workspace-scope middleware and must not write the column directly.
+	services.OfficeSvcs.Dashboard.SetHumanAssigneeWriter(services.Task)
 	// Wire the reactivity pipeline so property mutations queue downstream runs.
 	services.OfficeSvcs.Dashboard.SetReactivityApplier(
 		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),
@@ -2269,8 +2311,11 @@ func buildHTTPServer(
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
 	// unclassified (sanitized 500).
+	// Workspace secrets are a shared credential the workspace owner is
+	// accountable for, so they require secret.manage rather than mere reach:
+	// a collaborator contributes to the workspace, they do not hold its keys.
 	secretsSvc.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
-		err := services.Task.AuthorizeWorkspaceAccess(ctx, workspaceID)
+		err := services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSecretManage)
 		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 			return secrets.ErrWorkspaceAccessDenied
 		}

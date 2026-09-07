@@ -11,7 +11,7 @@ export type SettingsDiscoveryDefinition = {
   href: string;
   targetId?: string;
   order: number;
-  requires?: "account" | "users" | "workspace";
+  requires?: "account" | "users" | "workspace" | "organizations";
 };
 
 export type SettingsDiscoveryGroupDefinition = {
@@ -37,6 +37,7 @@ export type SettingsDiscoveryContext = {
   t: (key: string) => string;
   showAccount: boolean;
   showUsers: boolean;
+  showOrganizations: boolean;
   workspaces: Array<{ id: string; name: string }>;
   agents: Array<{
     name: string;

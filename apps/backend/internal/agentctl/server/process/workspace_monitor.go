@@ -176,6 +176,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 
 	currentState, err := wt.getWorkspaceState(ctx)
 	if err != nil {
+		if wt.accessDenied.Load() {
+			return false
+		}
 		if !wt.workDirExists() {
 			wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
 				zap.String("workDir", wt.workDir))
@@ -240,8 +243,10 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// to dirty files, we also include the mtime of each dirty file.
 	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only")
 	if err != nil {
-		return state, fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
+		wrapped := fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
 			wt.workDir, err, stderr)
+		wt.recordFilesystemFailure("workspace.file_monitor", workspaceTrigger(ctx, "poll"), wrapped)
+		return state, wrapped
 	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
@@ -249,6 +254,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// The shared query excludes dependency trees before Git enumerates paths.
 	untrackedID, err := wt.getUntrackedFilesID(ctx)
 	if err != nil {
+		wt.recordFilesystemFailure("workspace.file_monitor", workspaceTrigger(ctx, "poll"), err)
 		return state, err
 	}
 	state.untrackedID = untrackedID

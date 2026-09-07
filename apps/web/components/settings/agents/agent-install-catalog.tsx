@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import { InstallAgentCard } from "@/components/settings/install-agent-card";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { installAgent, listAgentDiscovery, listAvailableAgents, listInstallJobs } from "@/lib/api";
@@ -65,7 +66,7 @@ function InstallCard({
   copiedValue: string | null;
   onCopy: (text: string) => void;
   job: InstallJob | undefined;
-  onInstall: (name: string) => void;
+  onInstall?: (name: string) => void;
 }) {
   return (
     <InstallAgentCard
@@ -221,6 +222,9 @@ export function AgentInstallCatalog() {
   }, [setAgentDiscovery, setAvailableAgents]);
 
   const { installJobs, handleInstall } = useInstallAgent(refresh);
+  // Installing an agent is POST /agent-install/:name, an org.config.manage
+  // write. The catalog stays readable; the install buttons do not render.
+  const canManage = useIsAdmin();
 
   const notInstalledAgents = useMemo(
     () => availableAgents.filter((a: AvailableAgent) => !a.available && a.install_script),
@@ -247,7 +251,7 @@ export function AgentInstallCatalog() {
           copiedValue={copiedValue}
           onCopy={copy}
           job={installJobs[agent.name]}
-          onInstall={handleInstall}
+          onInstall={canManage ? handleInstall : undefined}
         />
       ))}
       {notInstalledTools.map((tool) => (

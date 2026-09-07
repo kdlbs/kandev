@@ -438,8 +438,12 @@ func TestResolverWakeQueueMatchesLookupConcurrency(t *testing.T) {
 func TestResolverChecksEachUserOncePerResolve(t *testing.T) {
 	cache := &memoryCache{entries: map[string]CacheEntry{}, set: make(chan struct{}, 1)}
 	var settingsReads atomic.Int32
+	thirdSettingsRead := make(chan struct{})
+	var thirdSettingsReadOnce sync.Once
 	resolver := NewResolver(cache, func(context.Context, string) (bool, error) {
-		settingsReads.Add(1)
+		if settingsReads.Add(1) == 3 {
+			thirdSettingsReadOnce.Do(func() { close(thirdSettingsRead) })
+		}
 		return true, nil
 	}, nil, nil, nil)
 	resolver.lookupAddr = func(context.Context, string) ([]string, error) {
@@ -454,9 +458,9 @@ func TestResolverChecksEachUserOncePerResolve(t *testing.T) {
 		[]string{"192.0.2.10", "::ffff:192.0.2.10"},
 	)
 	select {
-	case <-cache.set:
+	case <-thirdSettingsRead:
 	case <-time.After(time.Second):
-		t.Fatal("hostname lookup did not finish")
+		t.Fatal("resolver did not perform the publication settings read")
 	}
 	if got := settingsReads.Load(); got != 3 {
 		t.Fatalf("settings reads = %d, want admission, lookup, and publication reads", got)

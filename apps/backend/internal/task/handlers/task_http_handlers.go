@@ -279,6 +279,7 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount,
 			si.reviewStatus,
 			si.executorID,
+			si.executorProfileID,
 			si.executorType,
 			si.executorName,
 			si.agentName,
@@ -311,15 +312,16 @@ func buildTaskDTOsWithSessionInfo(
 }
 
 type sessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     models.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	agentProfileID   *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      models.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -339,6 +341,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	if info.ExecutorID != "" {
 		val := info.ExecutorID
 		si.executorID = &val
+	}
+	if info.ExecutorProfileID != "" {
+		val := info.ExecutorProfileID
+		si.executorProfileID = &val
 	}
 	if info.ExecutorSnapshot != nil {
 		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
@@ -1567,6 +1573,8 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 type httpUpdateTaskPortForwardingRequest struct {
@@ -1641,14 +1649,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	}
 
 	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     body.Priority,
-		State:        body.State,
-		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
-		Position:     body.Position,
-		Metadata:     body.Metadata,
-		ParentID:     body.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       body.Priority,
+		State:          body.State,
+		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Position:       body.Position,
+		Metadata:       body.Metadata,
+		ParentID:       body.ParentID,
+		AssigneeUserID: body.AssigneeUserID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")
@@ -1759,18 +1768,25 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
+			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
+				DiscardWorktreeChanges: discardWorktreeChanges,
+			},
+		); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 		return
 	}
-	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
+		DiscardWorktreeChanges: discardWorktreeChanges,
+	}); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1805,6 +1821,10 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 // unless the client explicitly opts in via ?cascade=true.
 func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+func discardWorktreeChangesQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
 }
 
 // httpTaskSubtaskCount returns the count of direct, non-archived,

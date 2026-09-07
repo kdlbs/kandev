@@ -126,6 +126,14 @@ type taskEnvironmentTransitionPersister interface {
 	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
 }
 
+// taskEnvironmentTaskDirNameStamper claims the stable task-root identity on a
+// shared environment without rewriting unrelated environment fields. It is
+// optional so lightweight test and legacy stores can retain the compatibility
+// path in executor_execute.go.
+type taskEnvironmentTaskDirNameStamper interface {
+	SetTaskEnvironmentTaskDirNameIfEmpty(context.Context, string, string) (bool, error)
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories
@@ -799,6 +807,7 @@ type Executor struct {
 	capabilities      ExecutorTypeCapabilities
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
+	canvasesEnabled   bool
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -1081,6 +1090,13 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 // claimed descriptors into passthrough workspaces.
 func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 	e.attachmentReader = reader
+}
+
+// SetCanvasesEnabled controls whether task MCP profiles receive the gated
+// canvas-authoring capability. The flag is applied during backend startup
+// before any new agent session is launched.
+func (e *Executor) SetCanvasesEnabled(enabled bool) {
+	e.canvasesEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

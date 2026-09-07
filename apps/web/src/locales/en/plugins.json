@@ -39,6 +39,8 @@
   "installing": "Installing…",
   "latestVersion": "Latest v{{version}}",
   "loadingMarketplace": "Loading marketplace…",
+  "webAppLoading": "Loading canvas…",
+  "webAppUnavailable": "This canvas is unavailable.",
   "loadingPlugins": "Loading plugins...",
   "loadingSelectedUtilityAgent": "Loading selected utility agent...",
   "loadingSettings": "Loading settings...",

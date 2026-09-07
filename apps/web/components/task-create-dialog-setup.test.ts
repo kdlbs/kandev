@@ -1,17 +1,28 @@
 import { renderHook } from "@testing-library/react";
+import type { FormEvent } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
 
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
   submit: vi.fn(),
+  compatibilityBlocked: false,
+  agentCompatState: "compatible" as
+    | "compatible"
+    | "selected-incompatible"
+    | "selected-unavailable"
+    | "none-compatible",
+  shortcutHandler: null as ((event: unknown) => void) | null,
   submitDeps: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/lib/keyboard/constants", () => ({ SHORTCUTS: { SUBMIT: "submit" } }));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
-  useKeyboardShortcutHandler: () => vi.fn(),
+  useKeyboardShortcutHandler: (_shortcut: string, handler: (event: unknown) => void) => {
+    mocks.shortcutHandler = handler;
+    return vi.fn();
+  },
 }));
 vi.mock("@/hooks/use-utility-agent-generator", () => ({
   useUtilityAgentGenerator: () => ({ enhancePrompt: vi.fn(), isEnhancingPrompt: false }),
@@ -122,7 +133,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
       agentProfilesLoading: false,
       executorsLoading: false,
       workflowAgentLocked: false,
-      noCompatibleAgent: false,
+      noCompatibleAgent: mocks.compatibilityBlocked,
+      agentCompatState: mocks.agentCompatState,
       selectedExecutorProfileName: "",
       executorHint: "",
       hasRepositorySelection: false,
@@ -148,6 +160,9 @@ const props: TaskCreateDialogProps = {
 describe("useTaskCreateDialogSetup auto-title mode", () => {
   beforeEach(() => {
     mocks.agentGeneratedTaskTitles = false;
+    mocks.compatibilityBlocked = false;
+    mocks.agentCompatState = "compatible";
+    mocks.shortcutHandler = null;
     mocks.submit.mockReset();
   });
 
@@ -171,4 +186,24 @@ it("forwards the selected dependencies to the submit handlers", () => {
   // hop itself, not just the leaf.
   renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
   expect(mocks.submitDeps.blockedBy).toEqual(["dep-1"]);
+});
+
+describe("compatibility submit guard", () => {
+  it.each(["selected-incompatible", "none-compatible"] as const)(
+    "blocks the form and keyboard submit for %s",
+    (agentCompatState) => {
+      mocks.compatibilityBlocked = true;
+      mocks.agentCompatState = agentCompatState;
+      const { result } = renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+      const event = { preventDefault: vi.fn() } as unknown as FormEvent;
+      const shortcutEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+
+      result.current.guardedHandleSubmit(event);
+      mocks.shortcutHandler?.(shortcutEvent);
+
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+      expect(shortcutEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
+	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 )
 
@@ -134,7 +137,7 @@ func (s *Store) initSchema() error {
 	if err := s.migrateConfigsTableToInstances(); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	if err := s.addConfigURLColumn(); err != nil {
@@ -162,6 +165,9 @@ func (s *Store) initSchema() error {
 }
 
 func (s *Store) migrateLegacySingletonTable() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	cols, err := s.tableColumns("sentry_configs")
 	if err != nil {
 		return err
@@ -258,6 +264,9 @@ type legacyWorkspaceConfig struct {
 // has an id column (fresh install or a completed prior run) is left untouched,
 // so a crash between this step and the watch rebuild re-runs safely.
 func (s *Store) migrateConfigsTableToInstances() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	cols, err := s.tableColumns("sentry_configs")
 	if err != nil {
 		return err
@@ -356,6 +365,9 @@ func (s *Store) readLegacyWorkspaceConfigs(cols map[string]struct{}) ([]legacyWo
 // already has the exact nullable-FK target shape, so a crash mid-migration (or
 // an older wrong-shaped column) always re-runs safely.
 func (s *Store) migrateWatchesAddInstanceColumn() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	cols, err := s.tableColumns("sentry_issue_watches")
 	if err != nil {
 		return err
@@ -670,12 +682,12 @@ func (s *Store) addIssueWatchRepositoryColumns() error {
 		return nil
 	}
 	if _, ok := cols["repository_id"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add repository_id column: %w", err)
 		}
 	}
 	if _, ok := cols["base_branch"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add base_branch column: %w", err)
 		}
 	}
@@ -696,7 +708,7 @@ func (s *Store) addConfigURLColumn() error {
 	if _, ok := cols["url"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE sentry_configs ADD COLUMN url TEXT NOT NULL DEFAULT 'https://sentry.io'`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_configs ADD COLUMN url TEXT NOT NULL DEFAULT 'https://sentry.io'`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add url column: %w", err)
 	}
 	return nil
@@ -716,7 +728,7 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	if _, ok := cols["max_inflight_tasks"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
 	}
 	return nil
@@ -734,12 +746,12 @@ func (s *Store) addIssueWatchLastErrorColumns() error {
 		return nil
 	}
 	if _, ok := cols["last_error"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error column: %w", err)
 		}
 	}
 	if _, ok := cols["last_error_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error_at column: %w", err)
 		}
 	}
@@ -750,27 +762,27 @@ func (s *Store) addIssueWatchLastErrorColumns() error {
 // table_info, used by the lightweight ADD COLUMN migrations and the shape
 // detection guarding the table rebuilds above.
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	cols := make(map[string]struct{})
-	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return nil, err
-		}
+	cols := make(map[string]struct{}, len(columns))
+	for name := range columns {
 		cols[name] = struct{}{}
 	}
-	return cols, rows.Err()
+	return cols, nil
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	schema = strings.ReplaceAll(schema, "TIMESTAMP", dialect.TimestampType(driver))
+	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
+	return schema
 }
 
 const selectInstanceColumns = `id, workspace_id, name, auth_method, url,
@@ -779,8 +791,8 @@ const selectInstanceColumns = `id, workspace_id, name, auth_method, url,
 // ListInstances returns every Sentry instance in a workspace, ordered by name.
 func (s *Store) ListInstances(ctx context.Context, workspaceID string) ([]*SentryConfig, error) {
 	var rows []SentryConfig
-	if err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+selectInstanceColumns+` FROM sentry_configs WHERE workspace_id = ? ORDER BY name, id`,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT `+selectInstanceColumns+` FROM sentry_configs WHERE workspace_id = ? ORDER BY name, id`),
 		workspaceID); err != nil {
 		return nil, err
 	}
@@ -791,8 +803,8 @@ func (s *Store) ListInstances(ctx context.Context, workspaceID string) ([]*Sentr
 // auth-health poller and the provider secret rekey.
 func (s *Store) ListAllInstances(ctx context.Context) ([]*SentryConfig, error) {
 	var rows []SentryConfig
-	if err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+selectInstanceColumns+` FROM sentry_configs ORDER BY workspace_id, name, id`); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT `+selectInstanceColumns+` FROM sentry_configs ORDER BY workspace_id, name, id`)); err != nil {
 		return nil, err
 	}
 	return instancePtrs(rows), nil
@@ -802,8 +814,8 @@ func (s *Store) ListAllInstances(ctx context.Context) ([]*SentryConfig, error) {
 // is checked by the service against the request's workspace.
 func (s *Store) GetInstance(ctx context.Context, id string) (*SentryConfig, error) {
 	var cfg SentryConfig
-	err := s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectInstanceColumns+` FROM sentry_configs WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &cfg, s.ro.Rebind(
+		`SELECT `+selectInstanceColumns+` FROM sentry_configs WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -825,9 +837,9 @@ func (s *Store) CreateInstance(ctx context.Context, cfg *SentryConfig) error {
 		cfg.CreatedAt = now
 	}
 	cfg.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO sentry_configs (id, workspace_id, name, auth_method, url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
 		cfg.ID, cfg.WorkspaceID, cfg.Name, cfg.AuthMethod, cfg.URL, cfg.CreatedAt, cfg.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrDuplicateInstanceName
@@ -840,9 +852,9 @@ func (s *Store) CreateInstance(ctx context.Context, cfg *SentryConfig) error {
 // when no row matches and ErrDuplicateInstanceName on a name collision.
 func (s *Store) UpdateInstance(ctx context.Context, cfg *SentryConfig) error {
 	cfg.UpdatedAt = time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE sentry_configs SET name = ?, auth_method = ?, url = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ?`),
 		cfg.Name, cfg.AuthMethod, cfg.URL, cfg.UpdatedAt, cfg.ID)
 	if isUniqueViolation(err) {
 		return ErrDuplicateInstanceName
@@ -864,7 +876,7 @@ func (s *Store) UpdateInstance(ctx context.Context, cfg *SentryConfig) error {
 // the ON DELETE RESTRICT foreign key, surfaced as ErrInstanceInUse (the service
 // fills the watch count). Returns ErrInstanceNotFound when no row matches.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sentry_configs WHERE id = ?`, id)
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM sentry_configs WHERE id = ?`), id)
 	if isForeignKeyViolation(err) {
 		return ErrInstanceInUse{}
 	}
@@ -885,8 +897,8 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 // instance, used to reject deletion of an in-use instance with a friendly count.
 func (s *Store) CountWatchesForInstance(ctx context.Context, instanceID string) (int, error) {
 	var n int
-	if err := s.ro.GetContext(ctx, &n,
-		`SELECT COUNT(*) FROM sentry_issue_watches WHERE sentry_instance_id = ?`, instanceID); err != nil {
+	if err := s.ro.GetContext(ctx, &n, s.ro.Rebind(
+		`SELECT COUNT(*) FROM sentry_issue_watches WHERE sentry_instance_id = ?`), instanceID); err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -898,8 +910,8 @@ func (s *Store) CountWatchesForInstance(ctx context.Context, instanceID string) 
 // poll time, so deleting that sole instance would strand them.
 func (s *Store) CountUnboundIssueWatchesInWorkspace(ctx context.Context, workspaceID string) (int, error) {
 	var n int
-	if err := s.ro.GetContext(ctx, &n,
-		`SELECT COUNT(*) FROM sentry_issue_watches WHERE workspace_id = ? AND sentry_instance_id IS NULL`, workspaceID); err != nil {
+	if err := s.ro.GetContext(ctx, &n, s.ro.Rebind(
+		`SELECT COUNT(*) FROM sentry_issue_watches WHERE workspace_id = ? AND sentry_instance_id IS NULL`), workspaceID); err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -908,10 +920,10 @@ func (s *Store) CountUnboundIssueWatchesInWorkspace(ctx context.Context, workspa
 // UpdateAuthHealthForInstance records the result of a credential probe on one
 // instance row.
 func (s *Store) UpdateAuthHealthForInstance(ctx context.Context, id string, ok bool, errMsg string, checkedAt time.Time) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE sentry_configs
-		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE id = ?`,
+		SET last_checked_at = ?, last_ok = CASE WHEN ? THEN 1 ELSE 0 END, last_error = ?
+		WHERE id = ?`),
 		checkedAt, ok, errMsg, id)
 	if err != nil {
 		return err
@@ -930,7 +942,7 @@ func (s *Store) UpdateAuthHealthForInstance(ctx context.Context, id string, ok b
 // to decide whether to probe at all.
 func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 	var present int
-	if err := s.ro.GetContext(ctx, &present, `SELECT COUNT(*) FROM sentry_configs`); err != nil {
+	if err := s.ro.GetContext(ctx, &present, s.ro.Rebind(`SELECT COUNT(*) FROM sentry_configs`)); err != nil {
 		return false, err
 	}
 	return present > 0, nil
@@ -945,9 +957,16 @@ func instancePtrs(rows []SentryConfig) []*SentryConfig {
 }
 
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func isForeignKeyViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "FOREIGN KEY constraint failed")
+	return dbutil.IsForeignKeyViolation(err)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -24,8 +25,197 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
+
+// canvasAgentCtlClient is the small agentctl surface shared by canvas
+// authoring and browser-initiated canvas editing. The concrete runtime client
+// stays behind this adapter so higher-level services do not couple to the
+// lifecycle or agentctl implementation packages.
+type canvasAgentCtlClient interface {
+	CreateFile(context.Context, string, string) (*streams.FileCreateResponse, error)
+	ApplyFileDiff(context.Context, string, string, string, string, *string) (*streams.FileUpdateResponse, error)
+	DeleteFile(context.Context, string, string) (*streams.FileDeleteResponse, error)
+	RenameFile(context.Context, string, string, string) (*streams.FileRenameResponse, error)
+	StreamCanvasSource(context.Context, string) (io.ReadCloser, error)
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasCopyFilesResult struct {
+	Warnings []string
+	Present  bool
+}
+
+type canvasEditAgentCtl interface {
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasAgentExecution struct {
+	TaskID    string
+	SessionID string
+	client    canvasAgentCtlClient
+}
+
+func (e *canvasAgentExecution) GetAgentCtlClient() canvasAgentCtlClient {
+	if e == nil {
+		return nil
+	}
+	return e.client
+}
+
+type canvasExecutionResolver interface {
+	ResolveCanvasExecution(string) (*canvasAgentExecution, error)
+}
+
+type canvasEditExecutionResolver interface {
+	ResolveAgentCtl(string) (canvasEditAgentCtl, error)
+}
+
+// lifecycleCanvasExecutionResolver is the approved low-level adapter from
+// the lifecycle manager to the canvas services. Keep direct runtime imports
+// here, at the boundary, instead of spreading them through feature code.
+type lifecycleCanvasExecutionResolver struct {
+	manager *lifecycle.Manager
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveCanvasExecution(executionID string) (*canvasAgentExecution, error) {
+	if r.manager == nil || executionID == "" {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	execution, ok := r.manager.GetExecution(executionID)
+	if !ok || execution == nil {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
+		return nil, errors.New("agent execution is unavailable")
+	}
+	release()
+	return &canvasAgentExecution{
+		TaskID: execution.TaskID, SessionID: execution.SessionID,
+		client: canvasAgentCtlAdapter{acquire: execution.AcquireAgentCtlClient},
+	}, nil
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveAgentCtl(executionID string) (canvasEditAgentCtl, error) {
+	execution, err := r.ResolveCanvasExecution(executionID)
+	if err != nil {
+		return nil, err
+	}
+	return execution.GetAgentCtlClient(), nil
+}
+
+type canvasAgentCtlAdapter struct {
+	client  *client.Client
+	acquire func() (*client.Client, func())
+}
+
+func (a canvasAgentCtlAdapter) acquireClient() (*client.Client, func(), error) {
+	if a.acquire != nil {
+		client, release := a.acquire()
+		if client == nil {
+			release()
+			return nil, func() {}, errors.New("agentctl client is unavailable")
+		}
+		return client, release, nil
+	}
+	if a.client == nil {
+		return nil, func() {}, errors.New("agentctl client is unavailable")
+	}
+	return a.client, func() {}, nil
+}
+
+func (a canvasAgentCtlAdapter) CreateFile(ctx context.Context, path, repo string) (*streams.FileCreateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.CreateFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.ApplyFileDiff(ctx, path, diff, originalHash, repo, desiredContent)
+}
+
+func (a canvasAgentCtlAdapter) DeleteFile(ctx context.Context, path, repo string) (*streams.FileDeleteResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.DeleteFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) RenameFile(ctx context.Context, oldPath, newPath, repo string) (*streams.FileRenameResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.RenameFile(ctx, oldPath, newPath, repo)
+}
+
+func (a canvasAgentCtlAdapter) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.StreamCanvasSource(ctx, root)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if stream == nil {
+		release()
+		return nil, errors.New("agentctl returned an empty source stream")
+	}
+	return &canvasSourceReadCloser{ReadCloser: stream, release: release}, nil
+}
+
+func (a canvasAgentCtlAdapter) CopyFiles(ctx context.Context, repo string, entries []copyfiles.Entry) (canvasCopyFilesResult, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return canvasCopyFilesResult{}, err
+	}
+	defer release()
+	response, err := client.CopyFiles(ctx, repo, entries)
+	if response == nil {
+		return canvasCopyFilesResult{}, err
+	}
+	return canvasCopyFilesResult{Warnings: append([]string(nil), response.Warnings...), Present: true}, err
+}
+
+type canvasSourceReadCloser struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *canvasSourceReadCloser) releaseClient() {
+	r.once.Do(r.release)
+}
+
+func (r *canvasSourceReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil {
+		r.releaseClient()
+	}
+	return n, err
+}
+
+func (r *canvasSourceReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.releaseClient()
+	return err
+}
 
 // taskGetterRepo is the minimal interface needed by the scheduler adapter.
 type taskGetterRepo interface {

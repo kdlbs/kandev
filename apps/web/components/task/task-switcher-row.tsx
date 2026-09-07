@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
@@ -155,6 +155,7 @@ function TaskRowItem({
       }
       title={task.title}
       autopilot={task.autopilot}
+      priority={task.priority}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
@@ -169,6 +170,7 @@ function TaskRowItem({
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
       workflowStepId={task.workflowStepId}
+      automaticColor={task.automaticColor}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}
@@ -197,7 +199,7 @@ function TaskRowItem({
   );
 }
 
-export function TaskRow(props: TaskRowProps) {
+export const TaskRow = memo(function TaskRow(props: TaskRowProps) {
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
   return (
@@ -217,4 +219,4 @@ export function TaskRow(props: TaskRowProps) {
       />
     </TaskItemWithContextMenu>
   );
-}
+});

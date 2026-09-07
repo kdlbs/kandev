@@ -60,6 +60,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRepositorySetsSchema(); err != nil {
 		return err
 	}
+	if err := r.ensureTeamAccessSchema(); err != nil {
+		return err
+	}
 	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
 		return err
 	}

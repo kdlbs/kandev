@@ -58,6 +58,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   const agents = useAppStore((s) => s.settingsAgents.items);
   const executors = useAppStore((s) => s.executors.items);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const canvasesEnabled = useAppStore((s) => s.features?.canvases ?? false);
   // The Agents page groups detected agents ahead of configured-but-undetected
   // ones; the branch lists the same agents and so must land them in the same
   // order. Before the scan hydrates this is empty and the saved order stands.
@@ -99,7 +100,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
           activeWorkspaceId,
           visibleIntegrationsFor,
           integrationContributions,
-          pluginIntegrationEnabled,
+          { pluginIntegrationEnabled, canvasesEnabled },
         ),
       ),
       ...branchEntry(
@@ -112,6 +113,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     isTree,
     workspaces,
     activeWorkspaceId,
+    canvasesEnabled,
     agents,
     executors,
     agentDiscovery,

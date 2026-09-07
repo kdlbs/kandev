@@ -1,7 +1,7 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
 import { primaryTaskRepository } from "@/lib/types/http";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
-import { pickPendingAction, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+import { pickAssignee, pickPendingAction, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   isPRReviewFromMetadata,
   isIssueWatchFromMetadata,
@@ -9,6 +9,13 @@ import {
 } from "@/lib/metadata-utils";
 
 type KanbanTask = KanbanState["tasks"][number];
+
+function snapshotTaskWorkspaceId(
+  task: WorkflowSnapshot["tasks"][number],
+  fallback: string,
+): string {
+  return task.workspace_id ?? fallback;
+}
 
 // Split out so the snapshot->task mapper (already at the complexity limit
 // from its long list of `??` fallbacks) doesn't need to absorb one more.
@@ -19,6 +26,7 @@ function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolea
 function primaryExecutorFields(task: Task) {
   return {
     primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: task.primary_executor_profile_id ?? undefined,
     primaryExecutorType: task.primary_executor_type ?? undefined,
     primaryExecutorName: task.primary_executor_name ?? undefined,
     isRemoteExecutor: task.is_remote_executor ?? false,
@@ -59,6 +67,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       const primary = primaryTaskRepository(task.repositories);
       return {
         id: task.id,
+        workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
         title: task.title,
@@ -72,6 +81,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         // same values so queue classification and ordering stay consistent
         // after a workflow switch or reconnect.
         priority: task.priority,
+        origin: task.origin,
         createdAt: task.created_at,
         wipAdmitted: task.wip_admitted,
         queuedForStepId: task.queued_for_step_id,
@@ -95,7 +105,6 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primaryAgentProfileId: task.primary_agent_profile_id ?? undefined,
         primaryAgentName: task.primary_agent_name ?? undefined,
         labels: parseLabels(task.labels),
-        origin: task.origin,
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
@@ -104,6 +113,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         statusSummary: task.status_summary,
+        assigneeUserId: pickAssignee(task.assignee_user_id),
         parentTaskId: task.parent_id ?? undefined,
         metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),

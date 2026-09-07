@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
+updated: 2026-09-05
 owners:
   - kandev
 ---
@@ -115,13 +116,40 @@ repository resources, so that I can understand the consequence before acting.
   Enter default-action behavior, loading state, cascade selection, in-flight
   warning visibility, and single/bulk archive and delete callbacks shall remain
   unchanged.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.8:** When archive is initiated from a
+  phone Kanban card, the card shall use the contained full task-cleanup alert
+  dialog even when the task has no descendants. The dialog shall be centered
+  and inset, use the existing theme tokens, keep its content internally
+  scrollable, and expose stacked full-width actions at least 44 CSS px high;
+  no inline confirmation shall be inserted between cards or change the card's
+  height, board URL, or selected task. Fine-pointer desktop and compact-desktop
+  Kanban shall retain their anchored archive popover. Coarse-pointer tablet
+  Kanban shall retain its existing routing, including its current inline
+  zero-descendant surface. Task-switcher/task-row surfaces shall retain their
+  intentional row-owned coarse-pointer inline confirmation, and a disabled
+  archive-confirmation preference shall continue to bypass the surface.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** When the task's executor
+  projection is absent but task-owned worktree state may remain after the last
+  session ends, the delete confirmation shall fail closed by showing the same
+  explicit discard selection.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.12:** When delete can remove one or more
+  task worktrees, the confirmation shall state that tracked and untracked local
+  changes will be permanently discarded. The destructive action shall require
+  an explicit selection for this outcome.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.13:** When the backend rejects deletion
+  because discard consent is absent, every task deletion surface shall keep the
+  task visible and show a localized explanation. The explanation shall tell the
+  user how to retry with explicit consent.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.14:** At phone widths, the discard
+  selection shall remain inside the existing centered dialog and its scrolling
+  body. Its label shall provide a touch target of at least 44 CSS px.
 
 ## Out of scope
 
 - Rewriting or re-translating the still-working warning.
 - Widening all confirmation popovers globally.
-- Changing in-flight detection, archive behavior, delete behavior, API
-  contracts, focus handling, Escape handling, or safe-area handling.
+- Changing in-flight detection, archive behavior, focus handling, Escape
+  handling, or safe-area handling.
 - Changing compact archive popover/inline or unrelated dialog action
   dimensions.
 - Replacing the centered task alerts with a drawer, sheet, or new navigation

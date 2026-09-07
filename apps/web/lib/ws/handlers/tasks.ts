@@ -50,6 +50,9 @@ function preservePrimaryExecutorFields(
   if (!hasPayloadField(payload, "primary_executor_id")) {
     merged.primaryExecutorId = existing.primaryExecutorId;
   }
+  if (!hasPayloadField(payload, "primary_executor_profile_id")) {
+    merged.primaryExecutorProfileId = existing.primaryExecutorProfileId;
+  }
   if (!hasPayloadField(payload, "primary_executor_type")) {
     merged.primaryExecutorType = existing.primaryExecutorType;
   }
@@ -100,6 +103,13 @@ function mergeTaskUpdate(
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "parent_id",
     taskField: "parentTaskId",
+  });
+  // Same contract for the human assignee: a lightweight update that does not
+  // mention it must not read as "unassigned". Without this, taking a task over
+  // showed the new owner until the next unrelated event, then blanked.
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "assignee_user_id",
+    taskField: "assigneeUserId",
   });
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
