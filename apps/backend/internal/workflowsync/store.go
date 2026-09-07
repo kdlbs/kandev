@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -310,5 +309,5 @@ func boolToInt(b bool) int {
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	return strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	return dialect.MustRenderSchema(driver, schema)
 }

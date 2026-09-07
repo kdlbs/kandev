@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // Inbox item kinds for office-agent-error-handling.
@@ -89,28 +91,36 @@ func (s *Service) RecordAgentSuccess(ctx context.Context, agentID string) {
 	}
 }
 
-// MarkAgentRunFailedFixed dismisses the per-task inbox entry, clears
-// the FAILED state on the (task, agent) session, and re-queues a
-// run for that pair. Used by the inbox "Mark fixed" action.
+// MarkAgentRunFailedFixed clears the FAILED state on the (task, agent)
+// session, re-queues a run for that pair, and then dismisses the inbox entry.
+// Used by the inbox "Mark fixed" action.
 func (s *Service) MarkAgentRunFailedFixed(
 	ctx context.Context, userID, runID string,
 ) error {
-	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
 	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil {
 		// Run vanished (e.g. cancelled by reactivity) — dismissal
 		// alone is the best we can do. No retry needed.
+		if dismissErr := s.repo.DismissInboxItem(
+			ctx, userID, InboxKindAgentRunFailed, runID,
+		); dismissErr != nil {
+			return fmt.Errorf("dismiss: %w", dismissErr)
+		}
 		s.logger.Info("mark fixed: run not found, dismissed only",
 			zap.String("run_id", runID))
 		return nil
 	}
 	taskID := taskIDFromRunPayload(run.Payload)
 	if taskID == "" {
-		return nil
+		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID)
 	}
-	return s.requeueRunForTask(ctx, run.AgentProfileID, taskID)
+	if err := s.requeueRunForTask(ctx, run.AgentProfileID, taskID, runID); err != nil {
+		return fmt.Errorf("requeue run: %w", err)
+	}
+	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
+	}
+	return nil
 }
 
 // MarkAgentPausedFixed unpauses an auto-paused agent, clears the
@@ -120,57 +130,192 @@ func (s *Service) MarkAgentRunFailedFixed(
 func (s *Service) MarkAgentPausedFixed(
 	ctx context.Context, userID, agentID string,
 ) error {
-	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
-
 	agent, err := s.repo.GetAgentInstance(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("get agent: %w", err)
 	}
-	if !strings.HasPrefix(agent.PauseReason, autoPauseReasonPrefix) {
-		// Already cleared by something else; nothing to do.
-		return nil
-	}
-
-	if err := s.repo.UpdateAgentStatusFields(ctx, agentID, string(agent.Status), ""); err != nil {
-		return fmt.Errorf("clear pause reason: %w", err)
-	}
-	if err := s.repo.ResetAgentConsecutiveFailures(ctx, agentID); err != nil {
-		s.logger.Warn("reset counter on unpause failed",
-			zap.String("agent", agentID), zap.Error(err))
-	}
-
-	// Re-queue runs for the tasks affected by the pause AND
-	// auto-dismiss the prior per-task failure entries so unpausing
-	// doesn't resurface them in the inbox. The pause entry is the
-	// single source of truth for this batch of failures; once the
-	// user marks it fixed, the per-task entries are no longer
-	// actionable on their own.
-	runIDs, err := s.repo.ListFailedRunsForAgent(ctx, agentID)
+	autoPaused := strings.HasPrefix(agent.PauseReason, autoPauseReasonPrefix)
+	recoveries, err := s.loadPauseRecoveries(ctx, agent, autoPaused)
 	if err != nil {
-		return fmt.Errorf("list failed runs: %w", err)
+		return err
 	}
-	seenTasks := map[string]bool{}
-	for _, wID := range runIDs {
-		// Auto-dismiss every prior failed run row so it doesn't
-		// re-emerge in the inbox when the agent unpauses.
-		_ = s.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, wID)
-		w, err := s.repo.GetRun(ctx, wID)
+	if !autoPaused && len(recoveries) == 0 {
+		// Both the pause marker and its durable recovery work are gone.
+		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID)
+	}
+	if err := s.repo.DismissInboxItem(
+		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
+	); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
+	}
+
+	if autoPaused {
+		if err := s.clearAutoPause(ctx, agent); err != nil {
+			return err
+		}
+		if err := s.repo.ResetAgentConsecutiveFailures(ctx, agentID); err != nil {
+			s.logger.Warn("reset counter on unpause failed",
+				zap.String("agent", agentID), zap.Error(err))
+		}
+	}
+	return s.recoverPausedTasks(ctx, agentID, recoveries)
+}
+
+func (s *Service) loadPauseRecoveries(
+	ctx context.Context, agent *models.AgentInstance, autoPaused bool,
+) ([]officesqlite.AgentPauseRecovery, error) {
+	recoveries, err := s.repo.ListAgentPauseRecoveries(ctx, agent.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list pause recoveries: %w", err)
+	}
+	if len(recoveries) == 0 && autoPaused {
+		// Populate the snapshot for auto-paused agents created before this
+		// table was introduced, then use the same safe recovery path.
+		if err := s.repo.ReplaceAgentPauseRecoveries(
+			ctx, agent.ID, agent.ConsecutiveFailures,
+		); err != nil {
+			return nil, fmt.Errorf("capture pause recoveries: %w", err)
+		}
+		recoveries, err = s.repo.ListAgentPauseRecoveries(ctx, agent.ID)
 		if err != nil {
-			continue
-		}
-		taskID := taskIDFromRunPayload(w.Payload)
-		if taskID == "" || seenTasks[taskID] {
-			continue
-		}
-		seenTasks[taskID] = true
-		if err := s.requeueRunForTask(ctx, agentID, taskID); err != nil {
-			s.logger.Warn("requeue on unpause failed",
-				zap.String("agent", agentID), zap.String("task_id", taskID),
-				zap.Error(err))
+			return nil, fmt.Errorf("reload pause recoveries: %w", err)
 		}
 	}
+	return recoveries, nil
+}
+
+func (s *Service) clearAutoPause(
+	ctx context.Context, agent *models.AgentInstance,
+) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		changed, err := s.clearAutoPauseAttempt(ctx, agent)
+		if err != nil {
+			return err
+		}
+		if changed {
+			return nil
+		}
+
+		current, err := s.repo.GetAgentInstance(ctx, agent.ID)
+		if err != nil {
+			return fmt.Errorf("reload agent status: %w", err)
+		}
+		if !strings.HasPrefix(current.PauseReason, autoPauseReasonPrefix) {
+			return nil
+		}
+		agent = current
+	}
+	return fmt.Errorf("clear pause reason: agent status changed")
+}
+
+func (s *Service) clearAutoPauseAttempt(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	if agent.Status == models.AgentStatusPaused {
+		return s.unpauseAgentIfCurrent(ctx, agent)
+	}
+	return s.clearPauseReasonIfCurrent(ctx, agent)
+}
+
+func (s *Service) unpauseAgentIfCurrent(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	changed, err := s.repo.UpdateAgentStatusFieldsIfCurrent(
+		ctx, agent.ID, string(models.AgentStatusPaused),
+		string(models.AgentStatusIdle), "",
+	)
+	if err != nil {
+		return false, fmt.Errorf("unpause agent: %w", err)
+	}
+	if changed {
+		s.publishAgentStatusChanged(
+			ctx, agent.ID, agent.WorkspaceID, string(models.AgentStatusIdle),
+		)
+	}
+	return changed, nil
+}
+
+func (s *Service) clearPauseReasonIfCurrent(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	changed, err := s.repo.ClearAgentPauseReasonIfCurrent(
+		ctx, agent.ID, string(agent.Status),
+	)
+	if err != nil {
+		return false, fmt.Errorf("clear pause reason: %w", err)
+	}
+	if changed {
+		s.publishAgentStatusChanged(
+			ctx, agent.ID, agent.WorkspaceID, string(agent.Status),
+		)
+	}
+	return changed, nil
+}
+
+func (s *Service) recoverPausedTasks(
+	ctx context.Context, agentID string,
+	recoveries []officesqlite.AgentPauseRecovery,
+) error {
+	var recoveryErrs []error
+	for _, recovery := range recoveries {
+		if err := s.recoverPausedTask(ctx, agentID, recovery); err != nil {
+			recoveryErrs = append(recoveryErrs,
+				fmt.Errorf("recover task %s: %w", recovery.TaskID, err))
+		}
+	}
+	return errors.Join(recoveryErrs...)
+}
+
+func (s *Service) recoverPausedTask(
+	ctx context.Context, agentID string,
+	recovery officesqlite.AgentPauseRecovery,
+) error {
+	fields, err := s.repo.GetTaskExecutionFields(ctx, recovery.TaskID)
+	if errors.Is(err, officesqlite.ErrTaskNotFound) {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+	if err != nil {
+		return fmt.Errorf("load task: %w", err)
+	}
+	if fields.AssigneeAgentProfileID != agentID {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+
+	latest, err := s.repo.GetLatestRunForAgentTask(ctx, agentID, recovery.TaskID)
+	if err != nil {
+		return fmt.Errorf("load latest run: %w", err)
+	}
+	if latest == nil || latest.ID != recovery.FailedRunID ||
+		latest.Status != models.RunStatusFailed {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+	if err := s.requeueRunForTask(
+		ctx, agentID, recovery.TaskID, recovery.FailedRunID,
+	); err != nil {
+		return fmt.Errorf("requeue task: %w", err)
+	}
+	if err := s.repo.DeleteAgentPauseRecovery(
+		ctx, agentID, recovery.TaskID,
+	); err != nil {
+		return fmt.Errorf("delete recovery: %w", err)
+	}
+	_ = s.repo.DismissInboxItem(
+		ctx, autoDismissUserID, InboxKindAgentRunFailed, recovery.FailedRunID,
+	)
+	return nil
+}
+
+func (s *Service) discardPauseRecovery(
+	ctx context.Context, recovery officesqlite.AgentPauseRecovery,
+) error {
+	if err := s.repo.DeleteAgentPauseRecovery(
+		ctx, recovery.AgentID, recovery.TaskID,
+	); err != nil {
+		return fmt.Errorf("delete recovery: %w", err)
+	}
+	_ = s.repo.DismissInboxItem(
+		ctx, autoDismissUserID, InboxKindAgentRunFailed, recovery.FailedRunID,
+	)
 	return nil
 }
 
@@ -306,6 +451,9 @@ func (s *Service) autoPauseAgent(
 	}
 	reason := fmt.Sprintf("%s %d consecutive failures. Last error: %s",
 		autoPauseReasonPrefix, count, truncateForReason(errorMessage))
+	if err := s.repo.ReplaceAgentPauseRecoveries(ctx, agentID, count); err != nil {
+		return fmt.Errorf("capture pause recoveries: %w", err)
+	}
 	if err := s.repo.UpdateAgentStatusFields(
 		ctx, agentID, string(models.AgentStatusPaused), reason,
 	); err != nil {
@@ -319,10 +467,15 @@ func (s *Service) autoPauseAgent(
 }
 
 func (s *Service) requeueRunForTask(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, agentID, taskID, failedRunID string,
 ) error {
 	payload := mustJSONString(map[string]string{"task_id": taskID})
-	return s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, "")
+	identity := failedRunID
+	if identity == "" {
+		identity = taskID
+	}
+	key := fmt.Sprintf("%s:%s:%s", RunReasonManualResumeAfterFailure, agentID, identity)
+	return s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, key)
 }
 
 func (s *Service) publishRunFailed(

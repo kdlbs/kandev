@@ -20,6 +20,11 @@ type launchFailureClassification struct {
 
 func classifyLaunchFailure(err error) launchFailureClassification {
 	switch {
+	case errors.Is(err, worktree.ErrWorkspaceCheckoutFailed):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryWorkspaceCheckoutFailed,
+			message: "The workspace could not be prepared for this launch.",
+		}
 	case errors.Is(err, worktree.ErrInvalidBaseBranch):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryBaseBranchMissing,
@@ -38,20 +43,27 @@ func classifyLaunchFailure(err error) launchFailureClassification {
 	}
 }
 
-func launchFailureRecoveryActions(taskRepositoryID string, markReviewDone bool) []string {
+func launchFailureRecoveryActions(category, taskRepositoryID string, markReviewDone bool) []string {
 	actions := make([]string, 0, 3)
 	if strings.TrimSpace(taskRepositoryID) != "" {
-		actions = append(actions,
-			models.RecoveryActionRetryDefault,
-			models.RecoveryActionPickBaseBranch,
-		)
+		switch category {
+		case models.LaunchErrorCategoryBaseBranchMissing:
+			actions = append(actions,
+				models.RecoveryActionRetryDefault,
+				models.RecoveryActionPickBaseBranch,
+			)
+		case models.LaunchErrorCategoryDefaultBranchUnresolved:
+			actions = append(actions, models.RecoveryActionPickBaseBranch)
+		}
 	}
-	if markReviewDone {
+	if category == models.LaunchErrorCategoryWorkspaceCheckoutFailed || category == models.LaunchErrorCategoryGenericLaunchFailure {
+		actions = append(actions, models.RecoveryActionRetryLaunch)
+	}
+	if category == models.LaunchErrorCategoryPRAlreadyClosed && markReviewDone {
 		actions = append(actions, models.RecoveryActionMarkReviewDone)
 	}
-	return models.NormalizeRecoveryActions(actions)
+	return models.NormalizeRecoveryActionsForCategory(category, actions)
 }
-
 func (e *Executor) buildLastAgentError(
 	ctx context.Context,
 	taskID, taskRepositoryID string,
@@ -80,7 +92,7 @@ func (e *Executor) buildLastAgentError(
 		OccurredAt:       occurredAt,
 		Code:             classification.code,
 		Details:          details,
-		RecoveryActions:  launchFailureRecoveryActions(taskRepositoryID, markReviewDone),
+		RecoveryActions:  launchFailureRecoveryActions(classification.code, taskRepositoryID, markReviewDone),
 		TaskRepositoryID: taskRepositoryID,
 		StampValue: models.StableLaunchErrorStamp(
 			taskID, classification.code, taskRepositoryID, occurredAt.Format(time.RFC3339Nano),

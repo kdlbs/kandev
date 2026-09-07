@@ -145,6 +145,46 @@ func TestPublishMessageEventSuppressesUnchangedCompactPendingAction(t *testing.T
 	}
 }
 
+// TestPublishMessageEventExportedWrapperMatchesPrivateMethod covers
+// PublishMessageEvent, the exported form added for the e2e test harness
+// (internal/office/testharness), which inserts messages directly rather than
+// through CreateMessage. It must trigger the same compact
+// session.pending_action_changed side effect as the private
+// publishMessageEvent — this is a thin passthrough, so the test only proves
+// the delegation, not the pending-action projection logic itself (already
+// covered above).
+func TestPublishMessageEventExportedWrapperMatchesPrivateMethod(t *testing.T) {
+	const compactEventType = "session.pending_action_changed"
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-pending")
+	message := &models.Message{
+		ID:            "message-pending-exported",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "private question body",
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata:      map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+	}
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.PublishMessageEvent(ctx, events.MessageAdded, message); err != nil {
+		t.Fatalf("publish message event: %v", err)
+	}
+
+	data := singlePublishedEventDataOfType(t, eventBus, compactEventType)
+	if data["pending_action"] != "clarification" {
+		t.Fatalf("compact pending_action = %#v, want clarification", data["pending_action"])
+	}
+}
+
 func singlePublishedEventDataOfType(t *testing.T, eventBus *MockEventBus, eventType string) map[string]interface{} {
 	t.Helper()
 	var matching []*bus.Event

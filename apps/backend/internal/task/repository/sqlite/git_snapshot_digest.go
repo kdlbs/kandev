@@ -49,8 +49,8 @@ func computeGitSnapshotDigest(branch, remoteBranch, headCommit, baseCommit strin
 // ListDuplicateGitSnapshotCandidates for a later, explicit maintenance pass
 // to prune.
 func (r *Repository) migrateGitSnapshotContentDigest() error {
-	r.migrate.Apply("task_session_git_snapshots.content_digest", `ALTER TABLE task_session_git_snapshots ADD COLUMN content_digest TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("idx_git_snapshots_session_digest", `CREATE INDEX IF NOT EXISTS idx_git_snapshots_session_digest ON task_session_git_snapshots(session_id, content_digest)`)
+	_ = r.migrate.Apply("task_session_git_snapshots.content_digest", `ALTER TABLE task_session_git_snapshots ADD COLUMN content_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_git_snapshots_session_digest", `CREATE INDEX IF NOT EXISTS idx_git_snapshots_session_digest ON task_session_git_snapshots(session_id, content_digest)`)
 	return r.backfillGitSnapshotContentDigests()
 }
 

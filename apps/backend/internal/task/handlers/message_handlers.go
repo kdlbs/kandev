@@ -58,6 +58,7 @@ type MessageHandlers struct {
 	service             *service.Service
 	orchestrator        OrchestratorService
 	cancellationPending dto.CancellationPendingProvider
+	parkedProjection    dto.ParkedProvider
 	logger              *logger.Logger
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
@@ -91,6 +92,9 @@ func NewMessageHandlers(
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		handlers.cancellationPending = cancellation
+	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		handlers.parkedProjection = parked
 	}
 	return handlers
 }
@@ -719,6 +723,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if reloaded.State != models.TaskSessionStateCompleted {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -736,6 +741,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	}
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
@@ -793,6 +799,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in

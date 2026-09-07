@@ -22,10 +22,10 @@ import (
 // digest, so an identical payload referenced by more than one message is
 // stored exactly once.
 func (r *Repository) migrateMessagePayloadStorage() {
-	r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
-	r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
-	r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+	_ = r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	_ = r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS task_message_payloads (
 			digest TEXT PRIMARY KEY,
 			compressed_content %s NOT NULL,
@@ -56,7 +56,7 @@ func (r *Repository) migrateTaskSessions() error {
 // A DB that no longer contains the rebuild trigger columns would never gain the
 // cost columns, breaking the office cost subscriber's IncrementTaskSessionUsage
 // with "no such column: tokens_in". These additive ALTERs are idempotent — the
-// MigrateLogger swallows "duplicate column name" on DBs that already have them.
+// required migration logger tolerates only "duplicate column name" on replay.
 func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
@@ -212,8 +212,8 @@ func (r *Repository) runMigrations() error {
 	// task_session_commits gains a uniqueness constraint before its writer
 	// starts firing from more than just archive capture (CreateSessionCommit
 	// was previously a plain INSERT). Must dedupe existing duplicates first:
-	// CREATE UNIQUE INDEX fails on a duplicate pair, and MigrateLogger.Apply
-	// swallows non-"already exists" errors, so an unhandled duplicate would
+	// CREATE UNIQUE INDEX fails on a duplicate pair, and an idempotent migration
+	// helper must not classify that data error as an existing schema object, so an unhandled duplicate would
 	// silently leave both the index and every future ON CONFLICT missing.
 	if err := r.migrateSessionCommitsDedupeAndActivation(); err != nil {
 		return err
@@ -309,7 +309,9 @@ func (r *Repository) runMigrations() error {
 	// task SELECTs that reference them via correlated subquery don't
 	// fail. Required for tests and any environment where the workflow
 	// repo hasn't run yet.
-	r.ensureRunnerProjectionTables()
+	if err := r.ensureRunnerProjectionTables(); err != nil {
+		return err
+	}
 	// Keep the projection table compatible with databases whose workflow
 	// repository has not replayed its own migrations yet. These additive
 	// migrations are idempotent and preserve the false default for legacy rows.
@@ -392,6 +394,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task migration: %w", err)
+	}
 
 	return nil
 }
@@ -853,9 +858,8 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 // (e.g. abandoned work), not just noise.
 //
 // Must run before CreateSessionCommit starts firing from more than archive -
-// CREATE UNIQUE INDEX fails on an existing duplicate pair, and
-// MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
-// duplicate would silently leave both the index and every future
+// CREATE UNIQUE INDEX fails on an existing duplicate pair. An unhandled
+// duplicate must not silently leave both the index and every future
 // ON CONFLICT missing. That is exactly why these two statements, unlike most
 // migrations in this file, do NOT go through r.migrate.Apply: the writer's
 // ON CONFLICT (session_id, commit_sha) target hard-requires this index to

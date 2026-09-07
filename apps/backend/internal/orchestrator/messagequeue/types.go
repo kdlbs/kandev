@@ -143,7 +143,7 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 		return true
 	}
 	origin, _ := m.Metadata["origin"].(string)
-	return origin == "github_pr_automation"
+	return origin == "github_pr_automation" || origin == "ci_automation"
 }
 
 // IsReservedInFlight reports whether this durable row was already reserved for
