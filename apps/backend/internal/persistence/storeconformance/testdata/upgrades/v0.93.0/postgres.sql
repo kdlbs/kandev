@@ -3434,5 +3434,3 @@ INSERT INTO secrets (id, name, scope, workspace_id, encrypted_value, nonce, crea
 VALUES ('fixture-v0930-secret', 'Fixture Secret', 'global', '', '', '', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
 INSERT INTO telemetry_activations (contract_key, contract_version, activated_at)
 VALUES ('fixture.v0930.contract', 7, '2024-01-02 03:04:05+00:00');
-
-

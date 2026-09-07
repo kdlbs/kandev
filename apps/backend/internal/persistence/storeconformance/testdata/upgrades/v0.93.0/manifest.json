@@ -37,7 +37,7 @@
     {
       "engine": "pgx",
       "file": "postgres.sql",
-      "sha256": "6b8896bd3dc4275d9492595124de5c8fd801e0e659c9088f5781db1fe3afda49",
+      "sha256": "f4f26d8d67610ef94a2d5cc308392be7a353efdd3e36e8469fb5ed11d774d165",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
