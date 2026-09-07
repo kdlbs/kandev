@@ -592,9 +592,12 @@ E2E (Playwright, `apps/web/e2e`):
   is not in the host catalog. Make sure that the task-create picker keeps the
   profile selectable, shows one warning icon, and reveals the advisory warning
   through the fine-pointer tooltip or coarse-pointer drawer.
-- Launch with an executor catalog that omits the profile model. Make sure that
-  no model-selection call occurs, the task continues, and chat shows one warning.
-- Reload the task page. Make sure that the warning remains in chat.
+- Launch an exact profile with an executor catalog that omits its model. Make
+  sure that no model-selection call occurs and the session fails before a
+  prompt, tool call, or agent output with sanitized mismatch evidence.
+- Launch an auto-fallback profile with an executor catalog that omits its
+  model. Make sure that the task continues and chat shows one warning. Reload
+  the task page and make sure that warning remains in chat.
 - Desktop profile settings: the disclosure starts closed, expands to two
   horizontally aligned option columns, summarizes the current fallback mode,
   and exposes each info explanation on hover/focus.
@@ -607,8 +610,7 @@ E2E (Playwright, `apps/web/e2e`):
 - `agent_profiles.fallback_model TEXT NOT NULL DEFAULT ''`
 - `agent_profiles.auto_fallback INTEGER NOT NULL DEFAULT 0`
 
-Existing rows use `auto_fallback = 0` and no fallback model.
-This state means default-on-mismatch behavior.
-
-If the executor omits the saved model, the agent uses its default and Kandev
-persists a warning. The saved profile model does not change.
+Existing rows use `auto_fallback = 0` and no fallback model. This is exact
+mode: if the executor omits the saved model, Kandev fails before inference.
+The saved profile model does not change. Provider-default continuation and its
+persisted warning are permitted only when `auto_fallback = true`.
