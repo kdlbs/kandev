@@ -27,7 +27,13 @@ test.describe("SSH LSP boundary", () => {
     // reachable from the remote container. Create the Kotlin file through the
     // real workspace WebSocket so the assertion exercises the SSH task host.
     await task.session.clickTab("Files");
-    await testPage.getByRole("button", { name: "New file" }).click();
+    const directNewFile = testPage.getByRole("button", { name: "New file" });
+    if (await directNewFile.isVisible().catch(() => false)) {
+      await directNewFile.click();
+    } else {
+      await testPage.getByTestId("files-create-menu").click();
+      await testPage.getByRole("menuitem", { name: "New file" }).click();
+    }
     const fileNameInput = testPage.getByPlaceholder("filename...");
     await expect(fileNameInput).toBeVisible();
     await fileNameInput.fill(remoteFilePath);

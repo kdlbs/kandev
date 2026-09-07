@@ -18,6 +18,8 @@ import {
 } from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
+import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
+import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
@@ -264,6 +266,46 @@ describe("renderSettingsRoute", () => {
 
     expect(isValidElement(route)).toBe(true);
     expect(((route as ReactElement).type as { name?: string }).name).toBe("AgentsBrowsePage");
+  });
+});
+
+describe("system data and storage routes", () => {
+  it("renders Storage maintenance on its direct route", () => {
+    const route = renderSettingsRoute("/settings/system/storage") as ReactElement<{
+      titleKey: string;
+      descriptionKey: string;
+      children: ReactElement;
+    }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect(route.type).toBe(SystemRouteShell);
+    expect(route.props.titleKey).toBe("system:storageTitle");
+    expect(route.props.descriptionKey).toBe("system:storageDescription");
+    expect(route.props.children.type).toBe(StorageMaintenanceSettings);
+  });
+});
+
+describe("system page breadcrumbs", () => {
+  const noRecords: CrumbValues = {
+    workspaceName: () => null,
+    agentDisplayName: () => null,
+    agentProfileName: () => null,
+    automationName: () => null,
+    executorName: () => null,
+    executorProfileName: () => null,
+    executorTypeTitle: () => null,
+    integrationTitle: () => null,
+    pluginName: () => null,
+  };
+
+  it("resolves Storage from its translated catalog label", () => {
+    expect(resolveSettingsBreadcrumbs("/settings/system/storage", (key) => key, noRecords)).toEqual(
+      {
+        parents: [{ label: "common:settings", href: "/settings", phoneOnlyLink: true }],
+        title: "system:storageTitle",
+        titleFromUrlSegment: false,
+      },
+    );
   });
 });
 

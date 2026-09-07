@@ -22,9 +22,13 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, and Hermes. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
+
+Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
+
+Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
 
 ### Pi command surfaces
 
@@ -55,9 +59,23 @@ Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence over the default until you choose **Use Kandev default**. Kandev
-does not store the default as a user selection, so later Kandev releases can
-move unmodified installations to their reviewed defaults.
+precedence for the current default generation. **Use Kandev default** clears
+it, and a later shipped package or reviewed default resets it during startup.
+Kandev does not store the default as a user selection.
+
+When a Kandev upgrade changes the managed package or its reviewed default,
+Kandev removes the older selection during startup before the service becomes
+ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
+When the package and default stay the same, Kandev preserves your selection
+across restarts and unrelated upgrades. A process that is already running is
+not replaced, so the new default applies when Kandev starts a future process.
+
+After startup, open the update control to select any validated stable version,
+including an older version. This lets you roll back the new default when a
+provider or environment requires it. The selection remains active until you
+change it or a later Kandev release changes that agent's package or default.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest
@@ -267,6 +285,8 @@ apply.
 Each flag entry has a raw value, description, enabled state, and an agent-specific default where applicable. Only enabled entries reach the process. Kandev tokenizes each raw value as command arguments: `--add-dir /shared` becomes two arguments.
 
 The field is not a shell script. Pipes, redirects, variable expansion, and command substitution do not run as shell syntax. Empty or malformed quoting is rejected. Keep separate profiles for materially different permission or workspace flags, and recheck customized flags after upgrading the CLI.
+
+Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
 
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 

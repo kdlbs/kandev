@@ -278,9 +278,12 @@ type Adapter struct {
 	// Session configuration changes are serialized across model and option
 	// RPCs. configGeneration is incremented when a change begins so an older
 	// completion cannot overwrite a newer selection.
-	configChangeMu   sync.Mutex
-	configGeneration uint64
-	contextSamples   map[string]contextWindowSample
+	// Session transitions use a separate mutex because a reset must keep the
+	// adapter transitionally consistent from session/new through session/close.
+	sessionTransitionMu sync.Mutex
+	configChangeMu      sync.Mutex
+	configGeneration    uint64
+	contextSamples      map[string]contextWindowSample
 
 	// Synchronization
 	mu     sync.RWMutex

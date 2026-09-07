@@ -37,7 +37,8 @@ var (
 // shared cancellation coordinator, then the exact claim is handed to one
 // replacement prompt. The explicit Cancel path is deliberately not involved.
 func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error) {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	// Dispatching a queued prompt puts an agent to work: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 		return 0, err
 	}
 	if err := validateSendNowInput(sessionID, scope, entryID); err != nil {

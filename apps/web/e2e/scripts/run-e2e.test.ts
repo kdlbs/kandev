@@ -17,6 +17,7 @@ afterEach(() => {
 function runnerEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env = {
     ...process.env,
+    KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
     ...extra,
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
   };
@@ -94,7 +95,10 @@ describe("run-e2e.sh", () => {
       ],
       {
         encoding: "utf8",
-        env: runnerEnv(binDir, { KANDEV_RUNNER_RESULT_FILE: resultFile }),
+        env: runnerEnv(binDir, {
+          KANDEV_RUNNER_RESULT_FILE: resultFile,
+          KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "1",
+        }),
       },
     );
 
@@ -173,21 +177,22 @@ describe("run-e2e.sh", () => {
   it("normalizes the deprecated docker project alias for raw Playwright runs", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
     tempDirs.push(binDir);
-    const playwrightPath = path.join(binDir, "playwright");
-    fs.writeFileSync(playwrightPath, "#!/usr/bin/env sh\nprintf '%s' \"$*\"\n");
-    fs.chmodSync(playwrightPath, 0o755);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nprintf '%s' \"$*\"\n");
+    fs.chmodSync(pnpmPath, 0o755);
 
     const result = spawnSync("bash", [rawScriptPath, "--project=docker", "--help"], {
       encoding: "utf8",
       env: {
         ...process.env,
+        KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
       },
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(
-      "test --config e2e/playwright.config.ts --project=containers --help",
+      "exec playwright test --config e2e/playwright.config.ts --workers=1 --project=containers --help",
     );
   });
 
@@ -259,5 +264,96 @@ describe("run-e2e.sh", () => {
         (args) => args.includes("build-agentctl-linux") && args.includes("build-mock-agent-linux"),
       ),
     ).toBe(true);
+  });
+
+  it("rejects more than the local shard budget without an explicit opt-in", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [
+        scriptPath,
+        "--host",
+        "--no-build",
+        "--shards",
+        "4",
+        "--project",
+        "chromium",
+        "--",
+        "--help",
+      ],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("local shard limit");
+
+    const allowed = spawnSync(
+      "bash",
+      [
+        scriptPath,
+        "--host",
+        "--no-build",
+        "--shards",
+        "4",
+        "--project",
+        "chromium",
+        "--",
+        "--help",
+      ],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "1" }),
+      },
+    );
+
+    expect(allowed.status).toBe(0);
+  });
+
+  it("rejects Playwright worker overrides above one", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--workers=2"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("Playwright worker limit");
+  });
+
+  it("applies the worker guard to raw Playwright runs", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
+    tempDirs.push(binDir);
+    const playwrightPath = path.join(binDir, "playwright");
+    fs.writeFileSync(playwrightPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(playwrightPath, 0o755);
+
+    const result = spawnSync("bash", [rawScriptPath, "--workers=2", "--help"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expect(result.status).toBe(2);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("Playwright worker limit");
   });
 });

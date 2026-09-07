@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Store persists Azure DevOps configuration and health, never credentials.
@@ -175,7 +179,7 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 		reader = writer
 	}
 	store := &Store{db: writer, ro: reader}
-	if _, err := store.db.Exec(createConfigTableSQL); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(createConfigTableSQL, store.db.DriverName())); err != nil {
 		return nil, fmt.Errorf("azure devops schema init: %w", err)
 	}
 	if err := store.ensureSavedViewsColumn(); err != nil {
@@ -187,13 +191,13 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if err := store.ensureWorkspaceSettingsVersionColumn(); err != nil {
 		return nil, fmt.Errorf("azure devops workspace settings version schema init: %w", err)
 	}
-	if _, err := store.db.Exec(createTaskPRTableSQL); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(createTaskPRTableSQL, store.db.DriverName())); err != nil {
 		return nil, fmt.Errorf("azure devops task PR schema init: %w", err)
 	}
-	if _, err := store.db.Exec(createTaskWorkItemTableSQL); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(createTaskWorkItemTableSQL, store.db.DriverName())); err != nil {
 		return nil, fmt.Errorf("azure devops task work item schema init: %w", err)
 	}
-	if _, err := store.db.Exec(createWatchTablesSQL); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(createWatchTablesSQL, store.db.DriverName())); err != nil {
 		return nil, fmt.Errorf("azure devops watcher schema init: %w", err)
 	}
 	return store, nil
@@ -221,27 +225,14 @@ func (s *Store) ensureSavedViewsColumn() error {
 }
 
 func (s *Store) ensureConfigColumn(column, statement string) error {
-	rows, err := s.db.Query(`PRAGMA table_info(azure_devops_configs)`)
+	columns, err := dbutil.TableColumns(s.db, "azure_devops_configs")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if scanErr := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); scanErr != nil {
-			return scanErr
-		}
-		if name == column {
-			return rows.Err()
-		}
+	if columns[column] {
+		return nil
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(statement)
+	_, err = s.db.Exec(schemaSQLForDriver(statement, s.db.DriverName()))
 	return err
 }
 
@@ -251,8 +242,8 @@ func (s *Store) GetConfig(ctx context.Context, workspaceID string) (*Config, err
 		return nil, err
 	}
 	var cfg Config
-	err := s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectConfigColumns+` FROM azure_devops_configs WHERE workspace_id = ?`, workspaceID)
+	err := s.ro.GetContext(ctx, &cfg, s.ro.Rebind(
+		`SELECT `+selectConfigColumns+` FROM azure_devops_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -276,7 +267,7 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *Config) error {
 		cfg.CreatedAt = now
 	}
 	cfg.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO azure_devops_configs (
 			workspace_id, organization_url, default_project_id, default_project_name,
 			auth_method, created_at, updated_at
@@ -286,7 +277,7 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *Config) error {
 			default_project_id = excluded.default_project_id,
 			default_project_name = excluded.default_project_name,
 			auth_method = excluded.auth_method,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		cfg.WorkspaceID, cfg.OrganizationURL, cfg.DefaultProjectID,
 		cfg.DefaultProjectName, cfg.AuthMethod, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
@@ -297,16 +288,16 @@ func (s *Store) DeleteConfig(ctx context.Context, workspaceID string) error {
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM azure_devops_configs WHERE workspace_id = ?`, workspaceID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM azure_devops_configs WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 
 // ListConfigWorkspaceIDs returns all configured workspace IDs in stable order.
 func (s *Store) ListConfigWorkspaceIDs(ctx context.Context) ([]string, error) {
 	var workspaceIDs []string
-	if err := s.ro.SelectContext(ctx, &workspaceIDs,
-		`SELECT workspace_id FROM azure_devops_configs ORDER BY workspace_id`); err != nil {
+	if err := s.ro.SelectContext(ctx, &workspaceIDs, s.ro.Rebind(
+		`SELECT workspace_id FROM azure_devops_configs ORDER BY workspace_id`)); err != nil {
 		return nil, err
 	}
 	return workspaceIDs, nil
@@ -323,10 +314,10 @@ func (s *Store) UpdateAuthHealth(
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE azure_devops_configs
 		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE workspace_id = ?`, checkedAt, ok, errMsg, workspaceID)
+		WHERE workspace_id = ?`), checkedAt, ok, errMsg, workspaceID)
 	return err
 }
 
@@ -335,10 +326,10 @@ func (s *Store) ResetAuthHealth(ctx context.Context, workspaceID string) error {
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE azure_devops_configs
-		SET last_checked_at = NULL, last_ok = 0, last_error = ''
-		WHERE workspace_id = ?`, workspaceID)
+		SET last_checked_at = NULL, last_ok = FALSE, last_error = ''
+		WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 
@@ -347,8 +338,8 @@ func (s *Store) GetSavedViewsJSON(ctx context.Context, workspaceID string) (stri
 		return "", err
 	}
 	var raw string
-	err := s.ro.GetContext(ctx, &raw,
-		`SELECT saved_views FROM azure_devops_configs WHERE workspace_id = ?`, workspaceID)
+	err := s.ro.GetContext(ctx, &raw, s.ro.Rebind(
+		`SELECT saved_views FROM azure_devops_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotConfigured
 	}
@@ -359,9 +350,9 @@ func (s *Store) PutSavedViewsJSON(ctx context.Context, workspaceID, raw string) 
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE azure_devops_configs SET saved_views = ?, updated_at = ?
-		WHERE workspace_id = ?`, raw, time.Now().UTC(), workspaceID)
+		WHERE workspace_id = ?`), raw, time.Now().UTC(), workspaceID)
 	if err != nil {
 		return err
 	}
@@ -386,9 +377,9 @@ func (s *Store) GetWorkspaceSettingsSnapshot(ctx context.Context, workspaceID st
 		return WorkspaceSettingsSnapshot{}, err
 	}
 	var snapshot WorkspaceSettingsSnapshot
-	err := s.ro.GetContext(ctx, &snapshot,
+	err := s.ro.GetContext(ctx, &snapshot, s.ro.Rebind(
 		`SELECT workspace_settings AS json, workspace_settings_version AS version
-		FROM azure_devops_configs WHERE workspace_id = ?`, workspaceID)
+		FROM azure_devops_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return WorkspaceSettingsSnapshot{}, ErrNotConfigured
 	}
@@ -404,10 +395,10 @@ func (s *Store) PutWorkspaceSettingsJSON(ctx context.Context, workspaceID, raw s
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE azure_devops_configs
 		SET workspace_settings = ?, workspace_settings_version = workspace_settings_version + 1, updated_at = ?
-		WHERE workspace_id = ?`, raw, time.Now().UTC(), workspaceID)
+		WHERE workspace_id = ?`), raw, time.Now().UTC(), workspaceID)
 	if err != nil {
 		return err
 	}
@@ -427,10 +418,10 @@ func (s *Store) PutWorkspaceSettingsJSONIfVersion(ctx context.Context, workspace
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return false, err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE azure_devops_configs
 		SET workspace_settings = ?, workspace_settings_version = workspace_settings_version + 1, updated_at = ?
-		WHERE workspace_id = ? AND workspace_settings_version = ?`, raw, time.Now().UTC(), workspaceID, version)
+		WHERE workspace_id = ? AND workspace_settings_version = ?`), raw, time.Now().UTC(), workspaceID, version)
 	if err != nil {
 		return false, err
 	}
@@ -440,4 +431,16 @@ func (s *Store) PutWorkspaceSettingsJSONIfVersion(ctx context.Context, workspace
 func workspaceSettingsRowsUpdated(result sql.Result) (bool, error) {
 	updated, err := result.RowsAffected()
 	return updated > 0, err
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	schema = strings.ReplaceAll(schema, "TIMESTAMP", dialect.TimestampType(driver))
+	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
+	return schema
 }

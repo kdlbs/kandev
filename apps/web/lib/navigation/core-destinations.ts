@@ -26,6 +26,7 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconChartBar,
+  IconColumns,
   IconHexagon,
   IconHome,
   IconList,
@@ -33,7 +34,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
-import { linkToOfficeHome, linkToTaskOverview, linkToTasks } from "@/lib/links";
+import { linkToOfficeHome, linkToTaskOverview, linkToTasks, linkToThreads } from "@/lib/links";
 import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
 import type { Destination, NavContext } from "./types";
 
@@ -93,6 +94,22 @@ export const APP_DESTINATIONS: Destination[] = [
       labelKey: "common:commandGoToAllTasks",
       keywordsKey: "common:commandGoToAllTasksKeywords",
       href: "/tasks",
+    },
+  },
+  {
+    id: "threads",
+    labelKey: "kanban:threads",
+    icon: IconColumns,
+    section: "primary",
+    href: (ctx) => linkToThreads(ctx.workspaceId ?? undefined),
+    // Same reasoning as Tasks: the View toggle owns this on a kanban shell, so
+    // the menu and palette exist for the shells that have no toggle.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-threads",
+      labelKey: "common:commandGoToThreads",
+      keywordsKey: "common:commandGoToThreadsKeywords",
+      href: "/threads",
     },
   },
   {

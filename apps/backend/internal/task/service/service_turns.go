@@ -881,6 +881,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 	if taskEnv != nil {
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
+		info.ValidatedTaskEnvironmentID = taskEnv.ID
+		info.ValidatedExecutorType = taskEnv.ExecutorType
+		if info.ExecutorType == "" {
+			info.ExecutorType = taskEnv.ExecutorType
+		}
 		info.TaskDirName = taskEnv.TaskDirName
 	}
 	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
@@ -901,6 +906,9 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
+			info.AgentProfileID = officeProfileID
+		}
 		if running.ContainerID != "" {
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}

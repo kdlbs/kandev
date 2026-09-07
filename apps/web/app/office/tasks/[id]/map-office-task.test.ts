@@ -38,6 +38,19 @@ describe("mapOfficeTaskToTask", () => {
     expect(task.completedAt).toBeUndefined();
   });
 
+  // The human assignee travels store -> detail Task through this mapper. A
+  // dropped hop here is invisible to a component test that builds its own
+  // Task, and would surface as a task that reads unassigned no matter what
+  // the backend stored.
+  it("carries the human assignee through, independently of the agent assignee", () => {
+    const task = mapOfficeTaskToTask(
+      baseOfficeTask({ assigneeUserId: "user-7", assigneeAgentProfileId: "agent-3" }),
+    );
+
+    expect(task.assigneeUserId).toBe("user-7");
+    expect(task.assigneeAgentProfileId).toBe("agent-3");
+  });
+
   it("always maps createdBy to an empty string (no source of truth yet)", () => {
     const task = mapOfficeTaskToTask(baseOfficeTask());
 

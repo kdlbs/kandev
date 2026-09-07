@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-08-19
+updated: 2026-09-03
 owners:
   - product
 ---
@@ -28,3 +28,4 @@ user intent for destructive replacement, and evidence-based version comparison.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4:** When the checkout and provider history diverge, the system shall classify versions by repository, branch, commit identity, and ancestry evidence; it shall preserve the local task version and expose distinct provider/local actions without treating message or patch similarity as equality.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.5:** When a user chooses to replace the provider branch, the system shall require explicit confirmation and an exact provider-head lease; if the provider head changed, it shall leave both versions unchanged and request a fresh review.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.6:** When a user chooses the provider version, the system shall require a clean working tree, create a local recovery branch at the current task head, and reset to the confirmed provider head while reporting the recovery branch.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7:** When Kandev refreshes provider history for the same contribution, the Changes panel shall keep the previous confirmed commit provenance visible until refreshed evidence replaces it. A pending or failed refresh shall not show those commits as newly unpushed. Retained evidence shall not authorize a remote mutation.

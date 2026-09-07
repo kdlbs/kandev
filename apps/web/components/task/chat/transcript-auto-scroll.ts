@@ -163,19 +163,27 @@ export function createFrameCoalescer(run: () => void): {
  * completes its activation work. This keeps every activation owner aligned on
  * the same visibility and pending-transition contract.
  */
-export function useActivationPending(isVisible: boolean) {
+export function useActivationPending(
+  isVisible: boolean,
+  externalActivationToken: number | null = null,
+) {
   const isVisibleRef = useRef(isVisible);
   const previousVisibleRef = useRef(isVisible);
+  const previousExternalTokenRef = useRef<number | null>(null);
   const activationPendingRef = useRef(false);
   isVisibleRef.current = isVisible;
 
   useEffect(() => {
     const becameVisible = !previousVisibleRef.current && isVisible;
+    const externallyActivated =
+      externalActivationToken !== null &&
+      externalActivationToken !== previousExternalTokenRef.current;
     previousVisibleRef.current = isVisible;
+    previousExternalTokenRef.current = externalActivationToken;
     activationPendingRef.current = isVisible
-      ? becameVisible || activationPendingRef.current
+      ? becameVisible || externallyActivated || activationPendingRef.current
       : false;
-  }, [isVisible]);
+  }, [externalActivationToken, isVisible]);
 
   return { isVisibleRef, activationPendingRef };
 }

@@ -7,10 +7,12 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import { InstallAgentCard } from "@/components/settings/install-agent-card";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { installAgent, listAgentDiscovery, listAvailableAgents, listInstallJobs } from "@/lib/api";
 import type { InstallJob } from "@/lib/api";
+import { isHandledApiError } from "@/lib/api/client";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
 
@@ -64,7 +66,7 @@ function InstallCard({
   copiedValue: string | null;
   onCopy: (text: string) => void;
   job: InstallJob | undefined;
-  onInstall: (name: string) => void;
+  onInstall?: (name: string) => void;
 }) {
   return (
     <InstallAgentCard
@@ -129,6 +131,27 @@ function ToolInstallCard({
   );
 }
 
+export async function enqueueAgentInstall(
+  name: string,
+  upsertInstallJob: (job: InstallJob) => void,
+): Promise<void> {
+  try {
+    const job = await installAgent(name);
+    // The WS event will normally arrive first, but seed the store in case the
+    // WS round-trip is slower than the HTTP response.
+    upsertInstallJob(job);
+  } catch (err) {
+    if (isHandledApiError(err)) return;
+    upsertInstallJob({
+      job_id: `local-error-${name}`,
+      agent_name: name,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      started_at: new Date().toISOString(),
+    });
+  }
+}
+
 /**
  * Install state is held in the store (driven by WS events
  * agent.install.{started,output,finished}). This hook:
@@ -173,22 +196,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
   }, [Object.values(installJobs).filter((j) => j.status === "succeeded").length]);
 
   const handleInstall = useCallback(
-    async (name: string) => {
-      try {
-        const job = await installAgent(name);
-        // The WS event will normally arrive first, but seed the store in case
-        // the WS round-trip is slower than the HTTP response.
-        upsertInstallJob(job);
-      } catch (err) {
-        upsertInstallJob({
-          job_id: `local-error-${name}`,
-          agent_name: name,
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-          started_at: new Date().toISOString(),
-        });
-      }
-    },
+    (name: string) => enqueueAgentInstall(name, upsertInstallJob),
     [upsertInstallJob],
   );
 
@@ -214,6 +222,9 @@ export function AgentInstallCatalog() {
   }, [setAgentDiscovery, setAvailableAgents]);
 
   const { installJobs, handleInstall } = useInstallAgent(refresh);
+  // Installing an agent is POST /agent-install/:name, an org.config.manage
+  // write. The catalog stays readable; the install buttons do not render.
+  const canManage = useIsAdmin();
 
   const notInstalledAgents = useMemo(
     () => availableAgents.filter((a: AvailableAgent) => !a.available && a.install_script),
@@ -240,7 +251,7 @@ export function AgentInstallCatalog() {
           copiedValue={copiedValue}
           onCopy={copy}
           job={installJobs[agent.name]}
-          onInstall={handleInstall}
+          onInstall={canManage ? handleInstall : undefined}
         />
       ))}
       {notInstalledTools.map((tool) => (

@@ -17,6 +17,7 @@ function makeStore() {
 
 const COLLAPSED_KEY = "kandev.appSidebar.collapsed";
 const PICKER_KEY = "kandev.appSidebar.workspacePickerOpen";
+const SECTION_KEY = "kandev.appSidebar.sectionExpanded";
 
 describe("appSidebar workspace picker flag", () => {
   beforeEach(() => {
@@ -59,5 +60,16 @@ describe("appSidebar workspace picker flag", () => {
     store.getState().setWorkspacePickerOpen(false);
 
     expect(store.getState().appSidebar.collapsed).toBe(true);
+  });
+
+  it("keeps Canvases folded by default and persists an explicit expansion", () => {
+    const store = makeStore();
+
+    expect(store.getState().appSidebar.sectionExpanded.canvases).toBe(false);
+
+    store.getState().toggleAppSidebarSection("canvases", false);
+
+    expect(store.getState().appSidebar.sectionExpanded.canvases).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(SECTION_KEY) ?? "{}").canvases).toBe(true);
   });
 });

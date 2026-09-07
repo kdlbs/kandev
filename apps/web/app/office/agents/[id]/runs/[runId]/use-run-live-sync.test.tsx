@@ -13,7 +13,6 @@ vi.mock("@/lib/api/domains/office-runs-api", () => api);
 const clients = vi.hoisted(() => ({
   active: { subscribeRun: vi.fn() },
 }));
-
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => clients.active,
   useWebSocketClient: () => clients.active,
@@ -21,14 +20,17 @@ vi.mock("@/lib/ws/connection", () => ({
 
 const handlers = vi.hoisted(() => ({
   listener: undefined as ((payload: RunEventAppendedPayload) => void) | undefined,
+  unsubscribers: [] as ReturnType<typeof vi.fn>[],
 }));
 
 vi.mock("@/lib/ws/handlers/run", () => ({
   subscribeRunEvents: (_runId: string, listener: (payload: RunEventAppendedPayload) => void) => {
     handlers.listener = listener;
-    return () => {
+    const unsubscribe = vi.fn(() => {
       handlers.listener = undefined;
-    };
+    });
+    handlers.unsubscribers.push(unsubscribe);
+    return unsubscribe;
   },
 }));
 
@@ -60,6 +62,7 @@ const initialProps: Props = { runId: "run-1", initialEvents: [], initialStatus: 
 describe("useRunLiveSync", () => {
   beforeEach(() => {
     clients.active = { subscribeRun: vi.fn(() => vi.fn()) };
+    handlers.unsubscribers = [];
     handlers.listener = undefined;
   });
 
@@ -77,6 +80,26 @@ describe("useRunLiveSync", () => {
     expect(clients.active.subscribeRun).toHaveBeenCalledOnce();
     expect(result.current.events).toEqual([]);
     expect(result.current.status).toBe("claimed");
+  });
+
+  it("replaces claimed-run subscriptions when the WebSocket client changes", () => {
+    const firstClient = clients.active;
+    // Stable fixture: the hook re-syncs its events state on `initialEvents`
+    // identity, so a fresh literal on every render would feed an endless
+    // render->effect cycle (the snapshot is server-provided and reference-stable).
+    const initialEvents: RunEvent[] = [];
+    const { result, rerender } = renderHook(() =>
+      useRunLiveSync("run-1", initialEvents, "claimed"),
+    );
+    const secondClient = { subscribeRun: vi.fn(() => vi.fn()) };
+
+    clients.active = secondClient;
+    rerender();
+    expect(handlers.unsubscribers[0]).toHaveBeenCalledOnce();
+    expect(firstClient.subscribeRun.mock.results[0]?.value).toHaveBeenCalledOnce();
+    expect(secondClient.subscribeRun).toHaveBeenCalledWith("run-1");
+    act(() => handlers.listener?.({ run_id: "run-1", event: runEvent(1, "finished") }));
+    expect(result.current.status).toBe("finished");
   });
 
   it("does not clobber a live event when a fresh but unchanged snapshot rerenders", () => {

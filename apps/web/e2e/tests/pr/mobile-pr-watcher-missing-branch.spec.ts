@@ -75,7 +75,7 @@ test.describe("mobile PR watcher missing branch", () => {
     const recovery = chat.getByTestId("task-launch-error-entry");
 
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
-    await expect(recovery).toContainText("The selected base branch is not available.");
+    await expect(recovery).toContainText("The workspace could not be prepared for this launch.");
     await expect(recovery).not.toContainText(prBranch);
     const actionButtons = recovery.locator("button[data-testid^='task-launch-']");
     await expect(actionButtons).not.toHaveCount(0);

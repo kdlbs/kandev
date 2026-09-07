@@ -6,6 +6,7 @@ type Listener = (state: { isRestoringLayout: boolean }) => void;
 const fakeStore = {
   isRestoringLayout: false,
   pendingChatScrollTop: null as number | null,
+  pendingChatInitialPlacement: null as { sessionId: string; token: number } | null,
   setPendingChatScrollTop: vi.fn((v: number | null) => {
     fakeStore.pendingChatScrollTop = v;
   }),
@@ -51,6 +52,7 @@ describe("preserveChatScrollDuringLayout", () => {
     document.body.innerHTML = "";
     fakeStore.isRestoringLayout = false;
     fakeStore.pendingChatScrollTop = null;
+    fakeStore.pendingChatInitialPlacement = null;
     fakeStore.listeners.clear();
     fakeStore.setPendingChatScrollTop.mockClear();
   });

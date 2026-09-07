@@ -78,6 +78,18 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  // The server-rendered boot payload is the first thing a board paints from,
+  // so a dropped assignee here shows every card as unassigned until the first
+  // WS update happens to arrive.
+  it("hydrates the human assignee into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].assignee_user_id = "user-7";
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.assigneeUserId).toBe("user-7");
+  });
+
   it("hydrates task metadata into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);
     snapshot.tasks[0].metadata = {

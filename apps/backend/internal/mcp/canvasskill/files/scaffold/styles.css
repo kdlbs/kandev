@@ -1,0 +1,61 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --border: oklch(0.922 0 0);
+  --primary: oklch(0.51 0.23 277);
+  --primary-foreground: oklch(0.96 0.02 272);
+  --accent: oklch(0.68 0.18 276);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.96 0.02 27);
+  --ring: oklch(0.708 0 0);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.canvas-shell {
+  width: min(100% - 2rem, 72rem);
+  margin: 0 auto;
+  padding: 2rem 0;
+}
+
+.canvas-header {
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--primary);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 3rem);
+}
+
+.canvas-card {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: var(--card);
+  color: var(--card-foreground);
+}

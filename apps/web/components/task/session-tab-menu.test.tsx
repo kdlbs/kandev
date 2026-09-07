@@ -97,6 +97,43 @@ describe("SessionContextMenuItems", () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete.mock.calls[0]?.[0].defaultPrevented).toBe(true);
   });
+
+  it("omits Close Others (and its separator) when the action isn't provided", () => {
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button type="button">Session</button>
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          sessionState="COMPLETED"
+          isPrimary={false}
+          canShare={false}
+          taskId={null}
+          sessionId={undefined}
+          actions={{
+            handleSetPrimary: vi.fn(),
+            handleStop: vi.fn(),
+            handleResume: vi.fn(),
+          }}
+          onDelete={vi.fn()}
+          onShare={vi.fn()}
+          onHandoffProfile={vi.fn()}
+          onStartRename={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session" }), {
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Close Others" })).toBeNull();
+    // Only the setAsPrimary/stop-or-resume separator renders; no orphan
+    // separator is left behind where Close Others' own separator would go.
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
+  });
 });
 
 function SessionDeletePopoverHarness({ onConfirm }: { onConfirm: () => void }) {

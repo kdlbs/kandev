@@ -23,6 +23,7 @@ import {
   sortTasksForList,
 } from "@/lib/tasks/tasks-list-options";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { BootRouteData } from "./boot-payload";
 import { fetchJson } from "@/lib/api/client";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
@@ -53,12 +54,23 @@ import type {
 } from "@/lib/types/http";
 import { TaskDetailRoute } from "./task-detail-route";
 import { useTranslation } from "react-i18next";
+import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
+import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { WorkspaceCanvasesPage } from "@/components/settings/workspace-canvases-page";
+import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
 );
 const SettingsRoutes = lazy(() =>
   import("./settings-routes").then((mod) => ({ default: mod.SettingsRoutes })),
+);
+// Threads mounts a live chat panel per column, so it stays off the initial
+// bundle for the boards and lists that never open it.
+const ThreadsPageClient = lazy(() =>
+  import("@/app/threads/threads-page-client").then((mod) => ({
+    default: mod.ThreadsPageClient,
+  })),
 );
 
 const EMPTY_REPOSITORIES: Repository[] = [];
@@ -80,6 +92,7 @@ type SpaRoute =
       mode?: string;
     }
   | { kind: "tasks" }
+  | { kind: "threads" }
   | { kind: "github" }
   | { kind: "gitlab" }
   | { kind: "azure-devops" }
@@ -88,6 +101,8 @@ type SpaRoute =
   | { kind: "stats"; range?: RangeKey }
   | { kind: "runs"; view?: string }
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
+  | { kind: "canvas"; canvasId: string }
+  | { kind: "canvasSettings"; workspaceId: string }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "plugin"; path: string }
@@ -97,7 +112,18 @@ type SpaRoute =
 
 type DataBackedSpaRoute = Exclude<
   SpaRoute,
-  { kind: "kanban" | "settings" | "office" | "login" | "setup" | "invite" }
+  {
+    kind:
+      | "kanban"
+      | "canvas"
+      | "canvasSettings"
+      | "settings"
+      | "office"
+      | "login"
+      | "setup"
+      | "invite"
+      | "threads";
+  }
 >;
 
 type RouteDataState = {
@@ -107,16 +133,41 @@ type RouteDataState = {
   repositories: Repository[];
 };
 
-export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams): SpaRoute {
+type SpaRouteOptions = {
+  canvasesEnabled?: boolean;
+};
+
+export function resolveSpaRoute(
+  pathname: string,
+  searchParams: URLSearchParams,
+  options: SpaRouteOptions = {},
+): SpaRoute {
   const normalized = normalizePath(pathname);
   return (
     resolveTaskDetailRoute(normalized, searchParams) ??
     resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
+    resolveCanvasRoute(normalized, options.canvasesEnabled === true) ??
     resolveNestedRoute(normalized) ??
     resolvePluginRoute(normalized) ??
     resolveKanbanRoute(searchParams)
   );
+}
+
+function resolveCanvasRoute(normalized: string, canvasesEnabled: boolean): SpaRoute | null {
+  if (!canvasesEnabled) return null;
+  const direct = normalized.match(/^\/canvases\/([^/]+)$/);
+  if (direct) {
+    const canvasId = safeDecodePathSegment(direct[1]);
+    return canvasId ? { kind: "canvas", canvasId } : null;
+  }
+
+  const settings = normalized.match(/^\/settings\/workspaces\/([^/]+)\/canvases$/);
+  if (settings) {
+    const workspaceId = safeDecodePathSegment(settings[1]);
+    return workspaceId ? { kind: "canvasSettings", workspaceId } : null;
+  }
+  return null;
 }
 
 /**
@@ -180,6 +231,8 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
   switch (normalized) {
     case "/tasks":
       return { kind: "tasks" };
+    case "/threads":
+      return { kind: "threads" };
     case "/github":
       return { kind: "github" };
     case "/gitlab":
@@ -231,7 +284,8 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   usePluginRegistry();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const route = resolveSpaRoute(pathname, searchParams);
+  const canvasesEnabled = useFeature("canvases");
+  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled });
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or
@@ -239,11 +293,29 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   if (route.kind === "login" || route.kind === "setup" || route.kind === "invite") {
     return <AuthRouteRedirect />;
   }
+  if (route.kind === "canvas" || route.kind === "canvasSettings") {
+    if (!canvasesEnabled) return <AuthRouteRedirect />;
+    if (route.kind === "canvas") return <CanvasHostRoute canvasId={route.canvasId} />;
+    return (
+      <SettingsLayoutClient>
+        <WorkspaceSettingsShell workspaceId={route.workspaceId} activeTab="canvases">
+          <WorkspaceCanvasesPage workspaceId={route.workspaceId} />
+        </WorkspaceSettingsShell>
+      </SettingsLayoutClient>
+    );
+  }
   if (route.kind === "plugin") {
     return <PluginRoute path={route.path} />;
   }
   if (route.kind === "kanban") {
     return <KanbanRoute route={route} fallback={<RouteLoading routeNameKey="sidebar:office" />} />;
+  }
+  if (route.kind === "threads") {
+    return (
+      <Suspense fallback={<RouteLoading routeNameKey="threads:title" />}>
+        <ThreadsPageClient />
+      </Suspense>
+    );
   }
   if (route.kind === "taskDetail") {
     return (

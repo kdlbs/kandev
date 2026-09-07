@@ -1,7 +1,7 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
 import { primaryTaskRepository } from "@/lib/types/http";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
-import { pickPendingAction, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+import { pickAssignee, pickPendingAction, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   isPRReviewFromMetadata,
   isIssueWatchFromMetadata,
@@ -9,6 +9,13 @@ import {
 } from "@/lib/metadata-utils";
 
 type KanbanTask = KanbanState["tasks"][number];
+
+function snapshotTaskWorkspaceId(
+  task: WorkflowSnapshot["tasks"][number],
+  fallback: string,
+): string {
+  return task.workspace_id ?? fallback;
+}
 
 // Split out so the snapshot->task mapper (already at the complexity limit
 // from its long list of `??` fallbacks) doesn't need to absorb one more.
@@ -19,10 +26,23 @@ function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolea
 function primaryExecutorFields(task: Task) {
   return {
     primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: task.primary_executor_profile_id ?? undefined,
     primaryExecutorType: task.primary_executor_type ?? undefined,
     primaryExecutorName: task.primary_executor_name ?? undefined,
     isRemoteExecutor: task.is_remote_executor ?? false,
   };
+}
+
+function parseLabels(value: string | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((label): label is string => typeof label === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
@@ -40,12 +60,14 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
 
   const tasks = snapshot.tasks
     .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
+    // eslint-disable-next-line complexity -- The boot mapper projects one complete task record for hydration.
     .map((task) => {
       const workflowStepId = task.workflow_step_id;
       if (!workflowStepId) return null;
       const primary = primaryTaskRepository(task.repositories);
       return {
         id: task.id,
+        workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
         title: task.title,
@@ -59,6 +81,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         // same values so queue classification and ordering stay consistent
         // after a workflow switch or reconnect.
         priority: task.priority,
+        origin: task.origin,
         createdAt: task.created_at,
         wipAdmitted: task.wip_admitted,
         queuedForStepId: task.queued_for_step_id,
@@ -79,6 +102,9 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
         ...primaryExecutorFields(task),
+        primaryAgentProfileId: task.primary_agent_profile_id ?? undefined,
+        primaryAgentName: task.primary_agent_name ?? undefined,
+        labels: parseLabels(task.labels),
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
@@ -87,6 +113,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         statusSummary: task.status_summary,
+        assigneeUserId: pickAssignee(task.assignee_user_id),
         parentTaskId: task.parent_id ?? undefined,
         metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),

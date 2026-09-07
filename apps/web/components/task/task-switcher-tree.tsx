@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
 import {
   SortableTaskLevel,
@@ -28,34 +28,90 @@ type TaskTreeContext = {
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   // Rows in nestTargetIds render a nest drop zone while a drag is active.
   nestTargetIds: Set<string>;
-  activeDragId: string | null;
   // The group renders one DndContext spanning every level (TaskTreeDndGroup),
   // so levels must not create their own.
   externalDragContext: boolean;
 };
 
-function TaskTreeNode({
-  task,
-  depth,
-  ctx,
-  isDraggable,
-}: {
+type TaskTreeNodeProps = {
   task: TaskSwitcherItem;
   depth: number;
   ctx: TaskTreeContext;
   isDraggable: boolean;
-}) {
+};
+
+function nodeSubtreeEqual(
+  taskId: string,
+  previous: TaskTreeContext,
+  next: TaskTreeContext,
+  visited: Set<string>,
+): boolean {
+  if (visited.has(taskId)) return true;
+  visited.add(taskId);
+  if (
+    previous.collapsedSubs.has(taskId) !== next.collapsedSubs.has(taskId) ||
+    previous.nestTargetIds.has(taskId) !== next.nestTargetIds.has(taskId)
+  ) {
+    return false;
+  }
+  const previousChildren = previous.subTasksByParentId.get(taskId);
+  const nextChildren = next.subTasksByParentId.get(taskId);
+  if (!previousChildren || !nextChildren) return previousChildren === nextChildren;
+  if (
+    previousChildren.length !== nextChildren.length ||
+    previousChildren.some((task, index) => task !== nextChildren[index])
+  ) {
+    return false;
+  }
+  return previousChildren.every((task) => nodeSubtreeEqual(task.id, previous, next, visited));
+}
+
+function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps): boolean {
+  // A node owns its rendered descendants, so its equality includes only that
+  // branch's collapse, nest-target, and task references from the shared maps.
+  if (
+    previous.task !== next.task ||
+    previous.depth !== next.depth ||
+    previous.isDraggable !== next.isDraggable ||
+    previous.ctx.rowProps !== next.ctx.rowProps ||
+    previous.ctx.onToggleSubtasks !== next.ctx.onToggleSubtasks ||
+    previous.ctx.onReorderGroup !== next.ctx.onReorderGroup ||
+    previous.ctx.onReorderSubtasks !== next.ctx.onReorderSubtasks ||
+    previous.ctx.onNestTask !== next.ctx.onNestTask ||
+    previous.ctx.externalDragContext !== next.ctx.externalDragContext ||
+    (previous.depth === 0 &&
+      previous.ctx.pinnedSet.has(previous.task.id) !== next.ctx.pinnedSet.has(next.task.id))
+  ) {
+    return false;
+  }
+  return nodeSubtreeEqual(previous.task.id, previous.ctx, next.ctx, new Set());
+}
+
+const TaskTreeNode = memo(function TaskTreeNode({
+  task,
+  depth,
+  ctx,
+  isDraggable,
+}: TaskTreeNodeProps) {
   const subs = ctx.subTasksByParentId.get(task.id);
   const hasSubs = !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const toggleInfo: SubtaskToggleInfo | undefined =
-    hasSubs && ctx.onToggleSubtasks
-      ? {
-          subtaskCount: countGroupTasks(subs, ctx.subTasksByParentId),
-          subtasksCollapsed: subsHidden,
-          onToggleSubtasks: () => ctx.onToggleSubtasks!(task.id),
-        }
-      : undefined;
+  const subtaskCount = hasSubs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0;
+  const handleToggleSubtasks = useCallback(
+    () => ctx.onToggleSubtasks?.(task.id),
+    [ctx.onToggleSubtasks, task.id],
+  );
+  const toggleInfo: SubtaskToggleInfo | undefined = useMemo(
+    () =>
+      hasSubs && ctx.onToggleSubtasks
+        ? {
+            subtaskCount,
+            subtasksCollapsed: subsHidden,
+            onToggleSubtasks: handleToggleSubtasks,
+          }
+        : undefined,
+    [handleToggleSubtasks, hasSubs, ctx.onToggleSubtasks, subsHidden, subtaskCount],
+  );
   const isRoot = depth === 0;
   const isNestTarget = ctx.nestTargetIds.has(task.id);
   const handle = (
@@ -87,7 +143,7 @@ function TaskTreeNode({
       isDraggable={isDraggable}
     />
   );
-}
+}, taskTreeNodeEqual);
 
 function TaskTreeLevel({
   parentTaskId,
@@ -131,7 +187,7 @@ export type GroupSectionProps = {
   rowProps: TaskRowBaseProps;
   pinnedSet: Set<string>;
   isCollapsed: boolean;
-  onToggleCollapsed: () => void;
+  onToggleGroup?: (groupKey: string) => void;
   collapsedSubtaskParentIds?: string[];
   onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
@@ -139,6 +195,63 @@ export type GroupSectionProps = {
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
 };
+
+function sameTaskSubtree(
+  previousTasks: TaskSwitcherItem[],
+  nextTasks: TaskSwitcherItem[],
+  previousMap: Map<string, TaskSwitcherItem[]>,
+  nextMap: Map<string, TaskSwitcherItem[]>,
+  visited = new Set<string>(),
+): boolean {
+  if (
+    previousTasks.length !== nextTasks.length ||
+    previousTasks.some((task, index) => task !== nextTasks[index])
+  ) {
+    return false;
+  }
+  for (const task of previousTasks) {
+    if (visited.has(task.id)) continue;
+    visited.add(task.id);
+    const previousChildren = previousMap.get(task.id);
+    const nextChildren = nextMap.get(task.id);
+    if (!previousChildren && !nextChildren) continue;
+    if (
+      !previousChildren ||
+      !nextChildren ||
+      !sameTaskSubtree(previousChildren, nextChildren, previousMap, nextMap, visited)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
+  if (
+    previous.group !== next.group ||
+    previous.rowProps !== next.rowProps ||
+    previous.pinnedSet !== next.pinnedSet ||
+    previous.isCollapsed !== next.isCollapsed ||
+    previous.onToggleGroup !== next.onToggleGroup ||
+    previous.collapsedSubtaskParentIds !== next.collapsedSubtaskParentIds ||
+    previous.onToggleSubtasks !== next.onToggleSubtasks ||
+    previous.showHeader !== next.showHeader ||
+    previous.onReorderGroup !== next.onReorderGroup ||
+    previous.onReorderSubtasks !== next.onReorderSubtasks ||
+    previous.onNestTask !== next.onNestTask
+  ) {
+    return false;
+  }
+  return (
+    previous.subTasksByParentId === next.subTasksByParentId ||
+    sameTaskSubtree(
+      previous.group.tasks,
+      next.group.tasks,
+      previous.subTasksByParentId,
+      next.subTasksByParentId,
+    )
+  );
+}
 
 /**
  * Flattens one group's subtree (roots + every descendant, in rendered order)
@@ -170,13 +283,13 @@ function flattenGroupTasks(
  * Renders one sidebar group's task tree (header + the recursive tree wrapped
  * in the group-spanning DndContext that enables nest-by-drag).
  */
-export function GroupSection({
+export const GroupSection = memo(function GroupSection({
   group,
   subTasksByParentId,
   rowProps,
   pinnedSet,
   isCollapsed,
-  onToggleCollapsed,
+  onToggleGroup,
   collapsedSubtaskParentIds,
   onToggleSubtasks,
   showHeader,
@@ -190,7 +303,7 @@ export function GroupSection({
     [group.tasks, subTasksByParentId],
   );
 
-  const renderTree = (nestTargetIds: Set<string>, activeDragId: string | null) => {
+  const renderTree = (nestTargetIds: Set<string>) => {
     if (isCollapsed) return null;
     const ctx: TaskTreeContext = {
       subTasksByParentId,
@@ -202,7 +315,6 @@ export function GroupSection({
       onReorderSubtasks,
       onNestTask,
       nestTargetIds,
-      activeDragId,
       externalDragContext: true,
     };
     return <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />;
@@ -216,7 +328,7 @@ export function GroupSection({
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}
-          onToggle={onToggleCollapsed}
+          onToggle={() => onToggleGroup?.(group.key)}
         />
       )}
       <TaskTreeDndGroup
@@ -229,4 +341,4 @@ export function GroupSection({
       </TaskTreeDndGroup>
     </div>
   );
-}
+}, groupSectionEqual);

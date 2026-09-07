@@ -56,10 +56,11 @@ func TestResolveWorkflowStep_RoutesByCreateIntent(t *testing.T) {
 			wantStepID:   "first-step",
 		},
 		{
-			name:         "plan mode wins over an agent start",
+			// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.1
+			name:         "agent start wins over plan mode",
 			req:          &CreateTaskRequest{WorkflowID: "wf-1", PlanMode: true, StartAgent: true},
-			wantResolver: "first",
-			wantStepID:   "first-step",
+			wantResolver: "auto-start",
+			wantStepID:   "auto-start-step",
 		},
 	}
 

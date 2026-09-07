@@ -281,6 +281,8 @@ export class WorkflowSettingsPage {
       this.page.getByTestId(`${stepId}-profile-session-end-${lifecycle.endPolicy}`),
       touch,
     );
+    await this.page.keyboard.press("Escape");
+    await expect(this.stepAgentProfileSelect(card)).toHaveAttribute("aria-expanded", "false");
   }
 
   /** Hover over a step node to reveal the trash button, then click it. */

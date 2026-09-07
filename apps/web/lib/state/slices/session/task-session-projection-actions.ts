@@ -1,12 +1,10 @@
 import type { StateCreator } from "zustand";
 import type { TaskSession } from "@/lib/types/http";
-import type { SessionSlice } from "./types";
+import type { PendingActionOrphanProjection, PendingActionProjection, SessionSlice } from "./types";
 
 type ImmerSet = Parameters<
   StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
 >[0];
-
-type PendingActionProjection = Pick<TaskSession, "pending_action" | "pending_action_revision">;
 
 function parseEpoch(epoch: string): bigint | null {
   if (!/^\d+$/.test(epoch)) return null;
@@ -53,16 +51,43 @@ export function mergePendingActionProjection(
   };
 }
 
+export function mergeOrphanPendingActionProjection(
+  orphans: Record<string, PendingActionOrphanProjection>,
+  session: TaskSession,
+): TaskSession {
+  const orphan = orphans[session.id];
+  if (!orphan || orphan.task_id !== session.task_id) return session;
+  delete orphans[session.id];
+  return {
+    ...session,
+    ...mergePendingActionProjection(session, orphan),
+  };
+}
+
 export function buildTaskSessionProjectionActions(set: ImmerSet) {
   return {
     setTaskSessionPendingAction: (
       sessionId: string,
       pendingAction: Parameters<SessionSlice["setTaskSessionPendingAction"]>[1],
       revision: Parameters<SessionSlice["setTaskSessionPendingAction"]>[2],
+      taskId: Parameters<SessionSlice["setTaskSessionPendingAction"]>[3],
     ) =>
       set((draft) => {
         const session = draft.taskSessions.items[sessionId];
-        if (!session) return;
+        if (!session) {
+          if (!taskId) return;
+          const existing = draft.pendingActionProjectionsBySessionId[sessionId];
+          if (existing && existing.task_id !== taskId) return;
+          const projection = mergePendingActionProjection(existing ?? {}, {
+            pending_action: pendingAction,
+            pending_action_revision: revision,
+          });
+          draft.pendingActionProjectionsBySessionId[sessionId] = {
+            task_id: taskId,
+            ...projection,
+          };
+          return;
+        }
         const projection = mergePendingActionProjection(session, {
           pending_action: pendingAction,
           pending_action_revision: revision,

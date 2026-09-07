@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import type { AppState } from "@/lib/state/store";
@@ -34,6 +34,27 @@ export type ChatTopBarSlotProps = {
 };
 
 const EMPTY_SESSIONS: TaskSession[] = [];
+const MemoizedPluginSlot = memo(PluginSlot);
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function useStableSessionIds(
+  taskSessions: TaskSession[],
+  activeSessionId: string | null,
+): string[] {
+  const sessionIdsRef = useRef<string[]>([]);
+  return useMemo(() => {
+    const nextSessionIds: string[] = taskSessions.map((session) => session.id);
+    if (activeSessionId && !nextSessionIds.includes(activeSessionId)) {
+      nextSessionIds.unshift(activeSessionId);
+    }
+    if (sameStringArray(sessionIdsRef.current, nextSessionIds)) return sessionIdsRef.current;
+    sessionIdsRef.current = nextSessionIds;
+    return nextSessionIds;
+  }, [taskSessions, activeSessionId]);
+}
 
 /**
  * Plugin extension point in the session top bar, rendered alongside the
@@ -59,14 +80,11 @@ export function TaskTopBarPluginActions(props: {
     [taskId],
   );
   const taskSessions = useOptionalAppStore(selectSessions, EMPTY_SESSIONS);
+  const sessionIds = useStableSessionIds(taskSessions, sessionId);
 
   const slotProps = useMemo<ChatTopBarSlotProps>(() => {
-    const sessionIds: string[] = taskSessions.map((session) => session.id);
-    // The active session may not yet be in the store list (freshly prepared);
-    // make sure the plugin always receives it.
-    if (sessionId && !sessionIds.includes(sessionId)) sessionIds.unshift(sessionId);
     return { taskId, taskTitle, workspaceId, activeSessionId: sessionId, sessionIds };
-  }, [taskSessions, sessionId, taskId, taskTitle, workspaceId]);
+  }, [sessionId, sessionIds, taskId, taskTitle, workspaceId]);
 
-  return <PluginSlot name="chat-top-bar" slotProps={slotProps} />;
+  return <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} />;
 }

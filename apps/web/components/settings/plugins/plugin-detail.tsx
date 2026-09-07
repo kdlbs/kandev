@@ -17,6 +17,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
+import { PluginShortcutsCard } from "./plugin-shortcuts-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
@@ -79,6 +80,7 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
           />
         </>
       )}
+      <PluginShortcutsCard plugin={plugin} plugins={items} />
       <PluginManifestCard plugin={plugin} />
 
       {canManage && (

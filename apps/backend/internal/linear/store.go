@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 )
 
@@ -106,7 +109,7 @@ func (s *Store) initSchema() error {
 	if err := s.migrateLegacySingletonTable(); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	if err := s.addConfigColumns(); err != nil {
@@ -138,22 +141,22 @@ func (s *Store) addConfigColumns() error {
 		return nil
 	}
 	if _, ok := cols["org_slug"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_configs ADD COLUMN org_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_configs ADD COLUMN org_slug TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add org_slug column: %w", err)
 		}
 	}
 	if _, ok := cols["last_checked_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_configs ADD COLUMN last_checked_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_configs ADD COLUMN last_checked_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_checked_at column: %w", err)
 		}
 	}
 	if _, ok := cols["last_ok"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_configs ADD COLUMN last_ok INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_configs ADD COLUMN last_ok INTEGER NOT NULL DEFAULT 0`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_ok column: %w", err)
 		}
 	}
 	if _, ok := cols["last_error"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_configs ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_configs ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error column: %w", err)
 		}
 	}
@@ -175,12 +178,12 @@ func (s *Store) addIssueWatchRepositoryColumns() error {
 		return nil
 	}
 	if _, ok := cols["repository_id"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add repository_id column: %w", err)
 		}
 	}
 	if _, ok := cols["base_branch"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add base_branch column: %w", err)
 		}
 	}
@@ -202,7 +205,7 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	if _, ok := cols["max_inflight_tasks"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
 	}
 	return nil
@@ -223,7 +226,7 @@ func (s *Store) addIssueWatchSortByColumn() error {
 	if _, ok := cols["sort_by"]; ok {
 		return nil
 	}
-	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN sort_by TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN sort_by TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 		return fmt.Errorf("add sort_by column: %w", err)
 	}
 	return nil
@@ -240,12 +243,12 @@ func (s *Store) addIssueWatchLastErrorColumns() error {
 		return err
 	}
 	if _, ok := cols["last_error"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error column: %w", err)
 		}
 	}
 	if _, ok := cols["last_error_at"]; !ok {
-		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+		if _, err := s.db.Exec(schemaSQLForDriver(`ALTER TABLE linear_issue_watches ADD COLUMN last_error_at DATETIME`, s.db.DriverName())); err != nil {
 			return fmt.Errorf("add last_error_at column: %w", err)
 		}
 	}
@@ -256,6 +259,9 @@ func (s *Store) addIssueWatchLastErrorColumns() error {
 // rewrites it into the workspace-scoped shape. Picks the active/default
 // workspace as the target so startup is deterministic.
 func (s *Store) migrateLegacySingletonTable() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	cols, err := s.tableColumns("linear_configs")
 	if err != nil {
 		return err
@@ -367,27 +373,27 @@ func nullableTime(t sql.NullTime) interface{} {
 }
 
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	cols := make(map[string]struct{})
-	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return nil, err
-		}
+	cols := make(map[string]struct{}, len(columns))
+	for name := range columns {
 		cols[name] = struct{}{}
 	}
-	return cols, rows.Err()
+	return cols, nil
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	schema = strings.ReplaceAll(schema, "TIMESTAMP", dialect.TimestampType(driver))
+	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
+	return schema
 }
 
 const selectConfigColumns = `workspace_id, auth_method, default_team_key, org_slug,
@@ -411,8 +417,8 @@ func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (
 		return nil, err
 	}
 	var cfg LinearConfig
-	err = s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectConfigColumns+` FROM linear_configs WHERE workspace_id = ?`, workspaceID)
+	err = s.ro.GetContext(ctx, &cfg, s.ro.Rebind(
+		`SELECT `+selectConfigColumns+` FROM linear_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -444,13 +450,13 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 		cfg.CreatedAt = now
 	}
 	cfg.UpdatedAt = now
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO linear_configs (workspace_id, auth_method, default_team_key, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			auth_method = excluded.auth_method,
 			default_team_key = excluded.default_team_key,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		workspaceID, cfg.AuthMethod, cfg.DefaultTeamKey, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
@@ -470,7 +476,7 @@ func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM linear_configs WHERE workspace_id = ?`, workspaceID)
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_configs WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 
@@ -478,8 +484,7 @@ func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string
 // poller to decide whether to probe at all.
 func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 	var present int
-	err := s.ro.GetContext(ctx, &present,
-		`SELECT COUNT(*) FROM linear_configs`)
+	err := s.ro.GetContext(ctx, &present, s.ro.Rebind(`SELECT COUNT(*) FROM linear_configs`))
 	if err != nil {
 		return false, err
 	}
@@ -493,8 +498,8 @@ func (s *Store) HasConfigForWorkspace(ctx context.Context, workspaceID string) (
 		return false, err
 	}
 	var present int
-	err = s.ro.GetContext(ctx, &present,
-		`SELECT COUNT(*) FROM linear_configs WHERE workspace_id = ?`, workspaceID)
+	err = s.ro.GetContext(ctx, &present, s.ro.Rebind(
+		`SELECT COUNT(*) FROM linear_configs WHERE workspace_id = ?`), workspaceID)
 	if err != nil {
 		return false, err
 	}
@@ -504,7 +509,7 @@ func (s *Store) HasConfigForWorkspace(ctx context.Context, workspaceID string) (
 // ListConfigWorkspaceIDs returns every workspace with a saved Linear config.
 func (s *Store) ListConfigWorkspaceIDs(ctx context.Context) ([]string, error) {
 	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids, `SELECT workspace_id FROM linear_configs ORDER BY workspace_id`); err != nil {
+	if err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`SELECT workspace_id FROM linear_configs ORDER BY workspace_id`)); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -529,17 +534,17 @@ func (s *Store) UpdateAuthHealthForWorkspace(ctx context.Context, workspaceID st
 		return err
 	}
 	if orgSlug != "" {
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 			UPDATE linear_configs
-			SET last_checked_at = ?, last_ok = ?, last_error = ?, org_slug = ?
-			WHERE workspace_id = ?`,
+			SET last_checked_at = ?, last_ok = CASE WHEN ? THEN 1 ELSE 0 END, last_error = ?, org_slug = ?
+			WHERE workspace_id = ?`),
 			checkedAt, ok, errMsg, orgSlug, workspaceID)
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE linear_configs
-		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE workspace_id = ?`,
+		SET last_checked_at = ?, last_ok = CASE WHEN ? THEN 1 ELSE 0 END, last_error = ?
+		WHERE workspace_id = ?`),
 		checkedAt, ok, errMsg, workspaceID)
 	return err
 }

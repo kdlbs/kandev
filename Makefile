@@ -143,7 +143,7 @@ help:
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
-	@echo "  test-e2e         Run E2E tests (headless, parallel)"
+	@echo "  test-e2e         Run E2E tests (headless, resource-bounded)"
 	@echo "  test-e2e-headed  Run E2E tests with visible browser"
 	@echo "  test-e2e-ui      Run E2E tests in Playwright UI mode"
 	@echo "  test-e2e-ci      Run E2E tests in Docker with CI-like Linux + resource limits"
@@ -579,7 +579,7 @@ test-scripts:
 
 .PHONY: test-e2e
 test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
-	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
+	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
 		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" -- --output="e2e/test-results-$$project" || status=1; \

@@ -33,6 +33,7 @@ function standalonePositioningClass(placement: SettingsSavePlacement): string {
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
   placement?: SettingsSavePlacement;
+  canSave?: boolean;
   errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
   invalidReason?: string;
@@ -47,6 +48,7 @@ type SettingsFloatingSaveProps = {
 export function SettingsFloatingSave({
   status,
   placement = "viewport",
+  canSave = true,
   errorKind,
   dirtyContributorIds,
   invalidReason,
@@ -60,7 +62,7 @@ export function SettingsFloatingSave({
   const { t } = useTranslation();
   const isSaving = status === "saving";
   const isSaved = status === "saved";
-  const isInvalid = Boolean(invalidReason);
+  const isInvalid = !canSave || Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
   const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status, errorKind);
   const errorMessage = errorMessageKeys(errorKind);

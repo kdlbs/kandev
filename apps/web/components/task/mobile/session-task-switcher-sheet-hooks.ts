@@ -5,7 +5,11 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
-import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import {
+  useTaskActions,
+  useArchiveAndSwitchTask,
+  type TaskActionOptions,
+} from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
@@ -22,6 +26,10 @@ import {
 } from "./session-task-switcher-sheet-selection";
 import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
+import { useArchivedTaskState } from "../task-archived-context";
+import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
+import type { SidebarItemContext } from "../task-session-sidebar-item";
+import type { TaskSwitcherItem } from "../task-switcher";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -51,13 +59,22 @@ export function useSheetData(workspaceId: string | null) {
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const automaticColorSettings = useAppStore(
+    (state) => state.userSettings.sidebarTaskColorAutomation,
+  );
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
+  const archivedState = useArchivedTaskState();
 
   const selectedTaskId = activeTaskId;
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+    const repositoriesById = new Map(
+      Object.values(repositoriesByWorkspace)
+        .flat()
+        .map((repo: Repository) => [repo.id, repo]),
+    );
     const ctx: SheetItemCtx = {
       repositoryPathsById: new Map(
         repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
@@ -67,8 +84,33 @@ export function useSheetData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       wipQueueByTaskId,
+      workspaceId: workspaceId ?? undefined,
+      repositoriesById,
+      stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
+      automaticColorSettings,
     };
-    return allTasks.map((task) => toSheetItem(task, ctx));
+    const items: TaskSwitcherItem[] = allTasks.map((task) => toSheetItem(task, ctx));
+    if (
+      archivedState.isArchived &&
+      archivedState.archivedTaskId &&
+      !items.some((task) => task.id === archivedState.archivedTaskId)
+    ) {
+      const archivedContext: SidebarItemContext = {
+        repositorySlugById: ctx.repositoryPathsById,
+        titleById: new Map(allTasks.map((task) => [task.id, task.title])),
+        workflowNameById: ctx.workflowNameById,
+        stepTitleById: ctx.stepTitleById,
+        wipQueueByTaskId: ctx.wipQueueByTaskId,
+        acknowledgedAgentErrors: ctx.acknowledgedAgentErrors,
+        dismissedAgentErrors: ctx.dismissedAgentErrors,
+        workspaceId: ctx.workspaceId,
+        repositoriesById: ctx.repositoriesById,
+        stepColorById: ctx.stepColorById,
+        automaticColorSettings: ctx.automaticColorSettings,
+      };
+      items.unshift(buildArchivedSidebarItem(archivedState, archivedContext));
+    }
+    return items;
   }, [
     repositoriesByWorkspace,
     allTasks,
@@ -78,6 +120,8 @@ export function useSheetData(workspaceId: string | null) {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     wipQueueByTaskId,
+    automaticColorSettings,
+    archivedState,
   ]);
 
   const dialogSteps = useMemo(
@@ -259,6 +303,7 @@ function buildKanbanTaskUpsert(
   const taskSessionId = meta?.taskSessionId ?? null;
   return {
     id: task.id,
+    workspaceId: task.workspace_id,
     parentTaskId: task.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(task.metadata),
     workflowId: task.workflow_id,
@@ -267,11 +312,14 @@ function buildKanbanTaskUpsert(
     description: task.description,
     position: task.position ?? 0,
     state: task.state,
+    priority: task.priority,
+    origin: task.origin,
     repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
     repositories: mapTaskRepositories(task.repositories),
     updatedAt: task.updated_at,
     ...mergeSessionFields(task, existing, taskSessionId),
     primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: task.primary_executor_profile_id ?? undefined,
     primaryExecutorType: task.primary_executor_type ?? undefined,
     primaryExecutorName: task.primary_executor_name ?? undefined,
     isRemoteExecutor: task.is_remote_executor ?? false,
@@ -367,7 +415,7 @@ function useSheetDeleteActions(
   );
 
   const handleDeleteConfirm = useCallback(
-    async (opts?: { cascade?: boolean }) => {
+    async (opts?: TaskActionOptions) => {
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
@@ -422,7 +470,7 @@ export function useSheetArchiveActions(
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
 
   const runArchive = useCallback(
-    async (taskId: string, opts?: { cascade?: boolean }) => {
+    async (taskId: string, opts?: TaskActionOptions) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -439,7 +487,7 @@ export function useSheetArchiveActions(
   );
 
   const handleArchiveTask = useCallback(
-    (taskId: string, opts?: { cascade?: boolean }) => {
+    (taskId: string, opts?: TaskActionOptions) => {
       if (opts) {
         void runArchive(taskId, opts);
         return;
@@ -455,7 +503,7 @@ export function useSheetArchiveActions(
   );
 
   const handleArchiveConfirm = useCallback(
-    async (opts?: { cascade?: boolean }) => {
+    async (opts?: TaskActionOptions) => {
       if (!archivingTask) return;
       await runArchive(archivingTask.id, opts);
     },

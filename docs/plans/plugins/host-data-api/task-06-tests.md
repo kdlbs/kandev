@@ -19,7 +19,7 @@ the host RPC behavior and the end-to-end plugin path.)
 - **Capability gating (`internal/plugins/host_test.go`):** for each read RPC,
   assert `PermissionDenied` with `capability 'api_read:<resource>' not declared`
   when the manifest omits the resource, and success when it declares it. Assert
-  write RPCs return `Unimplemented`.
+  write RPCs enforce their capabilities and return their task/message results.
 - **DTO mapping:** table-driven internal-model → DTO assertions per resource,
   covering optional/NULL fields and RFC3339 timestamp formatting; assert the
   Session DTO carries `acp_session_id`.
