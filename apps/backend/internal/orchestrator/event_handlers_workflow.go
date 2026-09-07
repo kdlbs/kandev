@@ -2781,6 +2781,14 @@ func (s *Service) prepareWorkflowStepSession(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		if effectiveProfile != "" {
+			if s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile) {
+				endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+				newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, effectiveProfile, endPolicy)
+				if err != nil {
+					return nil, false, err
+				}
+				return newSession, true, nil
+			}
 			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		}
 		if !session.IsPrimary {
@@ -2806,6 +2814,38 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+// workflowEntryRequiresFreshExactModelSession prevents a workflow lane from
+// resuming a parked session whose persisted provider model disagrees with the
+// same exact profile's configured model. Explicit session overrides remain
+// valid within a lane; this boundary applies only while entering a different
+// workflow step and only to profiles that did not authorize a fallback.
+func (s *Service) workflowEntryRequiresFreshExactModelSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+) bool {
+	if session == nil || step == nil || sourceStep == nil || sourceStep.ID == step.ID || profileID == "" {
+		return false
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model == "" || profile.AutoFallback || profile.FallbackModel != "" {
+		return false
+	}
+	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
+	if !ok || effective.Model == "" || effective.Model == profile.Model {
+		return false
+	}
+	s.logger.Info("creating fresh workflow session for exact model identity",
+		zap.String("session_id", session.ID),
+		zap.String("profile_id", profileID),
+		zap.String("source_step_id", sourceStep.ID),
+		zap.String("target_step_id", step.ID),
+		zap.String("configured_model", profile.Model),
+		zap.String("persisted_model", effective.Model))
+	return true
 }
 
 func (s *Service) preflightWorkflowStepCredentials(

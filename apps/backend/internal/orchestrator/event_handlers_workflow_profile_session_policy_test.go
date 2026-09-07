@@ -651,6 +651,72 @@ func TestPrepareWorkflowStepSession_QAToPRDoesNotReuseSolRuntime(t *testing.T) {
 	require.Error(t, err, "the destination must not inherit the QA ACP resume identity before launch")
 }
 
+// TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOverride
+// covers a parked primary whose profile ID is already the Work profile but
+// whose prior Human-QA turn persisted a different runtime model. Entering an
+// exact Work lane must create a clean session before any auto-start prompt can
+// resume that stale ACP identity.
+func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOverride(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+		Model: "gpt-5.6-terra",
+	}
+	fixture.current.AgentProfileID = "terra-work-profile"
+	fixture.current.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-terra"}
+	fixture.current.Metadata = map[string]interface{}{
+		models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-luna"},
+	}
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+
+	workStep := &wfmodels.WorkflowStep{
+		ID:                        "step-work",
+		WorkflowID:                "wf1",
+		AgentProfileID:            "terra-work-profile",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	humanQAStep := &wfmodels.WorkflowStep{
+		ID: "step-human-qa", WorkflowID: "wf1", AgentProfileID: "terra-work-profile",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+
+	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, humanQAStep)
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.NotNil(t, workSession)
+	require.NotEqual(t, fixture.current.ID, workSession.ID)
+	require.Equal(t, "terra-work-profile", workSession.AgentProfileID)
+	_, inheritedRuntime := models.LoadSessionRuntimeConfig(workSession.Metadata)
+	require.False(t, inheritedRuntime, "a Work launch must not inherit Human-QA's Luna runtime model")
+
+	previous, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	require.False(t, previous.IsPrimary)
+}
+
+func TestPrepareWorkflowStepSession_HumanQAToWorkKeepsAuthorizedFallbackSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+		Model: "gpt-5.6-terra", FallbackModel: "gpt-5.6-luna",
+	}
+	fixture.current.AgentProfileID = "terra-with-luna-fallback"
+	fixture.current.Metadata = map[string]interface{}{
+		models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.6-luna"},
+	}
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+
+	workStep := &wfmodels.WorkflowStep{
+		ID: "step-work", WorkflowID: "wf1", AgentProfileID: "terra-with-luna-fallback",
+	}
+	humanQAStep := &wfmodels.WorkflowStep{ID: "step-human-qa", WorkflowID: "wf1"}
+
+	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, humanQAStep)
+	require.NoError(t, err)
+	require.False(t, switched)
+	require.Equal(t, fixture.current.ID, workSession.ID)
+}
+
 func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
