@@ -98,4 +98,4 @@ Verification:
 cd apps/backend && rtk go test ./internal/office/configloader ./internal/office/skills ./internal/office/service -run 'Test.*(DecisionSkill|DecisionContract|ReviewStage|ApprovalStage|SkillManifest|SystemSkills)' -count=1
 ```
 
-Passed: 37 tests. The full affected package run also passed 564 tests.
+Passed: 36 tests. The full affected package run also passed 564 tests.

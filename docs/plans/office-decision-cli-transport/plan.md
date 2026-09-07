@@ -91,7 +91,7 @@ and Kanban instruction/metadata isolation.
 ## Verification results
 
 - Task 01: `cd apps/backend && rtk go test ./cmd/agentctl ./internal/office/runtime ./internal/office/dashboard -run 'Test(TaskDecision|RuntimeHandler_RecordAgentDecision|RecordAgentDecision)' -count=1` — passed (18 tests).
-- Task 02: `cd apps/backend && rtk go test ./internal/office/configloader ./internal/office/skills ./internal/office/service -run 'Test.*(DecisionSkill|DecisionContract|ReviewStage|ApprovalStage|SkillManifest|SystemSkills)' -count=1` — passed (37 tests); full affected packages passed (564 tests).
+- Task 02: `cd apps/backend && rtk go test ./internal/office/configloader ./internal/office/skills ./internal/office/service -run 'Test.*(DecisionSkill|DecisionContract|ReviewStage|ApprovalStage|SkillManifest|SystemSkills)' -count=1` — passed (36 tests); full affected packages passed (564 tests).
 - Task 03: `cd apps/backend && rtk go test ./internal/mcp/server ./internal/mcp/handlers ./internal/backendapp -run 'Test.*(ModeOffice|ModeTask|Sysprompt|Decision|HandlerRegistration)' -count=1` — passed (22 tests); public docs tests and validator passed (61 tests, 46 pages).
 
 ## Risks
