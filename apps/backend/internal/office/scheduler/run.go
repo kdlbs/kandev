@@ -290,6 +290,18 @@ func (ss *SchedulerService) QueueRun(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		// This path bypasses runs/service.resolveCausation entirely (see the
+		// package doc comment and AC-CONSOLIDATION-001.6's deferred-gap
+		// note), so PriorityClass must be stamped here or it silently ships
+		// as models.PriorityClass's Go zero value — which is
+		// PriorityClassHuman (0), not PriorityClassEvent (2) — falsely
+		// promoting every run enqueued through this path to the highest
+		// claim-order preference (AC-OFFICE-BACKPRESSURE-001.1/.3). This
+		// caller has no actor to classify against, so it always resolves to
+		// PriorityClassEvent's fallback, but going through ClassifyPriority
+		// keeps this in one place with the reason-registry mapping instead
+		// of hardcoding a value that could drift from it.
+		PriorityClass: shared.ClassifyPriority(models.ActorKindSystem, reason, false),
 	}
 	if err := ss.repo.CreateRun(ctx, req); err != nil {
 		return fmt.Errorf("enqueue run: %w", err)

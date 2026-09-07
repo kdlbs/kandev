@@ -159,6 +159,14 @@ func (s *Service) queueRunInline(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		// This fallback path (no runs service wired) bypasses
+		// runs/service.resolveCausation, so PriorityClass must be stamped
+		// here or it silently ships as models.PriorityClass's Go zero
+		// value — PriorityClassHuman (0), not PriorityClassEvent (2) —
+		// falsely promoting every such run to the highest claim-order
+		// preference (AC-OFFICE-BACKPRESSURE-001.1/.3). See the matching
+		// comment in office/scheduler.QueueRun, which has the same gap.
+		PriorityClass: shared.ClassifyPriority(models.ActorKindSystem, reason, false),
 	}
 	if err := s.repo.CreateRun(ctx, req); err != nil {
 		return fmt.Errorf("enqueue run: %w", err)
