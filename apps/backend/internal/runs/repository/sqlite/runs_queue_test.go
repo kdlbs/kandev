@@ -71,6 +71,60 @@ func TestCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
 }
 
+// TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns
+// pins the same task-scoping guarantee as
+// TestCoalesceRun_DoesNotMergeDifferentTaskRuns for the
+// manual_resume_after_failure reason: an agent auto-paused across several
+// tasks must queue one run per task instead of coalescing task-b's wake
+// into task-a's already-queued run and dropping task-a's launch.
+func TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
+		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+	})
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-b"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a different task, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
+// TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates proves
+// the task-scoping predicate added for manual_resume_after_failure still
+// allows genuine duplicates (repeated wakes for the same task) to coalesce
+// onto one row.
+func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
+		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+	})
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-a"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if !merged {
+		t.Fatal("coalesce = false for the same task, want true")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+	if n := countRuns(t, repo); n != 1 {
+		t.Errorf("%d rows after coalescing, want 1 (no new run may be created)", n)
+	}
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
