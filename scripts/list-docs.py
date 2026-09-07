@@ -86,7 +86,7 @@ def parse_frontmatter(text: str, relative: str) -> tuple[dict[str, object], int]
     current_list: str | None = None
     for line_number, line in enumerate(lines[1:end], start=2):
         if re.match(r"^\s+-\s+", line) and current_list:
-            value = re.sub(r"^\s+-\s+", "", line).strip().strip("\"'")
+            value = re.sub(r"^\s+-\s+", "", line).strip().strip("\"'`")
             current_value = metadata.setdefault(current_list, [])
             if not isinstance(current_value, list):
                 raise CatalogError(
@@ -107,7 +107,7 @@ def parse_frontmatter(text: str, relative: str) -> tuple[dict[str, object], int]
             metadata[key] = []
             current_list = None
         elif value:
-            metadata[key] = value.strip("\"'")
+            metadata[key] = value.strip("\"'`")
             current_list = None
         else:
             metadata[key] = []
@@ -180,30 +180,45 @@ def parse_decision_metadata(
         if isinstance(value, str):
             add_metadata_value(fields, key, value, relative)
 
+    pending_key: str | None = None
+    pending_value: list[str] = []
+
+    def flush_pending() -> None:
+        nonlocal pending_key, pending_value
+        if pending_key is not None:
+            add_metadata_value(fields, pending_key, " ".join(pending_value), relative)
+        pending_key = None
+        pending_value = []
+
     index = start
     while index < len(lines):
         line = lines[index]
         heading_match = HEADING_FIELD.match(line.strip())
         if heading_match:
+            flush_pending()
             value_index = index + 1
             while value_index < len(lines) and not lines[value_index].strip():
                 value_index += 1
             if value_index < len(lines) and not lines[value_index].lstrip().startswith("#"):
-                add_metadata_value(
-                    fields,
-                    heading_match.group("key"),
-                    lines[value_index],
-                    relative,
-                )
+                pending_key = heading_match.group("key")
+                pending_value = [lines[value_index].strip()]
                 index = value_index + 1
                 continue
         elif re.match(r"^##\s+", line):
+            flush_pending()
             break
 
         parsed = parse_metadata_line(line)
         if parsed:
-            add_metadata_value(fields, parsed[0], parsed[1], relative)
+            flush_pending()
+            pending_key = parsed[0]
+            pending_value = [parsed[1]]
+        elif not line.strip():
+            flush_pending()
+        elif pending_key is not None:
+            pending_value.append(line.strip())
         index += 1
+    flush_pending()
     if not fields.get("status"):
         raise CatalogError(f"{relative}: ADR metadata must define a non-empty status")
     date = fields.get("date")
@@ -402,10 +417,7 @@ def filter_decisions(
 ) -> list[Document]:
     result = []
     for document in documents:
-        if status and (
-            not document.status
-            or document.status.split(None, 1)[0].lower() != status.lower()
-        ):
+        if status and leading_status_class(document.status) != status.lower():
             continue
         if area and not area_matches(document.area, area):
             continue
@@ -413,6 +425,13 @@ def filter_decisions(
             continue
         result.append(document)
     return sorted(result, key=decision_sort_key)
+
+
+def leading_status_class(value: str | None) -> str:
+    if not value:
+        return ""
+    match = re.match(r"^\s*([a-z][a-z0-9_-]*)", value, re.IGNORECASE)
+    return match.group(1).lower() if match else ""
 
 
 def area_matches(value: str | None, requested: str) -> bool:

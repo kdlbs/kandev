@@ -102,6 +102,33 @@ Older decisions can omit date and area metadata.
 This decision uses a metadata table.
 """,
         )
+        self.write(
+            "docs/decisions/2026-01-05-wrapped-status.md",
+            """# Wrapped status metadata
+
+**Status:** accepted (amended by
+2026-01-05)
+**Date:** 2026-01-05
+**Area:** workflow
+
+## Context
+
+This decision wraps one metadata value.
+""",
+        )
+        self.write(
+            "docs/decisions/0028-status-punctuation.md",
+            """# 0028: Status punctuation
+
+**Status:** accepted; browser-cache portion superseded
+**Date:** 2026-01-06
+**Area:** backend
+
+## Context
+
+This decision uses punctuation after the status class.
+""",
+        )
 
     def add_specs(self) -> None:
         self.write(
@@ -121,8 +148,8 @@ migration: complete
             """---
 id: ui-first
 title: Frontmatter requirement title
-status: active
-system: ui
+status: `active`
+system: `ui`
 created: 2026-01-01
 ---
 
@@ -162,7 +189,9 @@ This file has no frontmatter and remains in the legacy layout.
             [
                 "docs/decisions/0010-pipe.md",
                 "docs/decisions/0019-status-section.md",
+                "docs/decisions/0028-status-punctuation.md",
                 "docs/decisions/2026-01-03-frontmatter.md",
+                "docs/decisions/2026-01-05-wrapped-status.md",
             ],
         )
 
@@ -173,6 +202,23 @@ This file has no frontmatter and remains in the legacy layout.
         text_result = self.run_cli("decisions", "--text", "NEEDLE", "--format", "paths")
         self.assertEqual(text_result.returncode, 0, text_result.stderr)
         self.assertEqual(text_result.stdout.splitlines(), ["docs/decisions/0010-pipe.md"])
+
+        wrapped = self.run_cli("decisions", "--format", "json")
+        self.assertEqual(wrapped.returncode, 0, wrapped.stderr)
+        wrapped_document = next(
+            document
+            for document in json.loads(wrapped.stdout)["documents"]
+            if document["id"] == "2026-01-05-wrapped-status"
+        )
+        self.assertEqual(wrapped_document["status"], "accepted (amended by 2026-01-05)")
+
+        punctuation = self.run_cli(
+            "decisions", "--status", "accepted", "--format", "paths"
+        )
+        self.assertEqual(punctuation.returncode, 0, punctuation.stderr)
+        self.assertIn(
+            "docs/decisions/0028-status-punctuation.md", punctuation.stdout.splitlines()
+        )
 
     def test_decision_outputs_escape_markdown_and_preserve_metadata_in_json(self) -> None:
         self.add_decisions()
