@@ -144,6 +144,28 @@ func newRoutineCronHarness(t *testing.T) *routineCronHarness {
 	}
 }
 
+// awaitTaskInProgress polls until the task reaches IN_PROGRESS, the last DB
+// write in executor.runAgentProcessAsync's post-LaunchAgent goroutine (see
+// its callers for why that goroutine outlives the LaunchAgent call this test
+// otherwise synchronizes on).
+func (h *routineCronHarness) awaitTaskInProgress(ctx context.Context, t *testing.T, taskID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		task, err := h.taskRepo.GetTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task != nil && task.State == v1.TaskStateInProgress {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for task %q to reach IN_PROGRESS after agent process start", taskID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 type routineCronNoopActivity struct{}
 
 func (routineCronNoopActivity) LogActivity(_ context.Context, _, _, _, _, _, _, _ string) {}
@@ -204,6 +226,14 @@ func TestRoutine_CronFire_HeavyRoutineReachesSession(t *testing.T) {
 
 	req := h.agentMgr.awaitLaunch(t)
 
+	// LaunchAgent's caller (executor.runAgentProcessAsync) keeps running in a
+	// detached goroutine after the buffered channel send above unblocks this
+	// test: it still calls StartAgentProcess and then writes the session to
+	// RUNNING and the task to IN_PROGRESS. Wait for that goroutine's terminal
+	// side effect before any assertion or t.Cleanup can race its DB writes
+	// against sqlxDB.Close().
+	h.awaitTaskInProgress(ctx, t, req.TaskID)
+
 	// AC-1.2: the deliverable — a session row, not just a run row.
 	sessions, err := h.taskRepo.ListTaskSessions(ctx, req.TaskID)
 	if err != nil {
@@ -248,6 +278,9 @@ func TestRoutine_CronFire_HeavyRoutineReachesSession(t *testing.T) {
 	// start step pins no agent).
 	if req.AgentProfileID != "routine-assignee" {
 		t.Errorf("req.AgentProfileID = %q, want routine-assignee", req.AgentProfileID)
+	}
+	if !req.StartAgent {
+		t.Errorf("req.StartAgent = false, want true (cron-fired heavy routine must start the agent, not prepare-only)")
 	}
 }
 
