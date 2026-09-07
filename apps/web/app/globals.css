@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "@kandev/theme/shadcn-tailwind.css";
 @import "@kandev/theme/fonts.css";
 @import "dockview-react/dist/styles/dockview.css";
 @import "./dockview-theme.css";

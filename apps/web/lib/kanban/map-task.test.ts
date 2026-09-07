@@ -236,6 +236,27 @@ describe("toKanbanTask — autopilot", () => {
   });
 });
 
+describe("toKanbanTask — parked-on-background-work parity", () => {
+  it("maps parked-on-background-work + revision + epoch from HTTP and WS shapes", () => {
+    const parked = {
+      parked_on_background_work: true,
+      parked_revision: 4,
+      parked_epoch: 1723000000000,
+    } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(parked));
+    const ws = toKanbanTask(wsPayload(parked));
+
+    expect(http).toEqual(ws);
+    expect(http.parkedOnBackgroundWork).toBe(true);
+    expect(http.parkedRevision).toBe(4);
+    expect(http.parkedEpoch).toBe(1723000000000);
+    // Absent fields map to undefined so a partial update can never synthesize
+    // a parked reading.
+    expect(toKanbanTask(httpDTO()).parkedOnBackgroundWork).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).parkedOnBackgroundWork).toBeUndefined();
+  });
+});
+
 describe("toKanbanTask — state normalization", () => {
   it("maps the task-wide active subagent count for future status surfaces", () => {
     const mapped = toKanbanTask(

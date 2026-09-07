@@ -315,6 +315,14 @@ type Adapter struct {
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
 	asyncTurnEpochs     map[string]uint64
 
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
+
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
@@ -442,6 +450,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
