@@ -79,41 +79,47 @@ satisfying `AC-OFFICE-BUDGET-001.1`'s "computed once, never revised".
 ### Build-time completeness test
 
 `internal/office/shared/runprovenance_completeness_test.go`
-(`package shared_test`) implements `AC-OFFICE-BUDGET-007.3` using
-`golang.org/x/tools/go/packages` (`packages.Load` with `NeedSyntax |
-NeedTypes | NeedTypesInfo`), never a line-oriented regex — the X2 design note.
-It loads the seven packages the seven blocks live in
-(`internal/office/scheduler`, `internal/office/service` (twice, once per
-block), `internal/office/shared`, `internal/office/routing`,
-`internal/runs/commentkeys`, `internal/office/onboarding`,
-`internal/office/service` again for block (g)) by import path — `go/packages`
-resolution, not a Go `import`, so this test file cannot create an import
-cycle regardless of which package hosts it.
+(`package shared_test`) implements `AC-OFFICE-BUDGET-007.3` using plain
+`go/parser`/`go/ast` per file, never a line-oriented regex — the X2 design
+note. This is an implementation-time refinement from the originally-planned
+`golang.org/x/tools/go/packages` + `go/types`: that combination is an
+unnecessary new direct dependency (currently only transitive in `go.sum`)
+and spawns `go list` subprocesses under the hood, which is a source of CI
+fragility this test doesn't need to accept. The AC's actual requirements —
+never regex/identifier-matching, fail hard on a missing block, an alias
+contributes no new literal — hold under the simpler approach without
+weakening what the test proves; see below for how alias handling differs.
 
-For each of the seven blocks the test is hard-coded with **(package import
-path, anchor constant name)**: the anchor is one identifier already known to
-live in that block (`RunReasonTaskAssigned` for (a) scoped to the scheduler
-package, `RunReasonTaskAssigned` for (b1) scoped to service,
-`legacyRunReasonBlockersResolved` for (b2), `RunReasonRoutineDispatch` for
-(c), `WakeReasonHeartbeat` for (d), `TaskCommentReason` for (e),
-`runReasonTaskAssigned` for (f), `RunReasonManualResumeAfterFailure` for (g)).
-For each anchor the test walks every file's AST in the loaded package (not
-just one file — the reason block (g) is identified by *package and
-declaration*, because it shares a package with (b) but lives in a different
-file, `failure.go` vs `run.go`), finds the top-level `*ast.GenDecl` with
-`Tok == token.CONST` containing a `*ast.ValueSpec` naming the anchor, and
-fails the test (not skips) when no such declaration exists — an enumerated
-block that was renamed, moved, or deleted must fail the build rather than
-silently shrink the inventory.
+For each of the seven blocks the test is hard-coded with **(file path
+relative to the test file via `runtime.Caller(0)`, anchor constant name)**:
+the anchor is one identifier already known to live in that block
+(`RunReasonTaskAssigned` for (a) in `scheduler/run.go`,
+`RunReasonTaskAssigned` for (b1) in `service/run.go`,
+`legacyRunReasonBlockersResolved` for (b2) in the same file,
+`RunReasonRoutineDispatch` for (c) in `shared/runreasons.go`,
+`WakeReasonHeartbeat` for (d) in `routing/types.go`, `TaskCommentReason` for
+(e) in `runs/commentkeys/commentkeys.go`, `runReasonTaskAssigned` for (f) in
+`onboarding/service.go`, `RunReasonManualResumeAfterFailure` for (g) in
+`service/failure.go`). For each anchor the test parses that one file with
+`go/parser` (`parser.ParseFile`, `SkipObjectResolution`), finds the
+top-level `*ast.GenDecl` with `Tok == token.CONST` containing a
+`*ast.ValueSpec` naming the anchor, and fails the test (not skips) when no
+such declaration exists — an enumerated block that was renamed, moved, or
+deleted must fail the build rather than silently shrink the inventory.
+Blocks (b1) and (b2) both resolve to `service/run.go`; naming the file per
+block (rather than per package) is also what disambiguates block (g), which
+shares a package with (b) but lives in a different file (`failure.go` vs
+`run.go`).
 
-Once a block's `GenDecl` is located, every `ValueSpec` name in it is resolved
-through `types.Info.Defs[name].(*types.Const).Val()`. This is what makes an
-alias (`RunReasonHeartbeat = shared.RunReasonHeartbeat`) contribute no new
-literal for free: `go/types` resolves the constant's underlying value
-identically whether the RHS is a string literal or a qualified reference to
-another package's constant, so the test never needs to special-case aliasing
-syntactically — it just checks whether the *resolved string value* was
-already seen. Names present in the fixed six-entry exclusion list of
+Once a block's `GenDecl` is located, every `ValueSpec` in it whose RHS is a
+string `*ast.BasicLit` contributes that literal (via `strconv.Unquote`); a
+`ValueSpec` whose RHS is anything else — a `*ast.SelectorExpr` or
+`*ast.Ident`, i.e. an alias like `RunReasonHeartbeat =
+shared.RunReasonHeartbeat` — is skipped rather than resolved. This is
+sufficient, not a weaker substitute for `go/types` resolution: an aliased
+constant's underlying literal is itself already covered by scanning its own
+enumerated block, so skipping the alias syntactically loses no literal from
+the union. Names present in the fixed six-entry exclusion list of
 `AC-OFFICE-BUDGET-007.3` are dropped before dedup/membership checks.
 
 The test asserts, over the union of all seven blocks minus exclusions:
