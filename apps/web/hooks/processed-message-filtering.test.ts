@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
+  dropSupersededEmptyTurnNotices,
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
@@ -117,6 +118,80 @@ describe("isSuccessfulScriptExecutionMetadata", () => {
     expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 0 })).toBe(true);
     expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 1 })).toBe(false);
     expect(isSuccessfulScriptExecutionMetadata({ status: "running" })).toBe(false);
+  });
+});
+
+function baseMessage(overrides: Partial<Message>): Message {
+  return {
+    id: "m",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
+    author_type: "agent",
+    content: "",
+    type: "message",
+    created_at: "2026-05-30T00:00:00Z",
+    ...overrides,
+  } as Message;
+}
+
+function emptyTurnNotice(turnId: string): Message {
+  return baseMessage({
+    id: `empty-turn-${turnId}`,
+    turn_id: turnId,
+    type: "status",
+    content: "The agent finished without producing any output.",
+    metadata: { variant: "warning", empty_turn: true },
+  });
+}
+
+describe("dropSupersededEmptyTurnNotices", () => {
+  it("drops the notice once real agent text arrives on the same turn", () => {
+    const messages = [
+      baseMessage({ id: "u1", turn_id: "turn-1", author_type: "user", content: "hi" }),
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "a1", turn_id: "turn-1", content: "here you go" }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("keeps the notice when the turn never received output", () => {
+    const messages = [
+      baseMessage({ id: "u1", turn_id: "turn-1", author_type: "user", content: "hi" }),
+      emptyTurnNotice("turn-1"),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(2);
+  });
+
+  it("keeps the notice when the output belongs to a different turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "a1", turn_id: "turn-2", content: "unrelated" }),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(2);
+  });
+
+  it("keeps the notice when only status/thinking rows follow on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "s1", turn_id: "turn-1", type: "status", content: "New session started" }),
+      baseMessage({ id: "th1", turn_id: "turn-1", type: "thinking", content: "pondering" }),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(3);
+  });
+
+  it("drops the notice when a tool call lands on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({
+        id: "tc1",
+        turn_id: "turn-1",
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1" },
+      }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["tc1"]);
   });
 });
 
