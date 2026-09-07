@@ -2840,7 +2840,7 @@ func (s *Service) exactModelWorkflowStartPolicy(
 			zap.String("task_id", taskID),
 			zap.String("agent_profile_id", profileID),
 			zap.Error(err))
-		return startPolicy, nil
+		return startPolicy, fmt.Errorf("find reusable session for exact model identity: %w", err)
 	}
 	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
 	if err != nil {

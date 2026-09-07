@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -349,6 +351,34 @@ func TestPollOneRemoteStatusAtomicallyRefreshesRestartedKubernetesAgentctl(t *te
 	require.Equal(t, 2, secretCount, "token rotation must reuse the internal secret reference")
 	require.NotNil(t, writer.running)
 	require.Equal(t, "41002", getMetadataString(writer.running.Metadata, MetadataKeyKubernetesAgentctlRemotePort))
+}
+
+func TestPrepareRestartedKubernetesAgentctl_RejectsUnadvertisedExactModel(t *testing.T) {
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = &streams.SessionModelState{
+		CurrentModelID: "provider-default",
+		Models:         []streams.SessionModelInfo{{ModelID: "provider-default"}},
+	}
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	require.NoError(t, client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.4"}}
+	mgr.sessionManager = NewSessionManager(newTestLogger(), newTestStopCh(t))
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	require.True(t, ok)
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1", AgentProfileID: "profile-1",
+		WorkspacePath: "/workspace", AgentCommand: "agent", agentctl: client,
+	}
+	refresh := &RemoteInstanceRefresh{
+		Instance: &ExecutorInstance{Client: client}, ProcessRestarted: true, AgentConfig: agentConfig,
+	}
+
+	_, err := mgr.prepareRestartedKubernetesAgentctl(context.Background(), execution, refresh)
+
+	require.ErrorContains(t, err, `requested model "gpt-5.4" is unavailable (reason: requested_not_advertised`)
+	require.Empty(t, mock.getSetModelIDs(), "an unadvertised exact model must never be sent to ACP")
 }
 
 func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *testing.T) {
