@@ -56,6 +56,8 @@ func registerBudgetRoutes(api *gin.RouterGroup, h *Handler) {
 	api.POST("/workspaces/:wsId/budgets", h.createBudget)
 	api.PATCH("/budgets/:id", h.updateBudget)
 	api.DELETE("/budgets/:id", h.deleteBudget)
+	api.GET("/workspaces/:wsId/budgets/default", h.getDefaultCeiling)
+	api.PUT("/workspaces/:wsId/budgets/default", h.setDefaultCeiling)
 }
 
 // -- Cost handlers --
@@ -240,4 +242,32 @@ func (h *Handler) deleteBudget(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// getDefaultCeiling reports the built-in default ceiling's current
+// effective limit, visible without inspecting the database
+// (AC-OFFICE-BUDGET-003.5).
+func (h *Handler) getDefaultCeiling(c *gin.Context) {
+	limitSubcents, err := h.svc.GetWorkspaceBudgetDefault(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, DefaultCeilingResponse{LimitSubcents: limitSubcents})
+}
+
+// setDefaultCeiling writes the built-in default ceiling's limit through the
+// same surface that manages budget policies (AC-OFFICE-BUDGET-003.5), never
+// touching office_budget_policies (AC-OFFICE-BUDGET-003.7).
+func (h *Handler) setDefaultCeiling(c *gin.Context) {
+	var req SetDefaultCeilingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	if err := h.svc.SetWorkspaceBudgetDefault(c.Request.Context(), c.Param("wsId"), req.LimitSubcents); err != nil {
+		writeBudgetPolicyError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, DefaultCeilingResponse(req))
 }
