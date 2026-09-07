@@ -8,6 +8,11 @@ managed_package_name=opencode-ai
 real_npx=${KANDEV_E2E_REAL_NPX:-/usr/bin/npx}
 mock_agent=${KANDEV_E2E_MOCK_AGENT_PATH:-/usr/local/bin/mock-agent}
 
+if [ "${KANDEV_E2E_NPX_BYPASS_FAILURE:-false}" = "true" ]; then
+	shift 3
+	exec "$mock_agent" "$@"
+fi
+
 # This fixture replaces npx only to make the selected managed runtime failure
 # deterministic. Let every other package or invocation use the environment's
 # real npm implementation unless the host test explicitly mocks it.
@@ -22,7 +27,10 @@ case "$package_spec" in
 		;;
 esac
 
-key=$(printf '%s' "$package_spec" | sha512sum | cut -c1-16)
+case "$(uname -s)" in
+	Darwin) key=$(printf '%s' "$package_spec" | shasum -a 512 | cut -c1-16) ;;
+	*) key=$(printf '%s' "$package_spec" | sha512sum | cut -c1-16) ;;
+esac
 target_dir="$cache_root/_npx/$key"
 sibling_dir="$cache_root/_npx/0123456789abcdef"
 online_invocations="$cache_root/online-invocations"

@@ -102,6 +102,8 @@ selection on desktop. No frontend implementation change is required.
 - Shared matcher compatibility: `go test ./internal/agent/runtime/routingerr ./internal/common/npmresolution -count=1` passed.
 - Task 02: `pnpm e2e:run --host tests/settings/host-utility-managed-runtime-recovery.spec.ts` passed.
 - Public documentation validators and the complete specification lint passed.
+- PR fixup added model-configuration recovery, probe-environment cache resolution, exclusive repair admission, and portable macOS fixture hashing.
+- Expanded backend packages and changed-code lint against the PR merge base passed with zero issues.
 
 ## Risks
 

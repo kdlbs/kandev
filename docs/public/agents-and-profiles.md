@@ -120,8 +120,8 @@ Kandev also performs this recovery while it builds the host capability
 catalogue used by agent profiles. A successful retry publishes the recovered
 models and keeps the saved model, fallback model, mode, runtime version, and
 enabled state unchanged. The profile remains selectable and does not show a
-capability warning. Kandev reports a failed capability status only if the one
-online retry also fails.
+capability warning. Kandev reports a failed capability status if it cannot
+prepare the retry or repair the cache, or if the one online retry fails.
 
 The same recovery applies to managed runtime startup on a local PC, in a local
 Docker executor, or in a remote SSH executor. Kandev sends the repair request

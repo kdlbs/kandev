@@ -82,6 +82,7 @@ node scripts/validate-public-docs.mjs
 - Added a host fixture that reproduces strict offline `ETARGET`, proves one exact cache repair and online retry, and preserves sibling cache data.
 - Proved the recovered OpenCode profile keeps its saved model and appears without a capability warning before task launch.
 - Removed the duplicate host utility bootstrap that could race two startup probes against the same npm execution tree.
+- Kept a persisted profile across the recovery restart and made the cache-key fixture portable to macOS.
 - Updated the public agent guide and internal managed-runtime reference.
 - Passed `pnpm e2e:run --host tests/settings/host-utility-managed-runtime-recovery.spec.ts`.
 - Passed the public documentation validators and complete specification lint.

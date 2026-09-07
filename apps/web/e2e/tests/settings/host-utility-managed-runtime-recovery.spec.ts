@@ -23,15 +23,25 @@ test.describe("host utility managed runtime recovery", () => {
     fs.copyFileSync(wrapperSource, wrapperPath);
     fs.chmodSync(wrapperPath, 0o755);
 
+    const runtimeEnv = {
+      KANDEV_MOCK_AGENT: "true",
+      KANDEV_E2E_MOCK_AGENT_PATH: mockAgentPath,
+      KANDEV_E2E_NPX_MOCK_OTHERS: "true",
+      NPM_CONFIG_CACHE: cacheRoot,
+    };
     let releaseEnv: (() => Promise<void>) | undefined;
     let profileId = "";
     try {
-      releaseEnv = await backend.useEnv({
-        KANDEV_MOCK_AGENT: "true",
-        KANDEV_E2E_MOCK_AGENT_PATH: mockAgentPath,
-        KANDEV_E2E_NPX_MOCK_OTHERS: "true",
-        NPM_CONFIG_CACHE: cacheRoot,
+      await backend.restart({ ...runtimeEnv, KANDEV_E2E_NPX_BYPASS_FAILURE: "true" });
+      const { agents: persistedAgents } = await apiClient.listAgents();
+      const persistedAgent = persistedAgents.find((candidate) => candidate.name === AGENT_NAME);
+      expect(persistedAgent).toBeDefined();
+      const profile = await apiClient.createAgentProfile(persistedAgent!.id, PROFILE_NAME, {
+        model: "mock-fast",
       });
+      profileId = profile.id;
+
+      releaseEnv = await backend.useEnv(runtimeEnv);
 
       let packageSpec = "";
       await expect
@@ -55,14 +65,6 @@ test.describe("host utility managed runtime recovery", () => {
           },
         )
         .toBe("ok:true:true");
-
-      const { agents: persistedAgents } = await apiClient.listAgents();
-      const persistedAgent = persistedAgents.find((candidate) => candidate.name === AGENT_NAME);
-      expect(persistedAgent).toBeDefined();
-      const profile = await apiClient.createAgentProfile(persistedAgent!.id, PROFILE_NAME, {
-        model: "mock-fast",
-      });
-      profileId = profile.id;
 
       const target = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
       expect(fs.existsSync(path.join(target, "stale-marker"))).toBe(false);

@@ -30,6 +30,7 @@ Kandev backend.
 
 - `runtime/lifecycle.Manager` classifies bounded startup evidence and limits recovery to one retry.
 - `agent/hostutility.Manager` classifies a structured probe failure, repairs through its warm agentctl instance, and limits each probe operation to one retry.
+- The host utility instance admits ordinary probes and one-shot prompts concurrently, but cache repair and its retry take exclusive admission so no process can use the execution tree while it is replaced.
 - `backendapp` starts the host utility manager once, after temporary-artifact ownership is available, and runs profile and utility reconciliation after that bootstrap.
 - `runtime/agentctl.Client` calls the authenticated cache-repair endpoint on the session-scoped `agentctl` instance.
 - `agentctl/server/api.Server` validates the request and coordinates the local repair operation.
@@ -60,6 +61,9 @@ registry URL, shell command, or package data from stderr.
 The `agentctl` process resolves the cache root with its current agent
 environment. This environment includes `NPM_CONFIG_CACHE`, `HOME`, npm
 configuration, and profile values that also affect the failed child process.
+Host utility repair requests carry the same runtime environment overrides and
+strip list as the failed probe. Agentctl applies them while resolving npm's
+cache, so the repair and retry target the same effective cache.
 
 The repair operation uses `managedruntime.RemoveNpxExecutionTree`. This helper
 derives the `_npx` key from the trusted package specification. Its descriptor
@@ -89,8 +93,10 @@ For a host capability probe, the equivalent flow is:
 2. Agentctl reports the stable managed-runtime npm-resolution failure code.
 3. The host utility manager asks the same warm agentctl instance to repair the exact execution tree.
 4. The host utility manager rebuilds the same effective package version with `--prefer-online` and retries once.
-5. A successful retry becomes the live capability catalogue. Only a failed retry becomes the published failed status.
+5. A successful retry becomes the live capability or model-configuration catalogue. A repair, retry-preparation, or final probe failure becomes the published failed status.
 
+Normal host utility probes and prompts finish before an exclusive cache repair
+can start. New operations wait until repair and its online retry complete.
 The probe retry does not run profile reconciliation between attempts. Persisted
 profile model, fallback model, mode, enabled state, and active runtime version
 remain unchanged on both success and failure.

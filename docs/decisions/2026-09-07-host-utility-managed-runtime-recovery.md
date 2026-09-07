@@ -28,7 +28,9 @@ specification in the trusted probe command. It returns a stable failure code,
 not raw stderr or executable command data. The host utility manager accepts that
 code only for a registered managed npm agent, asks the same warm agentctl
 instance to remove the exact deterministic execution tree, and retries the same
-effective version once with online-preferred metadata.
+effective version once with online-preferred metadata. Repair uses the failed
+probe's environment overrides and strip list. The warm instance excludes other
+probe and prompt processes while it repairs and retries.
 
 The host utility manager publishes only the final probe result. It does not
 change persisted profile models, fallback models, modes, enabled state, or the

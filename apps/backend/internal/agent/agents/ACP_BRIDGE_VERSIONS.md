@@ -31,9 +31,11 @@ error for the selected exact package and version, Kandev makes one recovery
 attempt. The colocated agentctl process resolves its own npm cache, removes only
 that package's deterministic `_npx` execution tree, and retries the same command
 with online metadata preference. Capability recovery publishes the successful
-catalogue without changing persisted profile selections. Runtime recovery
-applies to standalone, local Docker, and remote SSH executors. Sibling trees,
-the global npm cache, the registry, and the selected version remain unchanged.
+catalogue without changing persisted profile selections. Host repair uses the
+failed probe's runtime environment and waits for concurrent host utility
+processes before replacing the tree. Runtime recovery applies to standalone,
+local Docker, and remote SSH executors. Sibling trees, the global npm cache,
+the registry, and the selected version remain unchanged.
 
 The **Update agent** action in Settings is the explicit freshness boundary for
 the Kandev host. Its candidate preparation resolves the requested trusted

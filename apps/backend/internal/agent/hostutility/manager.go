@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -76,10 +77,30 @@ func (m *Manager) SetProfileResolver(resolver interface {
 
 // instance is a single warm agentctl instance bound to an agent type.
 type instance struct {
-	agentType  string
-	instanceID string
-	workDir    string
-	client     *agentctlclient.Client
+	agentType         string
+	instanceID        string
+	workDir           string
+	client            *agentctlclient.Client
+	operationGateOnce sync.Once
+	operationGate     *semaphore.Weighted
+}
+
+// Shared probes and prompts each take one slot. Repair takes every slot so it
+// cannot remove an npm execution tree while another utility process uses it.
+const hostUtilityOperationCapacity int64 = 1 << 20
+
+func (i *instance) acquireOperation(ctx context.Context, exclusive bool) (func(), error) {
+	i.operationGateOnce.Do(func() {
+		i.operationGate = semaphore.NewWeighted(hostUtilityOperationCapacity)
+	})
+	weight := int64(1)
+	if exclusive {
+		weight = hostUtilityOperationCapacity
+	}
+	if err := i.operationGate.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	return func() { i.operationGate.Release(weight) }, nil
 }
 
 // NewManager constructs a HostUtilityManager.
@@ -615,22 +636,44 @@ func (m *Manager) probeWithCommand(
 	}
 
 	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
-	resp, err := inst.client.Probe(probeCtx, req)
+	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
 	if err != nil {
 		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
-	if !resp.Success && resp.FailureCode == agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
-		resp = m.recoverManagedRuntimeProbe(probeCtx, inst, ia, refresh, resolvedCommand, resp)
-	}
 	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+}
+
+func (m *Manager) probeManagedRuntime(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	command agents.Command,
+	req *agentctlutil.ProbeRequest,
+) (*agentctlutil.ProbeResponse, error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := inst.client.Probe(ctx, req)
+	release()
+	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+		return resp, err
+	}
+
+	release, err = inst.acquireOperation(ctx, true)
+	if err != nil {
+		return resp, nil
+	}
+	defer release()
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
 }
 
 func (m *Manager) recoverManagedRuntimeProbe(
 	ctx context.Context,
 	inst *instance,
 	ia agents.InferenceAgent,
-	refresh bool,
 	failedCommand agents.Command,
+	failedRequest *agentctlutil.ProbeRequest,
 	initial *agentctlutil.ProbeResponse,
 ) *agentctlutil.ProbeResponse {
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
@@ -646,14 +689,17 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	if err := inst.client.RepairManagedRuntimeCache(ctx, packageSpec); err != nil {
+	failedConfig := failedRequest.InferenceConfig
+	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
+		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
+	); err != nil {
 		m.log.Warn("managed runtime host capability probe cache repair failed",
 			zap.String("agent_type", inst.agentType),
 			zap.String("recovery_scope", "host_capability_probe"),
 			zap.Error(err))
 		return initial
 	}
-	response, err := inst.client.Probe(ctx, buildProbeRequest(inst, ia, refresh, retryCommand))
+	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",
 			zap.String("agent_type", inst.agentType),
@@ -667,6 +713,17 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.String("outcome", string(capabilityStatus(response))))
 	return response
+}
+
+func cloneProbeRequestWithCommand(
+	request *agentctlutil.ProbeRequest,
+	command agents.Command,
+) *agentctlutil.ProbeRequest {
+	retry := *request
+	config := *request.InferenceConfig
+	config.Command = command.Args()
+	retry.InferenceConfig = &config
+	return &retry
 }
 
 func capabilityStatus(response *agentctlutil.ProbeResponse) Status {

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 )
@@ -160,13 +163,165 @@ func TestManagedRuntimeProbeRecoveryStopsOnCancellation(t *testing.T) {
 		ctx,
 		inst,
 		agent,
-		true,
-		agent.ManagedNPMRuntime().ACPCommand(""),
+		agent.ManagedNPMRuntime().ACPCommand("1.18.29"),
+		buildProbeRequest(
+			inst, agent, true, agent.ManagedNPMRuntime().ACPCommand("1.18.29"),
+		),
 		initial,
 	)
 
 	if response != initial {
 		t.Fatalf("response = %#v, want initial failure after cancellation", response)
+	}
+}
+
+func TestResolveModelConfigRecoversManagedRuntimeETarget(t *testing.T) {
+	const version = "1.18.29"
+	agent := agents.NewOpenCodeACP()
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	if err := reg.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	var probes []agentctlutil.ProbeRequest
+	var repairs int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/probe":
+			var request agentctlutil.ProbeRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			probes = append(probes, request)
+			if len(probes) == 1 {
+				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+					Success:     false,
+					Error:       "ACP initialize failed",
+					FailureCode: agentctlutil.ProbeFailureManagedRuntimeNPMResolution,
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success: true,
+				ConfigOptions: []agentctlutil.ProbeConfigOption{{
+					ID:           "reasoning_effort",
+					CurrentValue: "high",
+				}},
+			})
+		case "/api/v1/agent/managed-runtime/cache-repair":
+			repairs++
+			_ = json.NewEncoder(w).Encode(agentctlclient.RepairManagedRuntimeCacheResponse{Success: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+	manager := NewManager(reg, host, port, nil, log)
+	manager.managedRuntimeSelections = managedRuntimeSelectionReader{
+		selection: managedruntime.Selection{Package: agent.ManagedNPMRuntime().Package, Version: version},
+		found:     true,
+	}
+	manager.instances[agent.ID()] = &instance{
+		agentType: agent.ID(),
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, log),
+	}
+
+	resolved, err := manager.ResolveModelConfig(context.Background(), agent.ID(), ModelConfigResolutionRequest{
+		Model: "mock-fast",
+	})
+	if err != nil {
+		t.Fatalf("ResolveModelConfig: %v", err)
+	}
+	if resolved.Status != StatusOK || len(resolved.ConfigOptions) != 1 {
+		t.Fatalf("resolution = %#v, want recovered config options", resolved)
+	}
+	if len(probes) != 2 || repairs != 1 {
+		t.Fatalf("attempts = (%d probes, %d repairs), want (2, 1)", len(probes), repairs)
+	}
+	if probes[1].Model != "mock-fast" {
+		t.Fatalf("retry model = %q, want selected model", probes[1].Model)
+	}
+	wantRetry := agent.ManagedNPMRuntime().ACPCommandWithNpmPreference(version, true).Args()
+	if !equalStrings(probes[1].InferenceConfig.Command, wantRetry) {
+		t.Fatalf("retry command = %#v, want %#v", probes[1].InferenceConfig.Command, wantRetry)
+	}
+}
+
+func TestManagedRuntimeRepairWaitsForConcurrentProbe(t *testing.T) {
+	agent := agents.NewOpenCodeACP()
+	blockerStarted := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	repairStarted := make(chan struct{})
+	var probeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/inference/probe":
+			call := probeCalls.Add(1)
+			if call == 1 {
+				close(blockerStarted)
+				<-releaseBlocker
+				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{Success: true})
+				return
+			}
+			if call == 2 {
+				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+					Success:     false,
+					Error:       "ACP initialize failed",
+					FailureCode: agentctlutil.ProbeFailureManagedRuntimeNPMResolution,
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{Success: true})
+		case "/api/v1/agent/managed-runtime/cache-repair":
+			close(repairStarted)
+			_ = json.NewEncoder(w).Encode(agentctlclient.RepairManagedRuntimeCacheResponse{Success: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+	manager := &Manager{log: newTestLogger(t)}
+	inst := &instance{
+		agentType: agent.ID(),
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, manager.log),
+	}
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		_ = manager.probe(context.Background(), inst, agent, true)
+	}()
+	<-blockerStarted
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_ = manager.probe(context.Background(), inst, agent, true)
+	}()
+
+	raced := false
+	select {
+	case <-repairStarted:
+		raced = true
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(releaseBlocker)
+	select {
+	case <-repairStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cache repair did not start after the concurrent probe completed")
+	}
+	<-firstDone
+	<-secondDone
+	if raced {
+		t.Fatal("cache repair raced a concurrent probe")
 	}
 }
 
