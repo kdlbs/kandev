@@ -156,6 +156,8 @@ type HorizontalRect = { left: number; right: number };
  * horizontally, without moving it further than necessary. Zero when the node
  * is already within bounds.
  */
+const MOVE_CONTROL_OVERHANG_PX = 12;
+
 export function computeAnchorScrollDelta(
   nodeRect: HorizontalRect,
   containerRect: HorizontalRect,
@@ -207,12 +209,18 @@ function PipelineStepNodes({
       container = container.parentElement;
     }
     if (!container) return;
-    const delta = computeAnchorScrollDelta(
-      node.getBoundingClientRect(),
-      container.getBoundingClientRect(),
-    );
+    // MoveButton (graph2-step-node.tsx) overhangs its step pill by
+    // `-left-3`/`-right-3` (12px); a bounding rect never includes an
+    // absolutely-positioned descendant's overflow, so anchoring against the
+    // pill's own rect can still leave the move control clipped past the edge.
+    const rawRect = node.getBoundingClientRect();
+    const nodeRect = {
+      left: rawRect.left - MOVE_CONTROL_OVERHANG_PX,
+      right: rawRect.right + MOVE_CONTROL_OVERHANG_PX,
+    };
+    const delta = computeAnchorScrollDelta(nodeRect, container.getBoundingClientRect());
     if (delta !== 0) container.scrollLeft += delta;
-  }, [task.id, currentStepIndex, steps]);
+  }, [task.id, currentStepIndex, steps, atTerminus]);
 
   return (
     <div
@@ -382,6 +390,7 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
         <RemoteCloudTooltip
           taskId={task.id}
           sessionId={task.primarySessionId ?? null}
+          executorId={task.primaryExecutorId}
           executorType={task.primaryExecutorType}
           fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
         />
