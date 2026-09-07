@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -615,19 +616,100 @@ func (m *Manager) probeWithCommand(
 
 	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
 	resp, err := inst.client.Probe(probeCtx, req)
-	now := time.Now()
 	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, now)
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
+	if !resp.Success && resp.FailureCode == agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+		resp = m.recoverManagedRuntimeProbe(probeCtx, inst, ia, refresh, resolvedCommand, resp)
+	}
+	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+}
+
+func (m *Manager) recoverManagedRuntimeProbe(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+	failedCommand agents.Command,
+	initial *agentctlutil.ProbeResponse,
+) *agentctlutil.ProbeResponse {
+	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return initial
+	}
+	spec := managed.ManagedNPMRuntime()
+	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	if !ok {
+		return initial
+	}
+	m.log.Info("recovering managed runtime host capability probe",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.Int("attempt", 1))
+	if err := inst.client.RepairManagedRuntimeCache(ctx, packageSpec); err != nil {
+		m.log.Warn("managed runtime host capability probe cache repair failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.Error(err))
+		return initial
+	}
+	response, err := inst.client.Probe(ctx, buildProbeRequest(inst, ia, refresh, retryCommand))
+	if err != nil {
+		m.log.Warn("managed runtime host capability probe retry failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.String("outcome", "failed"),
+			zap.Error(err))
+		return &agentctlutil.ProbeResponse{Success: false, Error: err.Error()}
+	}
+	m.log.Info("managed runtime host capability probe retry completed",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.String("outcome", string(capabilityStatus(response))))
+	return response
+}
+
+func capabilityStatus(response *agentctlutil.ProbeResponse) Status {
+	if response != nil && response.Success {
+		return StatusOK
+	}
+	return StatusFailed
+}
+
+func managedRuntimeProbeRetry(
+	command agents.Command,
+	spec agents.ManagedNPMRuntimeSpec,
+) (agents.Command, string, bool) {
+	args := command.Args()
+	if len(args) < 4 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" {
+		return agents.Command{}, "", false
+	}
+	packageSpec := args[3]
+	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+		return agents.Command{}, "", false
+	}
+	prefix := spec.Package + "@"
+	if !strings.HasPrefix(packageSpec, prefix) {
+		return agents.Command{}, "", false
+	}
+	version := strings.TrimPrefix(packageSpec, prefix)
+	want := spec.ACPCommandWithNpmPreference(version, false).Args()
+	if !slices.Equal(args, want) {
+		return agents.Command{}, "", false
+	}
+	return spec.ACPCommandWithNpmPreference(version, true), packageSpec, true
+}
+
+func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, now time.Time) AgentCapabilities {
 	if !resp.Success {
 		status := StatusFailed
 		if isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
-		return probeFailureCapabilities(inst.agentType, status, resp.Error, resp.DurationMs, now)
+		return probeFailureCapabilities(agentType, status, resp.Error, resp.DurationMs, now)
 	}
 	caps := AgentCapabilities{
-		AgentType:       inst.agentType,
+		AgentType:       agentType,
 		AgentName:       resp.AgentName,
 		AgentVersion:    resp.AgentVersion,
 		Status:          StatusOK,
