@@ -358,6 +358,49 @@ func TestDispatch_LightweightRoutine_EnqueuesWakeup(t *testing.T) {
 	}
 }
 
+// idempotencyConflictWakeupEnqueuer simulates the dedup race R2 covers:
+// a second fire's wakeup request lands on the same per-minute
+// idempotency key as one already enqueued by another fire (e.g. a cron
+// tick and a manual fire in the same bucket).
+type idempotencyConflictWakeupEnqueuer struct{}
+
+func (idempotencyConflictWakeupEnqueuer) CreateWakeupRequest(context.Context, *routines.WakeupRequest) error {
+	return routines.ErrWakeupAlreadyRequested
+}
+
+func (idempotencyConflictWakeupEnqueuer) Dispatch(context.Context, string) error { return nil }
+
+// TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed is the
+// R2 regression test: CreateWakeupRequest losing an idempotency race
+// means a request for this fire already exists (success by another
+// fire), not a failure. Pre-fix this was recorded as "failed" — the same
+// class of untruthful terminal status the card exists to remove.
+func TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:            "ws-1",
+		Name:                   "Dedup Race",
+		TaskTemplate:           "",
+		AssigneeAgentProfileID: "agent-1",
+		Status:                 "active",
+		ConcurrencyPolicy:      "always_create",
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	svc.SetWakeupEnqueuer(idempotencyConflictWakeupEnqueuer{})
+
+	run, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("fire manual: %v", err)
+	}
+	if run.Status != "done" {
+		t.Errorf("status = %q, want done (idempotency conflict is success by another fire, not a failure)", run.Status)
+	}
+}
+
 // TestDispatch_HeavyRoutine_CreatesTaskInRoutineWorkflow verifies a
 // routine with a task_template materialises a real task pinned to the
 // routine workflow id.
@@ -565,6 +608,61 @@ func TestDispatch_HeavyRoutine_StaleTaskCreatedDoesNotGate(t *testing.T) {
 	}
 	if run2.Status != "task_created" {
 		t.Errorf("second run status = %q, want task_created (stale row must not gate)", run2.Status)
+	}
+}
+
+// TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent is
+// the R1 regression test: no production publisher of events.TaskMoved
+// ever sets to_step_name (office-routine-runs review round 1), so
+// SyncRunStatus is never reached by that event in production and cannot
+// be the only way a heavy run's gate clears. This drives the actual
+// production seam — FireManual -> dispatchRoutineRun ->
+// applyConcurrencyPolicy — with no call to SyncRunStatus at all: the
+// linked task's row is updated directly (as the real `tasks` table would
+// be by an ordinary task-service move), and the gate must still notice
+// and let the second fire through.
+func TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent(t *testing.T) {
+	for _, policy := range []string{"skip_if_active", "coalesce_if_active"} {
+		t.Run(policy, func(t *testing.T) {
+			svc, db := newTestRoutineServiceWithDB(t)
+			ctx := context.Background()
+			svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+			svc.SetTaskCreator(&fakeTaskCreator{})
+
+			routine := createTestRoutine(t, svc, "Self Heal "+policy, policy)
+
+			run1, err := svc.FireManual(ctx, routine.ID, nil)
+			if err != nil {
+				t.Fatalf("first run: %v", err)
+			}
+			if run1.Status != "task_created" {
+				t.Fatalf("first run status = %q, want task_created", run1.Status)
+			}
+			if run1.LinkedTaskID == "" {
+				t.Fatalf("expected a linked task")
+			}
+
+			// Mirror the shared `tasks` table's shape and mark the linked
+			// task COMPLETED directly — no TaskMoved event, no
+			// SyncRunStatus call. This is what the row looks like after a
+			// real task-service move in production.
+			if _, err := db.ExecContext(ctx,
+				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+				t.Fatalf("create tasks table: %v", err)
+			}
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO tasks (id, state) VALUES (?, ?)`, run1.LinkedTaskID, "COMPLETED"); err != nil {
+				t.Fatalf("seed linked task: %v", err)
+			}
+
+			run2, err := svc.FireManual(ctx, routine.ID, nil)
+			if err != nil {
+				t.Fatalf("second run: %v", err)
+			}
+			if run2.Status != "task_created" {
+				t.Fatalf("second run status = %q, want task_created (gate must self-heal once the linked task is terminal)", run2.Status)
+			}
+		})
 	}
 }
 

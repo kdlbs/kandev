@@ -349,10 +349,16 @@ func (r *Repository) GetActiveRunForFingerprint(
 // GetRoutineRunByLinkedTaskID returns the most recent run linked to
 // taskID, or nil if no run is linked to it (most tasks aren't
 // routine-created). Used by SyncRunStatus to find the run to close out
-// when its task reaches a terminal step.
+// when its task reaches a terminal step. taskID must be non-empty:
+// linked_task_id defaults to ” for every lightweight run, so an empty
+// taskID would match (and let a caller rewrite) an arbitrary lightweight
+// run instead of correctly finding nothing.
 func (r *Repository) GetRoutineRunByLinkedTaskID(
 	ctx context.Context, taskID string,
 ) (*models.RoutineRun, error) {
+	if taskID == "" {
+		return nil, nil
+	}
 	var run models.RoutineRun
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM office_routine_runs
@@ -366,6 +372,36 @@ func (r *Repository) GetRoutineRunByLinkedTaskID(
 		return nil, err
 	}
 	return &run, nil
+}
+
+// GetTaskTerminalStatus reports whether taskID's task has reached a
+// terminal step and, if so, which outcome: "done" for COMPLETED,
+// "cancelled" for CANCELLED, "" otherwise — including when the task row
+// itself is missing (already deleted), so callers fail closed rather
+// than releasing a gate they cannot actually confirm is clear. Reads the
+// same `tasks` table and column IsTaskInTerminalStep does; this is the
+// routines gate's own use of that state (see
+// RoutineService.applyConcurrencyPolicy), so it lives in the routines
+// repo file rather than sharing IsTaskInTerminalStep's boolean, which
+// cannot distinguish the two terminal outcomes.
+func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error) {
+	var state string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	switch state {
+	case taskStateCompleted:
+		return "done", nil
+	case taskStateCancelled:
+		return "cancelled", nil
+	default:
+		return "", nil
+	}
 }
 
 // TouchRoutineLastRun updates only last_run_at (+ updated_at) on a
@@ -391,6 +427,31 @@ func (r *Repository) UpdateRunStatus(
 		WHERE id = ?
 	`), status, linkedTaskID, now, runID)
 	return err
+}
+
+// UpdateRunStatusIfTaskCreated closes a run out with a terminal status,
+// but only while it is still 'task_created' — the one status a routine
+// run can gate its fingerprint from. The WHERE clause makes this an
+// atomic claim: SyncRunStatus (TaskMoved-driven) and the concurrency
+// gate's own inline check (applyConcurrencyPolicy) can both observe the
+// same terminal task, and this is what lets exactly one of them win
+// instead of a read-then-write race rewriting an already-closed run's
+// status or completed_at. Returns whether this call was the one that
+// closed it.
+func (r *Repository) UpdateRunStatusIfTaskCreated(
+	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
+) (bool, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routine_runs
+		SET status = ?, linked_task_id = ?, completed_at = ?
+		WHERE id = ? AND status = 'task_created'
+	`), status, linkedTaskID, now, runID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
 }
 
 // UpdateRunCoalesced marks a run as coalesced into another run.

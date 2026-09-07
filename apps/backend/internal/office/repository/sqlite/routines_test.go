@@ -240,3 +240,133 @@ func TestRoutineRun_Create(t *testing.T) {
 		t.Fatal("expected run ID to be set")
 	}
 }
+
+// TestGetTaskTerminalStatus brings up just enough of the shared `tasks`
+// table (owned by internal/task/repository/sqlite in the real app) for
+// GetTaskTerminalStatus to query against it. office/repository/sqlite's
+// own initSchema deliberately does not create this table (see
+// TestInitSchema_AllTablesExist) — it shares the production DB's table
+// rather than owning it.
+func TestGetTaskTerminalStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, state) VALUES (?, ?), (?, ?), (?, ?)`,
+		"task-done", "COMPLETED", "task-cancelled", "CANCELLED", "task-open", "IN_PROGRESS"); err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+
+	cases := []struct {
+		taskID string
+		want   string
+	}{
+		{"task-done", "done"},
+		{"task-cancelled", "cancelled"},
+		{"task-open", ""},
+		{"task-missing", ""},
+	}
+	for _, c := range cases {
+		got, err := repo.GetTaskTerminalStatus(ctx, c.taskID)
+		if err != nil {
+			t.Fatalf("GetTaskTerminalStatus(%q): %v", c.taskID, err)
+		}
+		if got != c.want {
+			t.Errorf("GetTaskTerminalStatus(%q) = %q, want %q", c.taskID, got, c.want)
+		}
+	}
+}
+
+func TestUpdateRunStatusIfTaskCreated(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:       "ws-1",
+		Name:              "Conditional Close",
+		TaskTemplate:      "{}",
+		Status:            "active",
+		ConcurrencyPolicy: "skip_if_active",
+		Variables:         "{}",
+	}
+	if err := repo.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	run := &models.RoutineRun{
+		RoutineID:           routine.ID,
+		Source:              "manual",
+		Status:              "task_created",
+		TriggerPayload:      "{}",
+		DispatchFingerprint: "fp-cond",
+		LinkedTaskID:        "task-1",
+	}
+	if err := repo.CreateRoutineRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	closed, err := repo.UpdateRunStatusIfTaskCreated(ctx, run.ID, models.RoutineRunStatusDone, "task-1")
+	if err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if !closed {
+		t.Fatal("expected first close to succeed from task_created")
+	}
+
+	// A second attempt against the now-closed row must not win — this is
+	// the race SyncRunStatus and the concurrency gate's inline check can
+	// both hit, and it must not rewrite a "done" row to "cancelled" or
+	// move completed_at.
+	closedAgain, err := repo.UpdateRunStatusIfTaskCreated(ctx, run.ID, models.RoutineRunStatusCancelled, "task-1")
+	if err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	if closedAgain {
+		t.Fatal("second close against an already-closed run must report false")
+	}
+
+	got, err := repo.GetRoutineRunByLinkedTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get by linked task: %v", err)
+	}
+	if got.Status != models.RoutineRunStatusDone {
+		t.Errorf("status = %q, want done (unchanged by the losing second close)", got.Status)
+	}
+}
+
+func TestGetRoutineRunByLinkedTaskID_EmptyTaskIDGuarded(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:       "ws-1",
+		Name:              "Empty Guard",
+		TaskTemplate:      "",
+		Status:            "active",
+		ConcurrencyPolicy: "always_create",
+		Variables:         "{}",
+	}
+	if err := repo.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	// Lightweight run: linked_task_id defaults to ''.
+	run := &models.RoutineRun{
+		RoutineID:           routine.ID,
+		Source:              "manual",
+		Status:              "done",
+		TriggerPayload:      "{}",
+		DispatchFingerprint: "fp-empty",
+	}
+	if err := repo.CreateRoutineRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	got, err := repo.GetRoutineRunByLinkedTaskID(ctx, "")
+	if err != nil {
+		t.Fatalf("lookup with empty taskID: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for empty taskID, got run %q (would have matched an arbitrary lightweight run)", got.ID)
+	}
+}

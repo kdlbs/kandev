@@ -197,6 +197,14 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 	return err
 }
 
+// Task lifecycle state values as stored in the shared `tasks` table,
+// shared by every office-repo reader of terminal task state
+// (IsTaskInTerminalStep, GetTaskTerminalStatus).
+const (
+	taskStateCompleted = "COMPLETED"
+	taskStateCancelled = "CANCELLED"
+)
+
 func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {
 	var state string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
@@ -204,7 +212,7 @@ func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (b
 	if err != nil {
 		return false, err
 	}
-	return state == "COMPLETED" || state == "CANCELLED", nil
+	return state == taskStateCompleted || state == taskStateCancelled, nil
 }
 
 // GetTaskAssignee returns the agent currently driving a task. Resolves

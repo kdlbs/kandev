@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/github"
@@ -263,7 +264,13 @@ func (a *routineWakeupAdapter) CreateWakeupRequest(
 	if req.IdempotencyKey != "" {
 		row.IdempotencyKey = sql.NullString{String: req.IdempotencyKey, Valid: true}
 	}
-	return a.repo.CreateWakeupRequest(ctx, row)
+	if err := a.repo.CreateWakeupRequest(ctx, row); err != nil {
+		if errors.Is(err, officesqlite.ErrWakeupIdempotencyConflict) {
+			return officeroutines.ErrWakeupAlreadyRequested
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *routineWakeupAdapter) Dispatch(ctx context.Context, requestID string) error {

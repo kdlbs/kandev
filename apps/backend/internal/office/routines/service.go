@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+// ErrWakeupAlreadyRequested is the routines-package-local signal that a
+// WakeupEnqueuer.CreateWakeupRequest call lost an idempotency race: a
+// request for this fire already exists, enqueued by another caller (a
+// cron tick and a manual fire landing in the same dedup bucket, for
+// example). That is success by another route, not a failure — the
+// concrete adapter translates the sqlite layer's
+// ErrWakeupIdempotencyConflict into this sentinel so routines never
+// imports office/repository/sqlite directly (see routineWakeupAdapter).
+var ErrWakeupAlreadyRequested = errors.New("wakeup request already requested")
 
 // Repository is the persistence interface required by RoutineService.
 type Repository interface {
@@ -38,8 +49,20 @@ type Repository interface {
 	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string, notBefore time.Time) (*RoutineRun, error)
 	GetRoutineRunByLinkedTaskID(ctx context.Context, taskID string) (*RoutineRun, error)
 	UpdateRunStatus(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) error
+	// UpdateRunStatusIfTaskCreated closes out a run only while it is still
+	// task_created, returning whether this call was the one that closed
+	// it. Used by both the TaskMoved-driven SyncRunStatus and the
+	// concurrency gate's own inline check (applyConcurrencyPolicy), which
+	// can both observe the same terminal task; the conditional WHERE
+	// clause is what lets exactly one of them win instead of a
+	// read-then-write race between them.
+	UpdateRunStatusIfTaskCreated(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) (bool, error)
 	UpdateRunCoalesced(ctx context.Context, runID, coalescedIntoRunID string) error
 	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
+	// GetTaskTerminalStatus reads a task's real lifecycle state directly
+	// (not via the TaskMoved event — see applyConcurrencyPolicy) and
+	// reports "" when it is not terminal, "done", or "cancelled".
+	GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error)
 }
 
 // WakeupEnqueuer is the slim surface routines need to enqueue + dispatch
@@ -645,6 +668,12 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		RequestedAt:    time.Now().UTC(),
 	}
 	if err := s.wakeup.CreateWakeupRequest(ctx, req); err != nil {
+		if errors.Is(err, ErrWakeupAlreadyRequested) {
+			// A request for this fire's idempotency key already exists —
+			// success by another fire (e.g. a cron tick and a manual fire
+			// landing in the same per-minute dedup bucket), not a failure.
+			return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
+		}
 		s.logger.Warn("create routine wakeup request",
 			zap.String("routine", routine.Name), zap.Error(err))
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
@@ -718,6 +747,41 @@ func marshalRoutinePayload(routineID string, vars map[string]string, missedTicks
 // of gating the routine forever.
 const activeRunMaxAge = 7 * 24 * time.Hour
 
+// selfHealIfTaskTerminal is the pull-based counterpart to SyncRunStatus:
+// SyncRunStatus is driven by the TaskMoved event, but nothing in
+// production populates the step names that event needs
+// (office-routine-runs R1), so the gate cannot rely on that event alone
+// ever clearing it. Reading the linked task's real state here means a
+// heavy run's gate self-heals at the next fire even when that event
+// never arrives. Returns active unchanged when it is still genuinely
+// active, still lightweight (no linked task), or its state can't be
+// determined — a lookup or close-out failure fails closed, leaving the
+// existing 7-day backstop as the escape hatch, same as before this check
+// existed. Returns nil once the linked task is confirmed terminal and
+// closed out, meaning the caller should treat the gate as clear.
+func (s *RoutineService) selfHealIfTaskTerminal(
+	ctx context.Context, routine *Routine, active *RoutineRun,
+) *RoutineRun {
+	if active.LinkedTaskID == "" {
+		return active
+	}
+	terminalStatus, err := s.repo.GetTaskTerminalStatus(ctx, active.LinkedTaskID)
+	if err != nil {
+		s.logger.Warn("check linked task terminal state",
+			zap.String("routine", routine.Name), zap.String("run_id", active.ID), zap.Error(err))
+		return active
+	}
+	if terminalStatus == "" {
+		return active
+	}
+	if _, err := s.closeOutRun(ctx, active, terminalStatus); err != nil {
+		s.logger.Warn("close out stale active run",
+			zap.String("routine", routine.Name), zap.String("run_id", active.ID), zap.Error(err))
+		return active
+	}
+	return nil
+}
+
 func (s *RoutineService) applyConcurrencyPolicy(
 	ctx context.Context,
 	routine *Routine,
@@ -731,6 +795,9 @@ func (s *RoutineService) applyConcurrencyPolicy(
 	active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint, notBefore)
 	if err != nil {
 		return "", fmt.Errorf("check active run: %w", err)
+	}
+	if active != nil {
+		active = s.selfHealIfTaskTerminal(ctx, routine, active)
 	}
 	if active == nil {
 		return "", nil
@@ -767,8 +834,14 @@ func (s *RoutineService) FireManual(
 // finishes, and this is what clears the gate. terminalStatus is
 // "cancelled" for a task moved to the Cancelled step, "done" for
 // anything else terminal (currently only Done). A taskID with no
-// linked run is not an error — most tasks aren't routine-created.
+// linked run is not an error — most tasks aren't routine-created. An
+// empty taskID is rejected outright: linked_task_id defaults to ” for
+// every lightweight run, so an unguarded lookup would match (and
+// rewrite) an arbitrary lightweight run instead of finding nothing.
 func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error {
+	if taskID == "" {
+		return nil
+	}
 	run, err := s.repo.GetRoutineRunByLinkedTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get routine run by linked task: %w", err)
@@ -776,14 +849,26 @@ func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStat
 	if run == nil {
 		return nil
 	}
+	_, err = s.closeOutRun(ctx, run, terminalStatus)
+	return err
+}
+
+// closeOutRun writes a run's terminal status, but only while it is still
+// task_created (see Repository.UpdateRunStatusIfTaskCreated) — a replayed
+// or racing terminal signal for an already-closed run must not move
+// completed_at or flip a "done" back to "cancelled". terminalStatus is
+// "cancelled" or anything else counts as "done", matching SyncRunStatus's
+// contract. Returns whether this call was the one that closed the run.
+func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, terminalStatus string) (bool, error) {
 	status := models.RoutineRunStatusDone
 	if terminalStatus == "cancelled" {
 		status = models.RoutineRunStatusCancelled
 	}
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, status, run.LinkedTaskID); err != nil {
-		return fmt.Errorf("update run status: %w", err)
+	closed, err := s.repo.UpdateRunStatusIfTaskCreated(ctx, run.ID, status, run.LinkedTaskID)
+	if err != nil {
+		return false, fmt.Errorf("update run status: %w", err)
 	}
-	return nil
+	return closed, nil
 }
 
 // -- helpers --
