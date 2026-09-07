@@ -205,6 +205,38 @@ func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.
 	}
 }
 
+func TestLoadSessionNegotiatesAdditionalDirectories(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.LoadSession = true
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	err := adapter.LoadSessionWithAdditionalDirectories(context.Background(), "session-1", nil, func() ([]string, error) {
+		return []string{"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web"}, nil
+	})
+	if err != nil {
+		t.Fatalf("LoadSessionWithAdditionalDirectories: %v", err)
+	}
+	want := []string{"/tmp/test/api", "/tmp/test/web"}
+	if !slices.Equal(capture.loadRequest.AdditionalDirectories, want) {
+		t.Fatalf("ACP load additionalDirectories = %v, want %v", capture.loadRequest.AdditionalDirectories, want)
+	}
+}
+
+func TestLoadSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.LoadSession = true
+
+	err := adapter.LoadSessionWithAdditionalDirectories(context.Background(), "session-1", nil, func() ([]string, error) {
+		return []string{"/tmp/test/api"}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
+		t.Fatalf("LoadSessionWithAdditionalDirectories error = %v, want unsupported projection", err)
+	}
+	if capture.loadRequest.SessionId != "" {
+		t.Fatalf("ACP LoadSession was called despite unsupported additional directories: %+v", capture.loadRequest)
+	}
+}
+
 // TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption
 // guards the fix for the TOCTOU window where a caller pre-fetched
 // canonical workspace roots well before the ACP request was actually built.

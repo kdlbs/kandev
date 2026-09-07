@@ -464,6 +464,15 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 //
 //nolint:funlen // pre-existing length preserved from adapter.go file split
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return a.LoadSessionWithAdditionalDirectories(ctx, sessionID, mcpServers, nil)
+}
+
+// LoadSessionWithAdditionalDirectories resumes an existing session while
+// preserving the server-owned workspace roots on providers that support ACP
+// additionalDirectories.
+//
+//nolint:funlen // pre-existing length preserved from adapter.go file split
+func (a *Adapter) LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) error {
 	a.sessionTransitionMu.Lock()
 	defer a.sessionTransitionMu.Unlock()
 
@@ -510,6 +519,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
+	additionalDirectories, err := a.resolveAdditionalDirectoriesForSession(resolveRoots)
+	if err != nil {
+		return err
+	}
+	if len(additionalDirectories) > 0 && a.capabilities.SessionCapabilities.AdditionalDirectories == nil {
+		return fmt.Errorf("%s: ACP provider does not support required additional workspace directories", gitMetadataProjectionUnsupported)
+	}
 
 	// Suppress history replay notifications during load.
 	// ACP session/load replays the entire conversation history asynchronously.
@@ -522,9 +538,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 
 	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionId:  acp.SessionId(sessionID),
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		SessionId:             acp.SessionId(sessionID),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(filteredServers),
+		AdditionalDirectories: additionalDirectories,
 	})
 
 	if err != nil {

@@ -162,6 +162,12 @@ type AdditionalDirectoriesSessionResetter interface {
 	ResetSessionWithAdditionalDirectories(context.Context, []types.McpServer, types.WorkspaceSourceRootsResolver) (string, error)
 }
 
+// AdditionalDirectoriesSessionLoader preserves lifecycle-owned workspace
+// roots when an existing ACP session is loaded after a workspace rebind.
+type AdditionalDirectoriesSessionLoader interface {
+	LoadSessionWithAdditionalDirectories(context.Context, string, []types.McpServer, types.WorkspaceSourceRootsResolver) error
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

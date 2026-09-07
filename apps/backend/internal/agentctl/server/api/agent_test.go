@@ -388,6 +388,34 @@ func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T
 	}
 }
 
+func TestHandleWSLoadSessionForwardsServerOwnedAdditionalDirectories(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	apiRoot := filepath.Join(workspace, "api")
+	if err := os.Mkdir(apiRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace, WorkspaceSourceRoots: []string{workspace, apiRoot}}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.load", LoadSessionRequest{SessionID: "session-existing"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if response := s.handleWSLoadSession(context.Background(), msg); response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response", response.Type)
+	}
+	if capture.loadedSessionID != "session-existing" {
+		t.Fatalf("loaded session = %q, want session-existing", capture.loadedSessionID)
+	}
+	if !slices.Equal(capture.directories, []string{workspace, apiRoot}) {
+		t.Fatalf("load additional directories = %v, want %v", capture.directories, []string{workspace, apiRoot})
+	}
+}
+
 func TestHandleWSNewSessionRejectsChangedAdditionalDirectoryBeforeProviderSession(t *testing.T) {
 	log := newTestLogger()
 	workspace := t.TempDir()
@@ -720,7 +748,8 @@ type mcpCaptureAdapter struct {
 
 type additionalDirectoriesCaptureAdapter struct {
 	promptErrorAdapter
-	directories []string
+	directories     []string
+	loadedSessionID string
 }
 
 func (a *additionalDirectoriesCaptureAdapter) NewSessionWithAdditionalDirectories(_ context.Context, _ []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
@@ -734,6 +763,20 @@ func (a *additionalDirectoriesCaptureAdapter) NewSessionWithAdditionalDirectorie
 	}
 	a.directories = append([]string(nil), directories...)
 	return "new-session", nil
+}
+
+func (a *additionalDirectoriesCaptureAdapter) LoadSessionWithAdditionalDirectories(_ context.Context, sessionID string, _ []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) error {
+	var directories []string
+	if resolveRoots != nil {
+		var err error
+		directories, err = resolveRoots()
+		if err != nil {
+			return fmt.Errorf("git_metadata_projection_unsupported: workspace roots must be revalidated before loading a session: %w", err)
+		}
+	}
+	a.directories = append([]string(nil), directories...)
+	a.loadedSessionID = sessionID
+	return nil
 }
 
 type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }

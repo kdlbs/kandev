@@ -487,6 +487,19 @@ func TestLoadSession_Success(t *testing.T) {
 		if msg.Action != "agent.session.load" {
 			t.Errorf("expected action 'agent.session.load', got %q", msg.Action)
 		}
+		var payload struct {
+			SessionID            string   `json:"session_id"`
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.SessionID != "sess-456" {
+			t.Fatalf("session_id = %q, want sess-456", payload.SessionID)
+		}
+		if got, want := payload.WorkspaceSourceRoots, []string{"/workspace", "/workspace/api"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("workspace_source_roots = %v, want %v", got, want)
+		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success":    true,
 			"session_id": "sess-456",
@@ -499,7 +512,7 @@ func TestLoadSession_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456", nil)
+	err := c.LoadSession(ctx, "sess-456", nil, []string{"/workspace", "/workspace/api"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

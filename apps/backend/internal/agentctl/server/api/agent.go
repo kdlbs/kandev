@@ -68,8 +68,9 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID  string            `json:"session_id"`
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	SessionID            string            `json:"session_id"`
+	McpServers           []types.McpServer `json:"mcp_servers,omitempty"`
+	WorkspaceSourceRoots []string          `json:"workspace_source_roots,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -596,8 +597,8 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -617,7 +618,13 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
+	var err error
+	if loader, ok := agentAdapter.(adapter.AdditionalDirectoriesSessionLoader); ok && len(s.procMgr.WorkspaceSourceRoots()) > 0 {
+		err = loader.LoadSessionWithAdditionalDirectories(ctx, req.SessionID, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
+	} else {
+		err = agentAdapter.LoadSession(ctx, req.SessionID, mcpServers)
+	}
+	if err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
@@ -628,7 +635,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:    true,
 		SessionID:  req.SessionID,
-		ModelState: sessionModelState(adapter),
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
 }

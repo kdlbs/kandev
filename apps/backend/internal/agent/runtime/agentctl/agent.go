@@ -141,11 +141,12 @@ func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []type
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
-func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer, sourceRoots ...[]string) error {
 	payload := struct {
-		SessionID  string            `json:"session_id"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{SessionID: sessionID, McpServers: mcpServers}
+		SessionID            string            `json:"session_id"`
+		McpServers           []types.McpServer `json:"mcp_servers,omitempty"`
+		WorkspaceSourceRoots []string          `json:"workspace_source_roots,omitempty"`
+	}{SessionID: sessionID, McpServers: mcpServers, WorkspaceSourceRoots: firstSourceRoots(sourceRoots)}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
