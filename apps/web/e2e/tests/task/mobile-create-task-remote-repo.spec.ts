@@ -307,4 +307,51 @@ test.describe("Create task Remote repo picker on mobile", () => {
       "mock-user/duplicate",
     );
   });
+
+  test("keeps an unconfigured provider out of the touch picker", async ({
+    apiClient,
+    seedData,
+    testPage,
+    prCapture,
+  }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddRepos("mock-user", [
+      {
+        full_name: "mock-user/phone-alpha",
+        owner: "mock-user",
+        name: "phone-alpha",
+        private: false,
+      },
+    ]);
+    let gitLabProjectRequests = 0;
+    await testPage.route("**/api/v1/gitlab/projects?*", async (route) => {
+      gitLabProjectRequests += 1;
+      await route.continue();
+    });
+
+    await openRemotePicker(testPage);
+
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/phone-alpha" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
+    await expect(testPage.getByTestId("remote-repo-input")).toBeVisible();
+    expect(gitLabProjectRequests).toBe(0);
+    await prCapture.screenshot("remote-repository-picker-mobile", {
+      caption: "Mobile remote picker with an unconfigured provider hidden",
+    });
+
+    await testPage
+      .getByTestId("remote-repo-option")
+      .filter({ hasText: "mock-user/phone-alpha" })
+      .tap();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "mock-user/phone-alpha",
+    );
+    await expectNoDocumentHorizontalOverflow(testPage);
+  });
 });

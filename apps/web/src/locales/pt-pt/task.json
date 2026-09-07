@@ -1958,6 +1958,7 @@
   "modelSelectionReasonCatalogEmpty": "O executor não anunciou um catálogo de modelos.",
   "modelSelectionReasonFallbackNotAdvertised": "O modelo alternativo guardado não foi anunciado pelo executor.",
   "modelSelectionReasonRequestedNotAdvertised": "O modelo guardado não foi anunciado pelo executor.",
+  "modelSelectionReasonUniqueVariation": "O executor aplicou a única variação anunciada do modelo guardado.",
   "modelSelectionReasonUnknown": "{{reason}}",
   "modelSelectionReasonUnsupported": "O executor não suporta seleção de modelo.",
   "modelSelectionRemediationAgentVersion": "Verifique a versão do agente no executor.",

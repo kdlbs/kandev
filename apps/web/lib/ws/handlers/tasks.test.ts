@@ -541,6 +541,7 @@ describe("task.updated repository clearing", () => {
 describe("task.updated executor preservation", () => {
   const executorMetadata = {
     primaryExecutorId: "executor-1",
+    primaryExecutorProfileId: "profile-1",
     primaryExecutorType: "worktree",
     primaryExecutorName: "Worktree",
     isRemoteExecutor: false,
@@ -605,6 +606,7 @@ describe("task.updated executor preservation", () => {
     expect(store.getState().kanban.tasks[0]).toMatchObject({
       primarySessionId: undefined,
       primaryExecutorId: undefined,
+      primaryExecutorProfileId: undefined,
       primaryExecutorType: undefined,
       primaryExecutorName: undefined,
       isRemoteExecutor: false,

@@ -137,6 +137,18 @@ type TerminalClarificationCanceller interface {
 	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 }
 
+// ParkedProjectionCanceller clears the orchestrator's in-memory
+// parked_on_background_work projection (spec: docs/specs/disambiguate-waiting)
+// for a session terminated through a task service-owned bulk path — archive's
+// batch session cancellation and delete's cascaded session removal — neither
+// of which goes through the orchestrator's own per-session state-transition
+// chokepoint. newState mirrors the D8 session-state term: pass the session's
+// new terminal state (e.g. CANCELLED) for archive, or "" for delete, matching
+// the same convention the orchestrator uses for its own session-deleted path.
+type ParkedProjectionCanceller interface {
+	ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -399,6 +411,7 @@ type Service struct {
 	canvasCleanup                   CanvasCleanup
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
+	parkedProjectionCanceller       ParkedProjectionCanceller
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -439,6 +452,12 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
+	// taskParkedProvider resolves the task-level parked_on_background_work
+	// OR-aggregate and its own monotonic revision (satisfied by the
+	// orchestrator; spec: docs/specs/disambiguate-waiting/spec.md). Carried on
+	// task.updated events. Optional — unset omits the field's live update path
+	// and task.updated payloads read false/0/0, matching D9's defaults.
+	taskParkedProvider TaskParkedProvider
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
@@ -635,6 +654,14 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 // transitions owned by the task service.
 func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
 	s.clarificationCanceller = canceller
+}
+
+// SetParkedProjectionCanceller wires parked-projection cleanup (orchestrator)
+// for session terminations driven by the task service's own bulk paths —
+// archive cancellation and delete cascade — which never pass through the
+// orchestrator's per-session state-transition chokepoint.
+func (s *Service) SetParkedProjectionCanceller(canceller ParkedProjectionCanceller) {
+	s.parkedProjectionCanceller = canceller
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe
