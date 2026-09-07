@@ -3,6 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
 
+const responsive = vi.hoisted(() => ({
+  usesDesktopWorkbench: true,
+  isFinePointer: true,
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
+
 const VIEW: SidebarView = {
   id: "view-all",
   name: "All tasks",
@@ -55,6 +64,8 @@ afterEach(() => {
   vi.clearAllMocks();
   state.sidebarViews.views = [VIEW];
   state.sidebarViews.activeViewId = VIEW.id;
+  responsive.usesDesktopWorkbench = true;
+  responsive.isFinePointer = true;
 });
 
 describe("SidebarFilterPopover task-row editor", () => {
@@ -81,6 +92,26 @@ describe("SidebarFilterPopover task-row editor", () => {
 
     await waitFor(() => expect(state.deleteSidebarView).toHaveBeenCalledWith(VIEW.id));
     expect(state.deleteSidebarView).toHaveBeenCalledOnce();
+  });
+
+  it("keeps deletion touch-reachable in a phone drawer with a fine pointer", async () => {
+    responsive.usesDesktopWorkbench = false;
+    responsive.isFinePointer = true;
+    state.sidebarViews.views = [VIEW, SECOND_VIEW];
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const deleteButton = screen.getByTestId("view-delete-button");
+    expect(deleteButton.className).toContain("min-h-11");
+    fireEvent.click(deleteButton);
+
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+    expect(await screen.findByRole("group", { name: "Delete All tasks?" })).toBeTruthy();
   });
 
   it("keeps view settings collapsed until the user opens them", () => {

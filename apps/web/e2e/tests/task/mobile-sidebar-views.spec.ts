@@ -240,7 +240,22 @@ test.describe("Mobile sidebar — view system", () => {
     await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
     const deleteDrawer = testPage.getByTestId("sidebar-filter-drawer");
     const deleteEditor = deleteDrawer.getByTestId("sidebar-filter-popover");
-    await deleteEditor.getByTestId("view-delete-button").tap();
+    const deleteButton = deleteEditor.getByTestId("view-delete-button");
+    await deleteButton.scrollIntoViewIfNeeded();
+    const deleteButtonBox = await deleteButton.boundingBox();
+    expect(deleteButtonBox).not.toBeNull();
+    expect(deleteButtonBox!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await deleteButton.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || (hit !== null && element.contains(hit));
+      }),
+    ).toBe(true);
+    await deleteButton.tap();
     const confirmation = deleteEditor.getByTestId("saved-task-view-delete-confirmation");
     await expect(confirmation).toHaveAccessibleName("Delete New view?");
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(2);

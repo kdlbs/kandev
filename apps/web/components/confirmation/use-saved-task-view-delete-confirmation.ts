@@ -35,6 +35,7 @@ export function useSavedTaskViewDeleteConfirmation<T extends HTMLElement = HTMLE
   function request(targetToDelete: SavedTaskViewDeleteTarget) {
     anchorIdRef.current = targetToDelete.id;
     const registeredAnchor = anchorsRef.current.get(targetToDelete.id);
+    // Preserve a directly bound anchor when a surface does not register keyed anchors.
     if (registeredAnchor) anchorRef.current = registeredAnchor;
     setRequestedTarget(targetToDelete);
   }

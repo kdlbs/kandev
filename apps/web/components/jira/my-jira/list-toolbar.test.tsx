@@ -61,7 +61,7 @@ describe("Jira ListToolbar saved views", () => {
     expect(onDeleteView).not.toHaveBeenCalled();
     const confirmation = screen.getByRole("group", { name: "Delete Sprint bugs?" });
     expect(within(confirmation).getByRole("button", { name: "Cancel" }).className).toContain(
-      "h-12",
+      "h-11",
     );
     fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
     expect(onDeleteView).not.toHaveBeenCalled();

@@ -21,8 +21,8 @@ describe("InlineConfirmActions", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })),
     );
-    expect(screen.getByRole("button", { name: "Delete" }).className).toContain("h-12");
-    expect(screen.getByRole("button", { name: "Delete" }).className).toContain("min-w-12");
+    expect(screen.getByRole("button", { name: "Delete" }).className).toContain("h-11");
+    expect(screen.getByRole("button", { name: "Delete" }).className).toContain("min-w-11");
   });
 
   it("cancels on Escape without invoking the destructive action", () => {

@@ -110,7 +110,7 @@ describe("ThreadsViewControls", () => {
     expect(state.deleteThreadView).not.toHaveBeenCalled();
     const confirmation = screen.getByRole("group", { name: "Delete All threads?" });
     expect(within(confirmation).getByRole("button", { name: "Cancel" }).className).toContain(
-      "h-12",
+      "h-11",
     );
     fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID).dataset.state).toBe("open");

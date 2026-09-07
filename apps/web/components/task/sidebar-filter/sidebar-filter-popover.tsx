@@ -61,9 +61,10 @@ export function SidebarFilterPopover({
   const activeView: SidebarView | undefined = views.find((view) => view.id === activeViewId);
   const current = createSidebarViewEditorCurrent(activeView, storedDraft);
   const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
+  const usesInlineDeleteConfirmation = !usesDesktopWorkbench || !isFinePointer;
 
   const inlineDeleteConfirmation =
-    !isFinePointer && deletion.target ? (
+    usesInlineDeleteConfirmation && deletion.target ? (
       <SavedTaskViewDeleteConfirmation
         target={deletion.target}
         presentation="inline"
@@ -88,6 +89,7 @@ export function SidebarFilterPopover({
       deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) });
     },
     deleteAnchorRef: deletion.anchorRef,
+    deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
     deleteConfirmation: inlineDeleteConfirmation,
     renameRequestedViewId,
     onRenameRequestHandled,

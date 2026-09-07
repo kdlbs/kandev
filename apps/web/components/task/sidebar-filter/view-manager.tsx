@@ -26,6 +26,7 @@ type HeaderProps = {
   onDiscard: () => void;
   onDelete: () => void;
   deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteDensity?: "compact" | "touch";
   deleteConfirmation?: ReactNode;
   renameRequestedViewId?: string | null;
   onRenameRequestHandled?: (viewId: string) => void;
@@ -236,6 +237,7 @@ function ViewActions({
   onDiscard,
   onDelete,
   deleteAnchorRef,
+  deleteDensity = "compact",
 }: {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
@@ -246,6 +248,7 @@ function ViewActions({
   onDiscard: () => void;
   onDelete: () => void;
   deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteDensity?: "compact" | "touch";
 }) {
   const { t } = useTranslation();
   const canOverwrite = hasDraft && !!activeView;
@@ -305,7 +308,7 @@ function ViewActions({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-6 cursor-pointer text-xs text-destructive"
+          className={`${deleteDensity === "touch" ? "min-h-11" : "h-6"} cursor-pointer text-xs text-destructive`}
           onClick={onDelete}
           data-testid="view-delete-button"
         >
