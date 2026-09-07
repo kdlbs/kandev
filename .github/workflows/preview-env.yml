@@ -85,13 +85,20 @@ jobs:
     permissions: {}
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.workflow_sha }}
-          fetch-depth: 1
-          token: ""
-          persist-credentials: false
+      - name: Check out immutable preview command source without credentials
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.workflow_sha }}
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_ASKPASS: /bin/false
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${REPOSITORY}.git"
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --depth=1 origin "$REF"
+          git -C "$GITHUB_WORKSPACE" checkout --detach FETCH_HEAD
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -150,14 +157,22 @@ jobs:
         with:
           node-version: "24"
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          # The fork controls its product source and build hooks. This job has no
-          # repository or deployment credentials.
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          token: ""
-          persist-credentials: false
+      - name: Check out fork source without credentials
+        # The fork controls its product source and build hooks. This job has no
+        # repository or deployment credentials.
+        env:
+          REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REF: ${{ github.event.pull_request.head.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_ASKPASS: /bin/false
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${REPOSITORY}.git"
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --depth=1 origin "$REF"
+          git -C "$GITHUB_WORKSPACE" checkout --detach FETCH_HEAD
 
       - name: Install frontend dependencies
         env:

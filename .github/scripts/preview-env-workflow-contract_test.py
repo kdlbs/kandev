@@ -41,7 +41,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
             deploy_job,
         )
-        self.assertEqual(workflow.count("persist-credentials: false"), 8)
+        self.assertEqual(workflow.count("persist-credentials: false"), 6)
 
     def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -89,7 +89,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         deploy_job = workflow_job(workflow, "deploy-fork")
 
         self.assertIn("permissions: {}", build_job)
-        self.assertIn('token: ""', build_job)
+        self.assertNotIn('token: ""', build_job)
         self.assertIn("github.event.pull_request.head.repo.full_name", build_job)
         self.assertIn("pnpm -C apps install --frozen-lockfile", build_job)
         self.assertIn("pnpm -C apps --filter @kandev/web build", build_job)
@@ -138,17 +138,8 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         package_job = workflow_job(workflow, "package-fork-preview")
 
         self.assertIn("permissions: {}", trusted_build)
-        self.assertRegex(
-            trusted_build,
-            re.compile(
-                r"repository: \$\{\{ github\.repository \}\}\n"
-                r"\s+"
-                r"ref: \$\{\{ github\.workflow_sha \}\}\n"
-                r"\s+fetch-depth: 1\n"
-                r"\s+token: \"\"\n"
-                r"\s+persist-credentials: false"
-            ),
-        )
+        self.assertIn("REPOSITORY: ${{ github.repository }}", trusted_build)
+        self.assertIn("REF: ${{ github.workflow_sha }}", trusted_build)
         self.assertIn(
             'go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview',
             trusted_build,
@@ -172,6 +163,21 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         self.assertIn('env -i PATH="$TRUSTED_PATH"', package_job)
         self.assertIn('"$RUNNER_TEMP/kandev-preview-deploy" package', package_job)
         self.assertIn("--skip-web-build", package_job)
+
+    def test_tokenless_checkouts_use_noninteractive_public_git_fetches(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        for name in ("build-trusted-preview-cli", "build-fork-preview"):
+            job = workflow_job(workflow, name)
+            self.assertNotIn("actions/checkout", job)
+            self.assertIn("git init", job)
+            self.assertIn("-c credential.helper= fetch --depth=1 origin", job)
+            self.assertIn("checkout --detach FETCH_HEAD", job)
+            self.assertIn('GIT_TERMINAL_PROMPT: "0"', job)
+            self.assertIn("GIT_ASKPASS: /bin/false", job)
+            self.assertIn("-c credential.helper=", job)
+            self.assertIn('GITHUB_TOKEN: ""', job)
+            self.assertIn('GH_TOKEN: ""', job)
 
     def test_fork_build_subprocesses_cannot_inherit_deployment_credentials(self) -> None:
         build_source = PREVIEW_BUILD.read_text(encoding="utf-8")
