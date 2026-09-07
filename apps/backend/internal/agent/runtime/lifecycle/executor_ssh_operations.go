@@ -739,6 +739,13 @@ func setSSHControlAuthorization(req *http.Request, token string) {
 	}
 }
 
+// errSSHAgentctlHandshakeRejected marks a handshake that reached a listener —
+// this launch's own freshly-started agentctl or a stale one left on the same
+// port — that rejected the nonce. Mirrors the errSSHAgentctlPortInUse idiom:
+// the caller uses errors.Is to decide whether a fresh instance is worth
+// retrying, as opposed to a transport failure or a malformed response.
+var errSSHAgentctlHandshakeRejected = errors.New("ssh: agentctl handshake rejected")
+
 func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
 	body, err := json.Marshal(map[string]string{"nonce": nonce})
 	if err != nil {
@@ -757,7 +764,7 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ssh: agentctl handshake returned %d", resp.StatusCode)
+		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
 	}
 	var result struct {
 		Token string `json:"token"`
@@ -766,6 +773,48 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", errors.New("ssh: agentctl handshake returned no token")
 	}
 	return result.Token, nil
+}
+
+// readRemoteAgentctlLogTail best-effort reads the tail of the current
+// session's agentctl.log, for attaching to a diagnosable error. Errors are
+// swallowed — a missing or unreadable log must not mask the real failure.
+func readRemoteAgentctlLogTail(ctx context.Context, client *ssh.Client, sessionDir string) string {
+	tail, _, _ := runSSHCommand(ctx, client,
+		"tail -n "+strconv.Itoa(sshAgentctlLogTailLines)+" "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return tail
+}
+
+const sshAgentctlHandshakeAttempts = 3
+
+// retryAgentctlHandshake calls attempt up to sshAgentctlHandshakeAttempts
+// times, tearing down and retrying only when attempt fails with
+// errSSHAgentctlHandshakeRejected — the observed shape when a handshake
+// reaches a listener other than the agentctl this launch just started (a
+// stale process left on the picked port). Any other failure (bind
+// exhaustion, transport, a malformed response) is terminal and returned
+// immediately after tearing down anything attempt already started (pid > 0).
+func retryAgentctlHandshake(
+	attempt func() (port, pid int, token string, err error),
+	teardown func(port, pid int),
+) (port, pid int, token string, err error) {
+	var lastErr error
+	for range sshAgentctlHandshakeAttempts {
+		port, pid, token, err = attempt()
+		if err == nil {
+			return port, pid, token, nil
+		}
+		if pid > 0 {
+			teardown(port, pid)
+		}
+		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			return 0, 0, "", err
+		}
+		lastErr = err
+	}
+	return 0, 0, "", fmt.Errorf(
+		"ssh: agentctl exhausted %d handshake attempts: %w",
+		sshAgentctlHandshakeAttempts, lastErr,
+	)
 }
 
 func remoteControlHTTPClient(client *ssh.Client, controlPort int) *http.Client {

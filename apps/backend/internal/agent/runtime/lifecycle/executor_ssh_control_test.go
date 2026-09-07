@@ -63,6 +63,9 @@ func TestRemoteControlHandshake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "403") {
 			t.Fatalf("error = %v, want the status code", err)
 		}
+		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, want it to wrap errSSHAgentctlHandshakeRejected so the launch retry can classify it", err)
+		}
 	})
 
 	t.Run("empty token is an error", func(t *testing.T) {
@@ -77,6 +80,9 @@ func TestRemoteControlHandshake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no token") {
 			t.Fatalf("error = %v, want missing-token error", err)
 		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, a 200 with a malformed body is not a rejected-listener error", err)
+		}
 	})
 
 	t.Run("unreachable control port is an error", func(t *testing.T) {
@@ -84,6 +90,9 @@ func TestRemoteControlHandshake(t *testing.T) {
 		_, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce")
 		if err == nil || !strings.Contains(err.Error(), "agentctl handshake") {
 			t.Fatalf("error = %v, want dial failure", err)
+		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, a transport failure is not a rejected-listener error", err)
 		}
 	})
 }
