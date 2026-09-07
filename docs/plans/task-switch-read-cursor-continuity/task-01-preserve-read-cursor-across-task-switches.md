@@ -115,3 +115,6 @@ None.
 - Verification passed: 74 focused unit tests, typecheck, scoped ESLint, one
   Chromium E2E, one Mobile Chrome E2E, 30 specification-linter tests, the full
   specification lint, and `git diff --check`.
+- Review remediation: delayed mark-read responses now also require the cached
+  cursor to match the dispatch snapshot, preventing an external hydration from
+  regressing local state. The deferred hydration regression passes locally.

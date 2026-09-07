@@ -107,6 +107,18 @@ function useReadTrackingEffects(params: {
           });
           return;
         }
+        const cachedCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
+        if (cachedCursor !== currentCursor) {
+          finishMarkReadRequest(sessionId, generation);
+          readTrackingDebug("response discarded", {
+            sessionId,
+            generation,
+            reason: "cached-cursor-changed",
+            priorCursor: currentCursor,
+            cachedCursor,
+          });
+          return;
+        }
         finishMarkReadRequest(sessionId, generation);
         updateSessionReadCursor(response.session_id, response.last_read_message_id);
         readTrackingDebug("response applied", {

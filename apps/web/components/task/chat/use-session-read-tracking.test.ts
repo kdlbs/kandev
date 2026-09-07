@@ -352,4 +352,29 @@ describe("useSessionReadTracking — response ordering", () => {
 
     expect(mockUpdateSessionReadCursor).toHaveBeenCalledWith("session-1", "m2");
   });
+
+  it("discards a response when an external hydration advances the cached cursor", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+
+    type MarkReadResult = { session_id: string; last_read_message_id: string };
+    let resolveSessionOne: ((value: MarkReadResult) => void) | undefined;
+    const sessionOneResponse = new Promise<MarkReadResult>((resolve) => {
+      resolveSessionOne = resolve;
+    });
+    mockMarkSessionRead.mockReturnValue(sessionOneResponse);
+
+    renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+
+    // A reconnect or another tab can hydrate a newer cursor while the HTTP
+    // response is in flight. The delayed response must not regress that cache.
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m3" });
+    resolveSessionOne?.({ session_id: "session-1", last_read_message_id: "m2" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateSessionReadCursor).not.toHaveBeenCalled();
+  });
 });
