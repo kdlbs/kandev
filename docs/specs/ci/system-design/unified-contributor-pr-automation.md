@@ -18,9 +18,10 @@ Actions in the `kdlbs/kandev` repository. It covers fork pull request
 authorization, event routing, and the boundaries between review, preview,
 walkthrough generation, publication, and pull request linking.
 
-The design does not change the review providers, the preview command, the
-walkthrough skill, or the application. Those components keep their existing
-contracts after the shared authorization gate changes.
+The design does not change the review providers, the walkthrough skill, or the
+application. It defines the preview command's archive contract for the staged
+fork workflow. Those components keep their existing contracts after the
+shared authorization gate changes.
 
 ## Requirement mapping
 
@@ -38,7 +39,7 @@ contracts after the shared authorization gate changes.
 | --- | --- |
 | `.github/workflows/claude-code-review.yml` | Adds the approval label for allowlisted contributors and runs the existing Claude fork review path. |
 | `.github/workflows/opencode-code-review.yml` | Runs the existing OpenCode fork review path with durable `safe-to-review` authorization. |
-| `.github/workflows/preview-env.yml` | Runs the existing privileged fork preview path. |
+| `.github/workflows/preview-env.yml` | Builds fork input without deployment credentials, packages it with trusted code, and deploys the validated archive. |
 | `.github/workflows/pr-walkthrough.yml` | Generates, publishes, and links walkthroughs for authorized fork and same-repository pull requests. |
 | `.github/workflows/pr-walkthrough-reconcile.yml` | Repairs an existing stale walkthrough callout after an authorized pull request description edit. |
 | `.github/scripts/*workflow_contract_test.py` | Protects job gates, labels, event filters, permissions, and trusted input provenance. |
@@ -138,6 +139,21 @@ The public object key remains
 5. Publication and linking run in separate jobs with their existing minimal
    permissions and credentials.
 
+### Preview flow
+
+1. The fork gate evaluates `safe-to-review` and the direct preview allowlist.
+2. A trusted runner builds the preview command from `github.workflow_sha`.
+3. A separate tokenless runner fetches the exact contributor head and builds
+   the frontend. It uploads source and static assets as a run-scoped artifact.
+4. A fresh tokenless runner downloads both inputs and invokes only the trusted
+   preview command. The command builds the backend and writes one archive.
+5. The package job writes a SHA-256 file. A fresh deploy job checks the digest
+   and archive table, then runs trusted base code with `--artifact` and the
+   Sprites credential.
+6. The deploy command fails closed when an explicit archive is missing or is
+   not a regular file. Build-on-demand remains available only when no archive
+   is supplied, such as the same-repository path.
+
 ## Failure and recovery
 
 - Missing, malformed, or non-matching allowlists fail closed.
@@ -155,6 +171,9 @@ The public object key remains
 - A description-write race causes a fresh merge and bounded retry. A writer
   reports failure if its post-write readback does not contain its expected
   marker state.
+- A missing or non-regular explicit preview archive fails before build
+  commands or deployment credentials are used. A missing archive cannot cause
+  the deploy command to build contributor source.
 - Contract tests fail when the old label appears in an active authorization
   expression or when a privileged job loses its trust or permission boundary.
 
@@ -182,10 +201,13 @@ trigger.
   credentials or pull request write permission.
 - The review workflows retain their existing read-only agent policies and
   advisory posting boundaries.
-- The preview workflow intentionally reuses the existing privileged fork path.
-  That path checks out the contributor head and runs `go run ./cmd/preview
-  deploy` with `SPRITES_API_TOKEN` and `GITHUB_TOKEN`. `safe-to-review` is an
-  explicit maintainer trust decision for that execution.
+- The preview workflow builds contributor input in a tokenless job. A separate
+  tokenless package job runs only the trusted preview command from
+  `github.workflow_sha` with a restricted environment.
+- The deploy job checks out only `github.workflow_sha`, verifies the archive
+  digest and table, and passes the archive to the trusted command. Only the
+  fork deploy job receives `SPRITES_API_TOKEN` in this flow; it does not receive
+  contributor source or run contributor lifecycle scripts.
 - Publication receives only the bucket-scoped R2 credentials needed for its
   upload. Linking receives only the existing pull request write permission and
   trusted helper.
@@ -207,6 +229,7 @@ trigger.
 ## Related decisions
 
 - [Use one maintainer approval label for contributor PR automation](../../../decisions/2026-08-24-unified-fork-approval-label.md)
+- [Isolate contributor preview builds from deployment credentials](../../../decisions/2026-09-07-isolate-fork-preview-builds.md)
 - [Persist Fork Approval Labels Across Pushes](../../../decisions/2026-08-22-persistent-fork-approval-labels.md)
 - [Use the Claude Allowlist as a Trusted Preview Gate](../../../decisions/2026-08-07-claude-allowlist-label-bridge.md)
 - [Use a Filesystem Contract for PR Walkthrough Runners](../../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md)

@@ -301,6 +301,10 @@ type mockAgentManager struct {
 	startAgentProcessErr   error
 	startAgentProcessFunc  func(context.Context, string) error
 
+	// probeBackgroundWorkloadsFunc, when non-nil, overrides
+	// ProbeBackgroundWorkloads's default Unknown/nil response.
+	probeBackgroundWorkloadsFunc func(context.Context, string) (client.ProbeResult, error)
+
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 	stopAgentWithReasonErr  error           // optional error to return from StopAgentWithReason
@@ -599,6 +603,12 @@ func (m *mockAgentManager) CancelPermissionBySessionID(ctx context.Context, sess
 		return m.cancelPermissionFunc(ctx, sessionID, requestID, pendingID)
 	}
 	return nil, nil
+}
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	if m.probeBackgroundWorkloadsFunc != nil {
+		return m.probeBackgroundWorkloadsFunc(ctx, sessionID)
+	}
+	return client.ProbeResultUnknown, nil
 }
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	if m.isAgentRunningFn != nil {
@@ -3105,6 +3115,53 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 		if updated.State != models.TaskSessionStateCancelled {
 			t.Errorf("expected state %q, got %q", models.TaskSessionStateCancelled, updated.State)
 		}
+	})
+
+	t.Run("closes a cancelled auto-fix turn without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateTaskSessionState(
+			ctx, "s1", models.TaskSessionStateCancelled, "operator stopped",
+		))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed auto-fix turn: %v", err)
+		}
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-cancelled-auto-fix",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls,
+			"cancelled user stops must not rearm the auto-fix attempt")
+	})
+
+	t.Run("closes a turn for a durable stop owner without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed owned auto-fix turn: %v", err)
+		}
+		svc.RegisterExecutionStopOwner("s1", "exec-owned-stop", false)
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-owned-stop",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls)
 	})
 
 	// Office fire-and-forget regression: when the office turn-complete

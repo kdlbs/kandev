@@ -601,6 +601,47 @@ type Service struct {
 	sessionPromptCheck  func(ctx context.Context, sessionID string) error
 	taskPromptCheck     func(ctx context.Context, taskID string) error
 
+	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
+	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
+	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
+	// once at construction; see LoadBackgroundProbeConfig.
+	backgroundProbeConfig BackgroundProbeConfig
+
+	// backgroundProbe is the parked-projection's BackgroundProbe port
+	// (task-05). Defaults to an adapter over ProbeBackgroundWorkloads;
+	// overridable via SetBackgroundProbe for tests.
+	backgroundProbe BackgroundProbe
+
+	// parkedMu guards parkedStates, the per-session parked-projection state
+	// (spec: Data model -> Parked projection). One critical section covers
+	// the boolean, its revision, and the last probe sample together (D1),
+	// mirroring CancellationPendingSnapshot (task_operations.go).
+	parkedMu     sync.Mutex
+	parkedStates map[string]*parkedSessionState
+
+	// taskParkedStates is the task-level parked_on_background_work OR-aggregate
+	// (spec: Data model -> Task-level projection), keyed by task ID. Guarded by
+	// parkedMu — the same critical section as parkedStates — because computing
+	// the OR reads every session currently tracked for a task. Never derived by
+	// max()-ing member sessions' revisions; it carries its own monotonic
+	// counter that increments only when the aggregated boolean itself flips.
+	taskParkedStates map[string]*taskParkedState
+
+	// parkedEpoch is this process's start time in Unix nanoseconds, fixed for
+	// the process's life and identical on every parked carrier (spec: Data
+	// model -> Revision epoch). It is what lets a client tell "the backend
+	// restarted" apart from "a stale frame arrived late".
+	parkedEpoch uint64
+
+	// parkedLoopMu guards the sampling-loop worker lifecycle, mirroring
+	// sendNowCtx/sendNowCancel/sendNowWorkers: lazily created, cancelled and
+	// drained on Stop (AC-53's backend-shutdown exit).
+	parkedLoopMu      sync.Mutex
+	parkedLoopCtx     context.Context
+	parkedLoopCancel  context.CancelFunc
+	parkedLoopStopped bool
+	parkedLoopWorkers sync.WaitGroup
+
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
@@ -1138,6 +1179,16 @@ type Service struct {
 	cancelOperationsMu sync.Mutex
 	cancelOperations   map[string]*cancellationOperationState
 
+	// observedDetachedMu / observedDetached track, per session, whether a
+	// registered launch recogniser attested a Detached=true background-shell
+	// launch during the turn that is currently settling (D3). Set by
+	// trackBackgroundToolUpdate's terminal-detached-shell branch; cleared on
+	// EventTypeTurnStarted, which agentctl emits on every session/prompt
+	// dispatch (human or synthetic self-resume) — the single turn boundary
+	// this feature uses for both processes. Runtime-only, never persisted.
+	observedDetachedMu sync.Mutex
+	observedDetached   map[string]bool
+
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
 	// A backoff timer per session re-drives the failed prompt; cancelled on
@@ -1406,6 +1457,7 @@ func NewService(
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
+	parkedLoopCtx, parkedLoopCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1430,6 +1482,12 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
+		parkedStates:                 make(map[string]*parkedSessionState),
+		taskParkedStates:             make(map[string]*taskParkedState),
+		parkedEpoch:                  uint64(time.Now().UnixNano()),
+		parkedLoopCtx:                parkedLoopCtx,
+		parkedLoopCancel:             parkedLoopCancel,
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
@@ -1442,6 +1500,7 @@ func NewService(
 			s.publishTaskQueueStatusEvent(ctx, taskID, "")
 		})
 	}
+	s.backgroundProbe = serviceBackgroundProbeAdapter{s: s}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
@@ -2679,6 +2738,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetSendNowWorkers()
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
+	s.resetParkedSamplingWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2698,6 +2758,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
@@ -2708,6 +2769,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// snapshot of "starting" routes.
 	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
+	// Executor reconciliation abandons turns left open by a pre-crash active
+	// session. Run the CI attempt sweep again after that transition so a
+	// running auto-fix reservation can become retryable on the same startup.
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
@@ -2861,6 +2926,7 @@ func (s *Service) Stop() error {
 	s.cancelAllTransientRetries()
 	s.stopSendNowWorkers()
 	s.stopCIAutomationWorkers()
+	s.stopParkedSamplingLoops()
 
 	if len(errs) > 0 {
 		return errs[0]

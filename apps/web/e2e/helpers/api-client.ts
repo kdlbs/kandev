@@ -1192,6 +1192,9 @@ export class ApiClient {
     sidebar_views?: unknown[];
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
+    thread_views?: unknown[];
+    thread_active_view_id?: string;
+    thread_view_draft?: unknown;
     saved_layouts?: unknown[];
     app_status_bar_enabled?: boolean;
     lsp_auto_start_languages?: string[];
@@ -1375,6 +1378,38 @@ export class ApiClient {
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
+  }
+
+  /**
+   * Scripts a session's BackgroundProbe answer sequence (spec
+   * docs/specs/disambiguate-waiting/spec.md, "Probe port (backend)"). Each
+   * probe call for the session consumes the next entry in order and holds at
+   * the last one once exhausted — mirrors the backend's own
+   * ScriptedBackgroundProbe test double. Only mounted when the backend was
+   * started with KANDEV_E2E_MOCK=true.
+   */
+  async scriptBackgroundProbe(
+    sessionId: string,
+    results: Array<"live" | "settled" | "unknown">,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/_test/background-probe", {
+      session_id: sessionId,
+      results,
+    });
+  }
+
+  /**
+   * Reads back how many times the scripted BackgroundProbe has been called
+   * for a session since its last scriptBackgroundProbe call (AC-73) — lets a
+   * test assert a minimum sample count was actually reached instead of only
+   * checking the affordance's current visibility.
+   */
+  async backgroundProbeCallCount(sessionId: string): Promise<number> {
+    const { calls } = await this.request<{ calls: number }>(
+      "GET",
+      `/api/v1/_test/background-probe/${sessionId}/calls`,
+    );
+    return calls;
   }
 
   /**
