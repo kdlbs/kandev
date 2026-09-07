@@ -687,7 +687,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 	}
 	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
-		cleanupErr := rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, true)
+		cleanupErr := stopRuntimeInstanceAndRelease(context.WithoutCancel(ctx), rt, runtimeInstance, true)
 		return nil, errors.Join(fmt.Errorf("install clone Git metadata policy: %w", err), cleanupErr)
 	}
 	m.logGitMetadataPolicyInstalled(taskID, info.TaskEnvironmentID, info.ExecutorType, info.WorkspaceRepositories, preparation.request, rt)

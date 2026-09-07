@@ -58,6 +58,7 @@ type branchMaterialization struct {
 	environment  *models.TaskEnvironment
 	session      *models.TaskSession
 	worktree     *worktree.Worktree
+	taskRepoID   string
 	repositoryID string
 	slug         string
 	taskID       string
@@ -115,7 +116,11 @@ func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID,
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
 		zap.String(branchFieldKey, wt.Branch))
-	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
+	return &branchMaterialization{
+		environment: env, session: session, worktree: wt,
+		taskRepoID: taskRepositoryID, repositoryID: req.RepositoryID,
+		slug: slug, taskID: taskID,
+	}, nil
 }
 
 func (b *branchMaterializer) finalize(materialization *branchMaterialization, ctx context.Context) string {

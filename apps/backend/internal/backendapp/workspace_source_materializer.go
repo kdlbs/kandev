@@ -708,7 +708,7 @@ func workspaceSourceInventoryRows(
 	materialized := make(map[string]*branchMaterialization, len(branchMaterializations))
 	for _, branch := range branchMaterializations {
 		if branch != nil && branch.repositoryID != "" {
-			materialized[branch.repositoryID] = branch
+			materialized[workspaceSourceMaterializationKey(branch.taskRepoID, branch.repositoryID, branch.slug)] = branch
 		}
 	}
 	rows := make([]*models.TaskEnvironmentRepo, 0, len(batch.Sources))
@@ -734,7 +734,7 @@ func workspaceSourceInventoryRow(
 		return nil, false
 	}
 	branchSlug := workspaceSourceBranchSlug(taskRepository)
-	branch := materialized[taskRepository.RepositoryID]
+	branch := materialized[workspaceSourceMaterializationKey(taskRepository.ID, taskRepository.RepositoryID, branchSlug)]
 	if executorType == string(models.ExecutorTypeWorktree) && branch == nil {
 		// A worktree source that was not materialized has no physical checkout
 		// to publish. The next launch must prepare it first.
@@ -753,6 +753,13 @@ func workspaceSourceInventoryRow(
 		row.BranchSlug = branch.slug
 	}
 	return row, true
+}
+
+func workspaceSourceMaterializationKey(taskRepositoryID, repositoryID, branchSlug string) string {
+	if taskRepositoryID != "" {
+		return "task-repository:" + taskRepositoryID
+	}
+	return "repository:" + environmentRepoInventoryKey(repositoryID, branchSlug)
 }
 
 func workspaceSourceBranchSlug(taskRepository *models.TaskRepository) string {

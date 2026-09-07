@@ -645,6 +645,41 @@ func TestWorkspaceSourceMaterializer_RebindFailureRestoresEarlierSessionsInRever
 	}
 }
 
+func TestWorkspaceSourceInventoryRowsKeepsBranchesFromSameRepository(t *testing.T) {
+	mainBranch := &branchMaterialization{
+		taskRepoID:   "task-repo-main",
+		repositoryID: "repo-1",
+		slug:         "main",
+		worktree:     &worktree.Worktree{ID: "worktree-main", Path: "/task/app-main", Branch: "main"},
+	}
+	featureBranch := &branchMaterialization{
+		taskRepoID:   "task-repo-feature",
+		repositoryID: "repo-1",
+		slug:         "feature-x",
+		worktree:     &worktree.Worktree{ID: "worktree-feature", Path: "/task/app-feature-x", Branch: "feature/x"},
+	}
+	batch := &models.WorkspaceSourceBatch{Sources: []models.WorkspaceSource{
+		{Repository: &models.TaskRepository{ID: "task-repo-main", RepositoryID: "repo-1", BaseBranch: "main"}},
+		{Repository: &models.TaskRepository{ID: "task-repo-feature", RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/x"}},
+	}}
+
+	rows := workspaceSourceInventoryRows(
+		"environment-1", string(models.ExecutorTypeWorktree), batch,
+		[]*branchMaterialization{mainBranch, featureBranch}, nil,
+	)
+	if len(rows) != 2 {
+		t.Fatalf("inventory rows = %d, want two rows: %#v", len(rows), rows)
+	}
+	got := map[string]string{}
+	for _, row := range rows {
+		got[row.BranchSlug] = row.WorktreeID
+	}
+	want := map[string]string{"main": "worktree-main", "feature-x": "worktree-feature"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("inventory worktrees = %#v, want %#v", got, want)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_WorktreeLateFolderFailureEmitsNoMaterializedEvent(t *testing.T) {
 	ctx := context.Background()
 	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)

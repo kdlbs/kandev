@@ -174,6 +174,45 @@ func TestGetOrEnsureExecutionForceCleansRemoteRuntimeWhenReconstructionFails(t *
 	}
 }
 
+func TestGetOrEnsureExecutionReleasesRuntimeInventoryWhenGitMetadataPolicyFails(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	server.attestationErr = true
+	defer server.Close()
+
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-kubernetes": {
+			TaskID: "task-1", SessionID: "session-kubernetes", TaskEnvironmentID: "environment-kubernetes",
+			ExecutorType: string(models.ExecutorTypeKubernetes), WorkspacePath: "/executor/workspace", AgentID: "codex-acp",
+			WorkspaceRepositories: []WorkspaceRepositorySpec{
+				{RepositoryID: "repository-main", RepositoryURL: "https://github.com/acme/main.git", RepoName: "main", BaseBranch: "main"},
+				{RepositoryID: "repository-added", RepositoryURL: "https://github.com/acme/added.git", RepoName: "added", BaseBranch: "main"},
+			},
+		},
+	}}
+	backend := &releaseTrackingLazyMultiRepositoryExecutor{lazyMultiRepositoryExecutor: lazyMultiRepositoryExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameKubernetes},
+			client:       workspaceMaterializationAgentctlClient(t, server.URL),
+		},
+	}}
+	registry := NewExecutorRegistry(newTestLogger())
+	registry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", newTestLogger())
+	mgr.workspaceInfoProvider = provider
+	cleanupManagerStopCh(t, mgr)
+
+	_, err := mgr.GetOrEnsureExecution(context.Background(), "session-kubernetes")
+	if err == nil || !strings.Contains(err.Error(), "install clone Git metadata policy") {
+		t.Fatalf("GetOrEnsureExecution() error = %v, want policy installation failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 || !backend.forceStopped.Load() {
+		t.Fatalf("policy failure cleanup = (count=%d, force=%v), want one forced teardown", got, backend.forceStopped.Load())
+	}
+	if backend.releaseCount != 1 {
+		t.Fatalf("released runtime inventory = %d, want one release", backend.releaseCount)
+	}
+}
+
 type lazyMultiRepositoryExecutor struct{ createInstanceExecutor }
 
 func (*lazyMultiRepositoryExecutor) RequiresCloneURL() bool { return true }
@@ -183,6 +222,23 @@ func (*lazyMultiRepositoryExecutor) PrepareGitMetadataProjection(context.Context
 }
 
 var _ ExecutorBackend = (*lazyMultiRepositoryExecutor)(nil)
+
+type releaseTrackingLazyMultiRepositoryExecutor struct {
+	lazyMultiRepositoryExecutor
+	releaseCount int
+}
+
+func (e *releaseTrackingLazyMultiRepositoryExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	instance, err := e.lazyMultiRepositoryExecutor.CreateInstance(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	instance.ReleaseRuntimeInventory = func(context.Context) error {
+		e.releaseCount++
+		return nil
+	}
+	return instance, nil
+}
 
 func TestPrepareExecutionGitMetadataMarksLazyCloneRequirement(t *testing.T) {
 	info := &WorkspaceInfo{WorkspaceRepositories: []WorkspaceRepositorySpec{{RepositoryPath: "/source", RepoName: "repo"}}}
