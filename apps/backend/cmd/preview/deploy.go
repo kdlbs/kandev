@@ -33,6 +33,18 @@ func runDeploy(ctx context.Context, args []string) int {
 		fmt.Fprintln(os.Stderr, "preview deploy: --repo or GITHUB_REPOSITORY is required")
 		return 2
 	}
+	artifactProvided := *artifact != ""
+	if artifactProvided {
+		exists, err := previewArtifactExists(*artifact)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
+			return 2
+		}
+		if !exists {
+			fmt.Fprintf(os.Stderr, "preview deploy: prebuilt artifact %s does not exist\n", *artifact)
+			return 2
+		}
+	}
 
 	spritesToken := os.Getenv("SPRITES_API_TOKEN")
 	if spritesToken == "" {
@@ -59,7 +71,7 @@ func runDeploy(ctx context.Context, args []string) int {
 		tarPath = filepath.Join(tmpDir, "kandev-preview.tar.gz")
 	}
 
-	previewURL, err := deployArtifacts(ctx, tarPath, spritesToken, spriteName, *port, *skipWebInstall)
+	previewURL, err := deployArtifacts(ctx, tarPath, spritesToken, spriteName, *port, *skipWebInstall, !artifactProvided)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
 		return 1
@@ -79,22 +91,49 @@ func runDeploy(ctx context.Context, args []string) int {
 	return 0
 }
 
-// deployArtifacts builds the bundle, deploys it to the sprite, and returns the public URL.
+// deployArtifacts deploys an archive or builds one when buildIfMissing is true.
 // Using a single client for the full flow avoids redundant auth round-trips.
-func deployArtifacts(ctx context.Context, tarPath, spritesToken, spriteName string, port int, skipWebInstall bool) (string, error) {
+func deployArtifacts(ctx context.Context, tarPath, spritesToken, spriteName string, port int, skipWebInstall, buildIfMissing bool) (string, error) {
+	return deployArtifactsWithHooks(
+		ctx,
+		tarPath,
+		spritesToken,
+		spriteName,
+		port,
+		skipWebInstall,
+		buildIfMissing,
+		buildPreviewArtifact,
+		deployPreviewArtifact,
+	)
+}
+
+type previewArtifactBuilder func(context.Context, string, string, bool, bool) error
+type previewArtifactDeployer func(context.Context, string, string, string, int) (string, error)
+
+func deployArtifactsWithHooks(
+	ctx context.Context,
+	tarPath, spritesToken, spriteName string,
+	port int,
+	skipWebInstall, buildIfMissing bool,
+	build previewArtifactBuilder,
+	deploy previewArtifactDeployer,
+) (string, error) {
 	exists, err := previewArtifactExists(tarPath)
 	if err != nil {
 		return "", err
 	}
 
 	if !exists {
+		if !buildIfMissing {
+			return "", fmt.Errorf("prebuilt artifact %s does not exist", tarPath)
+		}
 		binDir := filepath.Join(filepath.Dir(tarPath), "bin")
-		if err := buildPreviewArtifact(ctx, binDir, tarPath, skipWebInstall, false); err != nil {
+		if err := build(ctx, binDir, tarPath, skipWebInstall, false); err != nil {
 			return "", err
 		}
 	}
 
-	return deployPreviewArtifact(ctx, tarPath, spritesToken, spriteName, port)
+	return deploy(ctx, tarPath, spritesToken, spriteName, port)
 }
 
 func previewArtifactExists(tarPath string) (bool, error) {

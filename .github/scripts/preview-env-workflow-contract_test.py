@@ -146,7 +146,14 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn('GOWORK: "off"', trusted_build)
         self.assertIn("trusted-preview-cli-${{ github.run_id }}", trusted_build)
-        self.assertNotIn("github.event.pull_request.head.repo.full_name", trusted_build)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name != github.repository",
+            trusted_build,
+        )
+        self.assertIn(
+            "contains(github.event.pull_request.labels.*.name, 'safe-to-review')",
+            trusted_build,
+        )
 
         self.assertNotIn("actions/download-artifact", fork_build)
         self.assertNotIn("trusted-preview-cli", fork_build)

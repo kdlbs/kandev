@@ -249,3 +249,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
 | 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |
 | 2026-09-05-bounded-progressive-storage-analysis | [Use bounded progressive storage analysis](2026-09-05-bounded-progressive-storage-analysis.md) | accepted | backend, frontend, protocol | 2026-09-05 |
+| 2026-09-07-isolate-fork-preview-builds | [Isolate contributor preview builds from deployment credentials](2026-09-07-isolate-fork-preview-builds.md) | accepted | infra, workflow, security | 2026-09-07 |
