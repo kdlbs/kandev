@@ -221,7 +221,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, user.IsOperator,
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, dialect.BoolToInt(user.IsOperator),
 		user.CreatedAt, user.UpdatedAt)
 	return err
 }
