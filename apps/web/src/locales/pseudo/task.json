@@ -883,6 +883,7 @@
   "modelSelectionReasonCatalogEmpty": "Ţĥē ēxēćũţōŕ ďĩď ńōţ àďvēŕţĩśē à ḿōďēĺ ćàţàĺōĝ.",
   "modelSelectionReasonFallbackNotAdvertised": "Ţĥē śàvēď ƒàĺĺƀàćķ ḿōďēĺ ŵàś ńōţ àďvēŕţĩśēď ƀŷ ţĥē ēxēćũţōŕ.",
   "modelSelectionReasonRequestedNotAdvertised": "Ţĥē śàvēď ḿōďēĺ ŵàś ńōţ àďvēŕţĩśēď ƀŷ ţĥē ēxēćũţōŕ.",
+  "modelSelectionReasonUniqueVariation": "Ţĥē ēxēćũţōŕ àƥƥĺĩēď ţĥē ōńĺŷ àďvēŕţĩśēď vàŕĩàţĩōń ōƒ ţĥē śàvēď ḿōďēĺ.",
   "modelSelectionReasonUnknown": "{{reason}}",
   "modelSelectionReasonUnsupported": "Ţĥē ēxēćũţōŕ ďōēś ńōţ śũƥƥōŕţ ḿōďēĺ śēĺēćţĩōń.",
   "modelSelectionRemediationAgentVersion": "Ćĥēćķ ţĥē àĝēńţ vēŕśĩōń ĩń ţĥē ēxēćũţōŕ.",
