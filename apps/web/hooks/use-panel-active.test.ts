@@ -10,34 +10,53 @@ afterEach(() => {
 
 type FakePanelApi = {
   isActive: boolean;
+  isVisible: boolean;
   onDidActiveChange: (cb: (event: { isActive: boolean }) => void) => { dispose: () => void };
+  onDidVisibilityChange: (cb: (event: { isVisible: boolean }) => void) => {
+    dispose: () => void;
+  };
 };
 
 type FakeApiHandle = {
   fakeApi: FakePanelApi;
   fireActiveChange: (isActive: boolean) => void;
+  fireVisibilityChange: (isVisible: boolean) => void;
 };
 
-function makeFakeApi(initialIsActive: boolean): FakeApiHandle {
-  let listener: ((event: { isActive: boolean }) => void) | null = null;
+function makeFakeApi(initialIsActive: boolean, initialIsVisible = initialIsActive): FakeApiHandle {
+  let activeListener: ((event: { isActive: boolean }) => void) | null = null;
+  let visibilityListener: ((event: { isVisible: boolean }) => void) | null = null;
   const fakeApi: FakePanelApi = {
     isActive: initialIsActive,
+    isVisible: initialIsVisible,
     onDidActiveChange: (cb) => {
-      listener = cb;
-      return { dispose: () => (listener = null) };
+      activeListener = cb;
+      return { dispose: () => (activeListener = null) };
+    },
+    onDidVisibilityChange: (cb) => {
+      visibilityListener = cb;
+      return { dispose: () => (visibilityListener = null) };
     },
   };
   return {
     fakeApi,
     fireActiveChange: (isActive: boolean) => {
       fakeApi.isActive = isActive;
-      listener?.({ isActive });
+      activeListener?.({ isActive });
+    },
+    fireVisibilityChange: (isVisible: boolean) => {
+      fakeApi.isVisible = isVisible;
+      visibilityListener?.({ isVisible });
     },
   };
 }
 
-function acquirePanel(panelId: string, initialIsActive: boolean): FakeApiHandle {
-  const handle = makeFakeApi(initialIsActive);
+function acquirePanel(
+  panelId: string,
+  initialIsActive: boolean,
+  initialIsVisible = initialIsActive,
+): FakeApiHandle {
+  const handle = makeFakeApi(initialIsActive, initialIsVisible);
   // Test double: only the subset of DockviewPanelApi this hook actually
   // reads/calls is implemented. Unchecked cast is intentional here — the
   // full interface has 30+ unrelated members no test in this file exercises.
@@ -57,7 +76,7 @@ describe("usePanelActive", () => {
     expect(result.current).toBe(false);
   });
 
-  it("reflects the panel's initial isActive state once registered", () => {
+  it("reflects the panel's initial isVisible state once registered", () => {
     acquirePanel("panel-active", true);
     const { result } = renderHook(() => usePanelActive("panel-active"));
     expect(result.current).toBe(true);
@@ -67,15 +86,29 @@ describe("usePanelActive", () => {
     expect(result2.current).toBe(false);
   });
 
-  it("updates when the panel's active tab changes via onDidActiveChange", () => {
+  it("treats a selected panel as visible when another Dockview group owns focus", () => {
+    const handle = acquirePanel("panel-visible-unfocused", false, true);
+    const { result } = renderHook(() => usePanelActive("panel-visible-unfocused"));
+
+    expect(result.current).toBe(true);
+
+    act(() => handle.fireActiveChange(true));
+    act(() => handle.fireActiveChange(false));
+    expect(result.current).toBe(true);
+
+    act(() => handle.fireVisibilityChange(false));
+    expect(result.current).toBe(false);
+  });
+
+  it("updates when the panel's visible tab changes via onDidVisibilityChange", () => {
     const handle = acquirePanel("panel-toggle", false);
     const { result } = renderHook(() => usePanelActive("panel-toggle"));
     expect(result.current).toBe(false);
 
-    act(() => handle.fireActiveChange(true));
+    act(() => handle.fireVisibilityChange(true));
     expect(result.current).toBe(true);
 
-    act(() => handle.fireActiveChange(false));
+    act(() => handle.fireVisibilityChange(false));
     expect(result.current).toBe(false);
   });
 
@@ -103,13 +136,13 @@ describe("usePanelActive", () => {
     // without the old one ever being released.
     const fresh = acquirePanel(PANEL_ID, false);
 
-    act(() => fresh.fireActiveChange(true));
+    act(() => fresh.fireVisibilityChange(true));
     expect(result.current).toBe(true);
 
     // The stale api's listener must have been torn down — firing it no
     // longer moves the hook (it would incorrectly flip back to false
     // without the resubscribe fix).
-    act(() => stale.fireActiveChange(false));
+    act(() => stale.fireVisibilityChange(false));
     expect(result.current).toBe(true);
   });
 });

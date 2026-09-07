@@ -185,6 +185,7 @@ test.describe("Unread divider", () => {
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
   });
 
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.15
   test("completed task switch keeps each read cursor and returns to the bottom", async ({
     testPage,
     apiClient,
@@ -214,6 +215,7 @@ test.describe("Unread divider", () => {
         element.scrollTop = element.scrollHeight;
         element.dispatchEvent(new Event("scroll"));
       });
+    await testPage.getByTestId("dockview-tab-changes").click();
 
     const taskBMarkRead = testPage.waitForResponse(
       (response) =>
@@ -237,6 +239,19 @@ test.describe("Unread divider", () => {
 
     const activeChat = session.activeChat();
     const scrollContainer = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __dockviewApi__?: { activePanel?: { id: string } };
+              }
+            ).__dockviewApi__?.activePanel?.id ?? null,
+        ),
+      )
+      .toBe("changes");
+    await expect(scrollContainer).toBeVisible();
     await expect(activeChat.getByTestId("unread-divider")).toHaveCount(0);
     await expect
       .poll(() =>
