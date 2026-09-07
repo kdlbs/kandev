@@ -232,3 +232,33 @@ func TestManagerRowLivenessScopedReusesSuppliedScope(t *testing.T) {
 		t.Fatalf("listInstances attempts = %d, want exactly 1 -- one enumeration reused across every row of the pass", control.listInstancesAttempts)
 	}
 }
+
+// TestManagerClassifyStandaloneLivenessEnumerationFailedAgainstAServerIsUnknown
+// pins the half of AC-EXECUTORS-SURVIVAL-003.6 that separates "nothing
+// answered at the recorded endpoint" from "a server answered but could not be
+// enumerated". Both reach classification as an unreachable scope, but only the
+// former licenses the process-identifier probe: a standalone row carries the
+// SHARED control server's identifier, so with a server still running the probe
+// answers Alive for an instance that may already be gone -- reporting a record
+// live solely because the shared control server is running, which that
+// criterion forbids, and leaving the row to escape repair indefinitely.
+func TestManagerClassifyStandaloneLivenessEnumerationFailedAgainstAServerIsUnknown(t *testing.T) {
+	// LocalPID is this process, which is certainly alive, so the
+	// process-identifier probe would answer Alive if it were consulted.
+	row := &models.ExecutorRunning{
+		SessionID: "session-unknown", Runtime: agentruntime.RuntimeStandalone, LocalPID: os.Getpid(),
+	}
+
+	for _, inherited := range []InheritedRecordScope{InheritedRecordScopeAdopted, InheritedRecordScopeForeignServer} {
+		for _, scope := range []*standaloneLivenessScope{nil, {reachable: false}} {
+			mgr := newLivenessTestManager(t, newStandaloneControlServer(t, true))
+			mgr.SetInheritedRecordScope(inherited)
+
+			got := mgr.classifyStandaloneLiveness(row, scope)
+			if got != models.ProcessLivenessUnknown {
+				t.Fatalf("inherited=%v scope=%+v: classifyStandaloneLiveness = %v, want Unknown when a server answered but its enumeration did not",
+					inherited, scope, got)
+			}
+		}
+	}
+}

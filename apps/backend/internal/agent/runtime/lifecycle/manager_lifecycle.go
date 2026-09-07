@@ -54,7 +54,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	// server, and hand them to every runtime's RecoverInstances unchanged.
 	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
 	if listErr != nil {
-		m.logger.Warn("failed to read live standalone recovery-inventory records", zap.Error(listErr))
+		// A failed read leaves the record set unknown, which is not the same
+		// thing as empty. AC-EXECUTORS-SURVIVAL-002.6 stops a live instance
+		// because it is known to have no record; passing an unknown set on as
+		// an empty one would make every live instance look record-less and
+		// send all of them down that orphan-stop path, so a transient database
+		// error during startup would kill every agent that just survived the
+		// restart. Recover nothing instead, on the same terms
+		// AC-EXECUTORS-SURVIVAL-002.12 sets for the mirror failure -- the
+		// adopted server that cannot be enumerated: report no recovered
+		// instances, stop no instance, and leave every record to the existing
+		// stale-execution repair path.
+		m.logger.Error("skipping recovery: live standalone recovery-inventory records could not be read, so no live instance can be correlated to a session",
+			zap.Error(listErr))
+		records = nil
 	}
 
 	// Take a recovery guard for every named session except a confirmed
@@ -95,9 +108,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	// deadline timer itself from leaking, it never reaches that background
 	// work, which deliberately runs against context.Background() instead.
 	recoveryCtx, cancelRecovery := context.WithDeadline(ctx, m.recoveryDeadlineDeadline())
-	recovered, err := m.executorRegistry.RecoverAll(recoveryCtx, records)
-	if err != nil {
-		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
+	var recovered []*ExecutorInstance
+	if listErr == nil {
+		var err error
+		recovered, err = m.executorRegistry.RecoverAll(recoveryCtx, records)
+		if err != nil {
+			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
+		}
 	}
 
 	var stopWG sync.WaitGroup

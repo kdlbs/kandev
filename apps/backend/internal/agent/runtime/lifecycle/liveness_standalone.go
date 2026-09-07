@@ -69,8 +69,10 @@ func (m *Manager) NewStandaloneLivenessScope(ctx context.Context) interface{} {
 //     RowProcessLiveness -- an enumeration scope is never consulted when the
 //     capability that makes a standalone control server outlive this
 //     backend isn't itself enabled.
-//   - scope nil or unreachable ("nothing answered"): falls back to today's
-//     process-identifier probe, so a genuinely dead row is still repaired on
+//   - scope nil or unreachable ("nothing answered"): presence is
+//     undeterminable, so Unknown -- except where no control server answered
+//     at the recorded endpoint at all, which falls back to today's
+//     process-identifier probe so a genuinely dead row is still repaired on
 //     the common case of a first start with no survivor.
 //   - present in the enumeration, but this session's stop was still in
 //     flight when the enumeration was taken: Unknown, not Alive -- the
@@ -101,7 +103,21 @@ func (m *Manager) classifyStandaloneLiveness(row *models.ExecutorRunning, scope 
 		return RowProcessLiveness(row)
 	}
 	if scope == nil || !scope.reachable {
-		return RowProcessLiveness(row)
+		// AC-EXECUTORS-SURVIVAL-003.6: presence could not be determined, so
+		// this is unknown rather than live or dead. The process-identifier
+		// probe cannot stand in for it here: a standalone row carries the
+		// SHARED control server's identifier, so with a server still running
+		// it answers live for an instance that is already gone -- reporting a
+		// record live solely because the shared control server is running,
+		// which that criterion forbids, and leaving the row to escape repair
+		// indefinitely. The probe is only evidence where no control server
+		// holds these instances at all, which is exactly the case the
+		// criterion names: nothing answered at the recorded endpoint, or no
+		// endpoint was recorded.
+		if m.inheritedRecordScope == InheritedRecordScopeNoServer {
+			return RowProcessLiveness(row)
+		}
+		return models.ProcessLivenessUnknown
 	}
 	sessionID := row.SessionID
 	createdHere := m.wasCreatedThisLifetime(sessionID)
