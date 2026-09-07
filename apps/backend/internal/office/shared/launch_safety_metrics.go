@@ -42,6 +42,13 @@ var (
 	// value resolved to its most restrictive reading, labelled by reason
 	// (AC-OFFICE-RUN-CAUSATION-001.10).
 	LaunchCausationInvalidTotal = expvar.NewMap("office_launch_causation_invalid_total")
+
+	// GateOutcomeRecordFailedTotal counts a failure to persist a gate's
+	// consecutive-failure state (RecordGateOutcome/RecordGateOutcomeTx),
+	// labelled by gate. Per AC-OFFICE-BACKPRESSURE-003.4 this failure must
+	// never affect the admission decision, so it is only ever counted, not
+	// propagated as an error the caller acts on.
+	GateOutcomeRecordFailedTotal = expvar.NewMap("office_gate_outcome_record_failed_total")
 )
 
 // LaunchSafetyLabel builds a "k1=v1;k2=v2;..." expvar map key, the same

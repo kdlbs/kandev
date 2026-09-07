@@ -75,6 +75,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		log:        log,
 		migrate:    db.NewMigrateLogger(writer, log),
 	}
+	repo.SetLogger(log)
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
 	}

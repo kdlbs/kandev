@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
@@ -103,10 +104,25 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 		return nil, err
 	}
 
+	// attributedGate is set from the first (highest-priority under the
+	// effective claim order) candidate's blocking gate, and reported at
+	// most once for the whole attempt: AC-OFFICE-BACKPRESSURE-003.6/.7
+	// attribute a no-row claim attempt to the gate blocking the
+	// highest-priority eligible run, counted per attempt rather than
+	// per blocked candidate. candidates is already in that exact order
+	// (the SELECT above), so candidates[0]'s gate is the one to report;
+	// later candidates are still evaluated (to find one that clears
+	// every gate) but their blocks are not separately counted.
+	var attributedGate string
+	var attributedRun *models.Run
+
 	for i := range candidates {
 		candidate := &candidates[i]
 		if blocked, gate := r.claimGateBlocks(ctx, tx, candidate, limits, budgetWindowStart); blocked {
-			shared.LaunchDeferredTotal.Add(shared.LaunchSafetyLabel("gate", gate), 1)
+			if attributedGate == "" {
+				attributedGate = gate
+				attributedRun = candidate
+			}
 			continue
 		}
 		claimed, err := r.commitClaim(ctx, tx, candidate)
@@ -115,7 +131,40 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 		}
 		return claimed, nil
 	}
+	if attributedGate != "" {
+		shared.LaunchDeferredTotal.Add(shared.LaunchSafetyLabel("gate", attributedGate), 1)
+		r.logDeferral(attributedGate, attributedRun)
+	}
+	// No candidate cleared every gate: no run row changes, but every
+	// gate evaluated above wrote its outcome to office_gate_failure_state
+	// in this same transaction (RecordGateOutcomeTx, called from
+	// claimGateBlocks's per-gate evaluators). That durable record must
+	// still land even though nothing was claimed — REQ-OFFICE-BACKPRESSURE-003.8
+	// tracks deferrals, so committing only on a successful claim would
+	// silently discard the escalation data for exactly the attempts that
+	// matter most.
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return nil, sql.ErrNoRows
+}
+
+// logDeferral emits AC-OFFICE-BACKPRESSURE-003.7's structured log entry
+// for a claim attempt that returned no row while eligible queued runs
+// existed: the gate attributed by AC-OFFICE-BACKPRESSURE-003.6, the
+// blocked run's workspace and agent profile, and its wake reason. A
+// nil/never-set logger (most tests) simply skips the entry.
+func (r *Repository) logDeferral(gate string, run *models.Run) {
+	if r.log == nil {
+		return
+	}
+	r.log.Info("run claim deferred",
+		zap.String("gate", gate),
+		zap.String("run_id", run.ID),
+		zap.String("workspace_id", run.WorkspaceID),
+		zap.String("agent_profile", run.AgentProfileID),
+		zap.String("reason", run.Reason),
+	)
 }
 
 // commitClaim marks candidate claimed and appends its launch-ledger
@@ -150,45 +199,19 @@ func (r *Repository) commitClaim(ctx context.Context, tx *sqlx.Tx, candidate *mo
 // workspace_ceiling, instance_ceiling, routine_budget, workspace_budget.
 // The first gate that blocks is reported; a gate whose input cannot be
 // read fails closed rather than admitting the candidate
-// (AC-OFFICE-LAUNCH-SAFETY, "Failure and recovery").
+// (AC-OFFICE-LAUNCH-SAFETY, "Failure and recovery"). Each gate records its
+// own outcome (readable-and-blocked, readable-and-passed, or unreadable)
+// against the durable escalation state, per REQ-OFFICE-BACKPRESSURE-003.8.
 func (r *Repository) claimGateBlocks(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, budgetWindowStart time.Time,
 ) (bool, string) {
-	agentCap, err := r.agentCeiling(ctx, tx, candidate.AgentProfileID, limits)
-	if err != nil {
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
+	if r.evalAgentCeilingGate(ctx, tx, candidate, limits) {
 		return true, gateAgentCeiling
 	}
-	if agentCap <= 0 {
-		// No resolvable agent_profiles row (or an invalid non-positive
-		// value): a missing ceiling input defers rather than admitting
-		// an unbounded agent, per AC-OFFICE-LAUNCH-SAFETY-001.8.
-		return true, gateAgentCeiling
-	}
-	agentClaimed, err := r.countClaimed(ctx, tx, "agent_profile_id = ?", candidate.AgentProfileID)
-	if err != nil {
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
-		return true, gateAgentCeiling
-	}
-	if agentClaimed >= agentCap {
-		return true, gateAgentCeiling
-	}
-
-	workspaceClaimed, err := r.countClaimed(ctx, tx, "workspace_id = ?", candidate.WorkspaceID)
-	if err != nil {
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceCeiling), 1)
+	if r.evalWorkspaceCeilingGate(ctx, tx, candidate, limits) {
 		return true, gateWorkspaceCeiling
 	}
-	if workspaceClaimed >= limits.MaxConcurrentWorkspace {
-		return true, gateWorkspaceCeiling
-	}
-
-	instanceClaimed, err := r.countClaimed(ctx, tx, "1 = 1")
-	if err != nil {
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateInstanceCeiling), 1)
-		return true, gateInstanceCeiling
-	}
-	if instanceClaimed >= limits.MaxConcurrentInstance {
+	if r.evalInstanceCeilingGate(ctx, tx, candidate, limits) {
 		return true, gateInstanceCeiling
 	}
 
@@ -199,27 +222,118 @@ func (r *Repository) claimGateBlocks(
 		return false, ""
 	}
 
-	if candidate.RoutineID != "" {
-		routineClaims, err := r.countLedger(ctx, tx, "routine_id = ? AND claimed_at > ?", candidate.RoutineID, budgetWindowStart)
-		if err != nil {
-			shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateRoutineBudget), 1)
-			return true, gateRoutineBudget
-		}
-		if routineClaims >= limits.RoutineBudgetPerHour {
-			return true, gateRoutineBudget
-		}
+	if candidate.RoutineID != "" && r.evalRoutineBudgetGate(ctx, tx, candidate, limits, budgetWindowStart) {
+		return true, gateRoutineBudget
 	}
+	if r.evalWorkspaceBudgetGate(ctx, tx, candidate, limits, budgetWindowStart) {
+		return true, gateWorkspaceBudget
+	}
+	return false, ""
+}
 
+// recordGateOutcome persists a gate's evaluation outcome for workspaceID
+// (RecordGateOutcomeTx, reusing the caller's open transaction), counting
+// rather than propagating any failure to persist it: per
+// AC-OFFICE-BACKPRESSURE-003.4, failure-tracking itself must never affect
+// the admission decision.
+func (r *Repository) recordGateOutcome(ctx context.Context, tx *sqlx.Tx, workspaceID, gate string, success bool) {
+	if err := r.RecordGateOutcomeTx(ctx, tx, workspaceID, gate, success); err != nil {
+		shared.GateOutcomeRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", gate), 1)
+	}
+}
+
+// evalAgentCeilingGate reports whether candidate's agent is at or over its
+// effective per-agent ceiling. Returns true (blocked) both when the
+// ceiling is reached and when a required input could not be read
+// (fail closed).
+func (r *Repository) evalAgentCeilingGate(
+	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
+) bool {
+	agentCap, err := r.agentCeiling(ctx, tx, candidate.AgentProfileID, limits)
+	if err != nil {
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
+		return true
+	}
+	if agentCap <= 0 {
+		// No resolvable agent_profiles row (or an invalid non-positive
+		// value): a missing ceiling input defers rather than admitting
+		// an unbounded agent, per AC-OFFICE-LAUNCH-SAFETY-001.8. The read
+		// itself succeeded (an authoritative "no profile"), so this is a
+		// successful evaluation for AC-OFFICE-BACKPRESSURE-003.10.
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, true)
+		return true
+	}
+	agentClaimed, err := r.countClaimed(ctx, tx, "agent_profile_id = ?", candidate.AgentProfileID)
+	if err != nil {
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
+		return true
+	}
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, true)
+	return agentClaimed >= agentCap
+}
+
+// evalWorkspaceCeilingGate reports whether candidate's workspace is at or
+// over the instance-wide per-workspace ceiling.
+func (r *Repository) evalWorkspaceCeilingGate(
+	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
+) bool {
+	workspaceClaimed, err := r.countClaimed(ctx, tx, "workspace_id = ?", candidate.WorkspaceID)
+	if err != nil {
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceCeiling), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceCeiling, false)
+		return true
+	}
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceCeiling, true)
+	return workspaceClaimed >= limits.MaxConcurrentWorkspace
+}
+
+// evalInstanceCeilingGate reports whether the instance-wide concurrent
+// claim ceiling has been reached.
+func (r *Repository) evalInstanceCeilingGate(
+	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
+) bool {
+	instanceClaimed, err := r.countClaimed(ctx, tx, "1 = 1")
+	if err != nil {
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateInstanceCeiling), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateInstanceCeiling, false)
+		return true
+	}
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateInstanceCeiling, true)
+	return instanceClaimed >= limits.MaxConcurrentInstance
+}
+
+// evalRoutineBudgetGate reports whether candidate's routine is at or over
+// its rolling-hour launch budget. Only called for a non-human-rooted
+// candidate with a routine id.
+func (r *Repository) evalRoutineBudgetGate(
+	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, budgetWindowStart time.Time,
+) bool {
+	routineClaims, err := r.countLedger(ctx, tx, "routine_id = ? AND claimed_at > ?", candidate.RoutineID, budgetWindowStart)
+	if err != nil {
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateRoutineBudget), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateRoutineBudget, false)
+		return true
+	}
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateRoutineBudget, true)
+	return routineClaims >= limits.RoutineBudgetPerHour
+}
+
+// evalWorkspaceBudgetGate reports whether candidate's workspace is at or
+// over its rolling-hour launch budget. Only called for a non-human-rooted
+// candidate.
+func (r *Repository) evalWorkspaceBudgetGate(
+	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, budgetWindowStart time.Time,
+) bool {
 	workspaceClaims, err := r.countLedger(ctx, tx, "workspace_id = ? AND claimed_at > ?", candidate.WorkspaceID, budgetWindowStart)
 	if err != nil {
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceBudget), 1)
-		return true, gateWorkspaceBudget
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceBudget, false)
+		return true
 	}
-	if workspaceClaims >= limits.WorkspaceBudgetPerHour {
-		return true, gateWorkspaceBudget
-	}
-
-	return false, ""
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceBudget, true)
+	return workspaceClaims >= limits.WorkspaceBudgetPerHour
 }
 
 // agentCeiling resolves the effective per-agent claim ceiling: the

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -76,6 +78,12 @@ func (s *Service) resolveCausation(
 	workspaceID, err := s.repo.ResolveAgentProfileWorkspaceID(ctx, agentInstanceID)
 	if err != nil || workspaceID == "" {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalWorkspaceMissing)), 1)
+		s.logRefusal(RefusalWorkspaceMissing, agentInstanceID, req, "")
+		// No workspace was resolved, so there is no (workspace, gate) pair
+		// to record this outcome against: AC-OFFICE-RUN-CAUSATION-001.20
+		// is explicit that an empty workspace must never be used as a
+		// countable scope value. RecordGateOutcome is skipped for this
+		// gate only.
 		return causationResolution{}, &RefusalError{
 			Gate:   RefusalWorkspaceMissing,
 			Reason: fmt.Sprintf("agent profile %s has no resolvable workspace: %v", agentInstanceID, err),
@@ -89,12 +97,18 @@ func (s *Service) resolveCausation(
 		RoutineID:   req.RoutineID,
 	}
 
-	if err := s.applyCausationLineage(ctx, req, actorKind, &res); err != nil {
+	if err := s.applyCausationLineage(ctx, agentInstanceID, req, actorKind, &res); err != nil {
 		return causationResolution{}, err
 	}
 
 	if res.CausationDepth > s.effectiveMaxCausationDepth() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausationDepth)), 1)
+		s.logRefusal(RefusalCausationDepth, agentInstanceID, req, res.CausationID)
+		// The depth compared above was already read without error inside
+		// applyCausationLineage, so this gate can never fail closed on an
+		// unreadable input; only a genuinely successful evaluation is
+		// possible here, and there is nothing for RecordGateOutcome to
+		// distinguish.
 		return causationResolution{}, &RefusalError{
 			Gate: RefusalCausationDepth,
 			Reason: fmt.Sprintf("causation depth %d exceeds limit %d",
@@ -102,7 +116,7 @@ func (s *Service) resolveCausation(
 		}
 	}
 
-	if err := s.checkSelfTriggerAllowance(ctx, agentInstanceID, req.Reason, actorKind, actorID); err != nil {
+	if err := s.checkSelfTriggerAllowance(ctx, agentInstanceID, req, actorKind, actorID, res.WorkspaceID, res.CausationID); err != nil {
 		return causationResolution{}, err
 	}
 
@@ -116,7 +130,7 @@ func (s *Service) resolveCausation(
 // resolveCausation to keep that function's nesting under the repo's
 // complexity limit.
 func (s *Service) applyCausationLineage(
-	ctx context.Context, req QueueRunRequest, actorKind models.ActorKind, res *causationResolution,
+	ctx context.Context, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, res *causationResolution,
 ) error {
 	if req.CausingRunID == "" {
 		// AC-OFFICE-RUN-CAUSATION-001.9/.13: a human actor always roots a
@@ -134,11 +148,19 @@ func (s *Service) applyCausationLineage(
 	causing, err := s.repo.GetRunByID(ctx, req.CausingRunID)
 	if err != nil {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
+		s.logRefusal(RefusalCausingRunUnreadable, agentInstanceID, req, "")
+		// The causing run itself is the input this gate could not read,
+		// which is exactly AC-OFFICE-BACKPRESSURE-003.3's "input cannot
+		// be read" case, so it counts toward the durable escalation
+		// record alongside the refusal.
+		s.recordGateOutcome(ctx, res.WorkspaceID, RefusalCausingRunUnreadable, false)
 		return &RefusalError{
 			Gate:   RefusalCausingRunUnreadable,
 			Reason: fmt.Sprintf("causing run %s unreadable: %v", req.CausingRunID, err),
 		}
 	}
+	s.recordGateOutcome(ctx, res.WorkspaceID, RefusalCausingRunUnreadable, true)
 	// AC-OFFICE-RUN-CAUSATION-001.9: an actor who is human always roots a
 	// new causation chain, even when nested inside a human-rooted run's
 	// own follow-on work.
@@ -189,22 +211,31 @@ func causingCausationID(causing *models.Run) string {
 // Only applies to an agent acting as itself: a system or human actor
 // cannot self-trigger by definition.
 func (s *Service) checkSelfTriggerAllowance(
-	ctx context.Context, agentInstanceID, reason string, actorKind models.ActorKind, actorID string,
+	ctx context.Context, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, actorID string,
+	workspaceID, causationID string,
 ) error {
 	if actorKind != models.ActorKindAgent || actorID != agentInstanceID {
+		// Not applicable to this actor: the gate is not evaluated, so
+		// AC-OFFICE-BACKPRESSURE-003.10's "count left unchanged" rule
+		// applies and RecordGateOutcome is not called.
 		return nil
 	}
+	reason := req.Reason
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
 	count, err := s.repo.CountSelfTriggeredRuns(ctx, agentInstanceID, reason, since)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
+		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
+		s.recordGateOutcome(ctx, workspaceID, RefusalSelfTrigger, false)
 		return &RefusalError{
 			Gate:   RefusalSelfTrigger,
 			Reason: fmt.Sprintf("self-trigger count unreadable: %v", err),
 		}
 	}
+	s.recordGateOutcome(ctx, workspaceID, RefusalSelfTrigger, true)
 	if count >= s.effectiveSelfTriggerAllowance() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
+		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
 		return &RefusalError{
 			Gate: RefusalSelfTrigger,
 			Reason: fmt.Sprintf("agent %s exceeded self-trigger allowance %d for reason %q within %s",
@@ -212,4 +243,40 @@ func (s *Service) checkSelfTriggerAllowance(
 		}
 	}
 	return nil
+}
+
+// logRefusal emits AC-OFFICE-BACKPRESSURE-003.1's structured log entry
+// for an enqueue refused by gate: the gate, the agent profile the wake
+// was for, the wake reason, and the causing run identifier the request
+// supplied. A refusal creates no run row, so no run identifier is
+// logged. causationID is logged only when the caller had already
+// resolved it before this gate ran (empty otherwise, per
+// AC-OFFICE-BACKPRESSURE-003.1's "not for the missing workspace" carve-out
+// and applyCausationLineage's own refusal, neither of which has one yet).
+func (s *Service) logRefusal(gate RefusalGate, agentInstanceID string, req QueueRunRequest, causationID string) {
+	fields := []zap.Field{
+		zap.String("gate", string(gate)),
+		zap.String("agent_profile", agentInstanceID),
+		zap.String("reason", req.Reason),
+	}
+	if req.CausingRunID != "" {
+		fields = append(fields, zap.String("causing_run_id", req.CausingRunID))
+	}
+	if causationID != "" {
+		fields = append(fields, zap.String("causation_id", causationID))
+	}
+	s.log.Info("run enqueue refused", fields...)
+}
+
+// recordGateOutcome persists a refusal gate's evaluation outcome for
+// workspaceID via the standalone RecordGateOutcome: unlike the
+// claim-time deferral gates in runs/repository/sqlite/claim.go, no
+// transaction is already open at an enqueue-refusal decision point.
+// Any persistence failure is counted rather than propagated, per
+// AC-OFFICE-BACKPRESSURE-003.4: this diagnostic bookkeeping must never
+// affect the admission decision.
+func (s *Service) recordGateOutcome(ctx context.Context, workspaceID string, gate RefusalGate, success bool) {
+	if err := s.repo.RecordGateOutcome(ctx, workspaceID, string(gate), success); err != nil {
+		shared.GateOutcomeRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(gate)), 1)
+	}
 }
