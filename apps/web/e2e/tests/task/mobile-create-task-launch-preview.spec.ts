@@ -67,12 +67,13 @@ test.describe("mobile task-create launch prompt preview", () => {
       );
       expect(launchStepInfoBox.width).toBeGreaterThanOrEqual(44);
       await launchStepInfo.tap();
-      const launchStepTooltip = testPage.getByRole("tooltip", {
-        name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
-      });
-      await expect(launchStepTooltip).toBeVisible();
-      await launchStepInfo.tap();
-      await expect(launchStepTooltip).not.toBeVisible();
+      const launchStepHelpDrawer = testPage.getByTestId("task-create-launch-step-help-drawer");
+      await expect(launchStepHelpDrawer).toBeVisible();
+      await expect(launchStepHelpDrawer).toContainText(
+        "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      );
+      await launchStepHelpDrawer.press("Escape");
+      await expect(launchStepHelpDrawer).not.toBeVisible();
 
       await dialog.getByTestId("task-title-input").fill("Mobile launch preview");
       const description = "Review mobile launch preview";

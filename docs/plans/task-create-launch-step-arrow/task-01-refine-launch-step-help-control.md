@@ -26,8 +26,8 @@ and touch input.
 
 - Render `IconArrowBigRightLines` in the existing launch-step help button.
 - Render only the destination step name beside the button.
-- Preserve localized tooltip content, accessible naming, and responsive target
-  sizing.
+- Preserve localized tooltip content and accessible naming, and use the
+  standard drawer and responsive target sizing on coarse pointers.
 - Remove the unused visible-label translations and update public guidance.
 - Update focused component and desktop/mobile browser coverage.
 
@@ -42,7 +42,8 @@ and touch input.
 - The selected workflow is followed by the muted directional arrow button and
   resolved destination step name, with no visible **Start step:** prefix.
 - Hovering or focusing the arrow shows the localized launch-destination
-  explanation; activating it on a coarse pointer provides the same explanation.
+  explanation; activating it on a coarse pointer opens the same explanation in
+  a drawer.
 - The button retains its localized accessible name, and its coarse-pointer hit
   area remains at least 44 CSS pixels without enlarging fine-pointer desktop
   density.
@@ -86,8 +87,8 @@ None.
 
 - The arrow can look like navigation if spacing or emphasis separates it from
   the destination label.
-- Radix tooltip behavior must remain reachable by touch as well as hover and
-  keyboard focus.
+- Coarse-pointer detection must route the disclosure to the standard touch
+  drawer while fine pointers retain hover and keyboard focus behavior.
 
 ## Parallelism
 
@@ -104,10 +105,10 @@ None.
 - Replaced the generic information glyph with `IconArrowBigRightLines` and
   rendered the resolved workflow step name without a visible prefix.
 - Preserved localized accessible naming and explanatory tooltip behavior for
-  pointer hover and keyboard focus; mobile coverage proves touch pinning and
-  second-tap dismissal with the existing 44-pixel coarse-pointer target.
+  pointer hover and keyboard focus; mobile coverage proves the touch drawer and
+  its 44-pixel coarse-pointer trigger.
 - Removed the unused visible-label key from all locale catalogs and updated the
   public task-creation how-to guide.
-- The focused component test passed (2 tests), targeted desktop and mobile E2E
+- The focused component test passed (3 tests), targeted desktop and mobile E2E
   each passed (1 test), and all static, i18n, documentation, specification, and
   diff checks listed in the plan passed.

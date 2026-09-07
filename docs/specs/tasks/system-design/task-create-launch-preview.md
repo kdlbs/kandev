@@ -112,10 +112,12 @@ button first and the muted destination step name second. The arrow expresses
 the flow from the selected workflow into its launch destination, so the visible
 **Start step:** prefix and the generic information glyph are removed. The
 trigger keeps its intrinsic selector width and does not claim the full row.
-The arrow button exposes the existing localized help on pointer hover,
-keyboard focus, and touch activation, and retains the localized accessible
-name. On coarse pointers, the button has a hit area of at least 44 CSS pixels.
-Truncation keeps the selector row within its available width.
+The arrow button exposes the existing localized help in a tooltip on pointer
+hover and keyboard focus. On coarse pointers, `useTouchDrawer` replaces the
+tooltip with a drawer containing the same localized title and description. The
+button retains its localized accessible name and has a hit area of at least 44
+CSS pixels on coarse pointers. Truncation keeps the selector row within its
+available width.
 
 The existing selector visibility rules remain unchanged. A single implicit
 workflow can still omit the selector when it has no override information.
@@ -146,7 +148,8 @@ pointers, its active hit area is at least 44 CSS pixels. The read-only text wrap
 inside the composer and owns only the same bounded overflow as the textarea.
 
 The nearest mobile exemplar is the current Kanban FAB to task-create dialog
-flow. This change adds no drawer, route, fixed control, or safe-area boundary.
+flow. The launch-destination explanation uses the standard coarse-pointer
+drawer; this change adds no route, fixed control, or safe-area boundary.
 
 ## Failure and recovery
 
@@ -177,8 +180,8 @@ server-owned values.
   glyph and help disclosure.
 - Desktop Playwright covers workflow switching, pointer-hover help, and composed
   preview content.
-- Mobile Playwright covers the same user value, touch-activated help, the
-  44-pixel hit area, viewport containment, and horizontal overflow.
+- Mobile Playwright covers the same user value, the touch drawer, the 44-pixel
+  hit area, viewport containment, and horizontal overflow.
 
 ## Related decisions
 
