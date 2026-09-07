@@ -246,9 +246,9 @@ func (e *Engine) requiredSeatsForWorkflowRecording(
 //
 // collapseByRoleAgent already guarantees at most one seat per (role, agent
 // profile id) pair here, and this function is scoped to one role, so at most
-// one record is emitted per role and unresolved agent per call (AC-004.10)
-// without extra dedup state — as long as the caller passes record=true only
-// for an actual guard evaluation or decision write. A read-only observation
+// one record is emitted per role and unresolved agent per call, without
+// extra dedup state, as long as the caller passes record=true only for an
+// actual guard evaluation or decision write. A read-only observation
 // (ResolveParticipantRoleReadOnly) passes record=false precisely so it does
 // not multiply this emission at its own, unrelated cadence.
 //
@@ -916,12 +916,12 @@ func (e *Engine) evaluateGuardStateReadOnly(
 // ErrParticipantNotFound when the agent occupies neither seat.
 //
 // This is the recording variant: an unresolved-agent seat dropped from the
-// slate emits AC-004.8's counter and warning, scoped by AC-004.10 to "per
-// guard evaluation". Reserve it for callers that ARE a guard evaluation or a
-// real decision write (RecordAgentDecision's authorization check). A caller
-// that merely observes seat occupancy — without evaluating a guard or
-// recording a decision — must use ResolveParticipantRoleReadOnly instead, or
-// every such observation double-counts the same drop.
+// slate emits a counter and warning log scoped to guard evaluations.
+// Reserve it for callers that ARE a guard evaluation or a real decision
+// write (RecordAgentDecision's authorization check). A caller that merely
+// observes seat occupancy — without evaluating a guard or recording a
+// decision — must use ResolveParticipantRoleReadOnly instead, or every such
+// observation double-counts the same drop.
 func (e *Engine) ResolveParticipantRole(
 	ctx context.Context, taskID, stepID, agentProfileID string,
 ) (role, participantID string, err error) {
@@ -929,11 +929,11 @@ func (e *Engine) ResolveParticipantRole(
 }
 
 // ResolveParticipantRoleReadOnly is ResolveParticipantRole without the
-// AC-004.8 unresolved-agent counter/log side effect, mirroring
+// unresolved-agent counter/log side effect, mirroring
 // evaluateGuardStateReadOnly's use of requiredSeatsForWorkflowRecording(...,
 // false) for the same reason: the caller is observing seat occupancy, not
-// evaluating a guard or recording a decision, so it is outside AC-004.10's
-// "per guard evaluation" scope.
+// evaluating a guard or recording a decision, so the emission stays scoped
+// to actual guard evaluations rather than firing on every observation.
 func (e *Engine) ResolveParticipantRoleReadOnly(
 	ctx context.Context, taskID, stepID, agentProfileID string,
 ) (role, participantID string, err error) {

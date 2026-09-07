@@ -104,3 +104,28 @@ func TestHoldsDecisionSeat_EmptyTaskIDReturnsFalse(t *testing.T) {
 		t.Fatal("expected empty task id to return false")
 	}
 }
+
+// legacyDispatcher satisfies shared.WorkflowEngineDispatcher but not the
+// package-local decisionSeatDispatcher capability, exercising the type
+// assertion's failure branch.
+type legacyDispatcher struct{}
+
+func (legacyDispatcher) HandleTrigger(
+	_ context.Context, _ string, _ engine.Trigger, _ any, _ string,
+) error {
+	return nil
+}
+
+func TestHoldsDecisionSeat_DispatcherWithoutCapabilityReturnsFalse(t *testing.T) {
+	svc := newTestService(t)
+	insertTestTaskWithStep(t, svc, "task-1", "ws-1", "step-1")
+	svc.SetWorkflowEngineDispatcher(legacyDispatcher{})
+
+	held, err := svc.HoldsDecisionSeat(context.Background(), "task-1", "agent-1")
+	if err != nil {
+		t.Fatalf("HoldsDecisionSeat: %v", err)
+	}
+	if held {
+		t.Fatal("expected dispatcher without decisionSeatDispatcher to return false")
+	}
+}

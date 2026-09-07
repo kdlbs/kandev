@@ -15,9 +15,11 @@ import (
 // dashboard.roleResolvingDispatcher. HoldsDecisionSeat only observes seat
 // occupancy — it neither evaluates a guard nor records a decision — so it
 // asserts on the read-only variant rather than ResolveParticipantRole:
-// the latter emits AC-004.8's unresolved-agent counter/log, which
-// AC-OFFICE-REVIEW-SEATS-004.10 scopes to "per guard evaluation", and a
-// capability grant runs once per run launch, not once per guard evaluation.
+// the recording variant would emit the unresolved-agent quorum counter and
+// warning log, which are scoped to guard evaluations. A capability grant
+// runs once per run launch, not per guard evaluation, so it must use the
+// read-only variant to avoid inflating those metrics at an unrelated
+// cadence.
 type decisionSeatDispatcher interface {
 	ResolveParticipantRoleReadOnly(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
