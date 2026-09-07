@@ -206,6 +206,10 @@ type Manager struct {
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
 
+	// workspacePreview owns ephemeral loopback static servers for current
+	// editor-buffer HTML previews. It is closed with the agentctl instance.
+	workspacePreview *WorkspacePreviewManager
+
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
 
@@ -389,6 +393,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		false,
 	)
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
+	m.workspacePreview = NewWorkspacePreviewManager(log)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
@@ -1167,6 +1172,53 @@ func (m *Manager) ResolveRepoSubdir(subpath string) (string, error) {
 	return full, err
 }
 
+// PublishWorkspacePreview publishes a current HTML editor buffer under the
+// selected workspace or repository root.
+func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (WorkspacePreviewResponse, error) {
+	if m.workspacePreview == nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
+	if err != nil {
+		return WorkspacePreviewResponse{}, err
+	}
+	return m.workspacePreview.Publish(root, req)
+}
+
+// CloseWorkspacePreview stops all ephemeral preview servers owned by this
+// agentctl process.
+func (m *Manager) CloseWorkspacePreview(ctx context.Context) error {
+	if m.workspacePreview == nil {
+		return nil
+	}
+	return m.workspacePreview.Close(ctx)
+}
+
+func (m *Manager) resolveWorkspacePreviewRoot(repo string) (string, error) {
+	_, root, err := m.resolveSubpath(repo)
+	if err != nil {
+		return "", err
+	}
+	canonicalRoot, err := canonicalPreviewDirectory(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve preview root: %w", err)
+	}
+	canonicalWorkDir, err := canonicalPreviewDirectory(m.cfg.WorkDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	if previewPathWithinRoot(canonicalWorkDir, canonicalRoot) {
+		return canonicalRoot, nil
+	}
+	for _, sourceRoot := range m.currentWorkspaceSourceRoots() {
+		canonicalSourceRoot, sourceErr := canonicalPreviewDirectory(sourceRoot)
+		if sourceErr == nil && previewPathWithinRoot(canonicalSourceRoot, canonicalRoot) {
+			return canonicalRoot, nil
+		}
+	}
+	return "", fmt.Errorf("%w: preview root escapes workspace", ErrWorkspacePreviewPathInvalid)
+}
+
 // JoinRepoPath validates a repo subpath and returns the workspace-relative
 // path obtained by joining `subpath` and `path`. Empty `subpath` returns
 // `path` unchanged (single-repo workspaces). Used by file content / update
@@ -1865,10 +1917,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
+	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
-		return fmt.Errorf("wait for process admission to drain: %w", err)
+		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err))
 	}
-	return m.stop(ctx)
+	return errors.Join(previewErr, m.stop(ctx))
 }
 
 func (m *Manager) stop(ctx context.Context) error {

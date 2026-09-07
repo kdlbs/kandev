@@ -645,6 +645,76 @@ func TestUpdateAgentStatusFields(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentStatusFieldsIfCurrent_DoesNotOverwriteNewStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-cas", "ws-1", "CAS")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "Auto-paused: test"); err != nil {
+		t.Fatalf("pause agent: %v", err)
+	}
+
+	changed, err := repo.UpdateAgentStatusFieldsIfCurrent(
+		ctx, agent.ID, "paused", "idle", "",
+	)
+	if err != nil {
+		t.Fatalf("compare-and-set paused: %v", err)
+	}
+	if !changed {
+		t.Fatal("compare-and-set paused = false, want true")
+	}
+
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "stopped", "manual stop"); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+	changed, err = repo.UpdateAgentStatusFieldsIfCurrent(
+		ctx, agent.ID, "paused", "idle", "",
+	)
+	if err != nil {
+		t.Fatalf("stale compare-and-set: %v", err)
+	}
+	if changed {
+		t.Fatal("stale compare-and-set = true, want false")
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("stopped") || got.PauseReason != "manual stop" {
+		t.Fatalf("status/reason = %q/%q, want stopped/manual stop", got.Status, got.PauseReason)
+	}
+}
+
+func TestClearAgentPauseReasonIfCurrent_PreservesStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-clear-reason", "ws-1", "Clear reason")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "stopped", "Auto-paused: stale"); err != nil {
+		t.Fatalf("set stale pause: %v", err)
+	}
+
+	changed, err := repo.ClearAgentPauseReasonIfCurrent(ctx, agent.ID, "stopped")
+	if err != nil {
+		t.Fatalf("clear reason: %v", err)
+	}
+	if !changed {
+		t.Fatal("clear reason = false, want true")
+	}
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("stopped") || got.PauseReason != "" {
+		t.Fatalf("status/reason = %q/%q, want stopped/empty", got.Status, got.PauseReason)
+	}
+}
+
 func TestUpdateAgentStatusFields_ClearsWorkingOwner(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
