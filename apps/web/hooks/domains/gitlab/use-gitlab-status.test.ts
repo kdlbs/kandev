@@ -10,12 +10,10 @@ const workspaceB = "workspace-b";
 const gitLabAHost = "https://gitlab-a.example";
 
 let activeWorkspaceId: string | null = workspaceA;
-let cachedStatus = {
-  workspaceId: workspaceA as string | null,
-  data: null as { host: string } | null,
-  loading: false,
-  loadedAt: null as number | null,
-};
+let cachedStatuses: Record<
+  string,
+  { data: { host: string } | null; loading: boolean; loadedAt: number | null }
+> = {};
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   fetchGitLabStatus: (...args: unknown[]) => fetchGitLabStatusMock(...args),
@@ -25,16 +23,17 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       workspaces: { activeId: activeWorkspaceId },
-      gitlabStatus: cachedStatus,
+      gitlabStatus: { byWorkspaceId: cachedStatuses },
       setGitLabStatus: setStatus,
       setGitLabStatusLoading: setStatusLoading,
+      resetGitLabStatus: vi.fn(),
     }),
 }));
 
 describe("useGitLabStatus", () => {
   beforeEach(() => {
     activeWorkspaceId = workspaceA;
-    cachedStatus = { workspaceId: workspaceA, data: null, loading: false, loadedAt: null };
+    cachedStatuses = {};
     fetchGitLabStatusMock.mockReset().mockResolvedValue({ host: gitLabAHost });
     setStatus.mockReset();
     setStatusLoading.mockReset();
@@ -141,11 +140,8 @@ describe("useGitLabStatus", () => {
 describe("useGitLabStatus workspace ownership", () => {
   it("hides workspace A's cached status on the first render for workspace B", () => {
     activeWorkspaceId = workspaceA;
-    cachedStatus = {
-      workspaceId: workspaceA,
-      data: { host: gitLabAHost },
-      loading: false,
-      loadedAt: 1,
+    cachedStatuses = {
+      [workspaceA]: { data: { host: gitLabAHost }, loading: false, loadedAt: 1 },
     };
     fetchGitLabStatusMock.mockReset().mockResolvedValue({ host: gitLabAHost });
     setStatus.mockReset();
@@ -163,7 +159,7 @@ describe("useGitLabStatus workspace ownership", () => {
 describe("useGitLabStatus requested workspace", () => {
   beforeEach(() => {
     activeWorkspaceId = workspaceA;
-    cachedStatus = { workspaceId: workspaceA, data: null, loading: false, loadedAt: null };
+    cachedStatuses = {};
     fetchGitLabStatusMock.mockReset().mockResolvedValue({ host: gitLabAHost });
     setStatus.mockReset();
     setStatusLoading.mockReset();
@@ -178,6 +174,20 @@ describe("useGitLabStatus requested workspace", () => {
         workspaceId: workspaceB,
       }),
     );
+    expect(setStatus).toHaveBeenCalledWith(workspaceB, null);
+  });
+
+  it("keeps simultaneous workspace status requests isolated", async () => {
+    const { rerender: rerenderA } = renderHook(() => useGitLabStatus(workspaceA));
+    const { rerender: rerenderB } = renderHook(() => useGitLabStatus(workspaceB));
+
+    await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(2));
+    rerenderA();
+    rerenderB();
+
+    expect(setStatus).not.toHaveBeenCalledWith(null, null);
+    expect(setStatusLoading).not.toHaveBeenCalledWith(null, false);
+    expect(setStatus).toHaveBeenCalledWith(workspaceA, null);
     expect(setStatus).toHaveBeenCalledWith(workspaceB, null);
   });
 });

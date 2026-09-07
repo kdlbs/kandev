@@ -209,6 +209,32 @@ describe("useRemoteRepositories registered provider listings", () => {
 });
 
 describe("useRemoteRepositories provider eligibility", () => {
+  it("waits for provider eligibility before listing repositories", async () => {
+    setBuiltInAvailability({ github: false, gitlab: false, azureDevOps: false });
+    mocks.useGitHubStatus.mockReturnValue({
+      status: null,
+      loaded: false,
+      loading: true,
+      refresh: vi.fn(),
+    });
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+
+    const { result, rerender } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    expect(result.current.loading).toBe(true);
+    expect(mocks.fetchAccessibleRepos).not.toHaveBeenCalled();
+    expect(mocks.listUserProjects).not.toHaveBeenCalled();
+    expect(mocks.listAzureDevOpsProjects).not.toHaveBeenCalled();
+
+    setBuiltInAvailability({ gitlab: false, azureDevOps: false });
+    rerender();
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1);
+    expect(mocks.listUserProjects).not.toHaveBeenCalled();
+    expect(mocks.listAzureDevOpsProjects).not.toHaveBeenCalled();
+  });
+
   it("does not request or report unconfigured built-in providers", async () => {
     setBuiltInAvailability({ gitlab: false, azureDevOps: false });
     mocks.fetchAccessibleRepos.mockResolvedValue([

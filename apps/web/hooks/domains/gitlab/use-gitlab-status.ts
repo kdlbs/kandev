@@ -15,10 +15,11 @@ import { subscribeIntegrationAvailability } from "@/lib/integrations/integration
 export function useGitLabStatus(requestedWorkspaceId?: string | null) {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceId = requestedWorkspaceId ?? activeWorkspaceId;
-  const statusSnapshot = useAppStore((state) => state.gitlabStatus);
-  const ownsSnapshot = statusSnapshot.workspaceId === workspaceId;
-  const status = ownsSnapshot ? statusSnapshot.data : null;
-  const loading = ownsSnapshot ? statusSnapshot.loading : Boolean(workspaceId);
+  const statusEntry = useAppStore((state) =>
+    workspaceId ? state.gitlabStatus.byWorkspaceId[workspaceId] : undefined,
+  );
+  const status = statusEntry?.data ?? null;
+  const loading = statusEntry?.loading ?? Boolean(workspaceId);
   const setStatus = useAppStore((state) => state.setGitLabStatus);
   const setStatusLoading = useAppStore((state) => state.setGitLabStatusLoading);
   const requestGeneration = useRef(0);
@@ -51,8 +52,6 @@ export function useGitLabStatus(requestedWorkspaceId?: string | null) {
   useEffect(() => {
     if (!workspaceId) {
       requestGeneration.current++;
-      setStatus(null, null);
-      setStatusLoading(null, false);
       return;
     }
     setStatus(workspaceId, null);
@@ -66,8 +65,6 @@ export function useGitLabStatus(requestedWorkspaceId?: string | null) {
     const requestedWorkspaceId = currentWorkspaceId.current;
     if (!requestedWorkspaceId) {
       requestGeneration.current++;
-      setStatus(null, null);
-      setStatusLoading(null, false);
       return;
     }
     await loadStatus(requestedWorkspaceId);

@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AzureDevOpsPullRequest } from "@/lib/types/azure-devops";
+import { invalidateIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 const apiMocks = vi.hoisted(() => ({
   config: vi.fn(),
@@ -68,6 +69,16 @@ describe("Azure DevOps browse hooks", () => {
 
     await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(1));
     act(() => result.current.refresh());
+
+    await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(2));
+  });
+
+  it("reloads connection data when integration availability is invalidated", async () => {
+    apiMocks.config.mockResolvedValue({ hasSecret: true, lastOk: true });
+    renderHook(() => useAzureDevOpsConnection(WORKSPACE_A));
+
+    await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(1));
+    act(() => invalidateIntegrationAvailability());
 
     await waitFor(() => expect(apiMocks.config).toHaveBeenCalledTimes(2));
   });

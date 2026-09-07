@@ -98,10 +98,14 @@ None.
   requests or add provider tabs and source errors.
 - Preserved partial-success behavior for eligible provider failures, including
   retry support through refreshed connection status and repository discovery.
-- Extended GitLab status to accept an explicit workspace and Azure DevOps
-  connection to refresh on demand, with focused hook regressions for both.
+- Keyed GitLab status by workspace and scoped Azure DevOps connection state to
+  the requested workspace. Azure DevOps re-probes after availability
+  invalidation and on the shared health cadence, with focused hook regressions
+  for both behaviors.
+- Updated repository-picker test harnesses to provide the state required by
+  the shared connection probes.
 - Added desktop and mobile task-create picker regressions proving the silent
   unconfigured-provider behavior and continued repository selection.
-- Verification passed: 12 repository-hook tests, 5 GitLab tests, 5 Azure
-  DevOps tests, both focused Playwright tests, frontend typecheck, targeted
-  ESLint, and specification linting.
+- Verification passed: 13 repository-hook tests, 6 GitLab tests, 6 Azure
+  DevOps tests, 56 focused frontend tests, both focused Playwright tests,
+  frontend typecheck, targeted ESLint, and specification linting.

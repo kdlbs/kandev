@@ -104,7 +104,7 @@ containment. Extend it only with the connection-gating outcome.
   repository request set; eligible-provider failures remain bounded source
   errors beside successful results.
 - `pnpm --filter @kandev/web exec vitest run` passed for the repository hook
-  (12 tests), GitLab status (5 tests), and Azure DevOps connection (5 tests).
+  (13 tests), GitLab status (6 tests), and Azure DevOps connection (6 tests).
 - Desktop and phone task-create regressions each passed with one Playwright
   test. The mobile run was repeated with build temporary files redirected to
   an agent-owned root-filesystem directory after the default `/tmp` mount
@@ -117,7 +117,7 @@ containment. Extend it only with the connection-gating outcome.
 - Connection probes settle asynchronously. The implementation must not show a
   false no-provider state or drop a provider that becomes available after the
   picker mounts.
-- The GitLab status hook currently follows the active workspace. The task
-  dialog's explicit workspace must remain aligned with that status scope.
+- Explicit GitLab status consumers and Azure DevOps connection probes must stay
+  keyed to their requested workspace.
 - Existing tests assume all built-in list endpoints run unconditionally and
   must be updated without weakening configured-provider failure coverage.

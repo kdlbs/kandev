@@ -167,6 +167,10 @@ An unconfigured provider is absent from the request set, provider tabs, and
 fail during its repository request; `settleRepositoryRequests` retains that
 bounded error while preserving every successful provider result. Refresh
 re-evaluates connection eligibility before it repeats repository discovery.
+GitLab status entries are keyed by workspace so an explicit task-dialog probe
+cannot overwrite the active workspace's status. Azure DevOps connection state
+is scoped to the requested workspace and re-probes after integration
+availability invalidation and on the shared health cadence.
 Registered plugin repository providers keep their registry-owned availability
 and error contract.
 
