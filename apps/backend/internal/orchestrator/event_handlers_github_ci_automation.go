@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -46,10 +47,12 @@ type ciAutomationCheckpoint struct {
 }
 
 type ciAutomationCheckSnapshot struct {
-	Name       string `json:"name"`
-	Conclusion string `json:"conclusion"`
-	HTMLURL    string `json:"html_url"`
-	Output     string `json:"output,omitempty"`
+	Name        string     `json:"name"`
+	Conclusion  string     `json:"conclusion"`
+	HTMLURL     string     `json:"html_url"`
+	Output      string     `json:"output,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 type ciAutomationCommentSnapshot struct {
@@ -291,6 +294,10 @@ func ciAutomationHasFreshPRStatusAt(pr *github.TaskPR, now time.Time) bool {
 }
 
 func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) (bool, string) {
+	attemptService, supportsAttempts := s.githubCIAutoFixAttemptService()
+	if !supportsAttempts {
+		return s.handleTaskPRCIAutoFixLegacy(ctx, pr, options)
+	}
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
 		return true, fmt.Sprintf("load CI automation state: %v", err)
@@ -307,6 +314,152 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if !ciAutomationCanPromptForFeedback(pr, feedback) {
 		return false, ""
 	}
+	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
+	providerGeneration := ciAutomationProviderGeneration(pr, feedback)
+	if state != nil && state.AutoFixAttemptState == github.TaskCIAutoFixAttemptAwaitingProviderProgress {
+		if progressErr := attemptService.ReconcileTaskCIAutoFixProviderProgress(
+			context.WithoutCancel(ctx), github.TaskCIAutoFixProviderProgress{
+				TaskID:             pr.TaskID,
+				RepositoryID:       pr.RepositoryID,
+				PRNumber:           pr.PRNumber,
+				Signature:          state.AutoFixAttemptSignature,
+				ProviderGeneration: providerGeneration,
+				ObservedAt:         time.Now().UTC(),
+			},
+		); progressErr != nil && !errors.Is(progressErr, github.ErrTaskCIAutoFixAttemptNotFound) {
+			s.logger.Debug("reconcile CI auto-fix provider progress failed", zap.String("task_id", pr.TaskID), zap.Error(progressErr))
+		}
+		if refreshed, refreshErr := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber); refreshErr == nil {
+			state = refreshed
+		}
+	}
+	previous := decodeCIAutomationCheckpoint(state)
+	delta := ciAutomationBuildDeltaForPR(pr, feedback, previous)
+	checkpoint := ciAutomationCurrentCheckpointForPR(pr, feedback, previous)
+	queueRemoval, queueRecovery := ciAutomationNewQueueRemoval(pr, state)
+	if queueRecovery {
+		delta.QueueRemovals = append(delta.QueueRemovals, *queueRemoval)
+		checkpoint.QueueRemovals = append(checkpoint.QueueRemovals, *queueRemoval)
+	}
+	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
+	attemptRetryable := state != nil && state.AutoFixAttemptState == github.TaskCIAutoFixAttemptRetryable &&
+		(state.AutoFixAttemptSignature == signature || state.LastFixSignature == signature)
+	if ciAutomationCheckpointEmpty(delta) && !attemptRetryable {
+		return s.handleTaskPRCIAutoFixEmptyDelta(ctx, pr, state, previous, signature, checkpointJSON), ""
+	}
+	if state != nil && state.LastFixSignature == signature && !attemptRetryable {
+		return ciAutomationDuplicateFixAttemptBlocksMerge(state), ""
+	}
+	allowNewRound := !ciAutomationFixRoundsExhausted(state)
+	promptDelta := delta
+	if attemptRetryable && ciAutomationCheckpointEmpty(promptDelta) {
+		// A retry must carry the unchanged settled snapshot because no new
+		// provider feedback is required to rearm an undispositioned turn.
+		promptDelta = checkpoint
+	}
+	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, promptDelta)
+	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
+	if err != nil || session == nil {
+		return s.handleCIAutoFixWithoutSession(ctx, pr, allowNewRound)
+	}
+	prompt = s.expandPromptReferences(ctx, prompt, session.IsPassthrough)
+	prompt = ciAutomationAppendOutcomeProtocol(prompt, session.IsPassthrough)
+	queueRemovalEventID, queueRemovalCause := "", ""
+	if queueRecovery {
+		queueRemovalEventID = queueRemoval.EventID
+		queueRemovalCause = queueRemoval.Cause
+	}
+	recordAttempt := func(attemptState github.TaskCIAutoFixAttemptState, queueEntryID, turnID string, incrementRound bool) error {
+		return s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
+			TaskID:              pr.TaskID,
+			RepositoryID:        pr.RepositoryID,
+			PRNumber:            pr.PRNumber,
+			Signature:           signature,
+			CheckpointJSON:      checkpointJSON,
+			SessionID:           session.ID,
+			QueueEntryID:        queueEntryID,
+			TurnID:              turnID,
+			State:               attemptState,
+			ProviderGeneration:  providerGeneration,
+			EnqueuedAt:          time.Now().UTC(),
+			IncrementRound:      incrementRound,
+			QueueRemovalEventID: queueRemovalEventID,
+			QueueRemovalCause:   queueRemovalCause,
+		})
+	}
+	params := ciAutomationDispatchParams{
+		ChatPrompt:    ciAutomationChatPrompt(prompt),
+		CoalesceKey:   ciAutomationCoalesceKey(pr),
+		Metadata:      ciAutomationMessageMetadataForPR(pr, signature),
+		AllowNewRound: allowNewRound,
+		OnDirectAdmission: func(turnID string) error {
+			return recordAttempt(github.TaskCIAutoFixAttemptRunning, "", turnID, true)
+		},
+		OnQueued: func(queueEntryID string, replaced bool) error {
+			return recordAttempt(github.TaskCIAutoFixAttemptQueued, queueEntryID, "", !replaced)
+		},
+		OnAccepted: func(turnID, queueEntryID string) {
+			s.bindCIAutoFixAttemptTurnWithRecovery(ctx, github.TaskCIAutoFixAttemptBinding{
+				TaskID:       pr.TaskID,
+				RepositoryID: pr.RepositoryID,
+				PRNumber:     pr.PRNumber,
+				SessionID:    session.ID,
+				QueueEntryID: queueEntryID,
+				Signature:    signature,
+				TurnID:       turnID,
+			})
+		},
+		OnRejected: func(turnID, _ string) {
+			if strings.TrimSpace(turnID) == "" {
+				return
+			}
+			reconcileErr := attemptService.ReconcileTaskCIAutoFixTurnCompletion(
+				context.WithoutCancel(ctx), pr.TaskID, session.ID, turnID,
+			)
+			if reconcileErr != nil && !errors.Is(reconcileErr, github.ErrTaskCIAutoFixAttemptNotFound) {
+				s.logger.Debug("reconcile failed CI auto-fix turn failed", zap.String("task_id", pr.TaskID), zap.Error(reconcileErr))
+			}
+		},
+	}
+	_, err = s.dispatchCIAutomationPrompt(ctx, session, params)
+	if errors.Is(err, errCIAutoFixRoundCapReached) {
+		s.markCIAutoFixExhausted(ctx, pr)
+		return true, ""
+	}
+	if err != nil {
+		return true, err.Error()
+	}
+	s.publishTaskCIOptionsState(ctx, pr.TaskID)
+	return true, ""
+}
+
+func (s *Service) handleTaskPRCIAutoFixLegacy(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) (bool, string) {
+	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		return true, fmt.Sprintf("load CI automation state: %v", err)
+	}
+	if state != nil && state.AutoFixExhaustedAt != nil {
+		return !ciAutomationReadyToMerge(pr), ""
+	}
+	feedback, err := s.githubService.GetPRFeedbackForAutomation(
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber,
+	)
+	if err != nil {
+		return true, fmt.Sprintf("fetch PR feedback: %v", err)
+	}
+	if !ciAutomationCanPromptForFeedback(pr, feedback) {
+		return false, ""
+	}
+	return s.handleTaskPRCIAutoFixLegacyAttempt(ctx, pr, options, state, feedback)
+}
+
+func (s *Service) handleTaskPRCIAutoFixLegacyAttempt(
+	ctx context.Context,
+	pr *github.TaskPR,
+	options *github.TaskCIOptionsResponse,
+	state *github.TaskCIPRAutomationState,
+	feedback *github.PRFeedback,
+) (bool, string) {
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDeltaForPR(pr, feedback, previous)
@@ -354,7 +507,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		CheckpointJSON:      checkpointJSON,
 		SessionID:           session.ID,
 		EnqueuedAt:          time.Now().UTC(),
-		IncrementRound:      queueRecovery || result.consumesRound(),
+		IncrementRound:      result.consumesRound(),
 		QueueRemovalEventID: queueRemovalEventID,
 		QueueRemovalCause:   queueRemovalCause,
 	}); err != nil {
@@ -710,7 +863,14 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		if check.Status != ciAutomationCheckCompleted || !ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
 			continue
 		}
-		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
+		snap := ciAutomationCheckSnapshot{
+			Name:        check.Name,
+			Conclusion:  check.Conclusion,
+			HTMLURL:     check.HTMLURL,
+			Output:      check.Output,
+			StartedAt:   check.StartedAt,
+			CompletedAt: check.CompletedAt,
+		}
 		if _, seen := prevChecks[ciAutomationCheckKey(snap)]; !seen {
 			delta.FailedChecks = append(delta.FailedChecks, snap)
 		}
@@ -794,7 +954,78 @@ func ciAutomationDuplicateFixAttemptBlocksMergeAt(state *github.TaskCIPRAutomati
 }
 
 func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {
-	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output
+	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output + "|" +
+		ciAutomationProviderTime(check.StartedAt) + "|" + ciAutomationProviderTime(check.CompletedAt)
+}
+
+// ciAutomationProviderGeneration captures provider-visible execution state
+// separately from the feedback checkpoint. A rerun of the same named check
+// therefore re-arms an action_taken attempt even when its output is unchanged.
+func ciAutomationProviderGeneration(pr *github.TaskPR, feedback *github.PRFeedback) string {
+	type checkGeneration struct {
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		Conclusion  string `json:"conclusion"`
+		StartedAt   string `json:"started_at,omitempty"`
+		CompletedAt string `json:"completed_at,omitempty"`
+	}
+	type generation struct {
+		HeadSHA                 string            `json:"head_sha,omitempty"`
+		Checks                  []checkGeneration `json:"checks"`
+		ReviewState             string            `json:"review_state,omitempty"`
+		PendingReviewCount      int               `json:"pending_review_count,omitempty"`
+		UnresolvedReviewThreads int               `json:"unresolved_review_threads,omitempty"`
+		MergeableState          string            `json:"mergeable_state,omitempty"`
+		QueueEntryID            string            `json:"queue_entry_id,omitempty"`
+		QueueRemovalID          string            `json:"queue_removal_id,omitempty"`
+	}
+	current := generation{}
+	if pr != nil {
+		current.HeadSHA = strings.TrimSpace(pr.HeadSHA)
+		current.ReviewState = strings.TrimSpace(pr.ReviewState)
+		current.PendingReviewCount = pr.PendingReviewCount
+		current.UnresolvedReviewThreads = pr.UnresolvedReviewThreads
+		current.MergeableState = strings.TrimSpace(pr.MergeableState)
+		current.QueueEntryID = strings.TrimSpace(pr.MergeQueueEntryID)
+		current.QueueRemovalID = strings.TrimSpace(pr.MergeQueueLastRemovalID)
+	}
+	if feedback != nil {
+		current.Checks = make([]checkGeneration, 0, len(feedback.Checks))
+		for _, check := range feedback.Checks {
+			current.Checks = append(current.Checks, checkGeneration{
+				Name:        strings.TrimSpace(check.Name),
+				Status:      strings.TrimSpace(check.Status),
+				Conclusion:  strings.TrimSpace(check.Conclusion),
+				StartedAt:   ciAutomationProviderTime(check.StartedAt),
+				CompletedAt: ciAutomationProviderTime(check.CompletedAt),
+			})
+		}
+	}
+	sort.Slice(current.Checks, func(i, j int) bool {
+		if current.Checks[i].Name != current.Checks[j].Name {
+			return current.Checks[i].Name < current.Checks[j].Name
+		}
+		if current.Checks[i].StartedAt != current.Checks[j].StartedAt {
+			return current.Checks[i].StartedAt < current.Checks[j].StartedAt
+		}
+		if current.Checks[i].CompletedAt != current.Checks[j].CompletedAt {
+			return current.Checks[i].CompletedAt < current.Checks[j].CompletedAt
+		}
+		if current.Checks[i].Status != current.Checks[j].Status {
+			return current.Checks[i].Status < current.Checks[j].Status
+		}
+		return current.Checks[i].Conclusion < current.Checks[j].Conclusion
+	})
+	encoded, _ := json.Marshal(current)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+func ciAutomationProviderTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationCheckpoint {
@@ -966,6 +1197,21 @@ func ciAutomationRenderPromptTemplate(base, snapshot string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+const ciAutomationOutcomeProtocol = `Kandev PR auto-fix outcome protocol:
+Before this turn ends, call report_pr_auto_fix_outcome_kandev exactly once with one of these outcomes:
+- action_taken: you made or requested a concrete provider-visible change and want Kandev to wait for CI or PR progress.
+- non_actionable: the current feedback does not identify a change this task can make.
+- blocked: a concrete change is needed, but an external condition prevents it. Include a short reason.
+Do not claim action_taken from a plan or an attempted command alone. If the tool is unavailable, continue the repair work and explain that the outcome could not be recorded.`
+
+func ciAutomationAppendOutcomeProtocol(prompt string, passthrough bool) string {
+	prompt = strings.TrimSpace(prompt)
+	if passthrough {
+		return strings.TrimSpace(prompt + "\n\n" + ciAutomationOutcomeProtocol)
+	}
+	return strings.TrimSpace(prompt + "\n\n" + sysprompt.Wrap(ciAutomationOutcomeProtocol))
 }
 
 func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint) string {

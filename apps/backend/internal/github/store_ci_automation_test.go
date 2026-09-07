@@ -31,6 +31,17 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 			"last_lifecycle_event",
 			"last_lifecycle_prompt_at",
 			"last_lifecycle_session_id",
+			"auto_fix_attempt_state",
+			"auto_fix_attempt_queue_entry_id",
+			"auto_fix_attempt_session_id",
+			"auto_fix_attempt_turn_id",
+			"auto_fix_attempt_signature",
+			"auto_fix_attempt_provider_generation",
+			"auto_fix_attempt_outcome",
+			"auto_fix_attempt_summary",
+			"auto_fix_attempt_started_at",
+			"auto_fix_attempt_outcome_at",
+			"auto_fix_attempt_progress_deadline",
 		},
 		"github_task_pr_automation_options": {
 			"task_id",
@@ -54,6 +65,192 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 				t.Errorf("%s.%s is missing", table, column)
 			}
 		}
+	}
+}
+
+func TestStoreTaskCIAutoFixAttemptLifecycleUsesExactIdentity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	queuedAt := time.Now().UTC()
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:             "task-attempt",
+		RepositoryID:       "repo-attempt",
+		PRNumber:           17,
+		Signature:          "feedback-v1",
+		CheckpointJSON:     `{"failed_checks":[{"name":"test","conclusion":"failure"}]}`,
+		SessionID:          "session-attempt",
+		QueueEntryID:       "queue-attempt",
+		ProviderGeneration: "head-1/check-1",
+		State:              TaskCIAutoFixAttemptQueued,
+		EnqueuedAt:         queuedAt,
+		IncrementRound:     true,
+	}); err != nil {
+		t.Fatalf("record queued attempt: %v", err)
+	}
+
+	if err := store.BindTaskCIAutoFixAttemptTurn(ctx, TaskCIAutoFixAttemptBinding{
+		TaskID:       "task-attempt",
+		RepositoryID: "repo-attempt",
+		PRNumber:     17,
+		SessionID:    "session-attempt",
+		QueueEntryID: "queue-attempt",
+		Signature:    "feedback-v1",
+		TurnID:       "turn-attempt",
+	}); err != nil {
+		t.Fatalf("bind auto-fix turn: %v", err)
+	}
+
+	if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+		TaskID:    "task-attempt",
+		SessionID: "session-attempt",
+		TurnID:    "turn-attempt",
+		Outcome:   TaskCIAutoFixOutcomeActionTaken,
+		Summary:   "committed a fix",
+	}); err != nil {
+		t.Fatalf("report action outcome: %v", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, "task-attempt", "repo-attempt", 17)
+	if err != nil {
+		t.Fatalf("get attempt state: %v", err)
+	}
+	if state == nil {
+		t.Fatal("attempt state is missing")
+	}
+	if state.AutoFixAttemptState != TaskCIAutoFixAttemptAwaitingProviderProgress {
+		t.Fatalf("attempt state = %q, want awaiting_provider_progress", state.AutoFixAttemptState)
+	}
+	if state.AutoFixAttemptTurnID != "turn-attempt" || state.AutoFixAttemptQueueEntryID != "queue-attempt" {
+		t.Fatalf("attempt identity = %+v", state)
+	}
+	if state.AutoFixAttemptProgressDeadline == nil {
+		t.Fatal("action_taken did not persist a progress deadline")
+	}
+
+	if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+		TaskID:    "task-attempt",
+		SessionID: "session-attempt",
+		TurnID:    "different-turn",
+		Outcome:   TaskCIAutoFixOutcomeNonActionable,
+		Summary:   "stale report",
+	}); !errors.Is(err, ErrTaskCIAutoFixAttemptNotFound) {
+		t.Fatalf("stale outcome error = %v, want %v", err, ErrTaskCIAutoFixAttemptNotFound)
+	}
+
+	if err := store.ReconcileTaskCIAutoFixProviderProgress(ctx, TaskCIAutoFixProviderProgress{
+		TaskID:             "task-attempt",
+		RepositoryID:       "repo-attempt",
+		PRNumber:           17,
+		Signature:          "feedback-v1",
+		ProviderGeneration: "head-1/check-2",
+		ObservedAt:         time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("reconcile provider progress: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-attempt", "repo-attempt", 17)
+	if err != nil {
+		t.Fatalf("get progressed attempt state: %v", err)
+	}
+	if state.AutoFixAttemptState != TaskCIAutoFixAttemptAcknowledged {
+		t.Fatalf("progressed attempt state = %q, want acknowledged", state.AutoFixAttemptState)
+	}
+}
+
+func TestStoreTaskCIAutoFixAttemptCompletionAndOutcomeDisposition(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:             "task-disposition",
+		RepositoryID:       "repo-disposition",
+		PRNumber:           18,
+		Signature:          "feedback-v2",
+		CheckpointJSON:     `{}`,
+		SessionID:          "session-disposition",
+		TurnID:             "turn-disposition",
+		ProviderGeneration: "generation-1",
+		State:              TaskCIAutoFixAttemptRunning,
+		IncrementRound:     true,
+	}); err != nil {
+		t.Fatalf("record running attempt: %v", err)
+	}
+	if err := store.ReconcileTaskCIAutoFixTurnCompletion(ctx, "task-disposition", "session-disposition", "turn-disposition"); err != nil {
+		t.Fatalf("reconcile turn completion: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-disposition", "repo-disposition", 18)
+	if err != nil {
+		t.Fatalf("get retryable state: %v", err)
+	}
+	if state.AutoFixAttemptState != TaskCIAutoFixAttemptRetryable {
+		t.Fatalf("completion state = %q, want retryable", state.AutoFixAttemptState)
+	}
+
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:             "task-disposition",
+		RepositoryID:       "repo-disposition",
+		PRNumber:           18,
+		Signature:          "feedback-v2",
+		CheckpointJSON:     `{}`,
+		SessionID:          "session-disposition",
+		TurnID:             "turn-disposition-2",
+		ProviderGeneration: "generation-1",
+		State:              TaskCIAutoFixAttemptRunning,
+	}); err != nil {
+		t.Fatalf("record second running attempt: %v", err)
+	}
+	if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+		TaskID:    "task-disposition",
+		SessionID: "session-disposition",
+		TurnID:    "turn-disposition-2",
+		Outcome:   TaskCIAutoFixOutcomeNonActionable,
+		Summary:   "no provider-visible change is available",
+	}); err != nil {
+		t.Fatalf("report non-actionable outcome: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-disposition", "repo-disposition", 18)
+	if err != nil {
+		t.Fatalf("get acknowledged state: %v", err)
+	}
+	if state.AutoFixAttemptState != TaskCIAutoFixAttemptAcknowledged || state.AutoFixAttemptOutcome != TaskCIAutoFixOutcomeNonActionable {
+		t.Fatalf("non-actionable state = %+v", state)
+	}
+}
+
+func TestStoreTaskCIAutoFixAttemptRebindsRetryableTurn(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	attempt := TaskCIFixAttempt{
+		TaskID:             "task-rebind",
+		RepositoryID:       "repo-rebind",
+		PRNumber:           19,
+		Signature:          "feedback-rebind",
+		CheckpointJSON:     `{}`,
+		SessionID:          "session-rebind",
+		TurnID:             "turn-first",
+		ProviderGeneration: "generation-rebind",
+		State:              TaskCIAutoFixAttemptRunning,
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, attempt); err != nil {
+		t.Fatalf("record running attempt: %v", err)
+	}
+	if err := store.ReconcileTaskCIAutoFixTurnCompletion(ctx, attempt.TaskID, attempt.SessionID, attempt.TurnID); err != nil {
+		t.Fatalf("make attempt retryable: %v", err)
+	}
+	if err := store.BindTaskCIAutoFixAttemptTurn(ctx, TaskCIAutoFixAttemptBinding{
+		TaskID:       attempt.TaskID,
+		RepositoryID: attempt.RepositoryID,
+		PRNumber:     attempt.PRNumber,
+		SessionID:    attempt.SessionID,
+		Signature:    attempt.Signature,
+		TurnID:       "turn-retry",
+	}); err != nil {
+		t.Fatalf("rebind retryable attempt: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber)
+	if err != nil {
+		t.Fatalf("get rebound state: %v", err)
+	}
+	if state == nil || state.AutoFixAttemptState != TaskCIAutoFixAttemptRunning || state.AutoFixAttemptTurnID != "turn-retry" {
+		t.Fatalf("rebound state = %+v", state)
 	}
 }
 
@@ -909,6 +1106,14 @@ func TestStoreTaskCIPRState_MarkExhaustedAndResetOnReenable(t *testing.T) {
 	if state.LastFixSignature != "" || state.LastFixCheckpointJSON != "" || state.LastFixEnqueuedAt != nil || state.LastFixSessionID != nil {
 		t.Fatalf("expected auto-fix checkpoint state reset, got %+v", state)
 	}
+	if state.AutoFixAttemptState != TaskCIAutoFixAttemptAcknowledged ||
+		state.AutoFixAttemptQueueEntryID != "" || state.AutoFixAttemptSessionID != "" ||
+		state.AutoFixAttemptTurnID != "" || state.AutoFixAttemptSignature != "" ||
+		state.AutoFixAttemptProviderGeneration != "" || state.AutoFixAttemptOutcome != "" ||
+		state.AutoFixAttemptSummary != "" || state.AutoFixAttemptStartedAt != nil ||
+		state.AutoFixAttemptOutcomeAt != nil || state.AutoFixAttemptProgressDeadline != nil {
+		t.Fatalf("expected explicit attempt state reset, got %+v", state)
+	}
 }
 
 func TestStoreTaskCIPRState_RefreshCheckpointPreservesSessionPinning(t *testing.T) {
@@ -943,6 +1148,113 @@ func TestStoreTaskCIPRState_RefreshCheckpointPreservesSessionPinning(t *testing.
 	}
 	if state.LastFixEnqueuedAt != nil {
 		t.Fatalf("LastFixEnqueuedAt=%v, want nil", state.LastFixEnqueuedAt)
+	}
+}
+
+func TestStoreTaskCIPRState_RefreshCheckpointPreservesUnchangedBlockedError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	oldEnqueuedAt := time.Now().UTC().Add(-2 * time.Hour)
+	const (
+		taskID       = "task-blocked-refresh"
+		repositoryID = "repo-blocked-refresh"
+		signature    = "blocked-feedback-v1"
+	)
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: 42,
+		Signature: signature, CheckpointJSON: `{"failed_checks":[{"name":"unit"}]}`,
+		SessionID: "session-blocked-refresh", TurnID: "turn-blocked-refresh",
+		State: TaskCIAutoFixAttemptRunning, EnqueuedAt: oldEnqueuedAt, IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record blocked attempt: %v", err)
+	}
+	const blockedReason = "the provider rejected the requested change"
+	if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+		TaskID: taskID, SessionID: "session-blocked-refresh", TurnID: "turn-blocked-refresh",
+		Outcome: TaskCIAutoFixOutcomeBlocked, Summary: blockedReason,
+	}); err != nil {
+		t.Fatalf("record blocked outcome: %v", err)
+	}
+	if err := store.RefreshTaskCIFixCheckpoint(
+		ctx, taskID, repositoryID, 42, signature, `{"failed_checks":[{"name":"unit"}]}`,
+	); err != nil {
+		t.Fatalf("refresh unchanged blocked checkpoint: %v", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, taskID, repositoryID, 42)
+	if err != nil {
+		t.Fatalf("get blocked state: %v", err)
+	}
+	if state.LastError == nil || *state.LastError != blockedReason {
+		t.Fatalf("unchanged blocked error = %v, want %q", state.LastError, blockedReason)
+	}
+	if state.LastErrorKind != TaskCIErrorKindAutoFix {
+		t.Fatalf("unchanged blocked error kind = %q, want %q", state.LastErrorKind, TaskCIErrorKindAutoFix)
+	}
+}
+
+func TestStoreTaskCIPRState_ExplicitAutoFixResetClearsBlockedError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reset func(context.Context, *Store, string, string, int) error
+	}{
+		{
+			name: "task options",
+			reset: func(ctx context.Context, store *Store, taskID, repositoryID string, prNumber int) error {
+				enabled := true
+				_, err := store.UpdateTaskCIOptions(ctx, taskID, TaskCIOptionsPatch{AutoFixEnabled: &enabled})
+				return err
+			},
+		},
+		{
+			name: "PR options",
+			reset: func(ctx context.Context, store *Store, taskID, repositoryID string, prNumber int) error {
+				enabled := true
+				_, err := store.UpdateTaskPRAutomationOptions(
+					ctx, taskID, repositoryID, prNumber,
+					TaskPRAutomationOptionsPatch{AutoFixEnabled: &enabled}, false,
+				)
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ctx := context.Background()
+			const (
+				taskID       = "task-explicit-reset"
+				repositoryID = "repo-explicit-reset"
+				prNumber     = 42
+			)
+			if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+				TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+				Signature: "blocked-feedback", SessionID: "session-explicit-reset",
+				TurnID: "turn-explicit-reset", State: TaskCIAutoFixAttemptRunning,
+				IncrementRound: true,
+			}); err != nil {
+				t.Fatalf("record blocked attempt: %v", err)
+			}
+			if err := store.ReportTaskCIAutoFixOutcome(ctx, TaskCIAutoFixOutcomeReport{
+				TaskID: taskID, SessionID: "session-explicit-reset", TurnID: "turn-explicit-reset",
+				Outcome: TaskCIAutoFixOutcomeBlocked, Summary: "blocked before reset",
+			}); err != nil {
+				t.Fatalf("record blocked outcome: %v", err)
+			}
+			if err := tc.reset(ctx, store, taskID, repositoryID, prNumber); err != nil {
+				t.Fatalf("reset auto-fix state: %v", err)
+			}
+
+			state, err := store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+			if err != nil {
+				t.Fatalf("get reset state: %v", err)
+			}
+			if state.LastError != nil || state.LastErrorKind != "" {
+				t.Fatalf("reset retained blocked error: error=%v kind=%q", state.LastError, state.LastErrorKind)
+			}
+			if state.AutoFixRoundCount != 0 || state.AutoFixAttemptState != TaskCIAutoFixAttemptAcknowledged {
+				t.Fatalf("reset state = %+v, want acknowledged zero-round state", state)
+			}
+		})
 	}
 }
 

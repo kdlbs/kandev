@@ -352,6 +352,29 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	return out, nil
 }
 
+// ListDurableLifecycleEntries returns durable lifecycle rows in stable FIFO
+// order across sessions. The startup sweep uses this view to find queue rows
+// left by a crash between queue admission and attempt persistence.
+func (r *memoryRepository) ListDurableLifecycleEntries(_ context.Context) ([]QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []QueuedMessage
+	for _, list := range r.entries {
+		for _, msg := range list {
+			if msg.IsDurableLifecycle() {
+				out = append(out, *msg)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SessionID == out[j].SessionID {
+			return out[i].Position < out[j].Position
+		}
+		return out[i].SessionID < out[j].SessionID
+	})
+	return out, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()

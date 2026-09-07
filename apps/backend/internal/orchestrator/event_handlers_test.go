@@ -3087,6 +3087,53 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 		}
 	})
 
+	t.Run("closes a cancelled auto-fix turn without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateTaskSessionState(
+			ctx, "s1", models.TaskSessionStateCancelled, "operator stopped",
+		))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed auto-fix turn: %v", err)
+		}
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-cancelled-auto-fix",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls,
+			"cancelled user stops must not rearm the auto-fix attempt")
+	})
+
+	t.Run("closes a turn for a durable stop owner without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed owned auto-fix turn: %v", err)
+		}
+		svc.RegisterExecutionStopOwner("s1", "exec-owned-stop", false)
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-owned-stop",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls)
+	})
+
 	// Office fire-and-forget regression: when the office turn-complete
 	// handler sets the session to IDLE before stopping the agent, the
 	// resulting agent.stopped event must NOT clobber IDLE → CANCELLED.

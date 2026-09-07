@@ -196,6 +196,49 @@ func TestLifecycleRetryBypassesCurrentCapacity(t *testing.T) {
 	assert.Equal(t, []int{3, 0}, repo.lifecycleMaxima())
 }
 
+func TestLifecycleAdmissionCallbackRollbackRestoresInsertAndReplacement(t *testing.T) {
+	t.Run("insert", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		failure := errors.New("attempt persistence failed")
+		_, replaced, accepted, err := svc.QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+			ctx, "s", "t", "inserted", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+			func(_ context.Context, _ *QueuedMessage, _ bool) error { return failure },
+		)
+		require.ErrorIs(t, err, failure)
+		assert.False(t, replaced)
+		assert.False(t, accepted)
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+
+	t.Run("replacement", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		original, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", "original", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+		)
+		require.NoError(t, err)
+		require.True(t, accepted)
+
+		failure := errors.New("attempt persistence failed")
+		_, replaced, accepted, err := svc.QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+			ctx, "s", "t", "replacement", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+			func(_ context.Context, _ *QueuedMessage, _ bool) error { return failure },
+		)
+		require.ErrorIs(t, err, failure)
+		assert.False(t, replaced)
+		assert.False(t, accepted)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Len(t, status.Entries, 1)
+		assert.Equal(t, original.ID, status.Entries[0].ID)
+		assert.Equal(t, "original", status.Entries[0].Content)
+	})
+}
+
 func TestQueueCapacityConcurrentReadWrite(t *testing.T) {
 	svc := setupService(t)
 	var wait sync.WaitGroup
