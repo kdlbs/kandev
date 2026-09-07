@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,22 @@ func TestUntrustedBuildEnvRemovesCredentials(t *testing.T) {
 	}
 	if got != "PATH=/usr/bin\nHOME=/tmp/kandev" {
 		t.Fatalf("untrustedBuildEnv() = %q, want preserved non-credential environment", got)
+	}
+}
+
+func TestRunPackageRequiresArtifact(t *testing.T) {
+	if got := runPackage(context.Background(), nil); got != 2 {
+		t.Fatalf("runPackage(nil) = %d, want 2", got)
+	}
+}
+
+func TestRunDispatchesPackageCommand(t *testing.T) {
+	previousArgs := os.Args
+	os.Args = []string{"preview", "package"}
+	t.Cleanup(func() { os.Args = previousArgs })
+
+	if got := run(); got != 2 {
+		t.Fatalf("run() = %d, want 2 for package command without an artifact", got)
 	}
 }
 
