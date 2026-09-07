@@ -18,10 +18,12 @@ test.describe("host utility managed runtime recovery", () => {
 
     const wrapperSource = path.resolve(__dirname, "../../fixtures/managed-runtime-npx.sh");
     const wrapperPath = path.join(backend.tmpDir, "bin", "npx");
+    const discoveryPath = path.join(backend.tmpDir, "bin", "opencode");
     const cacheRoot = path.join(backend.tmpDir, "managed-npm-cache");
     const mockAgentPath = path.resolve(__dirname, "../../../../backend/bin/mock-agent");
     fs.copyFileSync(wrapperSource, wrapperPath);
     fs.chmodSync(wrapperPath, 0o755);
+    fs.writeFileSync(discoveryPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
     const runtimeEnv = {
       KANDEV_MOCK_AGENT: "true",
@@ -57,14 +59,15 @@ test.describe("host utility managed runtime recovery", () => {
             const hasMockModel = agent?.model_config.available_models.some(
               (model) => model.id === "mock-fast",
             );
-            return `${agent?.model_config.status ?? "missing"}:${hasMockModel}:${packageSpec !== ""}`;
+            const probeError = agent?.model_config.error ?? "";
+            return `${agent?.model_config.status ?? "missing"}:${hasMockModel}:${packageSpec !== ""}:${probeError}`;
           },
           {
             timeout: 60_000,
             message: "OpenCode host capabilities should recover before task creation",
           },
         )
-        .toBe("ok:true:true");
+        .toBe("ok:true:true:");
 
       const target = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
       expect(fs.existsSync(path.join(target, "stale-marker"))).toBe(false);
@@ -99,6 +102,7 @@ test.describe("host utility managed runtime recovery", () => {
     } finally {
       if (profileId) await apiClient.deleteAgentProfile(profileId, true).catch(() => undefined);
       fs.rmSync(wrapperPath, { force: true });
+      fs.rmSync(discoveryPath, { force: true });
       if (releaseEnv) await releaseEnv();
     }
   });
