@@ -118,8 +118,8 @@ Kandev must keep the task operational and explain the effective model.**
   evidence.
 - **Fallback-model mode**: profile has `auto_fallback = false` and a
   non-empty `fallback_model`. The only permitted automatic switch is to
-  that single model when the executor advertises it. Otherwise, the agent uses
-  its default and Kandev persists a warning.
+  that single model when the executor advertises and applies it. Otherwise,
+  Kandev fails the session before inference with sanitized mismatch evidence.
 - **Auto-fallback mode**: profile has `auto_fallback = true`. Legacy
   behavior (session-start best-effort; office routing re-dispatch to next
   candidate). Every session-start deviation creates a warning.
@@ -144,8 +144,9 @@ over `fallback_model`):
 | Model picker (profile editor, session toolbar) | Gone models greyed out, unselectable, visible. | Same. | Same. |
 
 `SetModel` failures that mean "this agent does not support model selection"
-(JSON-RPC `-32601`, `sessionmodel.MethodNone` / `IsMethodNotFound`) do not stop
-the launch. The agent uses its default and Kandev persists a warning.
+(JSON-RPC `-32601`, `sessionmodel.MethodNone` / `IsMethodNotFound`) fail exact
+and fallback-model launches before inference. Only `auto_fallback = true`
+continues on the agent default and persists a warning.
 
 The executor ACP catalog is authoritative for launch. Exact-profile model
 identity is enforced by [ADR-2026-09-06](../../../decisions/2026-09-06-exact-profile-model-identity.md).
