@@ -3,19 +3,9 @@ package sqlite
 import (
 	"context"
 	"time"
-)
 
-// SpendWindow reports one scope's priced spend and degradation state for a
-// single [start, before) window, in one query round-trip.
-// AC-OFFICE-BUDGET-002.10/.15, REQ-OFFICE-BUDGET-004.
-type SpendWindow struct {
-	// PricedSubcents excludes any event whose cost_source is 'unpriced'
-	// (AC-OFFICE-BUDGET-004.1); a NULL cost_source is treated as priced.
-	PricedSubcents int64
-	// Degraded is true when the window contains at least one unpriced
-	// event, determined from cost_source, never from estimated.
-	Degraded bool
-}
+	"github.com/kandev/kandev/internal/office/models"
+)
 
 // spendWindowQuery is shared by SpendWindowForWorkspace/Agent/Project: each
 // caller supplies its own WHERE-clause scope predicate and args, sharing the
@@ -26,7 +16,7 @@ type SpendWindow struct {
 func (r *Repository) spendWindowQuery(
 	ctx context.Context, scopeWhere string, scopeArgs []interface{},
 	start time.Time, hasStart bool, before time.Time,
-) (SpendWindow, error) {
+) (models.SpendWindow, error) {
 	query := `
 		SELECT
 			COALESCE(SUM(CASE WHEN e.cost_source = 'unpriced' THEN 0 ELSE e.cost_subcents END), 0) AS priced_subcents,
@@ -39,7 +29,7 @@ func (r *Repository) spendWindowQuery(
 		args = append(args, start.UTC())
 	}
 
-	var out SpendWindow
+	var out models.SpendWindow
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&out.PricedSubcents, &out.Degraded)
 	return out, err
 }
@@ -50,7 +40,7 @@ func (r *Repository) spendWindowQuery(
 // doc comment for the gap this deliberately does not share).
 func (r *Repository) SpendWindowForWorkspace(
 	ctx context.Context, workspaceID string, start time.Time, hasStart bool, before time.Time,
-) (SpendWindow, error) {
+) (models.SpendWindow, error) {
 	const where = `JOIN agent_profiles a ON a.id = e.agent_profile_id WHERE a.workspace_id = ?`
 	return r.spendWindowQuery(ctx, where, []interface{}{workspaceID}, start, hasStart, before)
 }
@@ -58,7 +48,7 @@ func (r *Repository) SpendWindowForWorkspace(
 // SpendWindowForAgent scopes directly on office_cost_events.agent_profile_id.
 func (r *Repository) SpendWindowForAgent(
 	ctx context.Context, agentInstanceID string, start time.Time, hasStart bool, before time.Time,
-) (SpendWindow, error) {
+) (models.SpendWindow, error) {
 	const where = `WHERE e.agent_profile_id = ?`
 	return r.spendWindowQuery(ctx, where, []interface{}{agentInstanceID}, start, hasStart, before)
 }
@@ -69,7 +59,7 @@ func (r *Repository) SpendWindowForAgent(
 // historical spend between ceilings (AC-OFFICE-BUDGET-002.15).
 func (r *Repository) SpendWindowForProject(
 	ctx context.Context, projectID string, start time.Time, hasStart bool, before time.Time,
-) (SpendWindow, error) {
+) (models.SpendWindow, error) {
 	const where = `WHERE e.project_id = ?`
 	return r.spendWindowQuery(ctx, where, []interface{}{projectID}, start, hasStart, before)
 }

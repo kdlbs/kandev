@@ -32,6 +32,15 @@ type Repository interface {
 	UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error
 	DeleteBudgetPolicy(ctx context.Context, id string) error
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
+	SpendWindowForWorkspace(
+		ctx context.Context, workspaceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForAgent(
+		ctx context.Context, agentInstanceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForProject(
+		ctx context.Context, projectID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.
