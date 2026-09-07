@@ -137,7 +137,11 @@ export class WorkflowSettingsPage {
     } else {
       await list.locator("select").selectOption(type);
     }
-    await expect(this.page.locator('[data-testid="workflow-focused-action-editor"]')).toBeVisible();
+    await expect(
+      this.page.locator(
+        '[data-testid="workflow-focused-action-editor"], [data-testid="workflow-cycle-guard-dialog"]',
+      ),
+    ).toBeVisible();
   }
 
   /** Return from the focused action editor to its inline recipe. */
@@ -255,10 +259,13 @@ export class WorkflowSettingsPage {
     optionName: string,
     touch = false,
   ) {
-    await this.selectStep(card, stepName, touch);
+    const panel = await this.selectStep(card, stepName, touch);
+    await this.activate(panel.getByTestId("workflow-editor-tab-automation"), touch);
     const type = transitionActionType(optionName);
     await this.addEditorAction("on_turn_complete", type, touch);
-    await this.backFromEditorAction(touch);
+    if (!(await this.cycleGuardDialog.isVisible().catch(() => false))) {
+      await this.backFromEditorAction(touch);
+    }
   }
 
   /** Toggle the cancellation policy beneath a configured turn-complete transition. */

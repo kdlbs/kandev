@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -7,8 +8,9 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Textarea } from "@kandev/ui/textarea";
 import type { WorkflowStep } from "@/lib/types/http";
+import { useDebouncedCallback } from "@/hooks/use-debounce";
+import { cn } from "@/lib/utils";
 import { AutomationTab, type WorkflowActionSelection } from "./automation-tab";
 import { WorkflowStepAgentProfileSelector } from "@/components/settings/workflow-step-agent-profile-selector";
 import {
@@ -16,9 +18,14 @@ import {
   SessionConfigToggle,
 } from "@/components/settings/workflow-session-config-editor";
 import { StepWipControls } from "@/components/settings/workflow-pipeline-editor-wip-controls";
-import { HelpTip, STEP_COLORS } from "@/components/settings/workflow-pipeline-editor-helpers";
+import {
+  hasOnEnterAction,
+  HelpTip,
+  STEP_COLORS,
+} from "@/components/settings/workflow-pipeline-editor-helpers";
+import { useStepActions } from "@/components/settings/workflow-pipeline-editor-step-actions";
 import { isWorkflowStepValueDirty } from "@/components/settings/workflow-dirty-state";
-import { cn } from "@/lib/utils";
+import { StepPromptSection } from "@/components/settings/workflow-step-prompt-section";
 
 export type WorkflowInspectorTab = "agent" | "automation" | "policies";
 
@@ -239,7 +246,13 @@ function AgentTab({
   | "onUpdate"
   | "onSessionConfigResolutionPendingChange"
 >) {
-  const { t } = useTranslation();
+  const [localPrompt, setLocalPrompt] = useState(step.prompt ?? "");
+  const debouncedUpdatePrompt = useDebouncedCallback((prompt) => onUpdate({ prompt }), 500);
+
+  useEffect(() => {
+    setLocalPrompt(step.prompt ?? "");
+  }, [step.id]);
+
   return (
     <div className="space-y-5" data-testid="workflow-agent-tab">
       <WorkflowStepAgentProfileSelector
@@ -247,6 +260,12 @@ function AgentTab({
         savedStep={savedStep}
         onUpdate={onUpdate}
         readOnly={readOnly}
+      />
+      <StepAgentBehaviorControls
+        step={step}
+        savedStep={savedStep}
+        readOnly={readOnly}
+        onUpdate={onUpdate}
       />
       <SessionConfigToggle
         step={step}
@@ -262,18 +281,66 @@ function AgentTab({
         readOnly={readOnly}
         onResolutionPendingChange={onSessionConfigResolutionPendingChange}
       />
-      <div className="space-y-1.5">
-        <Label htmlFor={`workflow-step-prompt-${step.id}`}>{t("workflows:stepPrompt")}</Label>
-        <Textarea
-          id={`workflow-step-prompt-${step.id}`}
-          value={step.prompt ?? ""}
-          onChange={(event) => onUpdate({ prompt: event.target.value })}
-          disabled={readOnly}
-          placeholder={t("workflows:stepPromptPlaceholder")}
-          className="min-h-32"
-        />
-        <p className="text-xs text-muted-foreground">{t("workflows:stepPromptHelp")}</p>
-      </div>
+      <StepPromptSection
+        step={step}
+        savedStep={savedStep}
+        localPrompt={localPrompt}
+        onLocalPromptChange={setLocalPrompt}
+        debouncedUpdatePrompt={debouncedUpdatePrompt}
+        readOnly={readOnly}
+      />
+    </div>
+  );
+}
+
+function StepAgentBehaviorControls({
+  step,
+  savedStep,
+  readOnly,
+  onUpdate,
+}: Pick<WorkflowInspectorProps, "step" | "savedStep" | "readOnly" | "onUpdate">) {
+  const { t } = useTranslation();
+  const { toggleOnEnterAction } = useStepActions({ step, onUpdate });
+
+  return (
+    <div className="space-y-3" data-testid="workflow-agent-behavior-controls">
+      <PolicyCheckbox
+        id={`${step.id}-auto-start`}
+        checked={hasOnEnterAction(step, "auto_start_agent")}
+        dirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "auto_start_agent"),
+        )}
+        label={t("workflows:autoStartAgent")}
+        help={t("workflows:autoStartAgentHelp")}
+        disabled={readOnly}
+        onChange={() => toggleOnEnterAction("auto_start_agent")}
+      />
+      <PolicyCheckbox
+        id={`${step.id}-plan-mode`}
+        checked={hasOnEnterAction(step, "enable_plan_mode")}
+        dirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "enable_plan_mode"),
+        )}
+        label={t("workflows:planMode")}
+        help={t("workflows:planModeHelp")}
+        disabled={readOnly}
+        onChange={() => toggleOnEnterAction("enable_plan_mode")}
+      />
+      <PolicyCheckbox
+        id={`${step.id}-reset-context`}
+        checked={hasOnEnterAction(step, "reset_agent_context")}
+        dirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "reset_agent_context"),
+        )}
+        label={t("workflows:resetAgentContext")}
+        help={
+          step.agent_profile_id
+            ? t("workflows:resetAgentContextHelpWithProfile")
+            : t("workflows:resetAgentContextHelp")
+        }
+        disabled={readOnly || !!step.agent_profile_id}
+        onChange={() => toggleOnEnterAction("reset_agent_context")}
+      />
     </div>
   );
 }
@@ -445,14 +512,15 @@ function PolicyCheckbox({
         disabled={disabled}
         data-settings-dirty={dirty}
       />
-      <div className="min-w-0 space-y-0.5">
-        <div className="flex items-center gap-1">
-          <Label htmlFor={id} className="text-sm" data-testid={labelTestId}>
-            {label}
-          </Label>
-          {helpTestId && <HelpTip testId={helpTestId} text={help} />}
-        </div>
-        <p className="text-xs text-muted-foreground">{help}</p>
+      <div className="flex min-w-0 items-center gap-1">
+        <Label
+          htmlFor={id}
+          className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
+          data-testid={labelTestId}
+        >
+          {label}
+        </Label>
+        <HelpTip testId={helpTestId} text={help} />
       </div>
     </div>
   );
