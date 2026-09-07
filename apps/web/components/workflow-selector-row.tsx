@@ -2,7 +2,12 @@
 
 import { Fragment, memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCheck, IconChevronDown, IconInfoCircle, IconLogicBuffer } from "@tabler/icons-react";
+import {
+  IconArrowBigRightLines,
+  IconCheck,
+  IconChevronDown,
+  IconLogicBuffer,
+} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
@@ -133,7 +138,7 @@ function LaunchDestinationInfo() {
           aria-label={t("task:launchDestinationHelpLabel")}
           data-testid="task-create-launch-step-info"
         >
-          <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          <IconArrowBigRightLines className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </TooltipTrigger>
       <TooltipContent className="max-w-[320px] text-xs leading-relaxed">
@@ -144,13 +149,12 @@ function LaunchDestinationInfo() {
 }
 
 function LaunchDestinationLabel({ stepName }: { stepName: string }) {
-  const { t } = useTranslation();
   return (
     <span
       className="min-w-0 max-w-[45vw] shrink truncate text-xs text-muted-foreground"
       data-testid="task-create-launch-step"
     >
-      {t("task:launchDestination", { step: stepName })}
+      {stepName}
     </span>
   );
 }

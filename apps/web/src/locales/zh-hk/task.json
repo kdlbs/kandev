@@ -1993,7 +1993,6 @@
   "promptHistoryPromptLabel": "提示 {{number}}",
   "promptHistoryPromptLabelGeneric": "提示",
   "promptHistoryEmpty": "暫無提示。",
-  "launchDestination": "開始步驟：{{step}}",
   "launchDestinationHelpLabel": "了解任務開始步驟",
   "launchDestinationHelp": "任務會在此工作流程步驟開始。有任務描述時，自動啓動代理程式的步驟可能優先於已設定的開始步驟。",
   "launchErrorBaseBranchMissing": "任務無法啓動，因為基礎分支不可用。",

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { WorkflowSelectorRow } from "./workflow-selector-row";
@@ -28,7 +28,8 @@ function renderSelector(preview: TaskCreateLaunchPreview | null = launchPreview)
 }
 
 describe("WorkflowSelectorRow launch destination", () => {
-  it("shows the launch controls immediately after the selector", () => {
+  // @covers AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.1
+  it("shows the launch destination arrow and explanation after the selector", async () => {
     renderSelector();
 
     const trigger = screen.getByTestId("workflow-selector-trigger");
@@ -40,14 +41,20 @@ describe("WorkflowSelectorRow launch destination", () => {
     expect(row.contains(trigger)).toBe(true);
     expect(row.contains(launchStep)).toBe(true);
     expect(trigger.className).not.toContain("flex-1");
-    expect(launchStep.textContent).toBe("Start step: In Progress");
+    expect(launchStep.textContent).toBe("In Progress");
     expect(launchStep.className).not.toContain("ml-auto");
 
     const launchStepInfo = screen.getByTestId("task-create-launch-step-info");
     expect(trigger.contains(launchStepInfo)).toBe(false);
     expect(launchStepInfo.getAttribute("aria-label")).toBe("Learn about the task start step");
+    expect(launchStepInfo.querySelector(".tabler-icon-arrow-big-right-lines")).not.toBeNull();
     expect(Array.from(row.children).indexOf(launchStepInfo)).toBeLessThan(
       Array.from(row.children).indexOf(launchStep),
+    );
+
+    fireEvent.focus(launchStepInfo);
+    expect((await screen.findByRole("tooltip")).textContent).toBe(
+      "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
     );
   });
 
