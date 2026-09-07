@@ -41,6 +41,8 @@ type Repository interface {
 	SpendWindowForProject(
 		ctx context.Context, projectID string, start time.Time, hasStart bool, before time.Time,
 	) (models.SpendWindow, error)
+	GetWorkspaceBudgetDefault(ctx context.Context, workspaceID string) (limitSubcents int64, found bool, err error)
+	SetWorkspaceBudgetDefault(ctx context.Context, workspaceID string, limitSubcents int64) error
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.

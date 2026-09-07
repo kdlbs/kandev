@@ -59,6 +59,11 @@ type PreLaunchPolicyResult struct {
 	Degraded           bool
 	LimitExceeded      bool
 	DegradationBlocked bool
+	// IsDefault is true when this result is the built-in default ceiling
+	// (EvaluateDefaultCeiling), never a stored office_budget_policies row.
+	// PolicyID is "" in that case (AC-OFFICE-BUDGET-003.7's stable identifier
+	// distinct from any policy row).
+	IsDefault bool
 }
 
 // PreLaunchResult is EvaluatePreLaunch's full output.
