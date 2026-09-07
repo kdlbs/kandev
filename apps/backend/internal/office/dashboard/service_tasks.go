@@ -628,6 +628,7 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	commentID := s.maybeCreateStatusComment(ctx, req)
 	s.logTaskStatusChangeActivity(ctx, req)
 	s.publishTaskStatusChanged(ctx, req)
+	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
 	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
 
@@ -982,6 +983,25 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 		s.logger.Error("publish task status changed event failed",
 			zap.String("task_id", req.TaskID), zap.Error(err))
 	}
+}
+
+// publishCanonicalTaskUpdated publishes the canonical task.updated event
+// (AGENTS.md:228) for a task row this function has just mutated via
+// s.repo.UpdateTaskState. office.task.status_changed above only reaches the
+// Office board; task.updated is what WS-driven UI outside Office (the
+// All-Workflows kanban view, task views, the task/statussummary projector)
+// keys off. Nil-safe: skipped when no publisher is wired.
+func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, taskID string) {
+	if s.taskLifecycle == nil {
+		return
+	}
+	task, err := s.taskLifecycle.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("publish canonical task updated: load task failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	s.taskLifecycle.PublishTaskUpdated(ctx, task)
 }
 
 // runReactivityForComment fires the pipeline for a standalone comment

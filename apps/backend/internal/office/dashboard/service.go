@@ -191,6 +191,17 @@ type TaskDetacher interface {
 	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 }
 
+// TaskLifecyclePublisher loads the canonical task row and publishes the
+// task.updated event AGENTS.md:228 requires for any code path that mutates
+// a task row. Office's own status-change events (office.task.status_changed)
+// only reach the Office board; this is the seam that reaches everything
+// else WS-driven off task.updated (All-Workflows kanban, task views, the
+// task/statussummary projector).
+type TaskLifecyclePublisher interface {
+	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	PublishTaskUpdated(ctx context.Context, task *taskmodels.Task, oldWorkflowIDs ...string)
+}
+
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
 // reviewer/approver removal, or agent instance deletion. Idempotent: skipping
@@ -378,6 +389,7 @@ type DashboardService struct {
 	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
 	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
 	taskDetacher     TaskDetacher                    // optional; canonical empty-parent mutation
+	taskLifecycle    TaskLifecyclePublisher          // optional; nil means status changes don't publish canonical task.updated
 	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
 	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
 	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
@@ -567,6 +579,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskLifecyclePublisher wires the canonical task.updated publisher used
+// after a status change persists a task row mutation.
+func (s *DashboardService) SetTaskLifecyclePublisher(p TaskLifecyclePublisher) {
+	s.taskLifecycle = p
 }
 
 // SetSessionTerminator wires the office session terminator. Optional; when
