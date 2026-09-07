@@ -337,6 +337,104 @@ describe("run-e2e.sh", () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain("Playwright worker limit");
   });
 
+  it("parses script options after a leading -- (the natural pnpm invocation)", () => {
+    // pnpm/npm forward a caller's `--` verbatim, so `pnpm e2e:run -- --host`
+    // reaches this script as `-- --host`. Regression test for the bug where
+    // the parser's `--) shift; PW_ARGS+=("$@"); break` case matched that
+    // leading `--` first and dumped every script option into PW_ARGS,
+    // leaving MODE=auto and DO_BUILD=1 no matter what was passed.
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nprintf '%s' \"${KANDEV_E2E_CONTAINERS:-}\"\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--", "--host", "--no-build", "--project", "containers", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("1");
+  });
+
+  it("forwards only the tail after a second -- when the first -- is a leading pnpm artifact", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nprintf '%s' \"$*\"\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--", "--host", "--no-build", "--project", "chromium", "--", "--grep", "foo"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      "exec playwright test --config e2e/playwright.config.ts --project=chromium --workers=1 --grep foo",
+    );
+  });
+
+  it("runs the clean subcommand when it follows a leading pnpm --", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const dockerPath = path.join(binDir, "docker");
+    fs.writeFileSync(
+      dockerPath,
+      '#!/usr/bin/env sh\nif [ "$1" = "info" ]; then exit 1; fi\nexit 0\n',
+    );
+    fs.chmodSync(dockerPath, 0o755);
+
+    const result = spawnSync("bash", [scriptPath, "--", "clean"], {
+      encoding: "utf8",
+      env: runnerEnv(binDir),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("clean done");
+  });
+
+  it("bounds the docker info probe and falls back to host mode on a hung daemon", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const dockerPath = path.join(binDir, "docker");
+    fs.writeFileSync(
+      dockerPath,
+      '#!/usr/bin/env sh\nif [ "$1" = "info" ]; then sleep 30; exit 0; fi\nexit 0\n',
+    );
+    fs.chmodSync(dockerPath, 0o755);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const start = Date.now();
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--no-build", "--project", "chromium", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "1" }),
+      },
+    );
+    const elapsedMs = Date.now() - start;
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(
+      "docker info did not respond within 1s; treating Docker as unavailable",
+    );
+    expect(result.stderr).toContain("mode=host");
+    expect(elapsedMs).toBeLessThan(15_000);
+  });
+
   it("applies the worker guard to raw Playwright runs", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
     tempDirs.push(binDir);

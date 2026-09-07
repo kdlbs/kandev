@@ -22,8 +22,15 @@
 #     container.
 #
 # Usage:
-#   run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
-#   run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Direct:  run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
+#            run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Via pnpm: pnpm e2e:run [options] [-- <playwright args>]
+#   pnpm/npm forward a caller-supplied `--` verbatim, so `pnpm e2e:run -- --host`
+#   reaches this script as `-- --host`. A leading bare `--` is therefore dropped
+#   before option parsing and carries no meaning — write script options directly
+#   after `e2e:run` (`pnpm e2e:run --host --no-build -- --grep foo`), not before
+#   a leading `--`. A `--` anywhere else still ends option parsing and forwards
+#   everything after it straight to Playwright.
 #
 # Options:
 #   --docker | --host     Force runner (default: auto-detect)
@@ -38,6 +45,8 @@
 #   KANDEV_CI_BUILD_IMAGE   (default: ghcr.io/kdlbs/kandev-ci:build-latest)
 #   KANDEV_CI_RUNTIME_IMAGE (default: kandev-ci:runtime-local, falls back to ghcr…:runtime-latest)
 #   KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1  bypass local shard/worker guards for experiments
+#   KANDEV_E2E_DOCKER_PROBE_TIMEOUT (default: 10)  seconds to wait for `docker info`
+#   before treating Docker as unavailable in auto/clean mode
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,11 +57,31 @@ WEB_DIR="$REPO_ROOT/apps/web"
 BACKEND_DIR="$REPO_ROOT/apps/backend"
 BUILD_IMAGE="${KANDEV_CI_BUILD_IMAGE:-ghcr.io/kdlbs/kandev-ci:build-latest}"
 RUNTIME_IMAGE="${KANDEV_CI_RUNTIME_IMAGE:-}"
+DOCKER_PROBE_TIMEOUT="${KANDEV_E2E_DOCKER_PROBE_TIMEOUT:-10}"
 
 log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
-docker_up() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+# Bounded in pure bash (no `timeout`/`gtimeout` dependency — bare macOS has
+# neither). Backgrounds the probe and kills it if it outlives the budget, so a
+# hung daemon degrades to host mode with a visible reason instead of hanging
+# the whole runner forever.
+docker_up() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 &
+  local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( tick >= max_ticks )); then
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      log "docker info did not respond within ${DOCKER_PROBE_TIMEOUT}s; treating Docker as unavailable (pass --host to skip this probe)"
+      return 1
+    fi
+    sleep 0.1
+    tick=$(( tick + 1 ))
+  done
+  wait "$pid"
+}
 is_container_project() { [[ "$PROJECT" == containers || "$PROJECT" == kubernetes-compat ]]; }
 
 resolve_runtime_image() {
@@ -171,6 +200,11 @@ DO_BUILD=1
 STRICT=1
 PROJECT=chromium
 PW_ARGS=()
+# pnpm/npm forward the caller's `--` verbatim, so `pnpm e2e:run -- --host`
+# reaches this script as `-- --host`. A leading `--` therefore carries no
+# information; dropping it keeps script options parseable. A later `--` still
+# ends option parsing (in the loop below).
+[[ "${1:-}" == -- ]] && shift
 [[ "${1:-}" == clean ]] && { SUBCMD=clean; shift; }
 [[ "${1:-}" == run ]] && shift
 while [[ $# -gt 0 ]]; do
