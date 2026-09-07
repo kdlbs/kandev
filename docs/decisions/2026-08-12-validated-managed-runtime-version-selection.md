@@ -1,10 +1,15 @@
 # ADR-2026-08-12-validated-managed-runtime-version-selection: Validate and Persist Managed Runtime Version Selection
 
-**Status:** accepted (amended 2026-08-21 and 2026-08-24)
+**Status:** accepted (amended 2026-08-21, 2026-08-24, and by 2026-09-07-activate-managed-runtime-defaults)
 **Date:** 2026-08-12
 **Area:** backend, frontend, protocol, workflow
 **Supersedes:**
 [ADR-2026-07-26-user-managed-agent-runtime-updates](2026-07-26-user-managed-agent-runtime-updates.md)
+
+**Amendment:**
+[ADR-2026-09-07](2026-09-07-activate-managed-runtime-defaults.md) limits a
+selection to one shipped default generation. A changed package or default
+activates the new Kandev default before runtime consumers start.
 
 ## Context
 

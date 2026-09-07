@@ -1,6 +1,6 @@
 # 0034: Agent Client Protocol Codex ACP Bridge
 
-**Status:** accepted (amended 2026-07-26)
+**Status:** accepted (amended 2026-07-26 and 2026-09-07)
 **Date:** 2026-07-10
 **Area:** backend, protocol
 
@@ -12,7 +12,7 @@ Kandev's `codex-acp` agent previously launched `@zed-industries/codex-acp`. That
 
 Kandev's `codex-acp` agent launches the exact effective version of
 `@agentclientprotocol/codex-acp` for ACP chat and one-shot inference sessions.
-The reviewed Kandev default is currently `1.6.0`; an install-wide operator
+The reviewed Kandev default is currently `1.10.0`; an install-wide operator
 selection can override it. Normal launches prefer npm's execution cache. The
 install script still installs `@openai/codex` for `codex login`; that native
 authentication helper is separate from the managed ACP runtime.
@@ -23,6 +23,11 @@ replaces the advertised model and configuration catalogue for future
 sessions. The shared runtime-management boundary is recorded in
 [ADR-2026-07-26](2026-07-26-user-managed-agent-runtime-updates.md) and the
 [managed runtime update spec](../specs/agents/requirements/runtime-updates.md).
+At startup, a changed Codex package or reviewed default clears the prior
+operator selection before new runtime consumers start. An unchanged default
+generation preserves the selection, and an active Codex process is not
+replaced during backend recovery. The shared upgrade rule is recorded in
+[ADR-2026-09-07](2026-09-07-activate-managed-runtime-defaults.md).
 
 ## Consequences
 

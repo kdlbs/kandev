@@ -110,6 +110,26 @@ func TestBuildFreshAgentCommandUsesExactVersionForStandaloneRestart(t *testing.T
 	}
 }
 
+// @covers AC-AGENTS-RUNTIME-UPDATES-002.4 and AC-AGENTS-RUNTIME-UPDATES-002.5
+func TestBuildFreshAgentCommandUsesReviewedDefaultAfterSelectionReset(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{found: false})
+	agent := agents.NewOpenCodeACP()
+
+	commands, err := manager.buildFreshAgentCommand(
+		context.Background(),
+		&AgentExecution{RuntimeName: agentruntime.RuntimeStandalone},
+		agent,
+	)
+	if err != nil {
+		t.Fatalf("buildFreshAgentCommand: %v", err)
+	}
+	want := agent.ManagedNPMRuntime().DefaultVersionOrPinned()
+	if !strings.Contains(commands.initial, "opencode-ai@"+want) {
+		t.Fatalf("restart command = %q, want reviewed default %q", commands.initial, want)
+	}
+}
+
 func TestBuildFreshAgentCommandFailsWhenStandaloneSelectionCannotBeRead(t *testing.T) {
 	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
 	wantErr := errors.New("selection unavailable")
