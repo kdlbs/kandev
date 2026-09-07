@@ -422,8 +422,6 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitAllTypes(e, model)
 	case strings.EqualFold(cmd, "/error"):
 		emitError(e, model)
-	case strings.EqualFold(cmd, "/slow-until-release") || strings.HasPrefix(strings.ToLower(cmd), "/slow-until-release "):
-		emitSlowUntilRelease(e, cmd)
 	case strings.EqualFold(cmd, "/slow") || strings.HasPrefix(strings.ToLower(cmd), "/slow "):
 		emitSlowResponse(e, cmd, model)
 	case strings.EqualFold(cmd, "/thinking"):
@@ -633,38 +631,6 @@ func emitSlowResponse(e *emitter, prompt, model string) {
 
 	e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration))
 	time.Sleep(stepDelay)
-}
-
-const slowUntilReleaseCommand = "/slow-until-release"
-
-func slowUntilReleasePath(cmd string) string {
-	trimmed := strings.TrimSpace(cmd)
-	if len(trimmed) <= len(slowUntilReleaseCommand) {
-		return ""
-	}
-	return strings.TrimSpace(trimmed[len(slowUntilReleaseCommand):])
-}
-
-func waitForReleaseFile(releasePath string) {
-	for {
-		if _, err := os.Stat(releasePath); err == nil {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
-// emitSlowUntilRelease keeps the prompt active until the test explicitly
-// releases it, so cancellation assertions do not depend on wall-clock timing.
-func emitSlowUntilRelease(e *emitter, cmd string) {
-	releasePath := slowUntilReleasePath(cmd)
-	if releasePath == "" {
-		e.text("Mock slow response release path is missing.")
-		return
-	}
-	e.thought("Waiting for the cancellation test release.")
-	waitForReleaseFile(releasePath)
-	e.text("Slow response released.")
 }
 
 // emitRandomResponse generates a random mix of 2-5 events.
