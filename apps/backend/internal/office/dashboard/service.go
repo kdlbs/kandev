@@ -192,11 +192,11 @@ type TaskDetacher interface {
 }
 
 // TaskLifecyclePublisher loads the canonical task row and publishes the
-// task.updated event AGENTS.md:228 requires for any code path that mutates
-// a task row. Office's own status-change events (office.task.status_changed)
-// only reach the Office board; this is the seam that reaches everything
-// else WS-driven off task.updated (All-Workflows kanban, task views, the
-// task/statussummary projector).
+// task.updated event for a task row Office has just mutated. Office's own
+// status-change events (office.task.status_changed) only reach the Office
+// board; this is the seam that reaches everything else WS-driven off
+// task.updated (All-Workflows kanban, task views, the task/statussummary
+// projector).
 type TaskLifecyclePublisher interface {
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
 	PublishTaskUpdated(ctx context.Context, task *taskmodels.Task, oldWorkflowIDs ...string)

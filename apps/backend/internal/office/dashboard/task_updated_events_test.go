@@ -2,6 +2,7 @@ package dashboard_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
@@ -64,12 +65,21 @@ func TestUpdateTaskStatus_PublishesCanonicalTaskUpdatedWhenGateRedirects(t *test
 		TaskID:    "cu2",
 		NewStatus: "done",
 	})
-	if err == nil {
-		t.Fatal("expected *ApprovalsPendingError, got nil")
+	var pendingErr *dashboard.ApprovalsPendingError
+	if !errors.As(err, &pendingErr) {
+		t.Fatalf("err = %v, want *dashboard.ApprovalsPendingError", err)
 	}
 
 	if len(pub.published) != 1 || pub.published[0] != "cu2" {
 		t.Fatalf("published = %v, want exactly one task.updated for cu2 despite the gate redirect", pub.published)
+	}
+
+	exec, err := deps.repo.GetTaskExecutionFields(context.Background(), "cu2")
+	if err != nil {
+		t.Fatalf("get task execution fields: %v", err)
+	}
+	if exec == nil || exec.State != "REVIEW" {
+		t.Fatalf("persisted state = %+v, want REVIEW", exec)
 	}
 }
 

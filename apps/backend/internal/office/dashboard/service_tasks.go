@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
@@ -985,23 +986,35 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 	}
 }
 
-// publishCanonicalTaskUpdated publishes the canonical task.updated event
-// (AGENTS.md:228) for a task row this function has just mutated via
-// s.repo.UpdateTaskState. office.task.status_changed above only reaches the
-// Office board; task.updated is what WS-driven UI outside Office (the
-// All-Workflows kanban view, task views, the task/statussummary projector)
-// keys off. Nil-safe: skipped when no publisher is wired.
+// canonicalTaskUpdatedPublishTimeout bounds the detached reload+publish in
+// publishCanonicalTaskUpdated so a caller-cancelled ctx can't hang it forever.
+const canonicalTaskUpdatedPublishTimeout = 10 * time.Second
+
+// publishCanonicalTaskUpdated publishes the canonical task.updated event for
+// a task row this function has just mutated via s.repo.UpdateTaskState.
+// office.task.status_changed above only reaches the Office board;
+// task.updated is what WS-driven UI outside Office (the All-Workflows
+// kanban view, task views, the task/statussummary projector) keys off.
+// Nil-safe: skipped when no publisher is wired. Runs on a context detached
+// from ctx's cancellation: the mutation has already committed, so a caller
+// that disconnects (HTTP) or a ctx that expires between the write and this
+// reload must not suppress the event other WS-driven views depend on.
 func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, taskID string) {
 	if s.taskLifecycle == nil {
 		return
 	}
-	task, err := s.taskLifecycle.GetTask(ctx, taskID)
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), canonicalTaskUpdatedPublishTimeout)
+	defer cancel()
+	task, err := s.taskLifecycle.GetTask(pubCtx, taskID)
 	if err != nil {
 		s.logger.Error("publish canonical task updated: load task failed",
 			zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
-	s.taskLifecycle.PublishTaskUpdated(ctx, task)
+	if task == nil {
+		return
+	}
+	s.taskLifecycle.PublishTaskUpdated(pubCtx, task)
 }
 
 // runReactivityForComment fires the pipeline for a standalone comment
