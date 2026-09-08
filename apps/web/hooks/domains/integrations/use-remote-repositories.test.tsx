@@ -433,10 +433,12 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     setBuiltInAvailability({ azureDevOps: false, gitlab: false });
     act(() => result.current.refresh?.());
 
-    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2);
+      expect(result.current.availableProviders).toEqual(["github"]);
+    });
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
     expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
-    expect(result.current.availableProviders).toEqual(["github"]);
   });
 });
 
