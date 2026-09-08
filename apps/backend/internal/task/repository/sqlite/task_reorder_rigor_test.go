@@ -126,11 +126,13 @@ func TestReorderStepTasksExcludesHiddenTasksFromMembership(t *testing.T) {
 }
 
 // TestReorderStepTasksNamingForeignTaskIsMalformed pins
-// AC-TASKS-KANBAN-TASK-REORDERING-001.18: an id that never belonged to the
-// named step at all — it belongs to a different step, or never existed — is
-// a structurally malformed request (400 invalid_reorder), unlike a hidden
-// task that still belongs to the step
-// (TestReorderStepTasksExcludesHiddenTasksFromMembership).
+// AC-TASKS-KANBAN-TASK-REORDERING-001.18: an id that resolves to no task row
+// at all is a structurally malformed request (400 invalid_reorder) — the
+// server has no membership window to attribute it to, so it cannot be the
+// AC.26 conflict. An id naming a real task the named step's own membership
+// no longer includes is that conflict instead, whatever moved it there
+// (TestReorderStepTasksExcludesHiddenTasksFromMembership,
+// TestReorderStepTasksNamingTaskInAnotherStepIsMembershipDrift).
 func TestReorderStepTasksNamingForeignTaskIsMalformed(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -139,23 +141,41 @@ func TestReorderStepTasksNamingForeignTaskIsMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedReorderStep(t, repo, "step-foreign-reorder-id", "wf-foreign-reorder-id")
-	seedReorderStep(t, repo, "step-foreign-reorder-id-other", "wf-foreign-reorder-id")
 	mustCreateReorderTask(t, ctx, repo, "foreign-visible-a", "ws-foreign-reorder-id", "wf-foreign-reorder-id", "step-foreign-reorder-id")
-	mustCreateReorderTask(t, ctx, repo, "foreign-elsewhere", "ws-foreign-reorder-id", "wf-foreign-reorder-id", "step-foreign-reorder-id-other")
 
-	t.Run("belongs to a different step", func(t *testing.T) {
-		_, _, err := repo.ReorderStepTasks(ctx, "step-foreign-reorder-id", ReorderBandAdmitted, []string{"foreign-visible-a", "foreign-elsewhere"})
-		if !errors.Is(err, repoerrors.ErrInvalidReorder) {
-			t.Fatalf("err = %v, want ErrInvalidReorder", err)
-		}
-	})
+	_, _, err := repo.ReorderStepTasks(ctx, "step-foreign-reorder-id", ReorderBandAdmitted, []string{"foreign-visible-a", "does-not-exist"})
+	if !errors.Is(err, repoerrors.ErrInvalidReorder) {
+		t.Fatalf("err = %v, want ErrInvalidReorder", err)
+	}
+}
 
-	t.Run("never existed", func(t *testing.T) {
-		_, _, err := repo.ReorderStepTasks(ctx, "step-foreign-reorder-id", ReorderBandAdmitted, []string{"foreign-visible-a", "does-not-exist"})
-		if !errors.Is(err, repoerrors.ErrInvalidReorder) {
-			t.Fatalf("err = %v, want ErrInvalidReorder", err)
-		}
-	})
+// TestReorderStepTasksNamingTaskInAnotherStepIsMembershipDrift pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.26: a submitted id naming a real task
+// that is not currently in the named step's membership is the same
+// conflict (409 step_changed) as a task that became hidden inside the
+// window, not the AC.18 malformed case
+// (TestReorderStepTasksNamingForeignTaskIsMalformed) — AC.26 lists "moved
+// into or out of" the band as a membership-change conflict without a time
+// bound on when that move happened, and the server has no client-read-time
+// signal to tell "moved away just now, racing this very request" apart from
+// "was already elsewhere," so both resolve the same, safe way: a silent
+// reconcile rather than an error toast for what may be an ordinary race.
+func TestReorderStepTasksNamingTaskInAnotherStepIsMembershipDrift(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-drift-reorder-id")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-drift-reorder-id", WorkspaceID: "ws-drift-reorder-id", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderStep(t, repo, "step-drift-reorder-id", "wf-drift-reorder-id")
+	seedReorderStep(t, repo, "step-drift-reorder-id-other", "wf-drift-reorder-id")
+	mustCreateReorderTask(t, ctx, repo, "drift-visible-a", "ws-drift-reorder-id", "wf-drift-reorder-id", "step-drift-reorder-id")
+	mustCreateReorderTask(t, ctx, repo, "drift-elsewhere", "ws-drift-reorder-id", "wf-drift-reorder-id", "step-drift-reorder-id-other")
+
+	_, _, err := repo.ReorderStepTasks(ctx, "step-drift-reorder-id", ReorderBandAdmitted, []string{"drift-visible-a", "drift-elsewhere"})
+	if !errors.Is(err, repoerrors.ErrStepChanged) {
+		t.Fatalf("err = %v, want ErrStepChanged", err)
+	}
 }
 
 // TestReorderStepTasksDepartureLeavesRemainingRelativeOrderIntact pins
