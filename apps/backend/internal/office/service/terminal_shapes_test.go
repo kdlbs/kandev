@@ -31,15 +31,31 @@ func TestClassifyTerminalRun_CrossProduct(t *testing.T) {
 	}
 	sessionIDs := []string{"", "sess-1"}
 
+	// Closed-set membership, not just non-empty: an empty-string check
+	// passes vacuously here because ClassifyTerminalRun's own default
+	// branch always returns ShapeUnclassified rather than "" — a shape
+	// outside this set (a typo, a new constant not returned by any
+	// branch) would slip through an emptiness check silently (Review
+	// round 1, should-fix AC-005.2).
+	validShapes := map[service.TerminalShape]bool{
+		service.ShapePreActivation:     true,
+		service.ShapeLaunchedCompleted: true,
+		service.ShapeLaunchedFailed:    true,
+		service.ShapeSilentSuccess:     true,
+		service.ShapeUnlaunchedSkipped: true,
+		service.ShapeUnlaunchedFailed:  true,
+		service.ShapeUnclassified:      true,
+	}
+
 	for _, status := range statuses {
 		for _, outcome := range outcomes {
 			for _, sessionID := range sessionIDs {
 				shape := service.ClassifyTerminalRun(
 					status, outcome, sessionID, requestedAt, activation, true,
 				)
-				if shape == "" {
-					t.Fatalf("empty shape for status=%q outcome=%v session=%q",
-						status, outcome, sessionID)
+				if !validShapes[shape] {
+					t.Fatalf("shape %q not in the closed set for status=%q outcome=%v session=%q",
+						shape, status, outcome, sessionID)
 				}
 			}
 		}

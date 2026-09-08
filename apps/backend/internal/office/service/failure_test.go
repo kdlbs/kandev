@@ -520,6 +520,35 @@ func TestMarkAgentPausedFixed_NonPausedAgentGuardAndRequeueError(t *testing.T) {
 	}
 }
 
+// HandleAgentFailure is Office's v1 post-launch failure path
+// (event_subscribers.go's handleAgentFailed) and bypasses
+// transitionRunTerminal's own counting, so it must record its own
+// terminal shape or office_loop_terminal_total silently misses every
+// genuine agent crash (Review round 1, R1-1).
+func TestHandleAgentFailure_RecordsTerminalShape(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-crash")
+	taskID := "task-crash"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-crash")
+	run := queueAndReadRun(t, svc, "agent-crash", taskID)
+	svc.ExecSQL(t, `UPDATE runs SET session_id = ? WHERE id = ?`, "session-crash", run.ID)
+	run.SessionID = "session-crash"
+
+	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeLaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	if err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("launched_failed delta = %d, want 1", after-before)
+	}
+}
+
 // Pins that reassigning a task auto-dismisses the per-task inbox
 // entry for the OLD agent without resetting that agent's counter.
 func TestOnAssigneeChanged_DismissesPriorEntryWithoutResettingCounter(t *testing.T) {

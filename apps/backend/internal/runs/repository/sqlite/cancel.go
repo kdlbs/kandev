@@ -53,10 +53,13 @@ func (r *Repository) CancelRunsWhere(
 }
 
 // CancelRun marks a run as cancelled with an optional cancel reason.
-// A run that already reached a terminal state is left untouched.
-func (r *Repository) CancelRun(ctx context.Context, id, cancelReason string) error {
-	_, err := r.CancelRunsWhere(ctx, cancelReason, `id = ?`, id)
-	return err
+// A run that already reached a terminal state is left untouched. Returns
+// whether this call actually cancelled the row, so a caller counting the
+// transition (office_loop_terminal_total) can tell a persisted change
+// from a no-op on a run that was already terminal.
+func (r *Repository) CancelRun(ctx context.Context, id, cancelReason string) (bool, error) {
+	n, err := r.CancelRunsWhere(ctx, cancelReason, `id = ?`, id)
+	return n > 0, err
 }
 
 // BulkCancelRuns cancels multiple runs by ID with the given reason.

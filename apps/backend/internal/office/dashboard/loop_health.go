@@ -71,7 +71,7 @@ type LoopHealthRepo interface {
 		queuedGrace, claimedGrace time.Duration, limit int,
 	) ([]sqlite.StuckRunRow, int, error)
 	ListSilentSuccesses(
-		ctx context.Context, workspaceID string, windowStart time.Time, limit int,
+		ctx context.Context, workspaceID string, windowStart, activationAt time.Time, limit int,
 	) ([]sqlite.SilentSuccessRow, int, error)
 	ListTerminalRunsInWindow(
 		ctx context.Context, workspaceID string, windowStart time.Time,
@@ -211,7 +211,7 @@ func EvaluateLoopHealth(
 	if err != nil {
 		return nil, err
 	}
-	silentEvidence, err := evaluateLoopHealthSilentSuccesses(ctx, repo, workspaceID, windowStart)
+	silentEvidence, err := evaluateLoopHealthSilentSuccesses(ctx, repo, workspaceID, windowStart, activationAt)
 	if err != nil {
 		return nil, err
 	}
@@ -305,9 +305,9 @@ func evaluateLoopHealthStuckRuns(
 // evaluateLoopHealthSilentSuccesses reports ReasonTerminalReadFailed
 // on failure, not ReasonRunReadFailed — OPERATOR DECISION F31.
 func evaluateLoopHealthSilentSuccesses(
-	ctx context.Context, repo LoopHealthRepo, workspaceID string, windowStart time.Time,
+	ctx context.Context, repo LoopHealthRepo, workspaceID string, windowStart, activationAt time.Time,
 ) (silentSuccessEvidenceListDTO, error) {
-	rows, total, err := repo.ListSilentSuccesses(ctx, workspaceID, windowStart, officeLoopEvidenceCap)
+	rows, total, err := repo.ListSilentSuccesses(ctx, workspaceID, windowStart, activationAt, officeLoopEvidenceCap)
 	if err != nil {
 		return silentSuccessEvidenceListDTO{}, &LoopHealthDegradedError{Reason: ReasonTerminalReadFailed, Err: err}
 	}

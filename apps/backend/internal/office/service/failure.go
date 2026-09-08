@@ -42,9 +42,13 @@ func (s *Service) HandleAgentFailure(
 		return fmt.Errorf("mark run failed: %w", err)
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
-	// failure path, not FailRun), so the checkout release that lives there
-	// has to be duplicated here — otherwise every agent-error terminal
-	// transition leaks the task checkout the same way FinishRun used to.
+	// failure path, not FailRun), so the checkout release and terminal-shape
+	// count that live there have to be duplicated here — otherwise every
+	// agent-error terminal transition leaks the task checkout the same way
+	// FinishRun used to, and every genuine post-launch crash goes uncounted
+	// in office_loop_terminal_total. MarkRunFailed writes status='failed'
+	// with outcome left untouched (NULL for a launched run), matching FailRun.
+	s.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	// Leave "working" before the auto-pause decision below, not after: the
 	// reset is a working → idle CAS, so running it first lets a subsequent

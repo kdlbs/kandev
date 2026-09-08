@@ -100,8 +100,12 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 	s.logger.Info("cancelling stale run retry",
 		zap.String("run_id", run.ID),
 		zap.String("reason", reason))
-	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := s.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		return err
+	}
+	if cancelled {
+		s.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
 	}
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)

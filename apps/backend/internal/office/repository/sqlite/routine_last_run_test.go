@@ -170,4 +170,26 @@ func TestUpdateRoutine_DoesNotWriteLastRunAt(t *testing.T) {
 	if got.Description != "Updated from nil snapshot" {
 		t.Fatalf("update did not apply other fields: description = %q", got.Description)
 	}
+
+	// A caller holding a snapshot newer than the stored instant must not
+	// advance it either: a stale-or-nil case alone cannot distinguish "the
+	// column is not written" from "the column is written monotonically",
+	// since both pass under a stale or nil snapshot. Only a newer snapshot
+	// tells them apart.
+	newer := fresh.Add(24 * time.Hour)
+	routine.LastRunAt = &newer
+	routine.Name = "Renamed From Newer Snapshot"
+	if err := repo.UpdateRoutine(ctx, routine); err != nil {
+		t.Fatalf("update (newer snapshot): %v", err)
+	}
+	got, err = repo.GetRoutine(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LastRunAt == nil || !got.LastRunAt.Equal(fresh) {
+		t.Fatalf("newer-snapshot UpdateRoutine advanced last_run_at: got %v, want %v", got.LastRunAt, fresh)
+	}
+	if got.Name != "Renamed From Newer Snapshot" {
+		t.Fatalf("update did not apply other fields: name = %q", got.Name)
+	}
 }

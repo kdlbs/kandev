@@ -57,7 +57,7 @@ func (f *fakeLoopHealthRepo) ListStuckRuns(
 }
 
 func (f *fakeLoopHealthRepo) ListSilentSuccesses(
-	context.Context, string, time.Time, int,
+	context.Context, string, time.Time, time.Time, int,
 ) ([]sqlite.SilentSuccessRow, int, error) {
 	return f.silentRows, f.silentTotal, f.silentErr
 }

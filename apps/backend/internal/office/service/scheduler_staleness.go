@@ -60,10 +60,14 @@ func (si *SchedulerIntegration) cancelStaleRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		si.logger.Error("failed to cancel stale run",
 			zap.String("run_id", run.ID), zap.Error(err))
 	} else {
+		if cancelled {
+			si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+		}
 		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	}
 

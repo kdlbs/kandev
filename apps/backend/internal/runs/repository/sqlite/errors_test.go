@@ -146,7 +146,8 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			return err
 		},
 		"CancelRun": func() error {
-			return repo.CancelRun(ctx, run.ID, "reason")
+			_, err := repo.CancelRun(ctx, run.ID, "reason")
+			return err
 		},
 		"BulkCancelRuns": func() error {
 			return repo.BulkCancelRuns(ctx, []string{run.ID}, "reason")

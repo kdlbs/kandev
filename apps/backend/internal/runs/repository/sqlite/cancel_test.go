@@ -21,8 +21,12 @@ func TestCancelRun_CancelsQueuedAndClaimedRuns(t *testing.T) {
 	setStatus(t, repo, claimed.ID, "claimed", timePtr(now), nil)
 
 	for _, id := range []string{queued.ID, claimed.ID} {
-		if err := repo.CancelRun(ctx, id, "user stopped the task"); err != nil {
+		cancelled, err := repo.CancelRun(ctx, id, "user stopped the task")
+		if err != nil {
 			t.Fatalf("cancel %q: %v", id, err)
+		}
+		if !cancelled {
+			t.Errorf("%s: cancelled = false, want true", id)
 		}
 		got := mustGetRun(t, repo, id)
 		checkString(t, id+" status", string(got.Status), "cancelled")
@@ -47,8 +51,12 @@ func TestCancelRun_TerminalRunIsLeftAlone(t *testing.T) {
 		run := queueRunAt(t, repo, "run-"+status, "a1", finishedAt.Add(-time.Hour))
 		setStatus(t, repo, run.ID, status, nil, timePtr(finishedAt))
 
-		if err := repo.CancelRun(ctx, run.ID, "too late"); err != nil {
+		cancelled, err := repo.CancelRun(ctx, run.ID, "too late")
+		if err != nil {
 			t.Fatalf("cancel %q: %v", run.ID, err)
+		}
+		if cancelled {
+			t.Errorf("%s: cancelled = true, want false (already terminal)", run.ID)
 		}
 		got := mustGetRun(t, repo, run.ID)
 		checkString(t, run.ID+" status", string(got.Status), status)
@@ -64,8 +72,12 @@ func TestCancelRun_TerminalRunIsLeftAlone(t *testing.T) {
 // TestCancelRun_UnknownRunIsANoOp pins that a missing id is not an error.
 func TestCancelRun_UnknownRunIsANoOp(t *testing.T) {
 	repo := newTestRepo(t)
-	if err := repo.CancelRun(context.Background(), "nope", "reason"); err != nil {
+	cancelled, err := repo.CancelRun(context.Background(), "nope", "reason")
+	if err != nil {
 		t.Fatalf("cancel unknown run: %v", err)
+	}
+	if cancelled {
+		t.Error("cancelled = true, want false (unknown run)")
 	}
 }
 

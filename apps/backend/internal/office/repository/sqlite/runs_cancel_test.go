@@ -59,7 +59,7 @@ func TestCancelRun_QueuedRunIsCancelled(t *testing.T) {
 	repo := newTestRepo(t)
 	id := seedCancelRun(t, repo, "t1", "queued", nil, nil)
 
-	if err := repo.CancelRun(context.Background(), id, "run_too_old"); err != nil {
+	if _, err := repo.CancelRun(context.Background(), id, "run_too_old"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestCancelRun_ClaimedRunIsCancelled(t *testing.T) {
 	repo := newTestRepo(t)
 	id := seedCancelRun(t, repo, "t1", "claimed", nil, nil)
 
-	if err := repo.CancelRun(context.Background(), id, "execution_too_old"); err != nil {
+	if _, err := repo.CancelRun(context.Background(), id, "execution_too_old"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestCancelRun_TerminalRunIsUntouched(t *testing.T) {
 			repo := newTestRepo(t)
 			id := seedCancelRun(t, repo, "t1", tc.status, tc.cancelReason, &finished)
 
-			if err := repo.CancelRun(context.Background(), id, "task_reassigned"); err != nil {
+			if _, err := repo.CancelRun(context.Background(), id, "task_reassigned"); err != nil {
 				t.Fatalf("cancel: %v", err)
 			}
 

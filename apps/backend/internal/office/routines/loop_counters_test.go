@@ -82,6 +82,49 @@ func TestTickScheduledTriggers_IncrementsTriggerClaimedCounter(t *testing.T) {
 	}
 }
 
+// AC-003.9: a claim that persists must count even when the routine
+// lookup afterward fails, so the claim can't be attributed to a
+// workspace. Without the fallback, a claim that already wrote to the
+// database silently vanished from office_loop_trigger_claimed_total
+// (Review round 1, R1-4) — the counter must reflect the persisted
+// write, not the lookup that happens to follow it.
+func TestTickScheduledTriggers_ClaimedCounterSurvivesRoutineLookupFailure(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+
+	routine := newLightweightTestRoutine(t, svc)
+	if err := svc.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
+		RoutineID:      routine.ID,
+		Kind:           "cron",
+		CronExpression: "* * * * *",
+		Timezone:       "UTC",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	enq := &fakeWakeupEnqueuer{}
+	svc.SetWakeupEnqueuer(enq)
+
+	// Orphan the trigger: delete the routine it points at without
+	// touching the trigger row, so ClaimTrigger still succeeds but the
+	// subsequent GetRoutineFromConfig fails.
+	if err := svc.DeleteRoutine(ctx, routine.ID); err != nil {
+		t.Fatalf("delete routine: %v", err)
+	}
+
+	key := "workspace=_unattributed"
+	before := loopCounterInt(t, "office_loop_trigger_claimed_total", key)
+
+	if err := svc.TickScheduledTriggers(ctx, time.Now().UTC().Add(2*time.Minute)); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	after := loopCounterInt(t, "office_loop_trigger_claimed_total", key)
+	if after != before+1 {
+		t.Fatalf("trigger_claimed[_unattributed] delta = %d, want 1", after-before)
+	}
+}
+
 // AC-003.2: a fire that runs to completion (lightweight, always_create)
 // counts office_loop_routine_run_total with disposition=task_created.
 func TestDispatchRoutineRun_CountsTaskCreatedDisposition(t *testing.T) {
@@ -111,6 +154,8 @@ func TestDispatchRoutineRun_CountsTaskCreatedDisposition(t *testing.T) {
 func TestDispatchRoutineRun_CountsSkippedDisposition(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Skip Counter", "skip_if_active")
 
@@ -137,6 +182,8 @@ func TestDispatchRoutineRun_CountsSkippedDisposition(t *testing.T) {
 func TestDispatchRoutineRun_CountsCoalescedDisposition(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Coalesce Counter", "coalesce_if_active")
 

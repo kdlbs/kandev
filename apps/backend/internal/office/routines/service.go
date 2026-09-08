@@ -400,6 +400,9 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	}
 	routine, err := s.GetRoutineFromConfig(ctx, trigger.RoutineID)
 	if err != nil {
+		// The claim already persisted, so the counter must still see it
+		// even though the workspace it belongs to can't be resolved.
+		service.IncLoopTriggerClaimed(service.LoopUnattributedWorkspace)
 		return fmt.Errorf("get routine: %w", err)
 	}
 	service.IncLoopTriggerClaimed(routine.WorkspaceID)

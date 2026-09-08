@@ -222,10 +222,12 @@ type SilentSuccessRow struct {
 
 // ListSilentSuccesses returns finished/processed/sessionless runs whose
 // COALESCE(finished_at, requested_at) falls in [windowStart, now),
+// requested at or after the activation instant (AC-005.6: a run
+// predating activation is pre_activation, never a silent success),
 // newest first, capped with the same-statement untruncated total
 // (AC-004.7, AC-004.9, AC-004.16).
 func (r *Repository) ListSilentSuccesses(
-	ctx context.Context, workspaceID string, windowStart time.Time, limit int,
+	ctx context.Context, workspaceID string, windowStart, activationAt time.Time, limit int,
 ) ([]SilentSuccessRow, int, error) {
 	type row struct {
 		SilentSuccessRow
@@ -239,10 +241,11 @@ func (r *Repository) ListSilentSuccesses(
 		JOIN agent_profiles a ON a.id = r.agent_profile_id
 		WHERE a.workspace_id = ? AND r.status = 'finished' AND r.outcome = 'processed'
 		  AND (r.session_id IS NULL OR r.session_id = '')
+		  AND r.requested_at >= ?
 		  AND COALESCE(r.finished_at, r.requested_at) >= ?
 		ORDER BY COALESCE(r.finished_at, r.requested_at) DESC, r.id ASC
 		LIMIT ?
-	`), workspaceID, windowStart, limit)
+	`), workspaceID, activationAt, windowStart, limit)
 	if err != nil {
 		return nil, 0, err
 	}

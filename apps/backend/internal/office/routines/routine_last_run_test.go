@@ -22,6 +22,8 @@ func TestDispatch_AdvancesLastRunAtOnSkippedAndCoalescedPaths(t *testing.T) {
 	t.Run("skipped", func(t *testing.T) {
 		svc := newTestRoutineService(t)
 		ctx := context.Background()
+		svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+		svc.SetTaskCreator(&fakeTaskCreator{})
 		routine := createTestRoutine(t, svc, "Skip Last Run", "skip_if_active")
 
 		if _, err := svc.FireManual(ctx, routine.ID, nil); err != nil {
@@ -56,6 +58,8 @@ func TestDispatch_AdvancesLastRunAtOnSkippedAndCoalescedPaths(t *testing.T) {
 	t.Run("coalesced", func(t *testing.T) {
 		svc := newTestRoutineService(t)
 		ctx := context.Background()
+		svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+		svc.SetTaskCreator(&fakeTaskCreator{})
 		routine := createTestRoutine(t, svc, "Coalesce Last Run", "coalesce_if_active")
 
 		if _, err := svc.FireManual(ctx, routine.ID, nil); err != nil {
@@ -110,6 +114,8 @@ func TestDispatch_SurvivesLastRunAtWriteFailure(t *testing.T) {
 		t.Fatalf("new repo: %v", err)
 	}
 	svc := routines.NewRoutineService(&failingTouchRepo{Repository: repo}, logger.Default(), &noopActivity{})
+	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeTaskCreator{})
 
 	routine := createTestRoutine(t, svc, "Failing Touch", "always_create")
 	run, err := svc.FireManual(context.Background(), routine.ID, nil)

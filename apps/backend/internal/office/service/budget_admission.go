@@ -197,7 +197,7 @@ func (si *SchedulerIntegration) cancelBudgetRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	if _, err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
 	} else {
 		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
@@ -383,7 +383,7 @@ func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, 
 	incBudgetCancelledNoWorkspace(provenance)
 	si.cleanupWorkspaceLookupRun(ctx, run)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
+	if _, err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
 	} else {
 		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
