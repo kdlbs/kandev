@@ -1,7 +1,7 @@
 ---
 id: "01-cover-claim-decision-guard"
 title: "Cover the claim decision guard"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -138,4 +138,37 @@ None.
 
 ## Results
 
-Pending.
+- Added the unexported `claimWindowHook` to
+  `internal/office/repository/sqlite/participants.go`, called from
+  `attemptClaim` between `findClaimableAutoSeat` and `claimAutoSeat`. Unset, the
+  site is a nil check on a value nothing writes.
+- The setter lives in a new `export_test.go`, which the toolchain compiles only
+  under `go test`, so a production build has no way to set the hook at all.
+  This is a small deviation from the design's "an in-package test sets it": all
+  of this package's existing tests and their fixtures are in the external
+  `sqlite_test` package, and duplicating that setup in-package to reach an
+  unexported variable would have been worse than the standard `export_test.go`
+  idiom. The production symbol stays unexported either way.
+- Added four engine-agnostic tests in
+  `participant_claim_decision_guard_test.go`: the roleless decision blocking
+  the reassignment, a superseded decision blocking identically, the repeat
+  registration writing nothing, and the hook-unset path still claiming in
+  place.
+- **By-hand acceptance check performed.** With the `NOT EXISTS` condition
+  deleted from `claimAutoSeat`, the guard tests fail and show the exact
+  reattribution the condition prevents: the seat's `agent_profile_id` becomes
+  `agent-registering` and its provenance flips to `manual` while the decision
+  on file belongs to `agent-auto`. The hook-unset and repeat-registration tests
+  pass in both states, as they should. The condition was restored and the suite
+  re-run green.
+- Added the Postgres-gated
+  `TestPostgresAddTaskParticipant_ClaimDecisionGuard_RolelessDecisionCommitsInWindow`,
+  which commits the roleless decision through the real `RecordStepDecision` on
+  a second pooled connection inside the window.
+  **This test has not been executed against a real server.** This runner has no
+  PostgreSQL and the card forbids starting Docker, so it was verified only to
+  compile, to vet clean, and to skip correctly without
+  `KANDEV_TEST_POSTGRES_DSN`. CI, which supplies a DSN, is its first real run.
+- `internal/office/repository/sqlite` and `internal/workflow/repository` pass
+  with `-race`. `golangci-lint` reports 0 issues across `internal/office/...`,
+  `internal/workflow/...` and `internal/orchestrator/...`.
