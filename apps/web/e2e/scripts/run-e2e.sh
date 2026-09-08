@@ -62,13 +62,10 @@ DOCKER_PROBE_TIMEOUT="${KANDEV_E2E_DOCKER_PROBE_TIMEOUT:-10}"
 log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
-# Validated eagerly: it feeds arithmetic in docker_up below, and an unbounded
-# value there (non-numeric, fractional, or padded with whitespace) is exactly
-# the silent-zero-signal failure this script exists to eliminate. 0 is
-# accepted — it means "skip the probe, treat Docker as unavailable". No
-# leading zeros: bash arithmetic reads a leading-zero literal as octal, which
-# rejects valid-looking values like "08" (or silently means something else
-# for "010") one line below in docker_up.
+# Feeds arithmetic in docker_up; validated to reject fractional, suffixed, and
+# whitespace-padded values. 0 is accepted — it means "skip the probe, treat
+# Docker as unavailable". No leading zeros: bash arithmetic reads them as octal,
+# so "08" is a parse error and "010" silently means 8.
 [[ "$DOCKER_PROBE_TIMEOUT" =~ ^(0|[1-9][0-9]*)$ ]] \
   || die "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer (got '$DOCKER_PROBE_TIMEOUT')"
 
@@ -78,6 +75,10 @@ die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 # the whole runner forever.
 docker_up() {
   command -v docker >/dev/null 2>&1 || return 1
+  if (( DOCKER_PROBE_TIMEOUT == 0 )); then
+    log "docker info did not respond within 0s; treating Docker as unavailable (pass --host to skip this probe)"
+    return 1
+  fi
   docker info >/dev/null 2>&1 &
   local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
   while kill -0 "$pid" 2>/dev/null; do

@@ -338,11 +338,8 @@ describe("run-e2e.sh", () => {
   });
 
   it("parses script options after a leading -- (the natural pnpm invocation)", () => {
-    // pnpm/npm forward a caller's `--` verbatim, so `pnpm e2e:run -- --host`
-    // reaches this script as `-- --host`. Regression test for the bug where
-    // the parser's `--) shift; PW_ARGS+=("$@"); break` case matched that
-    // leading `--` first and dumped every script option into PW_ARGS,
-    // leaving MODE=auto and DO_BUILD=1 no matter what was passed.
+    // pnpm/npm forward `--` verbatim, so `pnpm e2e:run -- --host` reaches the
+    // script as `-- --host`. A leading bare `--` must be dropped before parsing.
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
     const pnpmPath = path.join(binDir, "pnpm");
