@@ -1,11 +1,18 @@
 # 0009: Fail-closed GC semantics for filesystem and container cleanup
 
-**Status:** accepted
+**Status:** accepted (implementation superseded 2026-09-08)
 **Date:** 2026-05-16
 **Area:** backend
 
 **Amended:** 2026-08-08 by
 [ADR-2026-08-08-task-owned-worktree-lifetime](2026-08-08-task-owned-worktree-lifetime.md)
+
+**Implementation superseded:** 2026-09-08 by
+[0045: Install-wide storage maintenance](0045-install-wide-storage-maintenance.md), which
+records that `internal/system/storage` "replaces the periodic `office/infra` GC loop". The
+office garbage collector corrected here was never constructed in production; `gc.go` and
+its tests have since been deleted. The decision below is unchanged and still binds every
+cleanup path in Kandev, including the storage-maintenance providers that replaced it.
 
 ## Context
 
@@ -38,7 +45,6 @@ Concretely:
 - The GC will sometimes leave true orphans alive when a DB read transiently fails. We accept this. The cost of holding onto a stale directory for one more 3-hour cycle is bounded; the cost of deleting a live one is not.
 - The container sweep's "no task row" path still removes the container, but only via the sentinel. Other callers of `GetTaskExecutionFields` are unaffected — the sentinel is a wrapped error, not a contract change.
 - New cleanup code — future scheduled GC, manual purge endpoints, retention policies — must follow this model. Reviewers should reject patterns where deletion fires on `err != nil`, missing rows, or "not found" inferred without a typed signal.
-- The worktree manager exposes `ListActiveWorktreePaths(ctx)` as a thin pass-through to the store. This is a cross-package dependency (`office/infra` imports a method satisfied by `worktree.Manager`), wired by the main process. The interface lives in `office/infra` so the dependency points outward from the consumer.
 
 ## Alternatives considered
 
@@ -48,5 +54,7 @@ Concretely:
 
 ## References
 
-- Implementation: `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/worktree/store.go`, `apps/backend/internal/office/repository/sqlite/tasks.go`
-- Regression tests: `apps/backend/internal/office/infra/gc_test.go`, `apps/backend/internal/worktree/store_test.go`
+- Current implementation of this decision: `apps/backend/internal/system/storage/` (task-workspace and container providers), wired in `apps/backend/internal/backendapp/storage_maintenance.go`
+- Supporting queries retained: `apps/backend/internal/worktree/store.go`, `apps/backend/internal/office/repository/sqlite/tasks.go`
+- Regression tests: `apps/backend/internal/system/storage/workspaces/provider_test.go`, `apps/backend/internal/worktree/store_test.go`
+- Deleted 2026-09-08 (never constructed in production): `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/office/infra/gc_test.go`

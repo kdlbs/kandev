@@ -1,6 +1,5 @@
 // Package scheduler orchestrates run processing for the office domain.
-// It wraps service.Service and owns the tick loop, retry logic, event
-// subscribers, and dispatch routing.
+// It wraps service.Service and owns retry logic and dispatch routing.
 package scheduler
 
 import (
