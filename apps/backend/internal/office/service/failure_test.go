@@ -410,8 +410,11 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	); err != nil {
 		t.Fatalf("query pre-fix snapshot: %v", err)
 	}
-	if preCount == 0 {
-		t.Fatal("test setup error: reassigned task was not captured in pause snapshot")
+	if preCount != 1 {
+		t.Fatalf(
+			"test setup error: expected exactly one recovery row for reassigned task, found %d",
+			preCount,
+		)
 	}
 
 	setTestTaskAssignee(t, svc, reassignedTaskID, "agent-reassigned-to")
