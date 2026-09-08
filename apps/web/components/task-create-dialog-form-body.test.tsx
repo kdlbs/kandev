@@ -350,6 +350,8 @@ describe("CreateEditSelectors", () => {
     executorProfileName: "Docker",
     selectedAgentProfileName: null,
     effectiveWorkflowName: null,
+    runnerEditable: true,
+    runnerIneligibleReason: "eligible",
   };
 
   // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
@@ -429,5 +431,68 @@ describe("CreateEditSelectors", () => {
     expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
       "/settings/executors/exec-profile-1",
     );
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: runner editability is independent of
+  // isTaskStarted — the previous state-only gate must no longer govern it.
+  it("shows the executor selector for a started task that is still runner-editable", () => {
+    render(<CreateEditSelectors {...baseProps} isTaskStarted={true} runnerEditable={true} />);
+
+    expect(screen.getByRole("button", { name: "executor" })).toBeTruthy();
+    expect(screen.queryByTestId("agent-selector-stub")).toBeNull();
+    expect(screen.queryByTestId("runner-ineligible-note")).toBeNull();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.2
+  it("presents the projected reason instead of the selector when not runner-editable", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.getByTestId("runner-ineligible-note").textContent).toBeTruthy();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.4b: never an empty reason or a raw code — an
+  // unrecognized reason renders the same copy as evaluation_unavailable.
+  it("falls back to the evaluation-unavailable copy for an unrecognized reason code", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        runnerEditable={false}
+        runnerIneligibleReason="some_future_reason_this_dialog_predates"
+      />,
+    );
+    const unrecognized = screen.getByTestId("runner-ineligible-note").textContent;
+    cleanup();
+
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        runnerEditable={false}
+        runnerIneligibleReason="evaluation_unavailable"
+      />,
+    );
+    const known = screen.getByTestId("runner-ineligible-note").textContent;
+
+    expect(unrecognized).toBeTruthy();
+    expect(unrecognized).toBe(known);
+  });
+
+  it("renders nothing when both the agent column and the runner column have nothing to show", () => {
+    const { container } = render(
+      <CreateEditSelectors
+        {...baseProps}
+        isTaskStarted={true}
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 });

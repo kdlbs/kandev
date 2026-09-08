@@ -15,6 +15,10 @@ import {
   resolveTaskCreateLaunchPreview,
   type TaskCreateLaunchPreview,
 } from "@/components/task-create-dialog-launch-preview";
+import {
+  computeRunnerEditable,
+  computeRunnerIneligibleReason,
+} from "@/components/task-create-dialog-helpers";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
@@ -120,6 +124,8 @@ export function buildDialogFormBodyProps(
     bottomSlot: props.bottomSlot,
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
+    runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
+    runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
   };
 }
 

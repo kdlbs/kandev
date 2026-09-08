@@ -122,6 +122,32 @@ export function computeIsTaskStarted(
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
 
+/**
+ * Whether the executor-profile selector should be offered for editing
+ * (REQ-TASKS-RUNNER-SWITCH-004). Create mode always offers it — there is no
+ * task yet for a mutability verdict to apply to. Edit mode defers entirely to
+ * the projected `runner_editable`, never to workflow state
+ * (AC-TASKS-RUNNER-SWITCH-004.3); an absent projection fails closed.
+ */
+export function computeRunnerEditable(
+  isEditMode: boolean,
+  editingTask?: { runnerEditable?: boolean } | null,
+): boolean {
+  if (!isEditMode) return true;
+  return editingTask?.runnerEditable ?? false;
+}
+
+/**
+ * Machine-readable reason to present when {@link computeRunnerEditable}
+ * returns false. Falls back to the same retriable class the backend uses
+ * when a projection could not be evaluated.
+ */
+export function computeRunnerIneligibleReason(
+  editingTask?: { runnerIneligibleReason?: string } | null,
+): string {
+  return editingTask?.runnerIneligibleReason ?? "evaluation_unavailable";
+}
+
 export function shouldShowTaskTitleField(
   isCreateMode: boolean,
   isEditMode: boolean,

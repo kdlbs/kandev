@@ -3,6 +3,8 @@ import {
   autoSelectBranch,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  computeRunnerEditable,
+  computeRunnerIneligibleReason,
   findUnresolvedProviderRemote,
   shouldShowTaskTitleField,
   validateCreateInputs,
@@ -106,6 +108,39 @@ describe("autoSelectBranch", () => {
     autoSelectBranch([], setBranch, { lastUsedBranch: "main", userSettingsLoaded: true });
 
     expect(setBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeRunnerEditable", () => {
+  it("is always editable in create mode, regardless of any editingTask", () => {
+    expect(computeRunnerEditable(false)).toBe(true);
+    expect(computeRunnerEditable(false, { runnerEditable: false })).toBe(true);
+  });
+
+  it("defers to the projected verdict in edit mode", () => {
+    expect(computeRunnerEditable(true, { runnerEditable: true })).toBe(true);
+    expect(computeRunnerEditable(true, { runnerEditable: false })).toBe(false);
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: never decide editability from workflow
+  // state — computeRunnerEditable doesn't even accept a `state` field.
+  it("fails closed when the projection is absent", () => {
+    expect(computeRunnerEditable(true, {})).toBe(false);
+    expect(computeRunnerEditable(true, null)).toBe(false);
+    expect(computeRunnerEditable(true, undefined)).toBe(false);
+  });
+});
+
+describe("computeRunnerIneligibleReason", () => {
+  it("returns the projected reason", () => {
+    expect(computeRunnerIneligibleReason({ runnerIneligibleReason: "session_exists" })).toBe(
+      "session_exists",
+    );
+  });
+
+  it("falls back to evaluation_unavailable when absent", () => {
+    expect(computeRunnerIneligibleReason({})).toBe("evaluation_unavailable");
+    expect(computeRunnerIneligibleReason(null)).toBe("evaluation_unavailable");
   });
 });
 

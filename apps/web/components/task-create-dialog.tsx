@@ -142,6 +142,8 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       selectedAgentProfileName={props.selectedAgentProfileName}
       effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
+      runnerEditable={props.runnerEditable}
+      runnerIneligibleReason={props.runnerIneligibleReason}
     />
   );
 }

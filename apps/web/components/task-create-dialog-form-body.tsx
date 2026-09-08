@@ -64,6 +64,10 @@ type CreateEditSelectorsProps = {
   selectedAgentProfileName: string | null;
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
+  /** Gates the executor-profile column independently of isTaskStarted (REQ-TASKS-RUNNER-SWITCH-004). */
+  runnerEditable: boolean;
+  /** Presented instead of the selector when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };
 
 type AgentColumnProps = Pick<
@@ -264,36 +268,69 @@ function AgentColumn({
   );
 }
 
+// Maps a projected runner_ineligible_reason (REQ-TASKS-RUNNER-SWITCH-001) to
+// the i18n key presented instead of the selector. Closed vocabulary; a code
+// this dialog doesn't recognize (a future reason it predates) falls back to
+// the same retriable copy as an evaluation failure rather than rendering
+// nothing (AC-TASKS-RUNNER-SWITCH-004.4b: never an empty reason or raw code).
+const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
+  task_archived: "task:runnerReasonTaskArchived",
+  no_repository: "task:runnerReasonNoRepository",
+  multiple_repositories: "task:runnerReasonMultipleRepositories",
+  session_exists: "task:runnerReasonSessionExists",
+  environment_exists: "task:runnerReasonEnvironmentExists",
+  executor_running: "task:runnerReasonExecutorRunning",
+  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
+  workspace_path_set: "task:runnerReasonWorkspacePathSet",
+  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
+  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
+};
+
+function RunnerIneligibleNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
+  const key = RUNNER_INELIGIBLE_REASON_KEYS[reason] ?? "task:runnerReasonEvaluationUnavailable";
+  return (
+    <div
+      className="flex h-auto min-h-7 items-center rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
+      data-testid="runner-ineligible-note"
+    >
+      <span>{t(key)}</span>
+    </div>
+  );
+}
+
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
   const { t } = useTranslation();
-  if (props.isTaskStarted) return null;
-  const {
-    executorProfileOptions,
-    executorProfileId,
-    onExecutorProfileChange,
-    executorsLoading,
-    ExecutorProfileSelectorComponent,
-  } = props;
+  const showAgentColumn = !props.isTaskStarted;
+  const { executorProfileOptions, executorProfileId, onExecutorProfileChange, executorsLoading } =
+    props;
+  const { ExecutorProfileSelectorComponent, runnerEditable, runnerIneligibleReason } = props;
+  // The row disappears only when there is nothing left to show in either
+  // column — a started task that is still runner-editable (nothing has
+  // materialized yet) keeps the executor column visible on its own.
+  if (!showAgentColumn && !runnerEditable) return null;
 
   // Branch + repo selection (and the FreshBranchToggle, which is per-task
   // branch strategy) live in the chip row above the description; this row
   // carries only agent and executor profile selectors.
   return (
     <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0">{showAgentColumn && <AgentColumn {...props} />}</div>
       <div className="min-w-0">
-        <AgentColumn {...props} />
-      </div>
-      <div className="min-w-0">
-        <ExecutorProfileSelectorComponent
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
-          disabled={executorsLoading}
-          popoverPortal
-        />
+        {runnerEditable ? (
+          <ExecutorProfileSelectorComponent
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
+            disabled={executorsLoading}
+            popoverPortal
+          />
+        ) : (
+          <RunnerIneligibleNote reason={runnerIneligibleReason} />
+        )}
       </div>
     </div>
   );

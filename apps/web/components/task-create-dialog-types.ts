@@ -689,4 +689,8 @@ export type DialogFormBodyProps = {
    * hands-free.
    */
   onComposerSubmit?: () => boolean | Promise<boolean>;
+  /** From computeRunnerEditable: gates the executor-profile selector independently of isTaskStarted. */
+  runnerEditable: boolean;
+  /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };
