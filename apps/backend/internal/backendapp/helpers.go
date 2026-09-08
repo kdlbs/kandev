@@ -1589,6 +1589,9 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
+		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+	})
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
 		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
 	}

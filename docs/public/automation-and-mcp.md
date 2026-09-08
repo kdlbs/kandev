@@ -187,6 +187,24 @@ The same data is available directly over REST for scripting: `GET /api/v1/worksp
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
 
+### Link an existing pull or merge request
+
+Task MCP provides `link_task_pr_kandev`, `unlink_task_pr_kandev`, and
+`replace_task_pr_kandev` for GitHub pull requests and GitLab merge requests.
+Each request needs `task_id`, `provider` (`github` or `gitlab`), the canonical
+`repository_id`, and a positive request number. A number by itself is rejected,
+so a fork and its canonical repository can safely have the same number.
+
+For example, link GitLab merge request 42 to its target task with
+`{ "task_id": "…", "provider": "gitlab", "repository_id": "…", "number": 42 }`.
+`replace_task_pr_kandev` also requires `old_provider`, `old_repository_id`, and
+`old_number`. Every successful mutation returns the resulting active link set.
+The target task must be reachable from the calling task's workspace.
+
+Unlinking changes only the active association and its matching automation
+state. It does not delete conversation history, terminal receipts, or the
+upstream pull request or merge request.
+
 Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent clients show or register a server-qualified alias instead. For example, a client may expose canonical `step_complete_kandev` as `mcp__kandev__step_complete_kandev`. That qualified form is client-specific, not a second tool or a universal name; use the form exposed by the active client.
 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.

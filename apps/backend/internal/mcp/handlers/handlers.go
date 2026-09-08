@@ -262,11 +262,17 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	taskChangeLinks        TaskChangeLinkService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
 	taskMRAutomation TaskMRAutomationService
+}
+
+// SetTaskChangeLinkService wires provider-neutral PR/MR association changes.
+func (h *Handlers) SetTaskChangeLinkService(links TaskChangeLinkService) {
+	h.taskChangeLinks = links
 }
 
 // NewHandlers creates new MCP handlers.
@@ -379,6 +385,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPLinkTaskPR, h.handleLinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPUnlinkTaskPR, h.handleUnlinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPReplaceTaskPR, h.handleReplaceTaskPR)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
