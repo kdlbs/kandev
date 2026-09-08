@@ -164,6 +164,57 @@ func TestBackfillLegacyActiveDynamicRoutes_MigratesLegacyIdleRouteToActive(t *te
 	}
 }
 
+// TestBackfillLegacyActiveDynamicRoutes_NoRouteRowLeavesProjectionUnchanged
+// is the regression test for review round 1 finding F2 (negative case i): an
+// IDLE session whose task_sessions.route_state projection reads 'starting'
+// but has no dynamic_route_states row at all must not be touched. The
+// projection UPDATE is scoped to rows the dynamic_route_states UPDATE just
+// backfilled to 'active', so a session with no route row is never in scope.
+func TestBackfillLegacyActiveDynamicRoutes_NoRouteRowLeavesProjectionUnchanged(t *testing.T) {
+	db := openLegacyDynamicRouteDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedLegacyDynamicRouteTaskAndSession(t, db, "task-no-route-row", "session-no-route-row", "IDLE", now)
+	// Deliberately no seedLegacyDynamicRouteState call: this session has no
+	// dynamic_route_states row.
+
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("run legacy backfill migration: %v", err)
+	}
+
+	if got := taskSessionRouteState(t, db, "session-no-route-row"); got != "starting" {
+		t.Fatalf("task_sessions.route_state for session with no route row = %q, want unchanged starting", got)
+	}
+}
+
+// TestBackfillLegacyActiveDynamicRoutes_ActionRequiredRouteLeavesProjectionUnchanged
+// is the regression test for review round 1 finding F2 (negative case ii): an
+// IDLE session whose durable dynamic_route_states row is 'action_required'
+// (a genuinely broken route surfaced by routeDynamicAgentFailure) but whose
+// task_sessions.route_state projection still reads 'starting' - because the
+// projection write that follows the durable write in
+// routeDynamicAgentFailure failed or never ran - must keep that projection
+// untouched. Overwriting it with 'active' would hide a live Retry banner for
+// a route that is actually broken.
+func TestBackfillLegacyActiveDynamicRoutes_ActionRequiredRouteLeavesProjectionUnchanged(t *testing.T) {
+	db := openLegacyDynamicRouteDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedLegacyDynamicRouteTaskAndSession(t, db, "task-action-required", "session-action-required", "IDLE", now)
+	seedLegacyDynamicRouteState(t, db, "session-action-required", "action_required", now)
+
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("run legacy backfill migration: %v", err)
+	}
+
+	if got := dynamicRouteState(t, db, "session-action-required"); got != "action_required" {
+		t.Fatalf("dynamic_route_states.state for action_required route = %q, want unchanged action_required", got)
+	}
+	if got := taskSessionRouteState(t, db, "session-action-required"); got != "starting" {
+		t.Fatalf("task_sessions.route_state for action_required route = %q, want unchanged starting (must not hide the Retry banner)", got)
+	}
+}
+
 // TestBackfillLegacyActiveDynamicRoutes_FreshInstallIsNoOp proves a brand new
 // database (whose dynamic_route_states DDL already declares the marker
 // column) never runs the backfill, so a genuinely orphaned starting+IDLE
