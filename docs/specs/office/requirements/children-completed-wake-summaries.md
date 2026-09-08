@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: office
 created: 2026-09-08
 owners:

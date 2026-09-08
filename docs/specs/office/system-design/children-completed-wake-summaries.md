@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: office
 requirements:
   - REQ-OFFICE-WAKE-CHILD-SUMMARIES-001

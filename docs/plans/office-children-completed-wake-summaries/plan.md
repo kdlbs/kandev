@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-status: draft
+status: implemented
 requirements:
   - REQ-OFFICE-WAKE-CHILD-SUMMARIES-001
   - REQ-OFFICE-WAKE-CHILD-SUMMARIES-002
@@ -177,20 +177,44 @@ package is Task 03's assembly-path test rather than a Playwright spec.
 
 Wave 1:
 
-- [ ] [Task 01: Make the child-summary query deterministic and live-only](task-01-child-summary-query.md)
-- [ ] [Task 02: Render the child summary line](task-02-child-summary-line.md)
+- [x] [Task 01: Make the child-summary query deterministic and live-only](task-01-child-summary-query.md)
+- [x] [Task 02: Render the child summary line](task-02-child-summary-line.md)
 
 Wave 2:
 
-- [ ] [Task 03: Derive the child list at prompt assembly time](task-03-assembly-time-enrichment.md)
+- [x] [Task 03: Derive the child list at prompt assembly time](task-03-assembly-time-enrichment.md)
 
 Wave 3:
 
-- [ ] [Task 04: Stop producers paying for discarded child summaries](task-04-drop-producer-reads.md)
+- [x] [Task 04: Stop producers paying for discarded child summaries](task-04-drop-producer-reads.md)
 
 ## Verification results
 
-Pending.
+All four work orders implemented and committed on
+`feature/children-completed-wake-summaries-6ecf9f`.
+
+- `go test -tags fts5 ./internal/office/... ./internal/orchestrator/... ./internal/workflow/...`
+  passes except `TestMigrate_PriorityIdempotent`, which fails identically on a
+  clean checkout of this branch (`backfill tasks FTS: no such column:
+  description`) and is unrelated to this work package.
+- `golangci-lint run ./internal/office/...` reports 0 issues; `gofmt -l
+  internal/office/` is empty.
+- `TestPostgresGetChildSummaries` **skipped**: `KANDEV_TEST_POSTGRES_DSN` is
+  unset in this environment, so AC-OFFICE-WAKE-CHILD-SUMMARIES-003.9 has code
+  but no executed evidence here. It runs in CI.
+
+Two deviations from the plan as written, both deliberate:
+
+- **Task 02 keeps 485 code points for an over-cap comment, not the maximal
+  488.** The system design states both a general `cap − 12` rule and, for the
+  comment specifically, "its first 485 code points ... for 497 in total"; its
+  Persistence ceiling is computed from 497. The explicit per-field figure wins,
+  so `truncateComment` survives as its own helper alongside `capRunes` and
+  `childCommentKeepRunes` records why.
+- **Task 03's tests reuse the existing `ExecSQL`/`RepoForTest` helpers** rather
+  than adding new ones; only `BuildPromptContextForTest` was added.
+  `applyServiceOverrides` in `base_test.go` did not forward `TaskPRs`, so a
+  wired PR lister was silently dropped in every test; that gap is fixed.
 
 ## Risks
 

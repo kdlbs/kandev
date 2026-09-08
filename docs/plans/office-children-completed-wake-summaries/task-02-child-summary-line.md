@@ -1,7 +1,7 @@
 ---
 id: "02-child-summary-line"
 title: "Render the child summary line"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -117,4 +117,4 @@ None.
 
 ## Results
 
-Pending.
+Implemented. `ChildSummaryPrompt.PRLinks` added; `sanitizePromptField` (via `strconv.IsPrint`), `capRunes`, `truncateComment` and `renderChildPRLinks` added; heading is now `Child tasks:`. Deviation: the comment keeps 485 code points rather than the maximal 488, per the design's explicit per-field figure and its Persistence ceiling of 497. The stale `"Completed children:"` assertion in `prompt_builder_test.go` was re-pointed.

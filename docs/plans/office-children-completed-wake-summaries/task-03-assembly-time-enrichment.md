@@ -1,7 +1,7 @@
 ---
 id: "03-assembly-time-enrichment"
 title: "Derive the child list at prompt assembly time"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-child-summary-query", "02-child-summary-line"]
 plan: "plan.md"
@@ -129,4 +129,4 @@ cd apps/backend && golangci-lint run ./internal/office/...
 
 ## Results
 
-Pending.
+Implemented. `enrichChildrenContext(ctx, pc, parentTaskID)` reads `GetChildSummaries` plus `lookupChildPRLinks`; the payload unmarshal and the `encoding/json` import are gone; the call site moved inside `buildPromptContext`'s non-empty `task_id` block while keeping both run reasons. Added `BuildPromptContextForTest` only; tests reuse the existing `ExecSQL` helper. `applyServiceOverrides` did not forward `TaskPRs`, silently dropping any wired PR lister in tests; fixed.

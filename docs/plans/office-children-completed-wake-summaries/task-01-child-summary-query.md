@@ -1,7 +1,7 @@
 ---
 id: "01-child-summary-query"
 title: "Make the child-summary query deterministic and live-only"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -120,4 +120,4 @@ comment limit, stated in both work orders.
 
 ## Results
 
-Pending.
+Implemented. `GetChildSummaries` is one statement with a scalar live-child count, `archived_at IS NULL` in both terms, an `EXISTS` parent guard, `created_at ASC, t.id ASC` ordering, a `created_at DESC, c.id DESC` comment tiebreak, and `SUBSTR(c.body, 1, maxCommentChars+1)`. Eight SQLite tests in `child_summaries_test.go`; the PostgreSQL twin `TestPostgresGetChildSummaries` skips without `KANDEV_TEST_POSTGRES_DSN`.

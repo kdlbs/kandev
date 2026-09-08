@@ -1,7 +1,7 @@
 ---
 id: "04-drop-producer-reads"
 title: "Stop producers paying for discarded child summaries"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-assembly-time-enrichment"]
 plan: "plan.md"
@@ -109,4 +109,4 @@ Task 03. Landing this first would leave `lookupChildPRLinks` with no caller.
 
 ## Results
 
-Pending.
+Implemented. Both producers dispatch `engine.OnChildrenCompletedPayload{}`; `ParentWakeReconciler.buildPayload` is deleted and its caller's error arm with it. `lookupChildPRLinks` and `GetChildSummaries` each retain exactly one caller, the enricher. The reconciler test drops `task_comments` to show a tick that previously aborted now dispatches, and a sibling test pins that the readiness gate still suppresses a wake.
