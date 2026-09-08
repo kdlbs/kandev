@@ -32,7 +32,7 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 	older := queueRunAt(t, repo, "older", "a1", now.Add(-30*time.Second))
 	newer := queueRunAt(t, repo, "newer", "a1", now.Add(-10*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"merged":true}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"newer","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 
 	got := mustGetRun(t, repo, newer.ID)
 	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
-	checkString(t, "payload", got.Payload, `{"merged":true}`)
+	checkString(t, "payload", got.Payload, `{"task_id":"newer","merged":true}`)
 
 	untouched := mustGetRun(t, repo, older.ID)
 	checkInt(t, "older coalesced_count", untouched.CoalescedCount, 1)
@@ -154,6 +154,28 @@ func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testin
 	}
 }
 
+// TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun pins the other
+// direction of the same guarantee: a taskless incoming payload must not
+// absorb a queued run that carries a task_id, or it would silently
+// overwrite that task's launch.
+func TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := queueRunAt(t, repo, "task-a", "a1", time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a taskless payload into a task-carrying run, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
@@ -162,7 +184,7 @@ func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
 	run := queueRunAt(t, repo, "target", "a1", time.Now().UTC().Add(-time.Second))
 
 	for i := range 3 {
-		merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"n":1}`)
+		merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"target","n":1}`)
 		if err != nil {
 			t.Fatalf("coalesce %d: %v", i, err)
 		}
@@ -211,7 +233,7 @@ func TestCoalesceRun_HonoursTheWindow(t *testing.T) {
 	ctx := context.Background()
 	run := queueRunAt(t, repo, "stale", "a1", time.Now().UTC().Add(-10*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 5, `{"merged":true}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 5, `{"task_id":"stale","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce (narrow window): %v", err)
 	}
@@ -220,7 +242,7 @@ func TestCoalesceRun_HonoursTheWindow(t *testing.T) {
 	}
 	checkInt(t, "coalesced_count", mustGetRun(t, repo, run.ID).CoalescedCount, 1)
 
-	merged, err = repo.CoalesceRun(ctx, "a1", "task_assigned", 600, `{"merged":true}`)
+	merged, err = repo.CoalesceRun(ctx, "a1", "task_assigned", 600, `{"task_id":"stale","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce (wide window): %v", err)
 	}
@@ -251,7 +273,7 @@ func TestCoalesceRun_SkipsCommentKeyedRuns(t *testing.T) {
 	})
 	setRequestedAt(t, repo, keyed.ID, now.Add(-5*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_comment", 600, `{"merged":true}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_comment", 600, `{"task_id":"t1","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}

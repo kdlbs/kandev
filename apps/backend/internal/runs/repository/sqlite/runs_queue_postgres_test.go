@@ -68,6 +68,33 @@ func TestPostgresCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 	}
 }
 
+// TestPostgresCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun is the
+// PostgreSQL twin of TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun:
+// the guard must also reject a taskless incoming payload against a
+// task-carrying queued row, not just the reverse.
+func TestPostgresCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.T) {
+	repo := newTestRepoPostgres(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "pg-task-c", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"pg-task-c"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a taskless payload into a task-carrying run, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"pg-task-c"}`)
+}
+
 // TestPostgresCoalesceRun_MergesSameTask is the positive-path twin: a
 // same-task, same-agent, same-reason request still merges, proving the
 // Postgres JSONExtract fragment is not just "always false" (which would

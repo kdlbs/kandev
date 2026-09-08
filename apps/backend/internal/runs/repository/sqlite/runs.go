@@ -453,15 +453,18 @@ func (r *Repository) CoalesceRun(
 ) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
 	taskID := taskIDFromPayload(payload)
-	taskPredicate := ""
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
-	// A task-scoped payload identifies a specific launch: merging two
-	// tasks for the same agent would replace the first task's payload
-	// and silently drop its launch. Agent-scoped reasons (heartbeat,
-	// budget_alert) carry no task_id, so the predicate is inert there.
+	// A payload's task_id identifies which launch it belongs to: merging
+	// across two different task_ids (present or absent) would replace one
+	// launch's payload with an unrelated one and silently drop it. The
+	// check is symmetric so both directions are covered.
+	jsonExtract := dialect.JSONExtract(r.db.DriverName(), "payload", "task_id")
+	var taskPredicate string
 	if taskID != "" {
-		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
+		taskPredicate = fmt.Sprintf(" AND %s = ?", jsonExtract)
 		args = append(args, taskID)
+	} else {
+		taskPredicate = fmt.Sprintf(" AND %s IS NULL", jsonExtract)
 	}
 	query := fmt.Sprintf(`
 		UPDATE runs
