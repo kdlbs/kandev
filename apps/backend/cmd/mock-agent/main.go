@@ -24,6 +24,9 @@ const (
 	modelFast           = "mock-fast"
 	modelSmart          = "mock-smart"
 	modelSlow           = "mock-slow"
+	modelUnique         = "opus[1m]"
+	modelAmbiguousFirst = "opus[270k]"
+	modelAmbiguousLast  = "opus[1m, fast]"
 	reasoningEffortLow  = "low"
 	reasoningEffortMed  = "medium"
 	reasoningEffortHigh = "high"
@@ -207,22 +210,24 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
 		}
 	}
+	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+		{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+		// E2E fixtures use "mock-slow" for the slow-response delay tier.
+		// It must be advertised so the no-silent-model-fallback strict
+		// policy (which fails session start when the profile model is
+		// absent from the advertised list) does not reject it.
+		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
+	}
+	modelOptions = append(modelOptions, mockModelVariationOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
 			CurrentValue: acp.SessionConfigValueId(model),
 			Id:           "model",
 			Name:         "Model",
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
-				// E2E fixtures use "mock-slow" for the slow-response delay tier.
-				// It must be advertised so the no-silent-model-fallback strict
-				// policy (which fails session start when the profile model is
-				// absent from the advertised list) does not reject it.
-				{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
-			}},
-			Type: "select",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
+			Type:         "select",
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modeCat,
@@ -245,6 +250,22 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Type:         "select",
 		}},
 	}
+}
+
+func mockModelVariationOptions() []acp.SessionConfigSelectOption {
+	catalog := strings.ToLower(strings.TrimSpace(os.Getenv("MOCK_AGENT_MODEL_CATALOG")))
+	if catalog == "ambiguous" {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelAmbiguousFirst, Name: "Opus (270k)", Description: ptr("Ambiguous variation fixture")},
+			{Value: modelAmbiguousLast, Name: "Opus (1m, fast)", Description: ptr("Ambiguous variation fixture")},
+		}
+	}
+	if catalog == "unique" || (catalog == "" && strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true")) {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelUnique, Name: "Opus (1m)", Description: ptr("Unique variation fixture")},
+		}
+	}
+	return nil
 }
 
 func cloneSessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
@@ -502,6 +523,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: toolKeyError, Description: "Simulate an error"},

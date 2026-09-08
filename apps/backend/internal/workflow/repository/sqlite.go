@@ -32,7 +32,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 	repo := &Repository{
 		db:      writer,
 		ro:      reader,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
@@ -166,6 +166,9 @@ func (r *Repository) initSchema() error {
 	// instead of UUIDs. This was caused by a frontend bug (fixed in PR #XXX).
 	if err := r.repairBrokenStepIDReferences(); err != nil {
 		return fmt.Errorf("failed to repair step_id references: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required workflow migration: %w", err)
 	}
 
 	return nil

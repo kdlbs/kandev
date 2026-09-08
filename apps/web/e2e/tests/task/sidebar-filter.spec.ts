@@ -192,7 +192,8 @@ test.describe("Sidebar filter — view ordering", () => {
 
     await filters.selectViewByName("Beta View");
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Beta View");
+    await filters.confirmDeleteActiveView("Beta View");
     await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
     // Deleting the active view falls back to the first remaining view.
     await filters.expectActiveViewChip("All tasks");
@@ -629,6 +630,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Delete View Task"]);
     await filters.addFilterRow();
@@ -638,7 +640,31 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("Ephemeral");
 
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Ephemeral");
+    await expect(filters.popover).toBeVisible();
+    if (prCapture.capturing) {
+      await filters.deleteConfirmation.evaluate(async (element) => {
+        await Promise.all(
+          element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+    }
+    await prCapture.screenshot("saved-task-view-delete-desktop", {
+      caption: "Desktop saved task view deletion names the target before removing filters.",
+    });
+    await filters.cancelDeleteActiveView();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "Ephemeral",
+    );
+    const settingsAfterCancel = await apiClient.getUserSettings();
+    expect(
+      (settingsAfterCancel.settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+        (view) => view.name === "Ephemeral",
+      ),
+    ).toBe(true);
+
+    await filters.beginDeleteActiveView("Ephemeral");
+    await filters.confirmDeleteActiveView("Ephemeral");
     await filters.close();
     await filters.openViewPicker();
     await expect(

@@ -51,7 +51,7 @@ test.describe("mobile task-create launch prompt preview", () => {
         .tap();
       await dialog.getByTestId("task-description-input").fill("");
       const launchStep = dialog.getByTestId("task-create-launch-step");
-      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(launchStep).toHaveText("Backlog");
       await expect(workflowSelector).not.toContainText("Start step:");
       const selectorBox = await workflowSelector.boundingBox();
       const launchStepBox = await launchStep.boundingBox();
@@ -66,11 +66,19 @@ test.describe("mobile task-create launch prompt preview", () => {
         launchStepInfoBox.x + launchStepInfoBox.width - 1,
       );
       expect(launchStepInfoBox.width).toBeGreaterThanOrEqual(44);
+      await launchStepInfo.tap();
+      const launchStepHelpDrawer = testPage.getByTestId("task-create-launch-step-help-drawer");
+      await expect(launchStepHelpDrawer).toBeVisible();
+      await expect(launchStepHelpDrawer).toContainText(
+        "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      );
+      await launchStepHelpDrawer.press("Escape");
+      await expect(launchStepHelpDrawer).not.toBeVisible();
 
       await dialog.getByTestId("task-title-input").fill("Mobile launch preview");
       const description = "Review mobile launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
-      await expect(launchStep).toHaveText("Start step: In Progress");
+      await expect(launchStep).toHaveText("In Progress");
 
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
       await expect(toggle).toHaveAttribute(
