@@ -1078,10 +1078,12 @@ func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid i
 	if err != nil {
 		var exitErr *ssh.ExitError
 		if !errors.As(err, &exitErr) {
-			return false, remoteProcessProbeError(pid, err, stderr)
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
 		}
-		// A nonzero ps exit (e.g. no matching process) is evaluated below
-		// like any other result: empty output never matches.
+		if !remoteProcessProbeConfirmsAbsence(stderr) {
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
+		}
+		return false, nil
 	}
 	return remoteAgentctlCommandLineMatches(stdout, sessionDir, taskDir), nil
 }
@@ -1114,7 +1116,7 @@ func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid in
 		if remoteProcessProbeConfirmsAbsence(stderr) {
 			return false, nil
 		}
-		return false, remoteProcessProbeError(pid, err, stderr)
+		return false, remoteProcessProbeError("kill -0", pid, err, stderr)
 	}
 	return false, err
 }
@@ -1126,12 +1128,12 @@ func remoteProcessProbeConfirmsAbsence(stderr string) bool {
 		strings.Contains(message, "esrch")
 }
 
-func remoteProcessProbeError(pid int, err error, stderr string) error {
+func remoteProcessProbeError(command string, pid int, err error, stderr string) error {
 	detail := strings.TrimSpace(stderr)
 	if detail == "" {
-		return fmt.Errorf("remote kill -0 %d failed: %w", pid, err)
+		return fmt.Errorf("remote %s %d failed: %w", command, pid, err)
 	}
-	return fmt.Errorf("remote kill -0 %d failed: %w (stderr: %s)", pid, err, detail)
+	return fmt.Errorf("remote %s %d failed: %w (stderr: %s)", command, pid, err, detail)
 }
 
 // isRemoteAgentctlAlive is the best-effort boolean form used by status and

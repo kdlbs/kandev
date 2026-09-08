@@ -14,8 +14,12 @@ import (
 // connection keys read by targetFromMetadata).
 
 func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
+	// The remote launch command line is always "<agentctlBin> --workdir
+	// <taskDir>" (startRemoteAgentctlOnPort) — sessionDir never appears in
+	// the argv. The fake server's ps output mirrors that shape so this test
+	// exercises the identity branch that actually fires in production.
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 		sshScriptRule{match: "kill 4242", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -23,6 +27,7 @@ func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",
@@ -74,6 +79,65 @@ func TestSSHExecutorStopInstanceIdentityMismatchSkipsKill(t *testing.T) {
 	}
 }
 
+// TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError
+// covers R2-F3: when the pid doesn't belong to our agentctl and the session
+// dir can't be reclaimed, StopInstance must error instead of warning and
+// returning nil — otherwise the caller prunes the executors_running row and
+// the session dir leaks with nothing left to retry it.
+func TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/usr/bin/some-other-process --unrelated")},
+		sshScriptRule{match: "rm -rf '/remote/session'", result: sshFail("permission denied")},
+	).handle)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "orphaned-instance",
+		StopReason: "startup terminal session cleanup",
+		Metadata:   metadata,
+	}, true)
+	if err == nil {
+		t.Fatal("expected StopInstance to propagate a failing session dir removal for an unmatched pid")
+	}
+}
+
+// TestSSHExecutorStopInstanceIdentityTaskDirMismatchSkipsKill covers the arm
+// of remoteAgentctlCommandLineMatches that actually fires in production: the
+// remote command line has "agentctl" and a --workdir, but it names a
+// different taskDir than the one persisted for this row (e.g. a stale row
+// whose pid was reused by another task's agentctl). That must not match.
+func TestSSHExecutorStopInstanceIdentityTaskDirMismatchSkipsKill(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task-other")},
+		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
+	).handle)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task-abc"
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "orphaned-instance",
+		StopReason: "startup terminal session cleanup",
+		Metadata:   metadata,
+	}, true)
+	if err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+	if _, ok := server.lastCommandContaining("kill 4242"); ok {
+		t.Fatalf("expected no kill when the remote command line's taskDir doesn't match, commands: %v", server.commands())
+	}
+	if _, ok := server.lastCommandContaining("rm -rf '/remote/session'"); !ok {
+		t.Fatalf("expected the session dir to still be reclaimed, commands: %v", server.commands())
+	}
+}
+
 // TestSSHExecutorStopInstanceIdentityProbeFailurePreservesRow covers F2's
 // other branch: when the identity probe itself can't be answered (an
 // SSH-level fault, not merely "no such process"), StopInstance must error so
@@ -109,7 +173,7 @@ func TestSSHExecutorStopInstanceIdentityProbeFailurePreservesRow(t *testing.T) {
 // deleting it out from under a still-live orphan.
 func TestSSHExecutorStopInstanceStopCommandFailurePropagatesError(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -117,6 +181,7 @@ func TestSSHExecutorStopInstanceStopCommandFailurePropagatesError(t *testing.T) 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",

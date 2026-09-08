@@ -24,8 +24,12 @@ func (s *restartSSHInventoryStore) ListExecutorsRunning(context.Context) ([]*mod
 }
 
 func TestStopAgentWithReasonReapsPersistedSSHAgentctlAfterRestart(t *testing.T) {
+	// The remote launch command line is always "<agentctlBin> --workdir
+	// <taskDir>" (startRemoteAgentctlOnPort) — sessionDir never appears in
+	// the argv. The fake server's ps output mirrors that shape so this test
+	// exercises the identity branch that actually fires in production.
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 		sshScriptRule{match: "kill 4242", result: sshOK},
 	).handle)
 	log := newTestRegistryLogger()
@@ -35,6 +39,7 @@ func TestStopAgentWithReasonReapsPersistedSSHAgentctlAfterRestart(t *testing.T) 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	row := &models.ExecutorRunning{
 		ID: "session-1", SessionID: "session-1", TaskID: "task-1",
 		ExecutorID: "executor-1", AgentExecutionID: "execution-1",
@@ -114,7 +119,7 @@ func TestStopAgentWithReasonPersistedSSHBackendShutdownWithoutForcePreservesRemo
 // it out from under a still-live orphan.
 func TestStopAgentWithReasonPropagatesPersistedSSHStopFailure(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
 	).handle)
 	log := newTestRegistryLogger()
@@ -124,6 +129,7 @@ func TestStopAgentWithReasonPropagatesPersistedSSHStopFailure(t *testing.T) {
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	row := &models.ExecutorRunning{
 		ID: "session-1", SessionID: "session-1", TaskID: "task-1",
 		ExecutorID: "executor-1", AgentExecutionID: "execution-1",

@@ -707,8 +707,7 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 		// signalling it would risk killing something we don't own. The
 		// session directory is still ours to reclaim.
 		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
-			r.logger.Warn("failed to remove persisted SSH session dir for unmatched pid",
-				zap.String("instance_id", instance.InstanceID), zap.Error(err))
+			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
 		}
 		return nil
 	}
