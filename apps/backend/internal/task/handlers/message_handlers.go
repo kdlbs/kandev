@@ -1009,6 +1009,10 @@ func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 			zap.Error(queueErr))
 		return false
 	}
+	h.logger.Warn("queued prompt for delivery once session runtime finishes launching",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.Error(promptErr))
 	return true
 }
 

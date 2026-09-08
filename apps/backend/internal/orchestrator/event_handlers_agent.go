@@ -998,10 +998,18 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	// ErrSessionRuntimeUnavailable means the session's runtime has not
+	// finished launching yet (see errSessionAwaitingRuntimeLaunch) — the
+	// exact condition this dispatch was taken under, since
+	// checkSessionPromptable does not know the difference between
+	// "promptable" and "promptable with a live runtime". A future launch
+	// (workflow on_enter, agent.boot_ready) will drain the queue once the
+	// runtime is actually up, so requeue instead of dropping.
 	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
-		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
+		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
+		errors.Is(err, ErrSessionRuntimeUnavailable) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}

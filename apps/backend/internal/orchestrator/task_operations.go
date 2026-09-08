@@ -80,12 +80,26 @@ var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
 // ErrSessionRuntimeUnavailable is returned by promptTask when
-// ensureSessionRunning fails before any prompt reached the agent — e.g. a
-// session promoted by a workflow step move whose runtime has not finished
-// launching yet. Callers can safely queue the prompt for delivery once the
-// runtime comes up instead of reporting it as failed, because nothing was
-// dispatched.
+// ensureSessionRunning fails for the single reason that is safe to treat as
+// "not yet launched" (see errSessionAwaitingRuntimeLaunch) — e.g. a session
+// promoted by a workflow step move whose runtime has not finished launching
+// yet. Callers can safely queue the prompt for delivery once the runtime
+// comes up instead of reporting it as failed, because nothing was
+// dispatched. Every other ensureSessionRunning failure (a real launch
+// error, an office-scheduler refusal, an exhausted resume retry) keeps
+// surfacing as a plain, visible error instead.
 var ErrSessionRuntimeUnavailable = errors.New("session runtime unavailable")
+
+// errSessionAwaitingRuntimeLaunch marks attemptColdResume's "prepared but
+// not launched yet" outcome: the session has no executors_running row
+// because the launch that creates one has not run yet, not because a launch
+// attempt failed. This is the only ensureSessionRunning failure narrow
+// enough to be classified ErrSessionRuntimeUnavailable — a session that
+// tried and failed to come up (bad SSH handshake, exhausted cold-resume
+// retries, an office-scheduler refusal) must not be silently queued with no
+// visible error and no log, since there is no future launch that will drain
+// the queue for it.
+var errSessionAwaitingRuntimeLaunch = errors.New("session is not resumable: no executor record")
 
 type primarySessionTaskStateUpdater interface {
 	UpdateTaskStateIfPrimarySessionState(
@@ -2640,7 +2654,7 @@ func (s *Service) attemptColdResume(
 
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if lookupErr != nil || running == nil {
-		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
+		return false, fmt.Errorf("%w (state: %s)", errSessionAwaitingRuntimeLaunch, session.State)
 	}
 
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
@@ -4333,7 +4347,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
-		return nil, fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
+		if errors.Is(err, errSessionAwaitingRuntimeLaunch) {
+			return nil, fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
+		}
+		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
 	// Reload session after ensureSessionRunning. If a resume happened, ResumeSession
