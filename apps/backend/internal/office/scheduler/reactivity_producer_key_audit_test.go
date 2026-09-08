@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"expvar"
-	"strings"
 	"testing"
 
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -52,12 +51,16 @@ func requireOneCallKeyless(t *testing.T, calls []recordedQueueCall, reason, agen
 	t.Fatalf("no %s call recorded for agent %q: calls=%#v", reason, agentID, calls)
 }
 
-// auditKeylessCounterHasLabel reports whether the process-global
-// office_run_dedup_keyless_total expvar map (internal/runs/service) carries
-// an entry for the given reason and cause. Duplicated locally rather than
-// imported: the counter map is unexported and the sibling helper in
-// internal/runs/service/dedup_test.go lives in a different package.
-func auditKeylessCounterHasLabel(t *testing.T, reason, cause string) bool {
+// auditKeylessCounterValue returns the current value of the process-global
+// office_run_dedup_keyless_total expvar map (internal/runs/service) for the
+// exact "reason=<reason>;cause=<cause>" label, or 0 if that label has never
+// been incremented. Duplicated locally rather than imported: the counter map
+// is unexported and the sibling helper in internal/runs/service/dedup_test.go
+// lives in a different package. Callers snapshot before and after a producer
+// call and assert the delta, rather than merely that the label exists — a
+// mere-existence check would pass even if this specific call site failed to
+// report, as long as some other test already set that label.
+func auditKeylessCounterValue(t *testing.T, reason, cause string) int64 {
 	t.Helper()
 	v := expvar.Get("office_run_dedup_keyless_total")
 	if v == nil {
@@ -67,13 +70,15 @@ func auditKeylessCounterHasLabel(t *testing.T, reason, cause string) bool {
 	if !ok {
 		t.Fatalf("office_run_dedup_keyless_total is not a *expvar.Map")
 	}
-	found := false
-	m.Do(func(kv expvar.KeyValue) {
-		if strings.Contains(kv.Key, "reason="+reason) && strings.Contains(kv.Key, "cause="+cause) {
-			found = true
-		}
-	})
-	return found
+	iv := m.Get("reason=" + reason + ";cause=" + cause)
+	if iv == nil {
+		return 0
+	}
+	i, ok := iv.(*expvar.Int)
+	if !ok {
+		t.Fatalf("counter value for reason=%s;cause=%s is not *expvar.Int", reason, cause)
+	}
+	return i.Value()
 }
 
 // TestReactivityProducerKeyAudit is the Part 2-required "producer-audit
@@ -204,12 +209,39 @@ func TestReactivityProducerKeyAudit(t *testing.T) {
 		queue := func(agentID string, c RunContext) {
 			calls = append(calls, recordedQueueCall{agentID: agentID, ctx: c})
 		}
+		before := auditKeylessCounterValue(t, RunReasonTaskUnblocked, "by_design")
 		change := TaskMutation{ActorID: "user-1", ActorType: "user"}
 		ss.reactToStatusChange(context.Background(), task, "todo", change, queue, res)
 
 		requireOneCallKeyless(t, calls, RunReasonTaskUnblocked, "agent-unblocked")
-		if !auditKeylessCounterHasLabel(t, RunReasonTaskUnblocked, "by_design") {
-			t.Fatal("expected office_run_dedup_keyless_total to carry task_unblocked/by_design")
+		if got, want := auditKeylessCounterValue(t, RunReasonTaskUnblocked, "by_design"), before+1; got != want {
+			t.Fatalf("office_run_dedup_keyless_total{task_unblocked,by_design} = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("task_unblocked_no_assignee_does_not_report", func(t *testing.T) {
+		// Regression test for Review round 2 Finding 3: an unassigned task
+		// must not increment the keyless counter for an enqueue that never
+		// happens. Goes through ApplyTaskMutation (not reactToStatusChange
+		// directly) so the real queue closure's empty-agent-id guard
+		// (reactivity.go's `if agentID == "" { return }`) is exercised —
+		// that guard is exactly what silently swallowed the enqueue while
+		// FINDING 3's ReportKeylessEnqueue call still fired unconditionally.
+		ss, _ := newAuditScheduler(t)
+		task := &TaskSnapshot{ID: "task-audit-unblocked-noassignee", WorkspaceID: "ws-1", State: "BLOCKED"}
+		before := auditKeylessCounterValue(t, RunReasonTaskUnblocked, "by_design")
+		newStatus := "todo"
+		change := TaskMutation{NewStatus: &newStatus, ActorID: "user-1", ActorType: "user"}
+		res, err := ss.ApplyTaskMutation(context.Background(), task, change)
+		if err != nil {
+			t.Fatalf("ApplyTaskMutation: %v", err)
+		}
+
+		if len(res.Runs) != 0 {
+			t.Fatalf("expected no queued runs for an unassigned task_unblocked, got %#v", res.Runs)
+		}
+		if got := auditKeylessCounterValue(t, RunReasonTaskUnblocked, "by_design"); got != before {
+			t.Fatalf("office_run_dedup_keyless_total{task_unblocked,by_design} = %d, want unchanged %d (no enqueue attempted)", got, before)
 		}
 	})
 
@@ -221,12 +253,36 @@ func TestReactivityProducerKeyAudit(t *testing.T) {
 		queue := func(agentID string, c RunContext) {
 			calls = append(calls, recordedQueueCall{agentID: agentID, ctx: c})
 		}
+		before := auditKeylessCounterValue(t, RunReasonTaskReopened, "by_design")
 		change := TaskMutation{ActorID: "user-1", ActorType: "user"}
 		ss.reactToStatusChange(context.Background(), task, "in_progress", change, queue, res)
 
 		requireOneCallKeyless(t, calls, RunReasonTaskReopened, "agent-silent-reopen")
-		if !auditKeylessCounterHasLabel(t, RunReasonTaskReopened, "by_design") {
-			t.Fatal("expected office_run_dedup_keyless_total to carry task_reopened/by_design")
+		if got, want := auditKeylessCounterValue(t, RunReasonTaskReopened, "by_design"), before+1; got != want {
+			t.Fatalf("office_run_dedup_keyless_total{task_reopened,by_design} = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("task_reopened_no_assignee_does_not_report", func(t *testing.T) {
+		// Regression test for Review round 2 Finding 3, silent-reopen branch.
+		// Goes through ApplyTaskMutation for the same reason as the
+		// task_unblocked case above: the empty-agent-id guard lives in the
+		// real queue closure, not in reactToStatusChange itself.
+		ss, _ := newAuditScheduler(t)
+		task := &TaskSnapshot{ID: "task-audit-reopen-silent-noassignee", WorkspaceID: "ws-1", State: "CANCELLED"}
+		before := auditKeylessCounterValue(t, RunReasonTaskReopened, "by_design")
+		newStatus := "in_progress"
+		change := TaskMutation{NewStatus: &newStatus, ActorID: "user-1", ActorType: "user"}
+		res, err := ss.ApplyTaskMutation(context.Background(), task, change)
+		if err != nil {
+			t.Fatalf("ApplyTaskMutation: %v", err)
+		}
+
+		if len(res.Runs) != 0 {
+			t.Fatalf("expected no queued runs for an unassigned silent reopen, got %#v", res.Runs)
+		}
+		if got := auditKeylessCounterValue(t, RunReasonTaskReopened, "by_design"); got != before {
+			t.Fatalf("office_run_dedup_keyless_total{task_reopened,by_design} = %d, want unchanged %d (no enqueue attempted)", got, before)
 		}
 	})
 
@@ -251,11 +307,12 @@ func TestReactivityProducerKeyAudit(t *testing.T) {
 		queue := func(agentID string, c RunContext) {
 			calls = append(calls, recordedQueueCall{agentID: agentID, ctx: c})
 		}
+		before := auditKeylessCounterValue(t, RunReasonTaskReviewRequested, "by_design")
 		ss.cascadeReviewRequested(ctx, task, TaskMutation{ActorID: "user-1", ActorType: "user"}, queue)
 
 		requireOneCallKeyless(t, calls, RunReasonTaskReviewRequested, "agent-reviewer-audit")
-		if !auditKeylessCounterHasLabel(t, RunReasonTaskReviewRequested, "by_design") {
-			t.Fatal("expected office_run_dedup_keyless_total to carry task_review_requested/by_design")
+		if got, want := auditKeylessCounterValue(t, RunReasonTaskReviewRequested, "by_design"), before+1; got != want {
+			t.Fatalf("office_run_dedup_keyless_total{task_review_requested,by_design} = %d, want %d", got, want)
 		}
 	})
 }

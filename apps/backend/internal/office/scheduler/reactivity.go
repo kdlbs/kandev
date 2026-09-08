@@ -200,7 +200,12 @@ func (ss *SchedulerService) reactToStatusChange(
 
 	case prev == statusBlocked && next != statusBlocked:
 		// Unblocked — no durable occurrence row to key on: keyless by design.
-		runsservice.ReportKeylessEnqueue(RunReasonTaskUnblocked, runsservice.KeylessCauseByDesign, "")
+		// Reported only when there's an assignee to enqueue for — queue()
+		// silently drops an empty agent id, so reporting unconditionally
+		// would count an enqueue that never happened.
+		if task.AssigneeAgentProfileID != "" {
+			runsservice.ReportKeylessEnqueue(RunReasonTaskUnblocked, runsservice.KeylessCauseByDesign, "")
+		}
 		queue(task.AssigneeAgentProfileID, RunContext{
 			Reason:      RunReasonTaskUnblocked,
 			TaskID:      task.ID,
@@ -224,8 +229,10 @@ func (ss *SchedulerService) reactToStatusChange(
 		var key string
 		if reason == RunReasonTaskReopenedComment {
 			key = fmt.Sprintf("%s:%s:%s", RunReasonTaskReopenedComment, commentID, task.AssigneeAgentProfileID)
-		} else {
-			// Silent reopen (no comment) — no durable occurrence row: keyless by design.
+		} else if task.AssigneeAgentProfileID != "" {
+			// Silent reopen (no comment) — no durable occurrence row: keyless
+			// by design. Reported only when there's an assignee to enqueue
+			// for, matching the task_unblocked case above.
 			runsservice.ReportKeylessEnqueue(RunReasonTaskReopened, runsservice.KeylessCauseByDesign, "")
 		}
 		queue(task.AssigneeAgentProfileID, RunContext{
