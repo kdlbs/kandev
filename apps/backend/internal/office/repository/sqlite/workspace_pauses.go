@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,6 +21,16 @@ import (
 // re-read the active record via GetActiveWorkspacePause rather than treating
 // this as a generic failure.
 var ErrWorkspaceAlreadyPaused = errors.New("workspace already paused")
+
+// releaseNoopDetails mirrors pause.noopDetails' JSON shape (that package
+// cannot be imported here — it imports this one). Every workspace_pause_noop
+// activity entry, whichever package writes it, must decode the same way
+// (system-design-02.md's Observability section).
+type releaseNoopDetails struct {
+	RequestedOp string `json:"requested_op"`
+	Reason      string `json:"reason"`
+	Cause       string `json:"cause"`
+}
 
 func (r *Repository) createWorkspacePauseTable() error {
 	_, err := r.db.Exec(`
@@ -136,8 +147,22 @@ func (r *Repository) ReleaseWorkspacePauseWithActivity(
 	released := rows > 0
 
 	action := models.ActivityActionWorkspaceResumed
+	details := releasedReason
 	if !released {
 		action = models.ActivityActionWorkspacePauseNoop
+		// A losing CAS is the lost-race case (a concurrent resume already
+		// won): the noop entry gets the same structured {requested_op,
+		// reason, cause} shape pause/service.go's logNoop writes for every
+		// other workspace_pause_noop entry, not a bare reason string.
+		encoded, err := json.Marshal(releaseNoopDetails{
+			RequestedOp: "resume",
+			Reason:      releasedReason,
+			Cause:       "lost_race",
+		})
+		if err != nil {
+			return false, fmt.Errorf("encode release noop details: %w", err)
+		}
+		details = string(encoded)
 	}
 	activity := &models.ActivityEntry{
 		WorkspaceID: workspaceID,
@@ -146,7 +171,7 @@ func (r *Repository) ReleaseWorkspacePauseWithActivity(
 		Action:      action,
 		TargetType:  models.ActivityTargetWorkspace,
 		TargetID:    workspaceID,
-		Details:     releasedReason,
+		Details:     details,
 	}
 	if err := insertActivityEntryTx(ctx, tx, r.db, activity); err != nil {
 		return false, fmt.Errorf("insert release activity: %w", err)

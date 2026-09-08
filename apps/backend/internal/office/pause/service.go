@@ -163,7 +163,10 @@ func (s *Service) Pause(ctx context.Context, workspaceID, reason, actorID, actor
 // attemptPause performs the insert-retry-once dance: try the insert; on a
 // uniqueness violation, re-read the active record. A re-read that itself
 // finds nothing means a resume raced in between, so retry the whole
-// sequence exactly once more before surfacing ErrPauseContended.
+// sequence exactly once more before surfacing ErrPauseContended. The
+// lost-race noop is logged here, only once the retry is exhausted — a
+// no-row re-read on attempt 1 that then succeeds on attempt 2 is not a
+// noop, it's a successful pause, and must not also emit one.
 func (s *Service) attemptPause(ctx context.Context, workspaceID, reason, actorID, actorKind string) (*models.WorkspacePause, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		active, done, err := s.tryPauseOnce(ctx, workspaceID, reason, actorID, actorKind)
@@ -174,6 +177,7 @@ func (s *Service) attemptPause(ctx context.Context, workspaceID, reason, actorID
 			return active, nil
 		}
 	}
+	s.logNoop(ctx, workspaceID, actorID, actorKind, "pause", reason, noopCauseLostRace)
 	return nil, ErrPauseContended
 }
 
@@ -213,8 +217,9 @@ func (s *Service) tryPauseOnce(ctx context.Context, workspaceID, reason, actorID
 		s.logNoop(ctx, workspaceID, actorID, actorKind, "pause", reason, noopCauseAlreadyPaused)
 		return active, true, nil
 	}
-	// No active record: a resume raced this insert. The caller retries once.
-	s.logNoop(ctx, workspaceID, actorID, actorKind, "pause", reason, noopCauseLostRace)
+	// No active record: a resume raced this insert. The caller retries
+	// once; attemptPause logs the lost-race noop only if that retry is
+	// also exhausted, since a successful retry means this wasn't a noop.
 	return nil, false, nil
 }
 

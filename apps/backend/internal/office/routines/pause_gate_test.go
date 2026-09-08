@@ -190,6 +190,30 @@ func TestDispatch_BlockedFiresDifferentPauses_EachWritesOwnSkipRow(t *testing.T)
 	}
 }
 
+// TestDispatch_BlockedByPause_SkipInsertFailsForNonUniqueReason_StillBlocks
+// proves checkPauseGate's "best-effort" comment: when
+// CreatePauseSkippedRoutineRun fails for a reason OTHER than the partial
+// unique index (a genuine write failure, simulated here by dropping the
+// table), the fire must still be blocked — the caller gets
+// shared.ErrWorkspacePaused either way, since the pause gate itself, not
+// the skip-record write, is what decides whether the fire proceeds.
+func TestDispatch_BlockedByPause_SkipInsertFailsForNonUniqueReason_StillBlocks(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+
+	if _, err := repo.ExecRaw(context.Background(), `DROP TABLE office_routine_runs`); err != nil {
+		t.Fatalf("drop office_routine_runs: %v", err)
+	}
+
+	gate := &fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
+	svc.SetPauseGate(gate)
+
+	_, err := svc.FireManual(context.Background(), routine.ID, nil)
+	if !errors.Is(err, shared.ErrWorkspacePaused) {
+		t.Fatalf("err = %v, want shared.ErrWorkspacePaused despite the failed skip-record write", err)
+	}
+}
+
 // TestDispatch_PauseGateError_FailsClosedWithNoRunRow proves a gate-read
 // error fails dispatch closed (shared.ErrPauseGateUnavailable) and writes
 // no row at all — nothing to retry from, so the next fire attempt is a

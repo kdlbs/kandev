@@ -60,6 +60,20 @@ func TestGetPause_UnknownWorkspaceReturns404(t *testing.T) {
 	}
 }
 
+// TestPostPause_UnknownWorkspaceReturns404 proves AC-006.9 on the pause
+// (mutation) endpoint specifically, mirroring TestGetPause_...404 and
+// TestPostResume_...404 — all three endpoints perform the same explicit
+// existence check independently of the scope middleware.
+func TestPostPause_UnknownWorkspaceReturns404(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-missing/pause", `{"reason":"incident"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestGetPause_RunningWorkspaceReportsNotPaused proves the ordinary read.
 func TestGetPause_RunningWorkspaceReportsNotPaused(t *testing.T) {
 	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
