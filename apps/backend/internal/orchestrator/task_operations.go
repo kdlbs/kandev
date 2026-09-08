@@ -79,6 +79,28 @@ var ErrAgentPromptInProgress = errors.New("agent is currently processing a promp
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
+// ErrSessionRuntimeUnavailable is returned by promptTask when
+// ensureSessionRunning fails for the single reason that is safe to treat as
+// "not yet launched" (see errSessionAwaitingRuntimeLaunch) — e.g. a session
+// promoted by a workflow step move whose runtime has not finished launching
+// yet. Callers can safely queue the prompt for delivery once the runtime
+// comes up instead of reporting it as failed, because nothing was
+// dispatched. Every other ensureSessionRunning failure (a real launch
+// error, an office-scheduler refusal, an exhausted resume retry) keeps
+// surfacing as a plain, visible error instead.
+var ErrSessionRuntimeUnavailable = errors.New("session runtime unavailable")
+
+// errSessionAwaitingRuntimeLaunch marks attemptColdResume's "prepared but
+// not launched yet" outcome: the session has no executors_running row
+// because the launch that creates one has not run yet, not because a launch
+// attempt failed. This is the only ensureSessionRunning failure narrow
+// enough to be classified ErrSessionRuntimeUnavailable — a session that
+// tried and failed to come up (bad SSH handshake, exhausted cold-resume
+// retries, an office-scheduler refusal) must not be silently queued with no
+// visible error and no log, since there is no future launch that will drain
+// the queue for it.
+var errSessionAwaitingRuntimeLaunch = errors.New("session is not resumable: no executor record")
+
 type primarySessionTaskStateUpdater interface {
 	UpdateTaskStateIfPrimarySessionState(
 		ctx context.Context,
@@ -1507,7 +1529,11 @@ func (s *Service) prepareSessionForStart(
 		// session row. Compensate before returning so callers never observe a
 		// partial sibling session when the required parent/group workspace is
 		// unavailable.
-		if deleteErr := s.repo.DeleteTaskSession(ctx, sessionID); deleteErr != nil {
+		createdSession, lookupErr := s.repo.GetTaskSession(ctx, sessionID)
+		if lookupErr != nil {
+			s.logger.Warn("failed to load inherited workspace session for compensation",
+				zap.String("session_id", sessionID), zap.Error(lookupErr))
+		} else if deleteErr := s.deleteSessionAndCleanAttachments(ctx, createdSession); deleteErr != nil {
 			s.logger.Warn("failed to compensate inherited workspace session",
 				zap.String("session_id", sessionID), zap.Error(deleteErr))
 		}
@@ -2487,7 +2513,23 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return nil
 	}
 
-	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
+	// Claimed after the actionability decision above, over content that
+	// excludes the handoff text, then appended last. Queue promotion and
+	// manual auto-start dispatch once with no replacement launch, so no
+	// shared stepHandoffOnce is needed here.
+	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
+	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
+	composedLaunchPrompt := appendStepHandoffToPrompt(promptForEmptinessCheck, handoffText)
+
+	// effectivePrompt is already fully composed for this step entry (handoff
+	// included): if promptTask's own internal ErrExecutionNotFound recovery
+	// fires, it must reuse this composed prompt rather than recomposing from
+	// the destination step's own template and discarding the handoff.
+	_, err = s.promptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false, promptTaskOptions{
+		promptAlreadyComposed: true,
+		fallbackLaunchPrompt:  composedLaunchPrompt,
+		fallbackRetryPrompt:   effectivePrompt,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}
@@ -2631,8 +2673,11 @@ func (s *Service) attemptColdResume(
 	}
 
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if lookupErr != nil || running == nil {
-		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
+	if lookupErr != nil && !errors.Is(lookupErr, models.ErrExecutorRunningNotFound) {
+		return false, fmt.Errorf("get executor running row: %w", lookupErr)
+	}
+	if running == nil {
+		return false, fmt.Errorf("%w (state: %s)", errSessionAwaitingRuntimeLaunch, session.State)
 	}
 
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
@@ -3454,10 +3499,25 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		zap.String("task_id", taskID),
 		zap.String("state", string(session.State)),
 		zap.Bool("was_primary", wasPrimary))
-
-	if err := s.deleteSessionAndPublishError(ctx, taskID, sessionID); err != nil {
+	if err := s.deleteSessionAndPublishError(ctx, session); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
+	// Remove ephemeral state only when it is still bound to the deleted
+	// incarnation. This purge includes reserved rows and cannot erase a
+	// replacement session that reuses the textual session ID.
+	if s.messageQueue != nil {
+		identity := messagequeue.QueueSessionIdentity{
+			TaskID:               taskID,
+			SessionID:            sessionID,
+			SessionIncarnationID: session.QueueIncarnationID,
+		}
+		if err := s.messageQueue.PurgeDeletedSession(ctx, identity); err != nil {
+			return fmt.Errorf("failed to purge deleted session queue: %w", err)
+		}
+	}
+	// The row is gone, so retire the detached-launch attestation and parked
+	// projection before any later session event can reuse this ID.
+	s.clearParkedProjectionOnSessionDeleted(ctx, taskID, sessionID)
 
 	// Drop the in-memory git snapshot throttle entries for an environment only
 	// after its session has been removed. The cache is environment-scoped, so a
@@ -3474,11 +3534,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// through a stale activity pointer.
 	s.clearTurnActivity(sessionID)
 
-	// Pending queue rows are keyed by session_id but counted for the sidebar
-	// badge by task_id. Cancel them after the session row is gone and publish
-	// queue-status so the status-summary projector drops the orphaned count.
-	// Best-effort: the session delete already committed.
-	s.cancelDeletedSessionQueue(ctx, taskID, sessionID)
+	// Queue rows and per-session policy are removed atomically with the task
+	// session row. Publish only the task-scoped recount after commit.
+	s.publishTaskQueueStatusEvent(ctx, taskID, "")
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
@@ -3488,16 +3546,33 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-func (s *Service) deleteSessionAndPublishError(ctx context.Context, taskID, sessionID string) error {
-	lock, release := s.acquireTaskSessionErrorGuard(taskID)
+func (s *Service) deleteSessionAndCleanAttachments(ctx context.Context, session *models.TaskSession) error {
+	var deletedAttachments []*models.TaskMessageAttachment
+	var err error
+	if deleter, ok := s.repo.(sessionAttachmentDeleter); ok {
+		deletedAttachments, err = deleter.DeleteTaskSessionWithAttachments(ctx, session)
+	} else {
+		err = s.repo.DeleteTaskSession(ctx, session)
+	}
+	if err != nil {
+		return err
+	}
+	if remover, ok := s.attachmentReader.(attachmentBytesRemover); ok {
+		remover.RemoveBytes(deletedAttachments)
+	}
+	return nil
+}
+
+func (s *Service) deleteSessionAndPublishError(ctx context.Context, session *models.TaskSession) error {
+	lock, release := s.acquireTaskSessionErrorGuard(session.TaskID)
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+	if err := s.deleteSessionAndCleanAttachments(ctx, session); err != nil {
 		return err
 	}
-	s.publishDeletedSessionError(ctx, taskID, sessionID)
+	s.publishDeletedSessionError(ctx, session.TaskID, session.ID)
 	return nil
 }
 
@@ -3598,21 +3673,6 @@ func (s *Service) publishTaskSessionErrorEvent(
 		"orchestrator",
 		eventData,
 	))
-}
-
-// cancelDeletedSessionQueue removes pending prompts left on a deleted session
-// and publishes a task-scoped queue status event for the live badge path.
-func (s *Service) cancelDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
-	if s.messageQueue == nil {
-		return
-	}
-	if _, err := s.messageQueue.CancelAll(ctx, sessionID); err != nil {
-		s.logger.Warn("failed to cancel queued prompts after session delete",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
 }
 
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
@@ -4192,7 +4252,23 @@ type promptTaskOptions struct {
 	// onAccepted runs at the agentctl acceptance boundary, before PromptTask
 	// waits for the turn to finish. Automation callers use it to bind durable
 	// attempt identity to the exact turn.
-	onAccepted func(turnID string)
+	onAccepted              func(turnID string)
+	expectedSessionIdentity *messagequeue.QueueSessionIdentity
+	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
+	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
+	// fallbackFreshLaunchOnMissingExecution). When promptAlreadyComposed is
+	// true, handlePromptDispatchFailure's own internal ErrExecutionNotFound
+	// recovery relaunches via startCreatedSessionWithComposedPrompt
+	// (fallbackRetryPrompt as its dispatch value) instead of the public
+	// StartCreatedSession, so a caller that already composed the prompt itself
+	// (e.g. appending a claimed step handoff) is not silently recomposed from
+	// the destination step's own template.
+	promptAlreadyComposed bool
+	// fallbackLaunchPrompt is the fully composed prompt for fresh-launch
+	// recovery. The normal dispatch still receives the raw prompt so it can
+	// apply session transforms exactly once.
+	fallbackLaunchPrompt string
+	fallbackRetryPrompt  string
 }
 
 type promptDispatchOutcome struct {
@@ -4322,6 +4398,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		if errors.Is(err, errSessionAwaitingRuntimeLaunch) {
+			return nil, fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
+		}
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
@@ -4363,7 +4442,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
 		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
 		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
-		options.requireNonterminalSession,
+		options.requireNonterminalSession, options.expectedSessionIdentity,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -4420,6 +4499,15 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Only bounded-ack callers preserve request context; ordinary prompts can take minutes.
 	promptCtx := options.executorContext(ctx)
+	session, identityValidationErr := s.validateQueuedPromptDispatch(
+		promptCtx, rollback.sessionIdentity, taskID, sessionID, session,
+	)
+	if identityValidationErr != nil {
+		return s.finishPromptDispatchFailure(
+			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
+			rollback, options, identityValidationErr, foregroundDispatch, false, nil,
+		)
+	}
 	s.bindPromptTurnID(promptCtx, session, rollback.turnID)
 	s.beginInteractivePromptAttempt(
 		promptCtx,
@@ -4430,8 +4518,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	dispatchOutcome := &promptDispatchOutcome{}
 	dispatchOutcome.turnID = rollback.turnID
 	dispatchOutcome.onAccepted = options.onAccepted
-	onDispatched := s.promptDispatchCallback(
-		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+	onDispatched := s.promptDispatchCallbackForIdentity(
+		promptCtx, taskID, sessionID, rollback.sessionIdentity,
+		session.AgentExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
 	if releaseDispatchGuard != nil {
 		originalOnDispatched := onDispatched
@@ -4446,6 +4535,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	)
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
 	if err != nil {
+		// Missing-execution recovery reacquires the cancel guard while it resets
+		// the session. Release dispatch admission before entering that path.
+		if releaseDispatchGuard != nil {
+			releaseDispatchGuard()
+		}
 		return s.finishPromptDispatchFailure(
 			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 			rollback, options, err, foregroundDispatch, dispatchAccepted, publicationErr,
@@ -4480,6 +4574,7 @@ func (s *Service) finishPromptDispatchFailure(
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
 		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
+		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -4616,8 +4711,39 @@ func (s *Service) promptDispatchCallback(
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
 ) func() {
+	return s.promptDispatchCallbackForIdentity(
+		ctx, taskID, sessionID, messagequeue.QueueSessionIdentity{}, "",
+		reservedTurn, dispatch, outcome,
+	)
+}
+
+func (s *Service) promptDispatchIdentityIsCurrent(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	expectedExecutionID, executionID string,
+) bool {
+	if identity.SessionIncarnationID == "" {
+		return true
+	}
+	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
+	return err == nil && current == identity && executionID == expectedExecutionID
+}
+
+func (s *Service) promptDispatchCallbackForIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity messagequeue.QueueSessionIdentity,
+	expectedExecutionID string,
+	reservedTurn *models.Turn,
+	dispatch *foregroundDispatch,
+	outcome *promptDispatchOutcome,
+) func() {
 	return func() {
 		executionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if !s.promptDispatchIdentityIsCurrent(ctx, identity, expectedExecutionID, executionID) {
+			outcome.recordAccepted(nil)
+			return
+		}
 		s.bindPromptAttemptToExecution(ctx, sessionID, executionID)
 		var publicationErr error
 		if reservedTurn != nil && s.turnService != nil {
@@ -4684,6 +4810,7 @@ type promptClaimRollback struct {
 	previousSessionState models.TaskSessionState
 	previousTaskState    v1.TaskState
 	taskStateClaimed     bool
+	sessionIdentity      messagequeue.QueueSessionIdentity
 	turnID               string
 	createdTurn          bool
 	reservedTurn         *models.Turn
@@ -4701,7 +4828,12 @@ func (s *Service) claimPromptDispatch(
 	foregroundClaim *foregroundClaim,
 	expectedCurrentTurnID string,
 	requireNonterminalSession bool,
+	expectedIdentities ...*messagequeue.QueueSessionIdentity,
 ) (*models.TaskSession, promptClaimRollback, error) {
+	var expectedIdentity *messagequeue.QueueSessionIdentity
+	if len(expectedIdentities) > 0 {
+		expectedIdentity = expectedIdentities[0]
+	}
 	if lifecyclePrompt {
 		return s.claimLifecyclePromptDispatch(
 			ctx, taskID, sessionID, claimEntryID, afterClaim,
@@ -4710,6 +4842,7 @@ func (s *Service) claimPromptDispatch(
 	claimed, previousState, turnID, createdTurn, reservedTurn, err := s.claimSessionRunningForPrompt(
 		ctx, taskID, sessionID, claimEntryID, reserveTurnUntilDispatch,
 		promptDispatchRecovery, foregroundClaim, expectedCurrentTurnID, requireNonterminalSession,
+		expectedIdentity, afterClaim,
 	)
 	if err != nil {
 		return nil, promptClaimRollback{}, err
@@ -4719,6 +4852,12 @@ func (s *Service) claimPromptDispatch(
 		turnID:               turnID,
 		createdTurn:          createdTurn,
 		reservedTurn:         reservedTurn,
+	}
+	if reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID); reservation != nil {
+		rollback.sessionIdentity = reservation.identity
+	}
+	if expectedIdentity != nil {
+		rollback.sessionIdentity = *expectedIdentity
 	}
 	return claimed, rollback, nil
 }
@@ -4738,6 +4877,9 @@ func (s *Service) claimLifecyclePromptDispatch(
 		previousSessionState: previousSessionState,
 		turnID:               turnID,
 		createdTurn:          createdTurn,
+	}
+	if reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID); reservation != nil {
+		rollback.sessionIdentity = reservation.identity
 	}
 	rollback.previousTaskState, rollback.taskStateClaimed, err = s.reconcileLifecycleClaim(
 		ctx, taskID, sessionID, previousSessionState, session,
@@ -4806,7 +4948,11 @@ func (s *Service) rollbackPromptClaim(
 	if rollback.dispatchGuardRelease != nil {
 		rollback.dispatchGuardRelease()
 	}
-	s.restoreLifecycleClaim(ctx, taskID, sessionID, rollback.previousSessionState)
+	if rollback.sessionIdentity.SessionIncarnationID != "" {
+		s.restoreLifecycleClaimForIdentity(ctx, rollback.sessionIdentity, rollback.previousSessionState)
+	} else {
+		s.restoreLifecycleClaim(ctx, taskID, sessionID, rollback.previousSessionState)
+	}
 	if rollback.taskStateClaimed {
 		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
 	}
@@ -4949,6 +5095,11 @@ func (s *Service) restoreLifecycleTaskState(
 // it falls back to a fresh launch instead of surfacing the error to the
 // caller. Otherwise — or if that fallback launch itself fails — it
 // delegates to handlePromptError for the caller-facing result.
+// promptAlreadyComposed/fallbackRetryPrompt are the caller's promptTaskOptions
+// values, forwarded to fallbackFreshLaunchOnMissingExecution so a caller that
+// already composed the dispatch prompt (e.g. autoStartStepPrompt, which
+// appends a claimed step handoff) is not silently recomposed from the
+// destination step's own template by this internal recovery.
 func (s *Service) handlePromptDispatchFailure(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
@@ -4958,14 +5109,21 @@ func (s *Service) handlePromptDispatchFailure(
 	lifecyclePrompt bool,
 	dispatchAccepted bool,
 	promptErr error,
+	promptAlreadyComposed bool,
+	fallbackLaunchPrompt string,
+	fallbackRetryPrompt string,
 ) (*PromptResult, error) {
 	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
 		errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
+		fallbackPrompt := prompt
+		if fallbackLaunchPrompt != "" {
+			fallbackPrompt = fallbackLaunchPrompt
+		}
 		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
-			ctx, taskID, sessionID, prompt, planMode, nil, attachments, nil,
+			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, nil, attachments, nil,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
@@ -5044,7 +5202,20 @@ func (s *Service) claimSessionRunningForPrompt(
 	foregroundClaim *foregroundClaim,
 	expectedCurrentTurnID string,
 	requireNonterminalSession bool,
+	optionalClaimArgs ...interface{},
 ) (*models.TaskSession, models.TaskSessionState, string, bool, *models.Turn, error) {
+	var (
+		afterClaim       func() error
+		expectedIdentity *messagequeue.QueueSessionIdentity
+	)
+	for _, arg := range optionalClaimArgs {
+		switch value := arg.(type) {
+		case func() error:
+			afterClaim = value
+		case *messagequeue.QueueSessionIdentity:
+			expectedIdentity = value
+		}
+	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -5090,6 +5261,20 @@ func (s *Service) claimSessionRunningForPrompt(
 	if freshSession == nil {
 		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
+	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
+	if !reservation.matchesSessionIdentity(
+		freshSession.TaskID,
+		freshSession.ID,
+		freshSession.QueueIncarnationID,
+	) {
+		return nil, "", "", false, nil, messagequeue.ErrSessionIdentityMismatch
+	}
+	if expectedIdentity != nil &&
+		(freshSession.TaskID != expectedIdentity.TaskID ||
+			freshSession.ID != expectedIdentity.SessionID ||
+			freshSession.QueueIncarnationID != expectedIdentity.SessionIncarnationID) {
+		return nil, "", "", false, nil, messagequeue.ErrSessionIdentityMismatch
+	}
 	if requireNonterminalSession && isTerminalSessionState(freshSession.State) {
 		return nil, "", "", false, nil, newWorkflowAutoStartSessionTerminalizedError(freshSession)
 	}
@@ -5099,10 +5284,20 @@ func (s *Service) claimSessionRunningForPrompt(
 		return nil, "", "", false, nil, promptErr
 	}
 	previousState := freshSession.State
-	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
-	// setSessionRunning refreshes freshSession in place when its guarded write
-	// loses, so a cancellation landing after the promptability check is visible
-	// here as a terminal state.
+	switch {
+	case reservation != nil && reservation.identity.SessionIncarnationID != "":
+		if err := s.setQueuedSessionRunningForIdentity(ctx, reservation.identity, freshSession); err != nil {
+			return nil, "", "", false, nil, err
+		}
+	case expectedIdentity != nil:
+		if err := s.setQueuedSessionRunningForIdentity(ctx, *expectedIdentity, freshSession); err != nil {
+			return nil, "", "", false, nil, err
+		}
+	default:
+		s.setSessionRunning(ctx, taskID, sessionID, freshSession)
+	}
+	// The guarded state transition refreshes freshSession in place, so a
+	// competing terminal transition remains visible before turn creation.
 	if requireNonterminalSession && isTerminalSessionState(freshSession.State) {
 		return nil, "", "", false, nil, newWorkflowAutoStartSessionTerminalizedError(freshSession)
 	}
@@ -5116,9 +5311,14 @@ func (s *Service) claimSessionRunningForPrompt(
 		ctx, sessionID, reserveTurnUntilDispatch, promptDispatchRecovery,
 	)
 	if err != nil {
-		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, promptClaimRollback{
-			previousSessionState: previousState,
-		})
+		rollback := promptClaimRollback{previousSessionState: previousState}
+		if reservation != nil {
+			rollback.sessionIdentity = reservation.identity
+		}
+		if expectedIdentity != nil {
+			rollback.sessionIdentity = *expectedIdentity
+		}
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
 		return nil, "", "", false, nil, fmt.Errorf("persist prompt turn: %w", err)
 	}
 	if reservedTurn != nil && s.turnService != nil {
@@ -5129,28 +5329,78 @@ func (s *Service) claimSessionRunningForPrompt(
 				createdTurn:          createdTurn,
 				reservedTurn:         reservedTurn,
 			}
+			if reservation != nil {
+				rollback.sessionIdentity = reservation.identity
+			}
+			if expectedIdentity != nil {
+				rollback.sessionIdentity = *expectedIdentity
+			}
 			s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
 			return nil, "", "", false, nil, fmt.Errorf("persist prompt dispatch attempt: %w", err)
 		}
 	}
-	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
+	reservation = s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
+	rollback := promptClaimRollback{
+		previousSessionState: previousState,
+		turnID:               turnID,
+		createdTurn:          createdTurn,
+		reservedTurn:         reservedTurn,
+	}
+	if reservation != nil {
+		rollback.sessionIdentity = reservation.identity
+	}
+	if expectedIdentity != nil {
+		rollback.sessionIdentity = *expectedIdentity
+	}
+	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
+		return nil, "", "", false, nil, err
+	}
+	// A Send Now reservation becomes replaceable only after the guarded session
+	// claim and its identity-bound visible side effects have succeeded.
 	if reservation != nil && reservation.liveEligible.Load() {
-		// A Send Now reservation becomes replaceable only after this guarded
-		// session claim. The turn was started/adopted under the same guard above,
-		// so the phase and turn ownership cannot be observed half-way through the
-		// handoff.
 		s.markAcceptedDispatchLiveLocked(sessionID, reservation)
 	}
 	// Remove only the pre-acceptance marker here. The accepted ownership record
 	// remains until the turn settles, so Send Now cannot cancel or duplicate
 	// this successor while the executor call is still in progress.
 	if claimEntryID != "" {
-		s.releaseQueuedDispatchPendingIfCurrent(
-			sessionID,
-			s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
-		)
+		s.releaseQueuedDispatchPendingIfCurrent(sessionID, reservation)
 	}
 	return freshSession, previousState, turnID, createdTurn, reservedTurn, nil
+}
+
+func (s *Service) validateQueuedPromptDispatch(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	taskID, sessionID string,
+	session *models.TaskSession,
+) (*models.TaskSession, error) {
+	if identity.SessionIncarnationID == "" {
+		return session, nil
+	}
+	if s.messageQueue == nil {
+		return nil, messagequeue.ErrSessionIdentityMismatch
+	}
+	expectedExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || expectedExecutionID == "" {
+		return nil, executor.ErrExecutionNotFound
+	}
+	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil ||
+		fresh.TaskID != taskID ||
+		fresh.ID != identity.SessionID ||
+		fresh.QueueIncarnationID != identity.SessionIncarnationID {
+		return nil, messagequeue.ErrSessionIdentityMismatch
+	}
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || currentExecutionID != expectedExecutionID {
+		return nil, executor.ErrExecutionNotFound
+	}
+	fresh.AgentExecutionID = expectedExecutionID
+	return fresh, nil
 }
 
 func (s *Service) claimLifecycleSessionRunning(
@@ -5182,7 +5432,8 @@ func (s *Service) claimLifecycleSessionRunning(
 	if err := s.validateLifecyclePromptSelection(ctx, taskID, sessionID); err != nil {
 		return nil, "", "", false, err
 	}
-	claim, err := s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
+	claim, err := s.claimPromptableSessionForIdentity(ctx, taskID, sessionID, reservation)
 	if err != nil {
 		return nil, "", "", false, fmt.Errorf("%w: %v", errLifecyclePromptClaim, err)
 	}
@@ -5193,17 +5444,25 @@ func (s *Service) claimLifecycleSessionRunning(
 		return nil, "", "", false, fmt.Errorf("%w: lifecycle prompt session is busy", ErrAgentPromptInProgress)
 	}
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
-		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
+		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
 		return nil, "", "", false, errQueuedDispatchSuperseded
 	}
 	if s.isSessionResetInProgress(sessionID) {
-		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
+		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
 		return nil, "", "", false, ErrSessionResetInProgress
 	}
 	freshSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || freshSession == nil {
-		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
+		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
 		return nil, "", "", false, errLifecyclePromptInactive
+	}
+	if !reservation.matchesSessionIdentity(
+		freshSession.TaskID,
+		freshSession.ID,
+		freshSession.QueueIncarnationID,
+	) {
+		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
+		return nil, "", "", false, messagequeue.ErrSessionIdentityMismatch
 	}
 	// Keep the lifecycle admission guard through durable turn creation. A reset
 	// that follows this claim must observe this turn and quiesce it before it
@@ -5212,14 +5471,87 @@ func (s *Service) claimLifecycleSessionRunning(
 	if err != nil {
 		failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
 		defer cancel()
-		s.restoreLifecycleClaim(failureCtx, taskID, sessionID, claim.PreviousState)
+		s.restoreLifecycleClaimForReservation(
+			failureCtx, taskID, sessionID, reservation, claim.PreviousState,
+		)
 		return nil, "", "", false, fmt.Errorf("persist lifecycle prompt turn: %w", err)
 	}
-	s.releaseQueuedDispatchPendingIfCurrent(
-		sessionID,
-		s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
-	)
+	s.releaseQueuedDispatchPendingIfCurrent(sessionID, reservation)
 	return freshSession, claim.PreviousState, turnID, createdTurn, nil
+}
+
+func (s *Service) claimPromptableSessionForIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	reservation *queuedDispatchReservation,
+) (models.PromptableTaskSessionClaim, error) {
+	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
+		return s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+	}
+	return s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx,
+		reservation.identity.TaskID,
+		reservation.identity.SessionID,
+		reservation.identity.SessionIncarnationID,
+	)
+}
+
+func (s *Service) restoreLifecycleClaimForReservation(
+	ctx context.Context,
+	taskID, sessionID string,
+	reservation *queuedDispatchReservation,
+	previousState models.TaskSessionState,
+) {
+	if reservation != nil && reservation.identity.SessionIncarnationID != "" {
+		s.restoreLifecycleClaimForIdentity(ctx, reservation.identity, previousState)
+		return
+	}
+	s.restoreLifecycleClaim(ctx, taskID, sessionID, previousState)
+}
+
+func (s *Service) restoreLifecycleClaimForIdentity(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	previousState models.TaskSessionState,
+) {
+	restored, updatedAt, err := s.repo.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx,
+		identity.TaskID,
+		identity.SessionID,
+		identity.SessionIncarnationID,
+		models.TaskSessionStateRunning,
+		previousState,
+		"",
+	)
+	if err != nil {
+		s.logger.Error("failed to restore lifecycle prompt session state",
+			zap.String("task_id", identity.TaskID),
+			zap.String("session_id", identity.SessionID),
+			zap.Error(err))
+		return
+	}
+	if !restored {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil || session == nil ||
+		session.TaskID != identity.TaskID ||
+		session.QueueIncarnationID != identity.SessionIncarnationID {
+		return
+	}
+	s.publishTaskSessionStateChanged(
+		ctx,
+		identity.TaskID,
+		identity.SessionID,
+		models.TaskSessionStateRunning,
+		previousState,
+		"",
+		&updatedAt,
+		session,
+	)
+	s.republishTaskActivityOnSettle(
+		ctx, identity.TaskID, models.TaskSessionStateRunning, previousState,
+	)
 }
 
 func (s *Service) validateLifecyclePromptSelection(
@@ -5499,6 +5831,51 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
 }
 
+// DrainQueuedMessageForSession dispatches one message only for the exact session incarnation.
+func (s *Service) DrainQueuedMessageForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return false, messagequeue.ErrSessionIdentityMismatch
+	}
+	lock, release := s.acquireCancelInFlightGuard(identity.SessionID)
+	defer release()
+	lock.Lock()
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+	}()
+	for s.isCancelInFlight(identity.SessionID) {
+		lock.Unlock()
+		guardLocked = false
+		if err := s.waitForCancelInFlight(ctx, identity.SessionID); err != nil {
+			return false, err
+		}
+		lock.Lock()
+		guardLocked = true
+	}
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session == nil || session.TaskID != identity.TaskID {
+		return false, messagequeue.ErrSessionIdentityMismatch
+	}
+	if err := s.checkSessionPromptable(identity.TaskID, identity.SessionID, session.State); err != nil {
+		return false, err
+	}
+	if s.sessionHasPendingClarification(ctx, identity.SessionID) {
+		return false, ErrSessionNotPromptable
+	}
+	if s.messageQueue == nil {
+		return false, errors.New("message queue is not configured")
+	}
+	if err := s.messageQueue.SetAutoRunForSession(ctx, identity, true); err != nil {
+		return false, fmt.Errorf("resume queue Auto-run: %w", err)
+	}
+	return s.drainQueuedMessageForPromptableSessionLockedForIdentity(ctx, identity)
+}
+
 // SetQueueAutoRun persists the queue policy and, when enabling an eligible
 // session, immediately attempts the FIFO head. It never cancels an active turn
 // and treats busy, clarification, and lifecycle guards as a successful armed
@@ -5536,6 +5913,115 @@ func (s *Service) SetQueueAutoRun(ctx context.Context, sessionID string, enabled
 	}
 	dispatched := s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
 	return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, dispatched, nil
+}
+
+func (s *Service) queueAutoRunDrainBlocked(sessionID string) bool {
+	return s.isCancelInFlight(sessionID) ||
+		s.isQueuedDispatchInFlight(sessionID) ||
+		s.isSteerInFlight(sessionID)
+}
+
+// SetQueueAutoRunForSession persists policy and dispatches only for the exact session incarnation.
+func (s *Service) SetQueueAutoRunForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, enabled bool) (bool, bool, error) {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return false, false, messagequeue.ErrSessionIdentityMismatch
+	}
+	if s.messageQueue == nil {
+		return false, false, errors.New("message queue is not configured")
+	}
+	lock, release := s.acquireCancelInFlightGuard(identity.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.messageQueue.SetAutoRunForSession(ctx, identity, enabled); err != nil {
+		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
+	}
+	if !enabled || s.queueAutoRunDrainBlocked(identity.SessionID) {
+		return enabled, false, nil
+	}
+	if s.sessionHasPendingClarification(ctx, identity.SessionID) {
+		return enabled, false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil {
+		return enabled, false, fmt.Errorf("load session for queue Auto-run: %w", err)
+	}
+	if session == nil || session.TaskID != identity.TaskID {
+		return enabled, false, messagequeue.ErrSessionIdentityMismatch
+	}
+	if err := s.checkSessionPromptable(identity.TaskID, identity.SessionID, session.State); err != nil {
+		if isSessionBusyError(err) {
+			return enabled, false, nil
+		}
+		return enabled, false, err
+	}
+	dispatched, err := s.drainQueuedMessageForPromptableSessionLockedForIdentity(ctx, identity)
+	return enabled, dispatched, err
+}
+
+func (s *Service) resolveQueueIdentityForSession(
+	ctx context.Context,
+	session *models.TaskSession,
+) (messagequeue.QueueSessionIdentity, error) {
+	if s.messageQueue == nil || session == nil || session.ID == "" || session.TaskID == "" {
+		return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
+	if err != nil {
+		return messagequeue.QueueSessionIdentity{}, err
+	}
+	if session.QueueIncarnationID != "" &&
+		session.QueueIncarnationID != identity.SessionIncarnationID {
+		return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	return identity, nil
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) (bool, error) {
+	lock, release := s.acquireCancelInFlightGuard(identity.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if s.isCancelInFlight(identity.SessionID) {
+		return false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil {
+		return false, err
+	}
+	if session == nil ||
+		session.TaskID != identity.TaskID ||
+		session.QueueIncarnationID != identity.SessionIncarnationID {
+		return false, messagequeue.ErrSessionIdentityMismatch
+	}
+	if err := s.checkSessionPromptable(identity.TaskID, identity.SessionID, session.State); err != nil {
+		if isSessionBusyError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if s.sessionHasPendingClarification(ctx, identity.SessionID) {
+		return false, nil
+	}
+	return s.drainQueuedMessageForPromptableSessionLockedForIdentity(ctx, identity)
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
+	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
+		return false, nil
+	}
+	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	if err != nil {
+		return false, err
+	}
+	if !autoRun {
+		return false, nil
+	}
+	return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok), nil
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
@@ -6650,7 +7136,19 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 		return fmt.Errorf("reconcile cancelled turn: %w", err)
 	}
 	if s.messageQueue != nil {
-		paused, err := s.messageQueue.PauseAutoRunIfPending(ctx, sessionID)
+		var (
+			paused bool
+			err    error
+		)
+		if session != nil {
+			var identity messagequeue.QueueSessionIdentity
+			identity, err = s.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, sessionID)
+			if err == nil {
+				paused, err = s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
+			}
+		} else {
+			paused, err = s.messageQueue.PauseAutoRunIfPending(ctx, sessionID)
+		}
 		if err != nil {
 			s.logger.Warn("failed to pause queued messages after cancel",
 				zap.String("session_id", sessionID),
@@ -6732,17 +7230,21 @@ func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sess
 // which checks the marker itself before delegating here). See
 // drainQueuedMessageForPromptableSessionLocked for the *non-cancelling*
 // FIFO-head drain path, which does check the marker directly.
-func (s *Service) takeAndDispatchEntryLocked(ctx context.Context, sessionID, entryID string) (bool, error) {
+func (s *Service) takeAndDispatchEntryLocked(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (bool, error) {
 	if s.messageQueue != nil {
-		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntryForSession(ctx, identity, entryID)
 		if err != nil {
 			return false, fmt.Errorf("take targeted queued message: %w", err)
 		}
-		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
+		if s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok) {
 			return true, nil
 		}
 	}
-	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+	return s.drainQueuedMessageForPromptableSessionLockedForIdentity(ctx, identity)
 }
 
 // takeIfPromptableLocked takes and dispatches entryID only if sessionID is
@@ -6763,15 +7265,21 @@ func (s *Service) takeAndDispatchEntryLocked(ctx context.Context, sessionID, ent
 // Also defers to an admitted-but-not-yet-dispatched steer (isSteerInFlight;
 // see steerInFlight's field doc comment) for the same reason: this path
 // never cancels, so it has no way to supersede the steer's dispatch either.
-func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+func (s *Service) takeIfPromptableLocked(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (bool, error) {
+	if s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
 		return false, nil
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || s.checkSessionPromptable(taskID, sessionID, session.State) != nil {
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil || session == nil ||
+		session.QueueIncarnationID != identity.SessionIncarnationID ||
+		s.checkSessionPromptable(identity.TaskID, identity.SessionID, session.State) != nil {
 		return false, nil
 	}
-	return s.takeAndDispatchEntryLocked(ctx, sessionID, entryID)
+	return s.takeAndDispatchEntryLocked(ctx, identity, entryID)
 }
 
 // cancelAndTakeForPeerMessage cancels sessionID's in-flight turn and takes
@@ -6800,28 +7308,31 @@ func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID,
 // task to REVIEW (writeTaskReviewStateOnCancel).
 func (s *Service) cancelAndTakeForPeerMessage(
 	ctx context.Context,
-	taskID string,
-	sessionID string,
+	identity messagequeue.QueueSessionIdentity,
 	entryID string,
 	unlockGuard func(),
 	relockGuard func(),
 ) (bool, error) {
 	return s.cancelAgentSilentWithGuardActionKind(
 		ctx,
-		taskID,
-		sessionID,
+		identity.TaskID,
+		identity.SessionID,
 		unlockGuard,
 		relockGuard,
 		func(actionCtx context.Context) (bool, error) {
-			return s.takeAndDispatchEntryLocked(actionCtx, sessionID, entryID)
+			return s.takeAndDispatchEntryLocked(actionCtx, identity, entryID)
 		},
 		cancellationKindPeer,
 	)
 }
 
-// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
-// and then interrupts the child's in-flight turn to deliver it immediately,
-// instead of waiting for the turn to end naturally. It is used only by
+// QueueAndInterruptForPeerMessage accepts the caller-captured session identity,
+// validates it after acquiring the session guard, atomically queues prompt, and
+// then interrupts the child's in-flight turn to deliver it immediately,
+// instead of waiting for the turn to end naturally. Capturing the identity
+// before contending for the guard prevents a delete-and-recreate race from
+// retargeting an old peer operation into a replacement session incarnation.
+// It is used only by
 // handleMessageTask (mcp/handlers) when the sender is the target task's
 // parent: a long-running child otherwise leaves its parent's control/steer
 // messages parked on the FIFO queue until the child's current turn finishes
@@ -6885,7 +7396,9 @@ func (s *Service) cancelAndTakeForPeerMessage(
 // hasn't yet reached PromptTask — so it must still be allowed to cancel
 // and take its own entry rather than being blocked by a marker the cancel
 // itself is about to invalidate.
-func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	taskID := identity.TaskID
+	sessionID := identity.SessionID
 	if s.messageQueue == nil {
 		return nil, false, errors.New("message queue not available")
 	}
@@ -6918,11 +7431,13 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 		release()
 	}()
 
-	queued, err := s.messageQueue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+	)
 	if err != nil {
 		return nil, false, err
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
+	s.publishQueueStatusEventForIdentity(ctx, identity)
 	if operation := s.currentCancellation(sessionID); operation != nil && operation.kind != cancellationKindPeer {
 		s.logger.Debug("leaving peer message queued while a different cancellation source is in progress",
 			zap.String("task_id", taskID),
@@ -6944,12 +7459,12 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 				zap.String("session_id", sessionID),
 				zap.String("turn_before_wait", turnBeforeWait),
 				zap.Bool("turn_peek_error", turnPeekErr != nil || turnNowErr != nil))
-			dispatched, fallbackErr := s.takeIfPromptableLocked(ctx, taskID, sessionID, queued.ID)
+			dispatched, fallbackErr := s.takeIfPromptableLocked(ctx, identity, queued.ID)
 			return queued, dispatched, fallbackErr
 		}
 	}
 
-	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID, unlockGuard, relockGuard)
+	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, identity, queued.ID, unlockGuard, relockGuard)
 	return queued, dispatched, err
 }
 

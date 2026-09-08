@@ -23,6 +23,17 @@ vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
   useRepositoryBranchPolicies: () => ({ policies: mockPolicies.value }),
 }));
 
+vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
+  useRemoteRepositories: () => ({
+    repos: [],
+    availableProviders: [],
+    loading: false,
+    unavailable: false,
+    error: null,
+    search: () => undefined,
+  }),
+}));
+
 // The Remote-mode branch of RepoChipsRow renders RemoteRepoChipsRow, which
 // in turn renders RemoteRepoChip — a heavy popover with its own GitHub
 // hook. Stub the chip here so tests for this row stay focused on the

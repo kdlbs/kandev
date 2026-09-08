@@ -247,12 +247,12 @@ func (r *Repository) ensurePromptOrderIndex() error {
 // would error with "no such table". Stubs created here are minimal —
 // the workflow repo's init still runs and adds the rest of its columns
 // via idempotent ALTER and CREATE statements.
-func (r *Repository) ensureRunnerProjectionTables() {
+func (r *Repository) ensureRunnerProjectionTables() error {
 	// workflow_steps: matches the full schema declared in the workflow
 	// repo so workflow.NewWithDB's later ALTER ADD COLUMNs become no-ops
-	// (column-already-exists errors are swallowed). Mirrors
+	// (only column-already-exists errors are tolerated). Mirrors
 	// internal/workflow/repository/sqlite.go (the canonical owner).
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
 			workflow_id TEXT NOT NULL DEFAULT '',
@@ -273,8 +273,10 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`)
-	_, _ = r.db.Exec(`
+		)`); err != nil {
+		return fmt.Errorf("create workflow_steps projection table: %w", err)
+	}
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_step_participants (
 			id TEXT PRIMARY KEY,
 			step_id TEXT NOT NULL DEFAULT '',
@@ -283,7 +285,10 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
 			position INTEGER NOT NULL DEFAULT 0
-		)`)
+		)`); err != nil {
+		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initCoreSchema() error {
@@ -1003,6 +1008,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
 		agent_execution_id TEXT NOT NULL DEFAULT '',
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,

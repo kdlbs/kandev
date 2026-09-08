@@ -74,6 +74,16 @@ func (r *failingQueueSnapshotRepository) ListBySession(
 	return r.Repository.ListBySession(ctx, sessionID)
 }
 
+func (r *failingQueueSnapshotRepository) Snapshot(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) (messagequeue.RepositorySnapshot, error) {
+	if identity.SessionID == r.failSessionID {
+		return messagequeue.RepositorySnapshot{}, errors.New("snapshot failed")
+	}
+	return r.Repository.Snapshot(ctx, identity)
+}
+
 // interruptCall records one InterruptForPeerMessage invocation.
 type interruptCall struct {
 	taskID, sessionID, entryID string
@@ -175,14 +185,14 @@ func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.qu
 // interruptSkippedNoError simulates a busy/failed-take outcome — real
 // interrupt/drain behavior is exercised by the orchestrator-level
 // QueueAndInterruptForPeerMessage tests, not this fake.
-func (f *fakeOrchestrator) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
-	queued, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+func (f *fakeOrchestrator) QueueAndInterruptForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	queued, err := f.queue.QueueMessageWithMetadataForSession(ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
 	if err != nil {
 		return nil, false, err
 	}
 
 	f.mu.Lock()
-	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: queued.ID})
+	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: identity.TaskID, sessionID: identity.SessionID, entryID: queued.ID})
 	f.mu.Unlock()
 
 	if f.interruptErr != nil {
@@ -216,11 +226,28 @@ func (panicPromptReferenceResolver) ResolvePromptReferences(context.Context, str
 func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskRepository) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
 	log := testLogger(t)
-	orch := &fakeOrchestrator{queue: messagequeue.NewServiceMemory(log)}
 	var repo TaskRepository
 	if len(taskRepo) > 0 {
 		repo = taskRepo[0]
 	}
+	queueRepo := messagequeue.NewMemoryRepository()
+	if sessionRepo, ok := repo.(SessionRepository); ok {
+		queueRepo = messagequeue.NewMemoryRepositoryWithAuthority(
+			func(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
+				session, err := sessionRepo.GetTaskSession(ctx, sessionID)
+				if err != nil {
+					return messagequeue.QueueSessionIdentity{}, err
+				}
+				if session == nil || session.TaskID != taskID || session.QueueIncarnationID == "" {
+					return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
+				}
+				return messagequeue.QueueSessionIdentity{
+					TaskID: taskID, SessionID: sessionID, SessionIncarnationID: session.QueueIncarnationID,
+				}, nil
+			},
+		)
+	}
+	orch := &fakeOrchestrator{queue: messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, log)}
 	h := &Handlers{
 		taskSvc:         svc,
 		taskRepo:        repo,
@@ -429,7 +456,7 @@ func TestHandleMessageTask_SiblingSession_Queues(t *testing.T) {
 	require.NoError(t, repo.CreateTaskSession(context.Background(), sibling))
 	require.NoError(t, repo.UpdateTaskSessionState(context.Background(), sibling.ID, models.TaskSessionStateRunning, ""))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	payload := map[string]interface{}{
 		"task_id":           target.ID,
@@ -492,7 +519,7 @@ func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
 		AgentExecutionID: "exec-" + sibling.ID,
 	}))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	payload := map[string]interface{}{
 		"task_id":           target.ID,
@@ -528,7 +555,7 @@ func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
 func TestHandleMessageTask_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.turnStartResult = orchestrator.ProcessOnTurnStartResult{Queued: true}
 
 	payload := senderPayload(target.ID, "wait for admission", sender.ID)
@@ -553,7 +580,7 @@ func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	// sess belongs to target — sending to sender's task with that session must fail.
 	payload := senderPayload(sender.ID, "hello", target.ID)
@@ -601,7 +628,7 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow-up message", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -650,7 +677,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop and pivot to X", parent.ID, "interrupt"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -692,7 +719,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMes
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.interruptErr = errors.New("cancel agent: agent manager unreachable")
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
@@ -720,7 +747,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQue
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.interruptSkippedNoError = true
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
@@ -756,7 +783,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesN
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "fyi, no rush", parent.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -782,7 +809,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInt
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "fyi, no rush", parent.ID, "queued"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -811,7 +838,7 @@ func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *test
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(target.ID, "stop now", sender.ID, "interrupt"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -838,7 +865,7 @@ func TestHandleMessageTask_InvalidDeliveryMode_Rejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, _ := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "immediately"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -850,7 +877,7 @@ func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	h.SetPromptReferenceResolver(fakePromptReferenceResolver{
 		expansions: []promptservice.PromptReferenceExpansion{
 			{Name: "improve-harness", Content: "Review this session for durable harness improvements."},
@@ -876,7 +903,7 @@ func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T)
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	h.SetPromptReferenceResolver(fakePromptReferenceResolver{err: errors.New("db error")})
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain @missing text", sender.ID))
@@ -895,7 +922,7 @@ func TestHandleMessageTask_NoPromptReferencesSkipsResolver(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	h.SetPromptReferenceResolver(panicPromptReferenceResolver{})
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain text", sender.ID))
@@ -922,7 +949,7 @@ func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	// Saturate the receiver's queue.
 	for i := 0; i < messagequeue.DefaultMaxPerSession; i++ {
@@ -953,7 +980,7 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "next instruction", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -999,7 +1026,7 @@ func TestHandleMessageTask_WaitingForInput_FiresTurnStart(t *testing.T) {
 	task.WorkflowStepID = "step-review"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
 		assert.Equal(t, target.ID, taskID)
 		assert.Equal(t, sess.ID, sessionID)
@@ -1041,7 +1068,7 @@ func TestHandleMessageTask_KanbanRunnerTransitionsReviewToInProgress(t *testing.
 	task.AssigneeAgentProfileID = "kanban-runner"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
 		assert.Equal(t, target.ID, taskID)
 		assert.Equal(t, sess.ID, sessionID)
@@ -1077,7 +1104,7 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 	}
 	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
 		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
 		require.NoError(t, err)
@@ -1155,7 +1182,7 @@ func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *t
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow up completed", sender.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -1192,7 +1219,7 @@ func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *te
 	}
 	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
 		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
 		require.NoError(t, err)
@@ -1232,7 +1259,7 @@ func TestHandleMessageTask_WaitingForInputCompletedWithoutPrimarySwitchRejects(t
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
 		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
 		require.NoError(t, err)
@@ -1261,7 +1288,7 @@ func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *tes
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	orch.onTurnStart = func(ctx context.Context, _, sessionID string) error {
 		require.Equal(t, sess.ID, sessionID)
 		return repo.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateWaitingForInput, "")
@@ -1415,6 +1442,7 @@ func TestTaskMessageReviewRollbackPreservesReservedLifecycleQueueEntry(t *testin
 	rollback := taskMessageReviewRollback{
 		changed: true,
 		sessions: []taskMessageSessionRollback{{
+			taskID:    target.ID,
 			sessionID: sess.ID,
 		}},
 	}
@@ -1442,8 +1470,8 @@ func TestTaskMessageReviewRollbackCaptureQueuesIsAtomic(t *testing.T) {
 	rollback := taskMessageReviewRollback{
 		changed: true,
 		sessions: []taskMessageSessionRollback{
-			{sessionID: "session-1"},
-			{sessionID: "session-2"},
+			{taskID: "task", sessionID: "session-1"},
+			{taskID: "task", sessionID: "session-2"},
 		},
 		queues: original,
 	}
@@ -1501,12 +1529,12 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	)
 	require.NoError(t, err)
 	require.True(t, accepted)
-	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
+	require.NoError(t, orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
 		TaskID:         target.ID,
 		WorkflowID:     "workflow-1",
 		WorkflowStepID: "step-review",
 		Position:       2,
-	})
+	}))
 	replacementID := "sess-2"
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
@@ -1614,12 +1642,12 @@ func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchRestoresQueues
 	require.NoError(t, err)
 	_, err = orch.queue.QueueMessageWithMetadata(ctx, replacementID, target.ID, "replacement queued", "", "user", false, nil, nil)
 	require.NoError(t, err)
-	orch.queue.SetPendingMove(ctx, replacementID, &messagequeue.PendingMove{
+	require.NoError(t, orch.queue.SetPendingMove(ctx, replacementID, &messagequeue.PendingMove{
 		TaskID:         target.ID,
 		WorkflowID:     "workflow-1",
 		WorkflowStepID: "replacement-step",
 		Position:       5,
-	})
+	}))
 
 	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
 		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
@@ -1871,7 +1899,7 @@ func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testi
 		svc, repo := newTestTaskService(t)
 		sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-		h, orch := newMessageTaskHandler(t, svc)
+		h, orch := newMessageTaskHandler(t, svc, repo)
 		orch.promptErrFirst = executor.ErrExecutionNotFound
 
 		msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "retry me", sender.ID))
@@ -1888,7 +1916,7 @@ func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "kick off the work", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -1925,7 +1953,7 @@ func TestHandleMessageTask_FailedSession_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateFailed)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -1937,7 +1965,7 @@ func TestHandleMessageTask_CancelledSession_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCancelled)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -1965,7 +1993,7 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	sender := senderResult.Task
 	require.NoError(t, err)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -1994,7 +2022,7 @@ func TestHandleMessageTask_NonexistentTask_ReportsTaskNotFound(t *testing.T) {
 	sender := senderResult.Task
 	require.NoError(t, err)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload("00000000-0000-0000-0000-000000000000", "hello", sender.ID))
@@ -2014,7 +2042,7 @@ func TestHandleMessageTask_MissingSenderTaskID_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
 		"task_id": target.ID,
@@ -2030,7 +2058,7 @@ func TestHandleMessageTask_SelfMessage_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", target.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -2047,7 +2075,7 @@ func TestHandleMessageTask_UnknownSenderTask_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", "00000000-0000-0000-0000-000000000000"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
