@@ -487,3 +487,67 @@ func TestSwitchTaskRunner_ConcurrentExecutorRunningWriteNeverBlendsWithSwitch(t 
 		t.Fatalf("switch committed but stored profile = %q, want profile-new", stored)
 	}
 }
+
+// TestSwitchTaskRunner_ConcurrentWorkspaceFolderAttachNeverBlendsWithSwitch is
+// the AC-TASKS-RUNNER-SWITCH-002.3a/3b acceptance evidence for the
+// guardWorkspaceSourceParentTx retrofit's no-parent (top-level task) branch:
+// a runner switch racing a workspace-folder attachment on the same top-level
+// task must land as one of exactly two outcomes, never a switch that commits
+// with a folder attached it never saw.
+func TestSwitchTaskRunner_ConcurrentWorkspaceFolderAttachNeverBlendsWithSwitch(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old"}`,
+	})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	taskRepo := seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	var wg sync.WaitGroup
+	var switchErr, attachErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, switchErr = repo.SwitchTaskRunner(ctx, baseRunnerSwitchRequest("task-1", "profile-new", taskRepo))
+	}()
+	go func() {
+		defer wg.Done()
+		attachErr = repo.CreateWorkspaceSourceBatch(ctx, &models.WorkspaceSourceBatch{
+			TaskID: "task-1",
+			Sources: []models.WorkspaceSource{
+				{Folder: &models.TaskWorkspaceFolder{LocalPath: "/tmp/race-folder", DisplayName: "race-folder"}},
+			},
+		})
+	}()
+	wg.Wait()
+
+	if attachErr != nil {
+		t.Fatalf("CreateWorkspaceSourceBatch error = %v, want nil", attachErr)
+	}
+
+	switchRejectedAsWorkspaceFolderAttached := false
+	if switchErr != nil {
+		var conflict *repoerrors.ErrRunnerMutabilityConflict
+		if !errors.As(switchErr, &conflict) || conflict.Reason != models.RunnerReasonWorkspaceFolderAttached {
+			t.Fatalf("switch error = %v, want nil or ErrRunnerMutabilityConflict{workspace_folder_attached}", switchErr)
+		}
+		switchRejectedAsWorkspaceFolderAttached = true
+	}
+
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	stored, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
+
+	if switchRejectedAsWorkspaceFolderAttached {
+		if stored != "profile-old" {
+			t.Fatalf("switch was rejected but stored profile = %q, want unchanged profile-old", stored)
+		}
+		return
+	}
+	if stored != "profile-new" {
+		t.Fatalf("switch committed but stored profile = %q, want profile-new", stored)
+	}
+}
