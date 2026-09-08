@@ -430,6 +430,52 @@ function usePublishMobileFocus(focusedWorkflowId: string | null) {
   }, [focusedWorkflowId, setMobileKanbanFocusedWorkflow]);
 }
 
+type RenderedWorkflowLayoutOptions = {
+  workflowFilter: string | null;
+  orderedWorkflows: { id: string; name: string }[];
+  getFilteredTasks: (workflowId: string) => Task[];
+  hasLiveHiddenSteps: (workflowId: string) => boolean;
+  isMobileKanban: boolean;
+  workflowOptions: MobileWorkflowNavigation["workflows"];
+  onWorkflowChange: SwimlaneContainerProps["onWorkflowChange"];
+};
+
+function useRenderedWorkflowLayout({
+  workflowFilter,
+  orderedWorkflows,
+  getFilteredTasks,
+  hasLiveHiddenSteps,
+  isMobileKanban,
+  workflowOptions,
+  onWorkflowChange,
+}: RenderedWorkflowLayoutOptions) {
+  const visibleWorkflows = useStableWorkflowList(
+    selectVisibleWorkflows({
+      workflowFilter,
+      orderedWorkflows,
+      hasTasks: (workflowId) => getFilteredTasks(workflowId).length > 0,
+      hasLiveHiddenSteps,
+      showEmptyBoard: isMobileKanban,
+    }),
+  );
+  const focusedWorkflowId = visibleWorkflows[0]?.id ?? null;
+  usePublishMobileFocus(isMobileKanban ? focusedWorkflowId : null);
+  const renderedWorkflows = useStableWorkflowList(
+    getRenderedWorkflows(isMobileKanban, focusedWorkflowId, visibleWorkflows),
+  );
+  const sortableWorkflowIds = useMemo(
+    () => renderedWorkflows.map((workflow) => workflow.id),
+    [renderedWorkflows],
+  );
+  const mobileWorkflowNavigation = useMobileWorkflowNavigation(
+    isMobileKanban,
+    focusedWorkflowId,
+    workflowOptions,
+    onWorkflowChange,
+  );
+  return { visibleWorkflows, renderedWorkflows, sortableWorkflowIds, mobileWorkflowNavigation };
+}
+
 function useMobileWorkflowNavigation(
   isMobileKanban: boolean,
   focusedWorkflowId: string | null,
@@ -479,30 +525,16 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
 
   const view = getEffectiveView(viewMode, isMobile);
   const isMobileKanban = isMobile && view.id === "kanban";
-  const visibleWorkflows = useStableWorkflowList(
-    selectVisibleWorkflows({
+  const { visibleWorkflows, renderedWorkflows, sortableWorkflowIds, mobileWorkflowNavigation } =
+    useRenderedWorkflowLayout({
       workflowFilter,
       orderedWorkflows,
-      hasTasks: (workflowId) => getFilteredTasks(workflowId).length > 0,
+      getFilteredTasks,
       hasLiveHiddenSteps,
-      showEmptyBoard: isMobileKanban,
-    }),
-  );
-  const focusedWorkflowId = visibleWorkflows[0]?.id ?? null;
-  usePublishMobileFocus(isMobileKanban ? focusedWorkflowId : null);
-  const renderedWorkflows = useStableWorkflowList(
-    getRenderedWorkflows(isMobileKanban, focusedWorkflowId, visibleWorkflows),
-  );
-  const sortableWorkflowIds = useMemo(
-    () => renderedWorkflows.map((workflow) => workflow.id),
-    [renderedWorkflows],
-  );
-  const mobileWorkflowNavigation = useMobileWorkflowNavigation(
-    isMobileKanban,
-    focusedWorkflowId,
-    workflowOptions,
-    containerProps.onWorkflowChange,
-  );
+      isMobileKanban,
+      workflowOptions,
+      onWorkflowChange: containerProps.onWorkflowChange,
+    });
 
   const emptyMessage = getEmptyMessage({
     isLoading,
