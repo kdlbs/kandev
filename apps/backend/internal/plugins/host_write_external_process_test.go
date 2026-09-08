@@ -33,17 +33,19 @@ import (
 // backendapp adapter has its own field-mapping unit coverage; this fixture
 // proves the external process reaches the real task service and SQLite store.
 type externalProcessTaskWriter struct {
-	svc              *taskservice.Service
-	workspaceID      string
-	workflowID       string
-	createPriorities []string
-	updatePriorities []string
+	svc                *taskservice.Service
+	createWorkspaceIDs []string
+	createWorkflowIDs  []string
+	createPriorities   []string
+	updatePriorities   []string
 }
 
 func (w *externalProcessTaskWriter) CreateTask(ctx context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
+	w.createWorkspaceIDs = append(w.createWorkspaceIDs, in.WorkspaceID)
+	w.createWorkflowIDs = append(w.createWorkflowIDs, in.WorkflowID)
 	w.createPriorities = append(w.createPriorities, in.Priority)
 	result, err := w.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
-		WorkspaceID: w.workspaceID, WorkflowID: w.workflowID, WorkflowStepID: in.WorkflowStepID,
+		WorkspaceID: in.WorkspaceID, WorkflowID: in.WorkflowID, WorkflowStepID: in.WorkflowStepID,
 		Title: in.Title, Description: in.Description, ParentID: in.ParentID, Metadata: in.Metadata,
 		PlanMode: in.PlanMode, Priority: in.Priority, StartAgent: in.StartAgent,
 	})
@@ -100,12 +102,13 @@ func TestPluginHost_ExternalProcessPersistsPriorityThroughTaskService(t *testing
 	require.NoError(t, err)
 	require.NotEmpty(t, workflows)
 
-	writer := &externalProcessTaskWriter{svc: taskSvc, workspaceID: workspaces[0].ID, workflowID: workflows[0].ID}
+	writer := &externalProcessTaskWriter{svc: taskSvc}
 	host := &pluginHost{
 		pluginID:     "priority-probe",
 		capabilities: manifest.Capabilities{APIRead: []string{"tasks"}, APIWrite: []string{"tasks"}},
 		taskData:     taskSvc,
 		taskWriter:   writer,
+		workflows:    taskSvc,
 	}
 
 	bin := buildExternalPriorityProbe(t)
@@ -144,6 +147,8 @@ func TestPluginHost_ExternalProcessPersistsPriorityThroughTaskService(t *testing
 	require.Equal(t, "high", probe.UpdateHighReadback)
 	require.NotEmpty(t, probe.InvalidCreateError)
 	require.NotEmpty(t, probe.InvalidUpdateError)
+	require.Equal(t, []string{workspaces[0].ID, workspaces[0].ID}, writer.createWorkspaceIDs)
+	require.Equal(t, []string{workflows[0].ID, workflows[0].ID}, writer.createWorkflowIDs)
 	require.Equal(t, []string{"high", ""}, writer.createPriorities)
 	require.Equal(t, []string{"high"}, writer.updatePriorities)
 }

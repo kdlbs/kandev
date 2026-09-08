@@ -191,7 +191,7 @@ func (p *fixturePlugin) priorityProbe(ctx context.Context) (*pluginsdk.WebhookRe
 	}
 	result := priorityProbeResult{}
 	createdHigh, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
-		WorkspaceID: "ws-probe", WorkflowID: "wf-probe", Title: "priority high", Priority: "high",
+		Title: "priority high", Priority: "high",
 	})
 	if err != nil {
 		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
@@ -202,7 +202,7 @@ func (p *fixturePlugin) priorityProbe(ctx context.Context) (*pluginsdk.WebhookRe
 		result.CreateHighReadback = readback.Priority
 	}
 	createdDefault, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
-		WorkspaceID: "ws-probe", WorkflowID: "wf-probe", Title: "priority default",
+		Title: "priority default",
 	})
 	if err != nil {
 		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
@@ -223,7 +223,7 @@ func (p *fixturePlugin) priorityProbe(ctx context.Context) (*pluginsdk.WebhookRe
 	}
 	invalid := "invalid"
 	if _, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
-		WorkspaceID: "ws-probe", WorkflowID: "wf-probe", Title: "invalid priority", Priority: invalid,
+		Title: "invalid priority", Priority: invalid,
 	}); err != nil {
 		result.InvalidCreateError = err.Error()
 	}
