@@ -134,14 +134,23 @@ slice operate on runes.
 
 - `identifier` falls back to `?` when empty, as today
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.9).
-- **The rendered line contains no line break except its terminator.** Every
-  interpolated field — identifier, title, state, comment, URL — has any embedded
-  CR or LF replaced with a single space before rendering, so one child is always
-  exactly one line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.1, -001.6). The comment
-  gets this from `%q`, which escapes a newline rather than emitting it; the
-  title, rendered unquoted, needs it applied explicitly. Scoping the guarantee to
-  the comment alone would leave `001.1`'s one-line-per-child promise breakable by
-  any title containing a newline.
+- **The rendered line contains no line break, and no other control character,
+  except its terminator.** Every interpolated field — identifier, title, state,
+  comment, URL — has every rune that Go's `strconv.IsPrint` rejects replaced with
+  a single space. This happens BEFORE any cap is applied and, for the comment,
+  BEFORE `%q` quotes it (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.1, -001.6). The
+  replacement is one rune for one rune, so it can neither move a cap's boundary
+  nor turn an empty body into a non-empty one. CR and LF
+  are two such runes, which is what makes one child exactly one line; U+2028, tab
+  and the other control characters are the rest, and they go for the same reason.
+  `strconv.IsPrint` is named rather than a hand-written CR/LF test because it is
+  the predicate `%q` itself uses, so sanitizing with it leaves `%q` nothing to
+  expand except `"` and `\`. Relying on `%q` alone instead would make the comment
+  the one field whose newlines survived as the two-character escape `\n` while
+  every other field's became spaces, and would leave its rendered length a
+  function of how many control characters it happened to contain. Scoping the
+  guarantee to the comment alone would leave `001.1`'s one-line-per-child promise
+  breakable by any title containing a newline.
 - The comment segment is present only when the child has a most-recent comment
   **whose body is non-empty** (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3, .4). The
   schema permits an empty body: `task_comments.body` is declared `TEXT NOT NULL`
@@ -158,6 +167,17 @@ slice operate on runes.
   marker — and the two differ by 12 code points on every field, which is the
   difference between the size ceiling in [Persistence](#persistence) being exact
   and being wrong by up to 144 code points per line.
+- **The comment's cap applies before quoting, and the quoting is bounded
+  separately.** The rule above bounds the value a cap is applied to. For title and
+  URL that value is what lands in the prompt, so there the cap bounds the rendered
+  text exactly. The comment is different: it is rendered through `%q`, which runs
+  after the cap. With the sanitization above already applied, `%q` can only add the
+  two enclosing quote characters and expand `"` to `\"` and `\` to `\\`, so a
+  497-code-point capped body renders as at most 2 × 497 + 2 = **996 code points**.
+  Stated because the cap rule would otherwise read as bounding the quoted text,
+  which it does not — a builder applies the cap to the unquoted body — and because
+  [Persistence](#persistence) has to size this segment with that expansion included
+  rather than at a flat 500.
 - `truncateComment` keeps its shape but counts runes: a body longer than 500 code
   points renders as its first 485 code points followed by ` [truncated]`, for 497
   in total; a body of 500 or fewer renders whole, with no marker
@@ -171,7 +191,9 @@ slice operate on runes.
 - The pull-request segment is present only when the child has at least one link.
   URLs are sorted ascending by URL string, then joined by `, `
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7). At most 10 render; a child
-  with more gets ` (+N more)` after the tenth. Sorting before capping is what
+  with more gets ` (+N more)` after the tenth, where **N is the number of links
+  NOT rendered — the child's total link count minus 10**, never the total: a child
+  with 12 links renders ` (+2 more)`. Sorting before capping is what
   makes *which* URLs appear deterministic rather than a property of whatever
   order the link projection returned. **Each URL is itself capped at 200 code
   points**, under the same rule: a longer URL renders as its first 188 code points
@@ -179,8 +201,8 @@ slice operate on runes.
   populates bounds length, so without this cap
   AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6 is unsatisfied for this field and the
   section has no size ceiling. Sorting and the 10-URL count both operate on the
-  untruncated values, so the cap decides how a URL is displayed and never which
-  URLs are selected. A cut URL is not a usable link, which is why the marker is
+  values as read — before sanitization as well as before the cap — so neither step
+  decides which URLs are selected, only how they are displayed. A cut URL is not a usable link, which is why the marker is
   required rather than a silent slice.
 
 `ChildSummaryPrompt` gains a `PRLinks []string` field. The lead-in sentence, the
@@ -351,14 +373,24 @@ Office run detail prompt panel.
 No schema change and no migration. `runs.payload` gains no field; the run row is
 unchanged. `runs.assembled_prompt` grows by the rendered section, bounded by 20
 lines whose length is bounded in turn by the per-field caps in
-[Rendered line contract](#rendered-line-contract): 200 code points of title, 500
-of comment, and at most 10 pull-request URLs of at most 200 code points each —
-each of those figures bounding the rendered field with its truncation marker
-included. That puts the worst case a little under 60 KB and the ordinary case in
-the low kilobytes, since real pull-request URLs run well under 100 characters and
-most children have one. Those caps are why this is a bound rather than an estimate —
-the task system limits title length, link count and URL length nowhere, so without
-them the section would have no ceiling at all.
+[Rendered line contract](#rendered-line-contract).
+
+**That ceiling is a code-point count, and converting it to bytes is a separate
+step.** Every cap in this design is counted in code points, so a byte figure read
+straight off them would be wrong for exactly the non-ASCII content this design
+calls ordinary: a 500-code-point CJK comment occupies 1500 bytes. Per line the
+worst case is about 200 (title) + 996 (quoted comment, per the quoting bound in
+[Rendered line contract](#rendered-line-contract)) + 2033 (ten 200-code-point
+URLs, their `, ` separators and ` (+N more)`) + about 110 for identifier, state
+and the fixed punctuation, so roughly **3,350 code points**. Twenty of those plus
+the heading and the truncation notice put the section under **70,000 code
+points**, and UTF-8 encodes a code point in at most 4 bytes, so under **280 KB**.
+Reaching that requires all 20 children to carry both a capped comment and ten
+capped URLs. The ordinary case — one pull-request URL of well under 100
+characters and a short comment — is a few hundred bytes per line and lands in the
+low kilobytes. The caps are what make this a bound at all rather than an
+estimate: the task system limits title length, link count and URL length
+nowhere.
 
 Runs queued before this change and claimed after it render the section normally,
 because the section does not depend on anything the producer recorded. No
