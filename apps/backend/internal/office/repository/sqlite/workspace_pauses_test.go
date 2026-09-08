@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -201,7 +202,11 @@ func TestReleaseWorkspacePauseWithActivity_ActivityWriteFailureRollsBackRelease(
 
 // TestReleaseWorkspacePauseWithActivity_ReleasesAndLogsResumed proves the
 // ordinary resume path: the CAS wins, the record is released, and a
-// workspace_resumed activity entry is written in the same transaction.
+// workspace_resumed activity entry is written in the same transaction. It
+// also proves the release columns are actually persisted (released_by,
+// released_reason, released_at) and that the original pause's own
+// provenance (reason, created_by, created_at) is left untouched by the
+// UPDATE, not just that some row still exists.
 func TestReleaseWorkspacePauseWithActivity_ReleasesAndLogsResumed(t *testing.T) {
 	repo := newPauseTestRepo(t)
 	ctx := context.Background()
@@ -222,6 +227,24 @@ func TestReleaseWorkspacePauseWithActivity_ReleasesAndLogsResumed(t *testing.T) 
 	}
 	if active != nil {
 		t.Fatalf("expected no active pause after release, got %+v", active)
+	}
+
+	var released2 models.WorkspacePause
+	if err := repo.ReaderDB().GetContext(ctx, &released2,
+		repo.ReaderDB().Rebind(`SELECT * FROM office_workspace_pauses WHERE id = ?`), pause.ID); err != nil {
+		t.Fatalf("read back released pause row: %v", err)
+	}
+	if released2.ReleasedAt == nil {
+		t.Fatal("expected released_at to be set")
+	}
+	if released2.ReleasedBy != "user-1" {
+		t.Fatalf("released_by = %q, want user-1", released2.ReleasedBy)
+	}
+	if released2.ReleasedReason != "resolved" {
+		t.Fatalf("released_reason = %q, want resolved", released2.ReleasedReason)
+	}
+	if released2.Reason != "incident" || released2.CreatedBy != "user-1" || !released2.CreatedAt.Equal(pause.CreatedAt) {
+		t.Fatalf("release must not modify original provenance: %+v", released2)
 	}
 
 	entries, err := repo.ListActivityEntries(ctx, "ws-1", 10)
@@ -268,6 +291,22 @@ func TestReleaseWorkspacePauseWithActivity_LosingRaceLogsNoop(t *testing.T) {
 	}
 	if entries[0].Action != models.ActivityActionWorkspacePauseNoop {
 		t.Fatalf("latest activity action = %q, want workspace_pause_noop", entries[0].Action)
+	}
+
+	// The noop entry must decode with the same structured shape every
+	// other workspace_pause_noop entry uses (pause/service.go's logNoop),
+	// not a bare reason string — a consumer decoding the activity feed
+	// cannot special-case release-originated noops.
+	var details struct {
+		RequestedOp string `json:"requested_op"`
+		Reason      string `json:"reason"`
+		Cause       string `json:"cause"`
+	}
+	if err := json.Unmarshal([]byte(entries[0].Details), &details); err != nil {
+		t.Fatalf("decode noop details %q: %v", entries[0].Details, err)
+	}
+	if details.RequestedOp != "resume" || details.Reason != "second" || details.Cause != "lost_race" {
+		t.Fatalf("noop details = %+v, want requested_op=resume reason=second cause=lost_race", details)
 	}
 }
 

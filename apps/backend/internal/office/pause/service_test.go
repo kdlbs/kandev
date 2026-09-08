@@ -329,6 +329,9 @@ func TestPause_RepeatPauseStillResweepsInFlightWork(t *testing.T) {
 // TestPause_ContendedAfterLosingRaceToResumeTwice proves the insert-retry-
 // once contract: an insert that loses to a concurrent resume retries once;
 // a second no-row re-read returns ErrPauseContended rather than looping.
+// system-design-01.md's Pause step 4 ties the noop write to "the one branch
+// that commits nothing and returns an error" — exactly one entry for the
+// whole contended sequence, not one per losing attempt.
 func TestPause_ContendedAfterLosingRaceToResumeTwice(t *testing.T) {
 	repo := &fakeRepo{
 		createErr:   []error{officesqlite.ErrWorkspaceAlreadyPaused, officesqlite.ErrWorkspaceAlreadyPaused},
@@ -343,14 +346,39 @@ func TestPause_ContendedAfterLosingRaceToResumeTwice(t *testing.T) {
 	if repo.createCalls != 2 {
 		t.Fatalf("createCalls = %d, want exactly 2 (retry exactly once)", repo.createCalls)
 	}
-	if len(repo.activityEntries) != 2 {
-		t.Fatalf("activity entries = %d, want 2 (one noop per losing attempt)", len(repo.activityEntries))
+	if len(repo.activityEntries) != 1 {
+		t.Fatalf("activity entries = %d, want exactly 1 (only the branch that returns the error is audited)", len(repo.activityEntries))
 	}
-	for _, entry := range repo.activityEntries {
-		details := decodeNoopDetails(t, entry.Details)
-		if details.RequestedOp != "pause" || details.Reason != "incident" || details.Cause != "lost_race" {
-			t.Fatalf("noop details = %+v, want requested_op=pause reason=incident cause=lost_race", details)
-		}
+	details := decodeNoopDetails(t, repo.activityEntries[0].Details)
+	if details.RequestedOp != "pause" || details.Reason != "incident" || details.Cause != "lost_race" {
+		t.Fatalf("noop details = %+v, want requested_op=pause reason=incident cause=lost_race", details)
+	}
+}
+
+// TestPause_RetryWinsAgainstConcurrentResumeLogsNoNoop proves the fixed
+// double-audit bug: an insert that loses to a concurrent resume on attempt
+// 1, then succeeds outright on attempt 2, must not also leave behind a
+// workspace_pause_noop entry for the attempt-1 loss — the request
+// succeeded, so only the workspace_paused entry belongs in the log.
+func TestPause_RetryWinsAgainstConcurrentResumeLogsNoNoop(t *testing.T) {
+	repo := &fakeRepo{
+		createErr:   []error{officesqlite.ErrWorkspaceAlreadyPaused, nil},
+		activeReads: []*models.WorkspacePause{nil}, // attempt 1's re-read finds no active record (a resume raced it)
+	}
+	svc := newTestService(repo, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+
+	result, err := svc.Pause(context.Background(), "ws-1", "incident", "user-1", "user")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if result.Pause == nil {
+		t.Fatalf("Pause returned nil record, want the attempt-2 insert's own candidate")
+	}
+	if repo.createCalls != 2 {
+		t.Fatalf("createCalls = %d, want exactly 2 (attempt 1 lost, attempt 2 succeeded)", repo.createCalls)
+	}
+	if len(repo.activityEntries) != 0 {
+		t.Fatalf("activity entries via CreateActivityEntry = %d, want 0 — a successful retry must not log a lost-race noop", len(repo.activityEntries))
 	}
 }
 
