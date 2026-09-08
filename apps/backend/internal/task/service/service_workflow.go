@@ -1567,17 +1567,25 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 		return nil, err
 	}
 
-	// Hold the target step's arrival-position lock across the whole dispatch
-	// loop below, not just within each individual MoveTask call's own
-	// transaction: a per-call-only lock leaves a window between two of this
-	// batch's own calls where an unrelated arrival (another create, move, WIP
-	// promotion, or automatic transition) into targetStepID can land in the
-	// middle of the batch's sequence, breaking the batch-scoped
-	// consecutiveness REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires.
+	// Hold every step this batch will touch — the target plus each task's
+	// own source step, known now that orderedTasks is resolved — as one
+	// ascending-ordered lock set across the whole dispatch loop below, not
+	// just within each individual MoveTask call's own transaction. A
+	// per-call-only lock leaves a window between two of this batch's own
+	// calls where an unrelated arrival (another create, move, WIP promotion,
+	// or automatic transition) into targetStepID can land in the middle of
+	// the batch's sequence, breaking the batch-scoped consecutiveness
+	// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires. Locking only the
+	// target here and letting each per-task MoveTask acquire its own source
+	// step deadlocks against an ordinary single move running the opposite
+	// direction between the same two steps.
 	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
 		var unlock func()
-		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, targetStepID)
+		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(orderedTasks, targetStepID)...)
 		defer unlock()
+	}
+	if s.bulkMoveAfterLockForTest != nil {
+		s.bulkMoveAfterLockForTest()
 	}
 
 	movedCount := 0
@@ -1597,12 +1605,26 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
 }
 
-// stepArrivalBatchLocker is the narrow capability BulkMoveSelectedTasks needs
-// from the task repository to hold one target step's arrival-position
-// serialization across its whole sequential dispatch loop, following the
-// same runtime-asserted narrow-interface pattern as reorderRepository.
+// stepArrivalBatchLocker is the narrow capability BulkMoveSelectedTasks and
+// BulkMoveTasks need from the task repository to hold a batch's whole step
+// set — target plus every distinct source step — locked across their
+// sequential dispatch loop, following the same runtime-asserted
+// narrow-interface pattern as reorderRepository.
 type stepArrivalBatchLocker interface {
-	LockStepArrivalsForBatch(ctx context.Context, stepID string) (context.Context, func())
+	LockStepArrivalsForBatch(ctx context.Context, stepIDs ...string) (context.Context, func())
+}
+
+// bulkMoveLockStepIDs returns the target step plus every distinct source
+// step among tasks, for a stepArrivalBatchLocker call. Duplicates and the
+// empty string are harmless: withStepArrivalLocks dedupes and sorts before
+// acquiring.
+func bulkMoveLockStepIDs(tasks []*models.Task, targetStepID string) []string {
+	ids := make([]string, 0, len(tasks)+1)
+	ids = append(ids, targetStepID)
+	for _, task := range tasks {
+		ids = append(ids, task.WorkflowStepID)
+	}
+	return ids
 }
 
 // orderTasksForBulkMove re-derives the
@@ -1745,19 +1767,24 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		return nil, err
 	}
 
-	// Hold the target step's arrival-position lock across the whole dispatch
-	// loop, for the same consecutiveness reason as BulkMoveSelectedTasks: a
-	// per-call-only lock leaves a window between two of this batch's own
-	// calls where an unrelated arrival can land mid-sequence.
+	// Hold every step this batch will touch, for the same reason and in the
+	// same ascending-ordered way as BulkMoveSelectedTasks — see its lock
+	// call for the deadlock this avoids.
 	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
 		var unlock func()
-		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, targetStepID)
+		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(orderedTasks, targetStepID)...)
 		defer unlock()
+	}
+	if s.bulkMoveAfterLockForTest != nil {
+		s.bulkMoveAfterLockForTest()
 	}
 
 	for _, task := range orderedTasks {
 		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
+		}
+		if s.bulkMoveAfterTaskForTest != nil {
+			s.bulkMoveAfterTaskForTest()
 		}
 	}
 

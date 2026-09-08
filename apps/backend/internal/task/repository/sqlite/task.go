@@ -587,11 +587,17 @@ func dedupeSortedStepIDs(stepIDs []string) []string {
 	return ids
 }
 
-// LockStepArrivalsForBatch acquires the target step's arrival lock for a
-// caller outside this package (BulkMoveSelectedTasks) — see
-// withStepArrivalLocks.
-func (r *Repository) LockStepArrivalsForBatch(ctx context.Context, stepID string) (context.Context, func()) {
-	return r.withStepArrivalLocks(ctx, stepID)
+// LockStepArrivalsForBatch acquires every step in stepIDs as one
+// ascending-ordered lock set for a caller outside this package
+// (BulkMoveSelectedTasks, BulkMoveTasks) — see withStepArrivalLocks. The
+// caller must pass the target step plus every distinct source step its
+// batch will touch, known before the dispatch loop starts: locking only the
+// target up front and letting each per-task MoveTask pick up its own source
+// step mid-loop fixes the acquisition order at target-then-source, which
+// deadlocks against an ordinary single move running the opposite direction
+// between the same two steps.
+func (r *Repository) LockStepArrivalsForBatch(ctx context.Context, stepIDs ...string) (context.Context, func()) {
+	return r.withStepArrivalLocks(ctx, stepIDs...)
 }
 
 // assignArrivalPosition locks stepID for the rest of tx (see

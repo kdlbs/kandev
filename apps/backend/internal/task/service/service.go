@@ -480,11 +480,17 @@ type Service struct {
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
 	cleanupDoneForTest chan struct{}
 	// bulkMoveAfterTaskForTest is a test-only hook invoked synchronously after
-	// each task's MoveTask call inside BulkMoveSelectedTasks's dispatch loop,
-	// while the target step's arrival lock is still held. Lets a test prove
-	// the lock spans the whole loop by blocking a concurrent arrival attempt
-	// from inside this hook. Nil in production.
+	// each task's MoveTask call inside BulkMoveSelectedTasks's and
+	// BulkMoveTasks's dispatch loops, while their arrival locks are still
+	// held. Lets a test prove the lock spans the whole loop by blocking a
+	// concurrent arrival attempt from inside this hook. Nil in production.
 	bulkMoveAfterTaskForTest func()
+	// bulkMoveAfterLockForTest is a test-only hook invoked synchronously
+	// after BulkMoveSelectedTasks/BulkMoveTasks acquire their step lock set,
+	// before the dispatch loop starts. Lets a test force a concurrent
+	// opposite-direction MoveTask into the acquisition window and prove the
+	// two do not deadlock. Nil in production.
+	bulkMoveAfterLockForTest func()
 	cleanupWorkerMu          sync.Mutex
 	cleanupWorkerCancel      context.CancelFunc
 	cleanupWorkerWG          sync.WaitGroup
