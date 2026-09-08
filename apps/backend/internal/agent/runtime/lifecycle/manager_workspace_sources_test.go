@@ -165,6 +165,34 @@ func TestRebindWorkspaceForSessionCreatesNewSessionWhenProviderCannotChangeResum
 	}
 }
 
+func TestRebindWorkspaceForSessionRestoresExistingACPSessionAfterStrictModelRestoreFailure(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	mgr.registry = registry.NewRegistry(newTestLogger())
+	mgr.registry.LoadDefaults()
+
+	execution.AgentID = "opencode-acp"
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.SetModelState(&CachedModelState{CurrentModelID: "exact-model"})
+
+	err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace")
+	if err == nil {
+		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
+	}
+	if execution.ACPSessionID != "acp-existing" {
+		t.Fatalf("ACP session ID after rollback = %q, want existing ID", execution.ACPSessionID)
+	}
+	if model := execution.GetModelState(); model == nil || model.CurrentModelID != "exact-model" {
+		t.Fatalf("model state after rollback = %#v, want exact-model", model)
+	}
+	if loads := server.loads(); len(loads) != 1 || loads[0] != "acp-existing" {
+		t.Fatalf("rollback loaded ACP sessions = %v, want [acp-existing]", loads)
+	}
+}
+
 func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, true)
 	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
@@ -279,6 +307,10 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 				response, _ := ws.NewResponse(request.ID, request.Action, map[string]any{
 					"success":    true,
 					"session_id": "acp-new",
+					"model_state": map[string]any{
+						"current_model_id": "provider-default",
+						"models":           []map[string]string{{"model_id": "provider-default"}},
+					},
 				})
 				data, _ := json.Marshal(response)
 				if conn.WriteMessage(websocket.TextMessage, data) != nil {
