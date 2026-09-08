@@ -35,7 +35,7 @@ Handler tests provide end-to-end API evidence without a browser or live instance
 All work-order checks passed. The backend tests reported 154 passing secrets/environment tests, nine reference-checker tests, and three lifecycle tests.
 The UI tests reported 13 passes, including the structured conflict toast. TypeScript, targeted Go/frontend lint, localization, specification, and public-documentation checks passed.
 The first regression runs reproduced unsafe deletion and missing repair/profile information before the corresponding fixes.
-Issue #3500 is assigned to `carlosflorencio`. Changes remain local and uncommitted; commit and PR publication are pending.
+Issue #3500 is assigned to `carlosflorencio`. The implementation is committed in PR #3503; review fixup is in progress.
 
 ## Risks
 

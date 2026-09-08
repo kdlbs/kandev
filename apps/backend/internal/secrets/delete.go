@@ -41,8 +41,8 @@ func (s *Service) SetReferenceChecker(checker func(context.Context, string) ([]R
 	s.referenceChecker = checker
 }
 
-func (s *Service) deleteChecked(ctx context.Context, id, workspaceID string, force []bool) error {
-	if len(force) > 0 && force[0] {
+func (s *Service) deleteChecked(ctx context.Context, id, workspaceID string, force bool) error {
+	if force {
 		return s.deleteStored(ctx, id, workspaceID)
 	}
 	if s.referenceChecker == nil {

@@ -101,4 +101,4 @@ Cross-owner reference reads must fail closed. Internal store deletion remains av
 - Specification lint, public-documentation validation, and `git diff --check` passed.
 - The existing desktop and mobile secret-deletion E2E specs now cover the structured conflict toast and retain the row after the failed delete. A fresh capture run will provide the PR screenshots.
 - No live instance was changed or started. Temporary databases use test cleanup. Unrelated generated translation changes were removed.
-- No agents were delegated. The issue assignment was verified. Changes remain uncommitted; commit and PR publication are pending.
+- No agents were delegated. The issue assignment was verified. The implementation is committed in PR #3503; review fixup is in progress.

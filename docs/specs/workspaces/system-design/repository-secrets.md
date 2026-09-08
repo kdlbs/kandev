@@ -21,7 +21,8 @@ The existing repository-secrets requirement retains the other runtime and storag
 An injected reference checker keeps the secrets package independent of profile and task repositories.
 `backendapp` wires the checker from the existing agent-settings and task repositories.
 It reads active agent profiles, all executor profiles, and active repositories across workspaces.
-Repository metadata is disclosed only after workspace access succeeds. Inaccessible references still block deletion, with their metadata omitted.
+Workspace-scoped profile and repository metadata is disclosed only after workspace access succeeds.
+Inaccessible references still block deletion, with their metadata omitted.
 
 HTTP deletion returns `409` with `error`, `code: secret_in_use`, and `references`.
 Each reference contains `kind`, `id`, `name`, and `key`. Hidden references contain only `kind`.

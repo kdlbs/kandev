@@ -509,7 +509,7 @@ These are trusted local-administration operations. In particular, `secrets.revea
 `secrets.delete` accepts `{ "id": "<secret-id>", "workspace_id": "<optional-workspace-id>", "force": false }`.
 A Workspace secret requires its `workspace_id`. A referenced secret returns `CONFLICT` with `details.code: "secret_in_use"` and `details.references`.
 References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
-An inaccessible repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
+An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
 The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
 
 With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.

@@ -28,7 +28,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.7:** Repository bindings contain secret references only, never literal values.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.8:** The effective repository environment is available to repository setup, the agent process, child shells, and terminal-panel terminals in every supported executor, including explicitly approved forwarding to SSH.
 
-- **AC-WORKSPACES-REPOSITORY-SECRETS-001.9:** Secret deletion shall reject existing agent-profile, executor-profile, and repository environment references with a conflict response. The response identifies references without exposing secret values or unauthorized repository metadata. An explicit force option permits deletion and preserves the broken bindings.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.9:** Secret deletion shall reject existing agent-profile, executor-profile, and repository environment references with a conflict response. The response identifies references without exposing secret values or unauthorized workspace-scoped reference metadata. An explicit force option permits deletion and preserves the broken bindings.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.10:** A missing secret shall block fresh launch and cold resume. The error names the environment key and source, identifies the agent profile when available, and directs the user to select the secret again. A replacement with the same name shall not repair the reference automatically.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
 

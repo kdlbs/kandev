@@ -53,16 +53,82 @@ func (c secretReferenceChecker) agentReferences(ctx context.Context, id string) 
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
 	var refs []secrets.Reference
+	workspaceAccess := make(map[string]error)
 	for _, agent := range agents {
 		profiles, err := c.agents.ListAgentProfiles(ctx, agent.ID)
 		if err != nil {
 			return nil, fmt.Errorf("list agent profiles: %w", err)
 		}
-		for _, profile := range profiles {
-			refs = appendEnvironmentReferences(refs, id, "agent_profile", profile.ID, profile.Name, profile.EnvVars)
+		refs, err = c.appendAgentProfileReferences(ctx, refs, id, profiles, workspaceAccess)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return refs, nil
+}
+
+func (c secretReferenceChecker) appendAgentProfileReferences(
+	ctx context.Context,
+	refs []secrets.Reference,
+	secretID string,
+	profiles []*settingsmodels.AgentProfile,
+	workspaceAccess map[string]error,
+) ([]secrets.Reference, error) {
+	for _, profile := range profiles {
+		if profile == nil || !hasSecretReference(profile.EnvVars, secretID) {
+			continue
+		}
+		redacted, err := c.agentProfileReferenceRedacted(ctx, profile.WorkspaceID, workspaceAccess)
+		if err != nil {
+			return nil, err
+		}
+		if redacted {
+			refs = appendRedactedEnvironmentReferences(refs, secretID, "agent_profile", profile.EnvVars)
+			continue
+		}
+		refs = appendEnvironmentReferences(refs, secretID, "agent_profile", profile.ID, profile.Name, profile.EnvVars)
+	}
+	return refs, nil
+}
+
+func (c secretReferenceChecker) agentProfileReferenceRedacted(
+	ctx context.Context,
+	workspaceID string,
+	workspaceAccess map[string]error,
+) (bool, error) {
+	if workspaceID == "" {
+		return false, nil
+	}
+	if c.authorizeWorkspace == nil {
+		return false, errors.New("workspace reference authorization is unavailable")
+	}
+	accessErr, cached := workspaceAccess[workspaceID]
+	if !cached {
+		accessErr = c.authorizeWorkspace(ctx, workspaceID)
+		workspaceAccess[workspaceID] = accessErr
+	}
+	if accessErr != nil && !errors.Is(accessErr, repoerrors.ErrWorkspaceNotFound) {
+		return false, accessErr
+	}
+	return accessErr != nil, nil
+}
+
+func appendRedactedEnvironmentReferences(refs []secrets.Reference, secretID, kind string, env []models.ProfileEnvVar) []secrets.Reference {
+	for _, entry := range env {
+		if entry.SecretID == secretID {
+			refs = append(refs, secrets.Reference{Kind: kind})
+		}
+	}
+	return refs
+}
+
+func hasSecretReference(env []models.ProfileEnvVar, secretID string) bool {
+	for _, entry := range env {
+		if entry.SecretID == secretID {
+			return true
+		}
+	}
+	return false
 }
 
 func appendEnvironmentReferences(refs []secrets.Reference, secretID, kind, id, name string, env []models.ProfileEnvVar) []secrets.Reference {

@@ -244,7 +244,8 @@ func (s *Service) Delete(ctx context.Context, id string, force ...bool) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
-	return s.deleteChecked(ctx, id, "", force)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, "", forceDelete)
 }
 
 // DeleteForWorkspace deletes a Global or same-workspace secret.
@@ -252,7 +253,8 @@ func (s *Service) DeleteForWorkspace(ctx context.Context, id, workspaceID string
 	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.deleteChecked(ctx, id, workspaceID, force)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, workspaceID, forceDelete)
 }
 
 // DeleteWorkspaceSecret deletes a Workspace secret after checking the
@@ -261,7 +263,8 @@ func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID str
 	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.deleteChecked(ctx, id, workspaceID, force)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, workspaceID, forceDelete)
 }
 
 // List returns all secrets without values.

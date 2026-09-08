@@ -127,6 +127,9 @@ func (h *Handler) httpDeleteSecret(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.deleteSecret(c, id); err != nil {
 		status, _, message, details := classifyDeleteError(err)
+		if status == http.StatusInternalServerError {
+			h.logger.Error("failed to delete secret", zap.String("id", id), zap.Error(err))
+		}
 		details["error"] = message
 		c.JSON(status, details)
 		return

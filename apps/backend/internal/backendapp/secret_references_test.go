@@ -57,9 +57,17 @@ func (f *secretReferenceFixture) ListRepositories(_ context.Context, workspaceID
 func newSecretReferenceFixture() *secretReferenceFixture {
 	return &secretReferenceFixture{
 		agents: []*settingsmodels.Agent{{ID: "claude"}},
-		profiles: []*settingsmodels.AgentProfile{{ID: "profile", Name: "Claude", EnvVars: []settingsmodels.ProfileEnvVar{
-			{Key: "MY_TOKEN", SecretID: "secret"}, {Key: "LITERAL", Value: "secret"}, {Key: "OTHER", SecretID: "other"},
-		}}},
+		profiles: []*settingsmodels.AgentProfile{
+			{ID: "profile", Name: "Claude", EnvVars: []settingsmodels.ProfileEnvVar{
+				{Key: "MY_TOKEN", SecretID: "secret"}, {Key: "LITERAL", Value: "secret"}, {Key: "OTHER", SecretID: "other"},
+			}},
+			{ID: "visible-profile", Name: "Visible", WorkspaceID: "visible", EnvVars: []settingsmodels.ProfileEnvVar{
+				{Key: "VISIBLE_TOKEN", SecretID: "secret"},
+			}},
+			{ID: "private-profile", Name: "Private", WorkspaceID: "private", EnvVars: []settingsmodels.ProfileEnvVar{
+				{Key: "PRIVATE_TOKEN", SecretID: "secret"},
+			}},
+		},
 		executors:  []*models.ExecutorProfile{{ID: "executor", Name: "Local", EnvVars: []models.ProfileEnvVar{{Key: "EXEC_TOKEN", SecretID: "secret"}}}},
 		workspaces: []*models.Workspace{{ID: "visible"}, {ID: "private"}},
 		repositories: map[string][]*models.Repository{
@@ -84,6 +92,8 @@ func TestSecretReferenceDiscoveryAndRedaction(t *testing.T) {
 	}
 	want := []secrets.Reference{
 		{Kind: "agent_profile", ID: "profile", Name: "Claude", Key: "MY_TOKEN"},
+		{Kind: "agent_profile", ID: "visible-profile", Name: "Visible", Key: "VISIBLE_TOKEN"},
+		{Kind: "agent_profile"},
 		{Kind: "executor_profile", ID: "executor", Name: "Local", Key: "EXEC_TOKEN"},
 		{Kind: "repository", ID: "repo", Name: "App", Key: "REPO_TOKEN"},
 		{Kind: "repository"},
