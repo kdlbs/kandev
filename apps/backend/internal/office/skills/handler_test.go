@@ -59,6 +59,32 @@ func TestUpdateSkillHandler_RejectsEmptySlug(t *testing.T) {
 	}
 }
 
+func TestUpdateSkillHandler_RejectsNotWellFormedSlug(t *testing.T) {
+	router, svc := newTestSkillRouter(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-existing", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rec := doSkillRequest(t, router, http.MethodPatch, "/api/v1/skills/"+skill.ID, `{"slug":"not a valid slug!"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d (body: %s)", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	reloaded, err := svc.GetSkillFromConfig(ctx, skill.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Slug != "kandev-existing" {
+		t.Errorf("stored slug = %q, want unchanged %q", reloaded.Slug, "kandev-existing")
+	}
+}
+
 func TestUpdateSkillHandler_OmittedSlugLeavesItUnchanged(t *testing.T) {
 	router, svc := newTestSkillRouter(t)
 	ctx := context.Background()
