@@ -126,13 +126,14 @@ func (s *CostService) evaluatePolicy(
 }
 
 // periodCutoff returns the time.Time at which the policy's spend window
-// starts. A zero time means "no filter" (lifetime / total).
+// starts. A zero time means "no filter" (lifetime / total) or an unknown
+// period retained for compatibility with stored policies.
 func periodCutoff(period string, now time.Time) time.Time {
-	if period == budgetPeriodMonthly {
-		n := now.UTC()
-		return time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
+	start, ok := windowStart(models.BudgetPeriod(period), now)
+	if !ok {
+		return time.Time{}
 	}
-	return time.Time{}
+	return start
 }
 
 func (s *CostService) getSpendForPolicy(

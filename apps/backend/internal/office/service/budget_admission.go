@@ -381,6 +381,7 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, run *models.Run) {
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 	incBudgetCancelledNoWorkspace(provenance)
+	si.cleanupWorkspaceLookupRun(ctx, run)
 
 	if err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
@@ -400,10 +401,11 @@ func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, 
 // new run for the CEO agent (AC-OFFICE-BUDGET-001.17). Mirrors
 // admitBudgetDeferral's shape, but no *models.AgentInstance is available
 // here (the lookup itself is what failed), so the activity entry carries
-// no workspace scope, and no checkout is released -- GetAgentFromConfig
-// runs before checkoutTask, so processRun never holds one at this point.
+// no workspace scope. The run may still own a checkout from an earlier
+// routed launch, so this path releases run-owned state before retrying.
 func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context, run *models.Run) {
 	provenance := shared.ClassifyRunProvenance(run.Reason)
+	si.cleanupWorkspaceLookupRun(ctx, run)
 
 	if run.RetryCount >= MaxRetryCount {
 		incBudgetFailedWorkspaceLookup(provenance)
@@ -436,5 +438,16 @@ func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context,
 	if err := si.svc.scheduleRetry(ctx, run); err != nil {
 		si.logger.Error("failed to schedule workspace lookup retry",
 			zap.String("run_id", run.ID), zap.Error(err))
+	}
+}
+
+// cleanupWorkspaceLookupRun clears ownership retained by a routed run that
+// was requeued after launch. The owner-scoped release is a no-op when this
+// attempt never held a checkout, so a lookup failure cannot steal another
+// run's lock.
+func (si *SchedulerIntegration) cleanupWorkspaceLookupRun(ctx context.Context, run *models.Run) {
+	si.releaseCheckoutIfNeeded(ctx, run)
+	if run != nil {
+		si.svc.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	}
 }

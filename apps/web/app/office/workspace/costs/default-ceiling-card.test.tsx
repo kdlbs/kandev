@@ -20,6 +20,9 @@ vi.mock("@/lib/toast/sonner", () => ({
   },
 }));
 
+const EDIT_BUTTON_NAME = "Edit default ceiling";
+const SAVE_BUTTON_NAME = "Save";
+
 import { DefaultCeilingCard } from "./default-ceiling-card";
 
 afterEach(() => {
@@ -72,7 +75,7 @@ describe("DefaultCeilingCard", () => {
     const { rerender } = render(<DefaultCeilingCard workspaceId="ws-a" />);
     await screen.findByText("$10.00");
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit default ceiling" }));
+    fireEvent.click(screen.getByRole("button", { name: EDIT_BUTTON_NAME }));
     expect(screen.getByRole("spinbutton")).toBeTruthy();
 
     rerender(<DefaultCeilingCard workspaceId="ws-b" />);
@@ -80,16 +83,64 @@ describe("DefaultCeilingCard", () => {
     expect(screen.queryByRole("spinbutton")).toBeNull();
   });
 
+  it("does not keep the replacement workspace busy after a stale save settles", async () => {
+    getDefaultCeilingMock.mockResolvedValue({ limit_subcents: 100000 });
+    const pendingSave = deferred<{ limit_subcents: number }>();
+    setDefaultCeilingMock.mockImplementationOnce(() => pendingSave.promise);
+
+    const { rerender } = render(<DefaultCeilingCard workspaceId="ws-a" />);
+    await screen.findByText("$10.00");
+
+    fireEvent.click(screen.getByRole("button", { name: EDIT_BUTTON_NAME }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
+    expect(
+      (screen.getByRole("button", { name: SAVE_BUTTON_NAME }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    rerender(<DefaultCeilingCard workspaceId="ws-b" />);
+    await screen.findByText("$10.00");
+    fireEvent.click(screen.getByRole("button", { name: EDIT_BUTTON_NAME }));
+
+    expect(
+      (screen.getByRole("button", { name: SAVE_BUTTON_NAME }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+
+    await act(async () => {
+      pendingSave.resolve({ limit_subcents: 200000 });
+      await pendingSave.promise;
+    });
+  });
+
   it("rejects a non-positive draft ceiling without calling the API", async () => {
     getDefaultCeilingMock.mockResolvedValue({ limit_subcents: 100000 });
     render(<DefaultCeilingCard workspaceId="ws-a" />);
     await screen.findByText("$10.00");
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit default ceiling" }));
+    fireEvent.click(screen.getByRole("button", { name: EDIT_BUTTON_NAME }));
     const input = screen.getByRole("spinbutton");
     fireEvent.change(input, { target: { value: "0" } });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
+    });
+
+    expect(setDefaultCeilingMock).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("Default ceiling must be greater than zero");
+  });
+
+  it("rejects a non-finite or sub-cent draft ceiling without calling the API", async () => {
+    getDefaultCeilingMock.mockResolvedValue({ limit_subcents: 100000 });
+    render(<DefaultCeilingCard workspaceId="ws-a" />);
+    await screen.findByText("$10.00");
+
+    fireEvent.click(screen.getByRole("button", { name: EDIT_BUTTON_NAME }));
+    const input = screen.getByRole("spinbutton", { name: "Default Ceiling" });
+    fireEvent.change(input, { target: { value: "0.001" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
     });
 
     expect(setDefaultCeilingMock).not.toHaveBeenCalled();

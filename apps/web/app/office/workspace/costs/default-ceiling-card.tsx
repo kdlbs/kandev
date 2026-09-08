@@ -14,6 +14,55 @@ type Props = {
   workspaceId: string;
 };
 
+type EditorProps = {
+  draftDollars: string;
+  saving: boolean;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+};
+
+function DefaultCeilingEditor({
+  draftDollars,
+  saving,
+  onDraftChange,
+  onSave,
+  onCancel,
+}: EditorProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <Input
+        className="h-8 w-full text-sm [@media(pointer:coarse)]:min-h-11 sm:w-32"
+        type="number"
+        min="0.01"
+        step="0.01"
+        value={draftDollars}
+        onChange={(e) => onDraftChange(e.target.value)}
+        aria-label={t("office:defaultCeiling")}
+        autoFocus
+      />
+      <Button
+        size="sm"
+        className="w-full cursor-pointer [@media(pointer:coarse)]:min-h-11 sm:w-auto"
+        disabled={saving}
+        onClick={onSave}
+      >
+        {t("office:saveDefaultCeiling")}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full cursor-pointer [@media(pointer:coarse)]:min-h-11 sm:w-auto"
+        disabled={saving}
+        onClick={onCancel}
+      >
+        {t("common:cancel")}
+      </Button>
+    </div>
+  );
+}
+
 // DefaultCeilingCard makes the built-in default spend ceiling
 // (AC-OFFICE-BUDGET-003.5) visible and editable without inspecting the
 // database. It is visually and structurally distinct from a
@@ -33,6 +82,7 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
     setLimitSubcents(null);
     setEditing(false);
     setDraftDollars("");
+    setSaving(false);
     getDefaultCeiling(workspaceId)
       .then((res) => {
         if (activeWorkspaceId.current !== workspaceId) return;
@@ -51,11 +101,12 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
   };
 
   const handleSave = async () => {
-    const nextSubcents = Math.round(parseFloat(draftDollars || "0") * 10000);
-    if (nextSubcents <= 0) {
+    const draftValue = Number(draftDollars);
+    if (!Number.isFinite(draftValue) || draftValue < 0.01) {
       toast.error(t("office:defaultCeilingMustBePositive"));
       return;
     }
+    const nextSubcents = Math.round(draftValue * 10000);
     const targetWorkspaceId = workspaceId;
     setSaving(true);
     try {
@@ -80,7 +131,7 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
           <Button
             variant="ghost"
             size="icon-sm"
-            className="cursor-pointer"
+            className="cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
             onClick={startEditing}
             aria-label={t("office:editDefaultCeiling")}
           >
@@ -91,29 +142,13 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">{t("office:defaultCeilingDescription")}</p>
         {editing ? (
-          <div className="flex items-center gap-2">
-            <Input
-              className="h-8 text-sm w-32"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={draftDollars}
-              onChange={(e) => setDraftDollars(e.target.value)}
-              autoFocus
-            />
-            <Button size="sm" className="cursor-pointer" disabled={saving} onClick={handleSave}>
-              {t("office:saveDefaultCeiling")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="cursor-pointer"
-              disabled={saving}
-              onClick={() => setEditing(false)}
-            >
-              {t("common:cancel")}
-            </Button>
-          </div>
+          <DefaultCeilingEditor
+            draftDollars={draftDollars}
+            saving={saving}
+            onDraftChange={setDraftDollars}
+            onSave={handleSave}
+            onCancel={() => setEditing(false)}
+          />
         ) : (
           <div className="text-lg font-semibold">
             {limitSubcents == null ? t("common:loading") : formatDollars(limitSubcents)}

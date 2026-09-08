@@ -96,26 +96,18 @@ test.describe("Office budget enforcement UI", () => {
     await testPage.getByRole("button", { name: "Create Policy" }).click();
     const response = await posted;
 
-    // This asserts the real downstream effect of THIS card's change (the
-    // newly-offered "Daily" option, AC-OFFICE-BUDGET-002.9): selecting it in
-    // the Select must produce `period: "daily"` on the wire, which it does
-    // (the request body key "period" happens to be spelled identically in
-    // both the frontend's camelCase FormState and the backend's snake_case
-    // DTO, so this assertion is unaffected by the issue below).
-    //
-    // It deliberately does NOT assert response.status() === 201/2xx: a
-    // pre-existing, out-of-scope bug in this same create path (office-api.ts's
-    // createBudget/listBudgets, predating this branch — confirmed present at
-    // merge-base commit 782c8a400) sends the REST of the payload
-    // (scopeType/scopeId/limitSubcents/...) as camelCase while the backend's
-    // CreateBudgetPolicyRequest only recognizes snake_case keys, so every
-    // field except `period` arrives as its zero value and the write is
-    // rejected by validateBudgetPolicyWrite. Confirmed live during this
-    // testing pass: the response is 400 `{"error":"invalid scope_type: "}`
-    // for literally any period value, not something this card introduced or
-    // can fix by itself. Filed as a separate follow-up card (see the task
-    // plan) rather than silently asserting success here.
-    const requestBody = JSON.parse(response.request().postData() ?? "{}") as { period?: string };
-    expect(requestBody.period).toBe("daily");
+    expect(response.status()).toBe(201);
+    const requestBody = JSON.parse(response.request().postData() ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(requestBody).toMatchObject({
+      scope_type: "workspace",
+      scope_id: officeSeed.workspaceId,
+      limit_subcents: 123400,
+      period: "daily",
+      alert_threshold_pct: 80,
+      action_on_exceed: "notify_only",
+    });
   });
 });

@@ -365,6 +365,113 @@ func TestFailRunNoEscalation_ClearsStaleAgentWorkingStatus(t *testing.T) {
 		"after failRunNoEscalation clears a stale working mark left by an earlier attempt")
 }
 
+// TestProcessRun_MissingAgentReleasesPriorCheckout covers a routed run that
+// was requeued after launch. The next scheduler pass may find that its agent
+// no longer exists, but the run still owns the task checkout from its prior
+// attempt. The cancellation must release that ownership.
+func TestProcessRun_MissingAgentReleasesPriorCheckout(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-routed-missing", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-routed-missing', 'ws-1', 'Routed task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-routed-missing"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	acquired, err := svc.RepoForTest().CheckoutTaskForRun(ctx, "task-routed-missing", agent.ID, run.ID)
+	if err != nil || !acquired {
+		t.Fatalf("seed run checkout: acquired=%v err=%v", acquired, err)
+	}
+	if _, err := svc.RepoForTest().MarkAgentWorking(ctx, agent.ID, run.ID); err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	if err := svc.RepoForTest().DeleteAgentInstance(ctx, agent.ID); err != nil {
+		t.Fatalf("delete agent: %v", err)
+	}
+
+	service.ProcessRunForTest(svc, ctx, run)
+
+	replacement := makeAgent("worker-routed-replacement", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, replacement); err != nil {
+		t.Fatalf("create replacement agent: %v", err)
+	}
+	acquired, err = svc.CheckoutTask(ctx, "task-routed-missing", replacement.ID)
+	if err != nil {
+		t.Fatalf("replacement checkout: %v", err)
+	}
+	if !acquired {
+		t.Fatal("replacement agent could not acquire a checkout left by the missing-agent cancellation")
+	}
+
+	cancelled, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get cancelled run: %v", err)
+	}
+	if cancelled.Status != service.RunStatusCancelled {
+		t.Fatalf("run status = %q, want cancelled", cancelled.Status)
+	}
+}
+
+// TestProcessRun_WorkspaceLookupErrorReleasesPriorCheckout covers the retry
+// branch. A temporary repository lookup error must not preserve a checkout
+// while the run waits in the queue.
+func TestProcessRun_WorkspaceLookupErrorReleasesPriorCheckout(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-routed-lookup-error", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-routed-lookup-error', 'ws-1', 'Routed task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-routed-lookup-error"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	acquired, err := svc.RepoForTest().CheckoutTaskForRun(ctx, "task-routed-lookup-error", agent.ID, run.ID)
+	if err != nil || !acquired {
+		t.Fatalf("seed run checkout: acquired=%v err=%v", acquired, err)
+	}
+
+	// Make both agent lookup queries fail with a transient database error.
+	svc.ExecSQL(t, "DROP TABLE agent_profiles")
+	service.ProcessRunForTest(svc, ctx, run)
+
+	acquired, err = svc.CheckoutTask(ctx, "task-routed-lookup-error", "replacement-agent")
+	if err != nil {
+		t.Fatalf("replacement checkout: %v", err)
+	}
+	if !acquired {
+		t.Fatal("replacement agent could not acquire a checkout left by the lookup-error deferral")
+	}
+
+	deferred, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get deferred run: %v", err)
+	}
+	if deferred.Status != service.RunStatusQueued {
+		t.Fatalf("run status = %q, want queued", deferred.Status)
+	}
+}
+
 // TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity covers
 // AC-OFFICE-BUDGET-005.6: each deferral of the same run writes its own
 // activity entry -- never coalesced into a single running total -- and each

@@ -4,7 +4,6 @@ import type {
   AgentProfile,
   Project,
   CostSummary,
-  BudgetPolicy,
   Routine,
   RoutineTrigger,
   RoutineRun,
@@ -64,6 +63,7 @@ export {
   gitPull,
   gitPush,
 } from "./office-extended-api";
+export { listBudgets, createBudget, updateBudget, deleteBudget } from "./office-budget-api";
 export type {
   ImportDiff,
   ImportPreview,
@@ -402,40 +402,6 @@ type CostBreakdownItemRaw = {
   count: number;
   total_subcents: number;
 };
-
-// --- Budget Policies ---
-
-export function listBudgets(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ budgets: BudgetPolicy[] }>(
-    `${BASE}/workspaces/${workspaceId}/budgets`,
-    options,
-  );
-}
-
-export function createBudget(
-  workspaceId: string,
-  data: Partial<BudgetPolicy>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<BudgetPolicy>(`${BASE}/workspaces/${workspaceId}/budgets`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function updateBudget(id: string, data: Partial<BudgetPolicy>, options?: ApiRequestOptions) {
-  return fetchJson<BudgetPolicy>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteBudget(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
 
 // --- Built-in default spend ceiling (AC-OFFICE-BUDGET-003.5) ---
 
