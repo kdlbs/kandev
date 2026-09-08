@@ -272,7 +272,7 @@ func (s *Store) RecordSyncStatus(ctx context.Context, workspaceID string, ok boo
 			updated_at = ?
 		WHERE workspace_id = ?
 	`), at, okInt, errMsg, string(warningsJSON), hash,
-		okInt, okInt, okInt, okInt, ok, at, workspaceID)
+		okInt, okInt, okInt, ok, okInt, at, workspaceID)
 	return err
 }
 

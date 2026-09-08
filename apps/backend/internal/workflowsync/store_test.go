@@ -3,6 +3,8 @@ package workflowsync
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"testing"
 	"time"
 
@@ -93,6 +95,25 @@ func TestStore_RecordSyncStatusRoundtrip(t *testing.T) {
 	assert.Equal(t, "boom", cfg.LastError)
 	assert.Equal(t, warnings, cfg.LastWarnings)
 	assert.Equal(t, "hash-2", cfg.LastHash)
+}
+
+func TestStore_RecordSyncStatusBindsRecoveryResetTypes(t *testing.T) {
+	rawDB, err := sql.Open("workflowsync-record-status-args", "")
+	require.NoError(t, err)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	store := &Store{db: db, ro: db}
+
+	err = store.RecordSyncStatus(
+		context.Background(),
+		"ws-1",
+		true,
+		"",
+		nil,
+		"hash-1",
+		time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
 }
 
 func TestStore_ListConfigs(t *testing.T) {
@@ -199,4 +220,40 @@ func TestSchemaSQLForDriverRendersBooleanDefaultsForPostgres(t *testing.T) {
 		"poll_suspended BOOLEAN NOT NULL DEFAULT FALSE, next_attempt_at TIMESTAMPTZ",
 		schemaSQLForDriver(schema, dialect.PGX),
 	)
+}
+
+func init() {
+	sql.Register("workflowsync-record-status-args", recordStatusArgDriver{})
+}
+
+type recordStatusArgDriver struct{}
+
+func (recordStatusArgDriver) Open(string) (driver.Conn, error) {
+	return recordStatusArgConn{}, nil
+}
+
+type recordStatusArgConn struct{}
+
+func (recordStatusArgConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not supported")
+}
+
+func (recordStatusArgConn) Close() error {
+	return nil
+}
+
+func (recordStatusArgConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are not supported")
+}
+
+func (recordStatusArgConn) ExecContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Result, error) {
+	if _, ok := args[8].Value.(bool); !ok {
+		return nil, errors.New("poll_suspended reset argument must be bool")
+	}
+	switch args[9].Value.(type) {
+	case int64:
+		return driver.RowsAffected(1), nil
+	default:
+		return nil, errors.New("poll_suspension_reason reset argument must be integer")
+	}
 }
