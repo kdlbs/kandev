@@ -253,6 +253,36 @@ func TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testing.T) {
 	checkString(t, "payload", got.Payload, `{"note":"real taskless launch"}`)
 }
 
+// TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID pins the other
+// direction of TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun: a
+// queued row whose own task_id is malformed (present but not a string) must
+// not absorb an incoming request just because the malformed value's textual
+// form happens to equal the incoming task_id's string. Both dialects yield a
+// text-comparable value for a JSON number, so this predicate must inspect
+// the stored value's JSON type rather than only its text.
+func TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "malformed", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":42}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"42"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true into a queued row with a non-string task_id, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":42}`)
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {

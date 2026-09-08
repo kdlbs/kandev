@@ -164,6 +164,35 @@ func TestPostgresCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testi
 	checkString(t, "payload", got.Payload, `{"note":"real taskless launch"}`)
 }
 
+// TestPostgresCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID is the
+// Postgres twin of TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID.
+// Postgres's ->> operator converts a stored JSON number to text before the
+// comparison, so a naive text-only predicate would let {"task_id":"42"}
+// match a queued {"task_id":42} and silently overwrite it; this exercises
+// exactly that dialect-specific coercion.
+func TestPostgresCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID(t *testing.T) {
+	repo := newTestRepoPostgres(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "pg-malformed", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":42}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"42"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true into a queued row with a non-string task_id, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":42}`)
+}
+
 // TestPostgresCoalesceRun_MergesSameTask is the positive-path twin: a
 // same-task, same-agent, same-reason request still merges, proving the
 // Postgres JSONExtract fragment is not just "always false" (which would

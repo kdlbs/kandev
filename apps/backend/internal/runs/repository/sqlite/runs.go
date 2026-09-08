@@ -470,7 +470,13 @@ func (r *Repository) CoalesceRun(
 		// taskless and must not match any queued row at all.
 		taskPredicate = " AND 1 = 0"
 	case taskID != "":
-		taskPredicate = fmt.Sprintf(" AND %s = ?", jsonExtract)
+		// The stored value must itself be a JSON string, not merely equal
+		// as text: Postgres's ->> converts a stored JSON number (or
+		// object) to text before the comparison, so an untyped payload
+		// with e.g. {"task_id":42} could otherwise textually match an
+		// incoming {"task_id":"42"} and get overwritten.
+		taskPredicate = fmt.Sprintf(" AND %s AND %s = ?",
+			dialect.JSONTypeIsString(r.db.DriverName(), "payload", "task_id"), jsonExtract)
 		args = append(args, taskID)
 	default:
 		taskPredicate = fmt.Sprintf(" AND COALESCE(%s, '') = ''", jsonExtract)
