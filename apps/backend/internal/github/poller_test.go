@@ -154,6 +154,54 @@ func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 	}
 }
 
+func TestCheckPRWatches_MergedPR_SyncsThenResets(t *testing.T) {
+	poller, _, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	now := time.Now().UTC()
+	mergedAt := now.Add(-time.Hour)
+	mockClient.AddPR(&PR{
+		Number:     42,
+		Title:      "Feature PR",
+		State:      prStateMerged,
+		HeadSHA:    "abc123",
+		HeadBranch: "feature-branch",
+		RepoOwner:  "owner",
+		RepoName:   "repo",
+		MergedAt:   &mergedAt,
+	})
+
+	watch := withTestWorkspace(&PRWatch{
+		SessionID: "sess-1",
+		TaskID:    "task-1",
+		Owner:     "owner",
+		Repo:      "repo",
+		PRNumber:  42,
+		Branch:    "feature-branch",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", Owner: "owner", Repo: "repo", PRNumber: 42,
+		PRURL: "https://github.com/owner/repo/pull/42", PRTitle: "Feature PR",
+		HeadBranch: "feature-branch", BaseBranch: "main", State: prStateOpen,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	poller.checkPRWatches(ctx)
+
+	updated, err := store.GetTaskPR(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task PR: %v", err)
+	}
+	if updated == nil || updated.State != prStateMerged {
+		t.Fatalf("expected merged task PR after poll, got %#v", updated)
+	}
+}
+
 func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 	poller, _, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()

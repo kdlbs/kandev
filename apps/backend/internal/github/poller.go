@@ -277,6 +277,12 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 	for workspaceID, workspaceWatches := range byWorkspace {
 		incCanonicalPollRequests(len(workspaceWatches))
 		workspaceResults, err := p.service.SyncWorkspaceWatchesBatched(ctx, workspaceID, workspaceWatches)
+		// A client without GraphQL support deliberately falls back to the
+		// per-watch REST path below. It is not an authentication failure, so
+		// it must not open the workspace circuit and filter that fallback out.
+		if errors.Is(err, errGraphQLUnsupported) {
+			return false
+		}
 		p.circuits.recordOutcome(workspaceID, classifyPollErr(err), time.Now().UTC())
 		if err != nil {
 			p.logger.Debug("batched PR watch check failed",

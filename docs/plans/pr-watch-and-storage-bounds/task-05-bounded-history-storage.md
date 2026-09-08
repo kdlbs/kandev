@@ -130,9 +130,10 @@ ordering tests — `TestGetLatestGitSnapshotFallsBackToNewestWithoutAgentComplet
 and `TestGetGitSnapshotsBySessionOrdersDescendingAndHonoursLimit` — that
 depend on every historical poll being recorded). Instead,
 `ListDuplicateGitSnapshotCandidates` (new, read-only) reports every row in a
-`(session_id, content_digest)` group except the newest (matching
+per-session `(session_id, content_digest)` group except the newest (matching
 `snapshotRankExpr`'s tie-break), for a later, explicit maintenance pass
-(Task 06) to prune. A dangling-session-reference "orphan" query was
+(Task 06) to prune. Equal snapshots from different sessions remain distinct
+history and are not candidates. A dangling-session-reference "orphan" query was
 considered and dropped: `task_session_git_snapshots.session_id` has
 `FOREIGN KEY ... REFERENCES task_sessions(id) ON DELETE CASCADE`, so that
 condition is schema-guaranteed impossible to reach (confirmed by a test that

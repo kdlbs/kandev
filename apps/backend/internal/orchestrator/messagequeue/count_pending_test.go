@@ -31,6 +31,35 @@ func TestMessageQueueDepthGaugeCountsVisibleEntries(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryCountQueueDepthSkipsReservedRowsWithoutDecodingAttachments(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	message := &QueuedMessage{
+		SessionID: "session-depth",
+		TaskID:    "task-depth",
+		Content:   "reserved",
+		QueuedBy:  QueuedByWorkflow,
+		Metadata:  map[string]interface{}{MetadataLifecycleDurable: true},
+	}
+	if err := repo.Insert(ctx, message, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := repo.ReserveHead(ctx, message.SessionID); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `UPDATE queued_messages SET attachments_json = 'not-json' WHERE id = ?`, message.ID); err != nil {
+		t.Fatalf("corrupt attachments: %v", err)
+	}
+
+	depth, err := repo.CountQueueDepth(ctx)
+	if err != nil {
+		t.Fatalf("CountQueueDepth: %v", err)
+	}
+	if depth != 0 {
+		t.Fatalf("queue depth = %d, want 0", depth)
+	}
+}
+
 // repositoriesUnderTest returns one SQLite and one memory Repository so the
 // pending-count contract is proven on both storage backends.
 func repositoriesUnderTest(t *testing.T) map[string]Repository {

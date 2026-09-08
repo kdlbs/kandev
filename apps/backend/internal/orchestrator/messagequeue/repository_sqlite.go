@@ -1791,21 +1791,24 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 }
 
 func (r *sqliteRepository) CountQueueDepth(ctx context.Context) (int, error) {
-	rows, err := r.ro.QueryxContext(ctx, `
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages`)
+	rows, err := r.ro.QueryxContext(ctx, `SELECT metadata_json FROM queued_messages`)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = rows.Close() }()
 	count := 0
 	for rows.Next() {
-		message, scanErr := scanQueuedRow(rows)
-		if scanErr != nil {
-			return 0, scanErr
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return 0, err
 		}
-		if !message.IsReservedInFlight() {
+		metadata := make(map[string]interface{})
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+				return 0, fmt.Errorf("unmarshal queue depth metadata: %w", err)
+			}
+		}
+		if reserved, _ := metadata[MetadataLifecycleReserved].(bool); !reserved {
 			count++
 		}
 	}

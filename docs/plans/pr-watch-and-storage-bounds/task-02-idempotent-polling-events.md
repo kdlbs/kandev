@@ -104,14 +104,13 @@ Commit: `e7cf5e8184c1df4e03efe56298afa2bf176ba269` (branch
   head-SHA-level changes are already captured transitively through
   `checks_state` (a new commit triggers a fresh CI run) and PR `updated_at`.
 
-**Deferred, out of scope for this narrow slice (not silently dropped):**
-
-- Acceptance criterion #4 from the overall plan ("switching branch A -> B
-  performs one transactionally visible transition ... merges into an
-  existing canonical row for B") is only partially covered — Task 01's
-  migration-time merge logic handles this at migration time, but live
-  reconciliation's branch-switch-and-merge path was not re-verified/hardened
-  in this task. Left for a later wave if still needed.
+**Branch-switch collision coverage.** Live branch changes coalesce into the
+existing task-owned destination row. `TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource`
+and `TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource`
+cover searching and discovered destinations; `TestResetPRWatch_ConcurrentSessionsCoalesceDestination`
+proves concurrent transitions leave one canonical destination. The stale-source
+regression confirms a late source observation cannot recreate or switch that
+destination back.
 
 **Test evidence:**
 
