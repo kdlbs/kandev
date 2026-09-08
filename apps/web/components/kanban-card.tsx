@@ -91,9 +91,14 @@ export interface Task {
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
+  primaryExecutorProfileId?: string | null;
   primaryExecutorType?: string | null;
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
+  /** Whether the executor profile can be switched right now. Never gap-filled on merge. */
+  runnerEditable?: boolean;
+  /** Machine-readable reason for `runnerEditable`. Never gap-filled on merge. */
+  runnerIneligibleReason?: string;
   /** Human assignee (user id); the card renders their name read-only. */
   assigneeUserId?: string;
   parentTaskId?: string | null;

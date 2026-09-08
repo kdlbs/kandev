@@ -283,6 +283,7 @@ function useDialogSetupData(
     lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
     lastUsedBranch: taskCreateLastUsed.branch,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
+    editingTaskExecutorProfileId: props.editingTask?.primaryExecutorProfileId,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs, props.lockedFields?.workflow === true);
   const handlers = useDialogHandlers(fs, repositories, {

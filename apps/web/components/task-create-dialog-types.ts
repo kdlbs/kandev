@@ -36,6 +36,25 @@ export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
 ) => Promise<CreateTaskResponse>;
 
+/**
+ * Shape of the task being edited that both `TaskCreateDialogProps.editingTask`
+ * and `SubmitHandlersDeps.editingTask` need. `runnerEditable`/
+ * `runnerIneligibleReason` gate the executor-profile selector
+ * (REQ-TASKS-RUNNER-SWITCH-004) independently of `state`.
+ */
+export type TaskEditTarget = {
+  id: string;
+  title: string;
+  description?: string;
+  workflowStepId: string;
+  state?: Task["state"];
+  repositoryId?: string;
+  repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
+};
+
 export interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -51,15 +70,7 @@ export interface TaskCreateDialogProps {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
   }>;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
@@ -350,6 +361,12 @@ export type TaskCreateEffectsArgs = {
    * clobbered by the executor's async settle on mount.
    */
   preserveBranch?: string;
+  /**
+   * The task's own stored executor profile, when editing a task that has one.
+   * Seeds the picker directly (REQ-TASKS-RUNNER-SWITCH-004.5a) instead of the
+   * create-mode "resolve a default" autopick.
+   */
+  editingTaskExecutorProfileId?: string | null;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -503,15 +520,7 @@ export type SubmitHandlersDeps = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",

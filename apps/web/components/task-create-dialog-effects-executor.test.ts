@@ -192,6 +192,42 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
   });
 });
 
+// AC-TASKS-RUNNER-SWITCH-004.5a: a task with a stored executor profile seeds
+// the picker from that stored value, not from the create-mode "resolve a
+// default" autopick.
+describe("useDefaultSelectionsEffect - editing task's stored executor profile", () => {
+  it("seeds the stored profile instead of resolving a create-mode default", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const local = localExecutor();
+    const worktree = worktreeExecutor();
+    const sel = makeSel({ executors: [local, worktree] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], PROFILE_LOCAL));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
+  });
+
+  it("does not reseed once the picker already carries a value", async () => {
+    const fs = makeDefaultSelFs({ executorId: "exec-local", executorProfileId: PROFILE_WORKTREE });
+    const sel = makeSel({ executors: [worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], PROFILE_LOCAL));
+
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the create-mode default when the task stores no profile", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const worktree = worktreeExecutor();
+    const sel = makeSel({ executors: [worktree] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], null));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+  });
+});
+
 describe("useDefaultSelectionsEffect - executor profile restoration", () => {
   it("defers executor profile fallback until user settings have loaded or settled", async () => {
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });

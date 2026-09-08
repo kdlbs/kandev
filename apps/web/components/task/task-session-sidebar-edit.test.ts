@@ -45,6 +45,20 @@ describe("buildSidebarTaskEditTarget", () => {
     ).toBeNull();
   });
 
+  it("carries the runner-mutability projection and stored executor profile", () => {
+    const target = buildSidebarTaskEditTarget(
+      { id: "task-1", workflowId: "workflow-1", workflowStepId: "step-1" },
+      sourceTask({
+        primaryExecutorProfileId: "profile-1",
+        runnerEditable: false,
+        runnerIneligibleReason: "session_exists",
+      }),
+    );
+    expect(target?.primaryExecutorProfileId).toBe("profile-1");
+    expect(target?.runnerEditable).toBe(false);
+    expect(target?.runnerIneligibleReason).toBe("session_exists");
+  });
+
   it("falls back to the sidebar step when the source task has no step", () => {
     expect(
       buildSidebarTaskEditTarget(

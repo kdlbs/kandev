@@ -456,6 +456,7 @@ export function useDefaultSelectionsEffect(
   open: boolean,
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
+  editingTaskExecutorProfileId?: string | null,
 ) {
   const { executors, workspaceDefaults } = sel;
   const {
@@ -490,6 +491,18 @@ export function useDefaultSelectionsEffect(
       preferLocalExecutor,
     ],
   );
+  const hasStoredEditingExecutorProfile = Boolean(editingTaskExecutorProfileId);
+  // Seed the picker from the task's own stored runner (edit mode only) before
+  // any create-mode "resolve a default" autopick runs — AC-004.5a presents
+  // this as a resolved default, but a task that already has one stores it,
+  // not resolves it. Gating the autopick effect's own `open` (below) rather
+  // than adding a state-machine flag keeps this race-free: the two effects
+  // cannot both compute a pick for the same render.
+  useEffect(() => {
+    if (!open || executorProfileId || !editingTaskExecutorProfileId) return;
+    setExecutorProfileId(editingTaskExecutorProfileId);
+  }, [open, executorProfileId, editingTaskExecutorProfileId, setExecutorProfileId]);
+
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
   useExecutorIdAutopickEffect({
     open,
@@ -498,7 +511,7 @@ export function useDefaultSelectionsEffect(
     setExecutorId,
   });
   useExecutorProfileAutopickEffect({
-    open,
+    open: open && !hasStoredEditingExecutorProfile,
     executorProfileId,
     context: executorAutopickContext,
     setExecutorProfileId,
@@ -560,8 +573,15 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
-  const { open, workspaceId, workflowId, effectiveWorkflowId, repositories, repositoriesLoading } =
-    args;
+  const {
+    open,
+    workspaceId,
+    workflowId,
+    effectiveWorkflowId,
+    repositories,
+    repositoriesLoading,
+    editingTaskExecutorProfileId,
+  } = args;
   const {
     agentProfiles,
     compatibleAgentProfiles,
@@ -601,6 +621,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
       effectiveWorkflowId,
     },
     workflows,
+    editingTaskExecutorProfileId,
   );
   useGitHubUrlErrorEffect(fs, open);
 }
