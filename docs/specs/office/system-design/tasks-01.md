@@ -27,12 +27,24 @@ Office tasks are the unit of work in office mode: a single task carries a descri
 
 This spec consolidates the office task surface: lifecycle, parent/child handoffs, approval flow, advanced execution mode, blocker cycle detection, the reactivity pipeline, per-(task, agent) session identity, inline editable properties, and the chat / activity views.
 
+### Session constraint boundary
+
+The current schema stores the Office agent identity in
+`task_sessions.agent_profile_id`. The schema does not enforce one live Office
+row per `(task_id, agent_profile_id)` pair yet. A future migration must define
+an Office-only discriminator because Kanban rows also use this column and can
+legitimately share the pair.
+
+The repository classifies the planned constraint's PostgreSQL and SQLite errors.
+The insert path reloads the winning row. The update path returns a typed conflict
+for a future caller to handle before the constraint becomes active.
+
 ## What
 
 ### A. Lifecycle and identity
 
 - A task progresses through statuses `todo → in_progress → in_review → done`, with `blocked` and `cancelled` as branchable states. Status transitions are user- or agent-driven and feed the reactivity pipeline (section E).
-- Every office task has zero or more **task sessions**: one per `(task_id, agent_instance_id)` pair. A session represents one agent's persistent conversation thread on the task, not a single launch.
+- Every office task has zero or more **task sessions**: one per `(task_id, agent_profile_id)` pair. A session represents one agent's persistent conversation thread on the task, not a single launch.
 - Sessions cycle through `CREATED → STARTING → RUNNING → IDLE → RUNNING → IDLE → ...` for as many turns as the agent is woken. A session is terminal (`COMPLETED` / `FAILED` / `CANCELLED`) only when the agent leaves the task's participants list.
 - Wakeups (section E) drive transitions IDLE → RUNNING. Turn-complete events drive RUNNING → IDLE, tearing down the executor and agent process entirely; the conversation is preserved via the stored ACP session token.
 - Kanban / quick-chat sessions keep their per-launch model and `WAITING_FOR_INPUT` semantics - office's IDLE state is office-scoped.
@@ -106,10 +118,10 @@ A backend pipeline runs synchronously on every relevant task property change. Pr
 
 ### G. Per-(task, agent) session lifecycle
 
-- `task_sessions` rows are keyed by `(task_id, agent_instance_id)` for office tasks. The same pair reuses one row across many wakeups. Kanban / quick-chat sessions leave `agent_instance_id` NULL and keep their per-launch + `is_primary` model.
+- `task_sessions` rows use `(task_id, agent_profile_id)` for Office identity. The same pair reuses one row across many wakeups. Kanban and quick-chat sessions also use `agent_profile_id` and keep their per-launch and `is_primary` model.
 - A single task may carry multiple sessions: assignee, each reviewer, each approver, each @-mentioned agent. Each maintains its own conversation; one agent's notes never appear in another's buffer.
-- On wakeup, `EnsureSessionForAgent(task, agent_instance)`:
-  1. Looks up the row by `(task_id, agent_instance_id)`.
+- On wakeup, `EnsureSessionForAgent(task, agent_profile_id)`:
+  1. Looks up the row by `(task_id, agent_profile_id)`.
   2. If found and IDLE: flip to RUNNING.
   3. If found and RUNNING/STARTING: return as-is (idempotent).
   4. If found and terminal: create a new row (prior pair was retired).
@@ -181,16 +193,16 @@ The Chat tab displays a chronological merge of:
 task_sessions
   id                     TEXT PK
   task_id                TEXT FK -> office_tasks.id
-  agent_instance_id      TEXT  nullable  -- office: set; kanban/quick-chat: NULL
+  agent_profile_id       TEXT  nullable  -- shared by Office, Kanban, and quick-chat
   acp_session_id         TEXT  nullable  -- preserved across IDLE turns
   state                  enum   CREATED | STARTING | RUNNING | IDLE
                                 | WAITING_FOR_INPUT | COMPLETED | FAILED | CANCELLED
   is_primary             bool   -- kanban resume; office never reads this
   ...
 
-  UNIQUE INDEX uniq_office_task_session
-    ON task_sessions(task_id, agent_instance_id)
-    WHERE agent_instance_id IS NOT NULL;
+  -- Planned constraint, not present in the current schema:
+  -- one live Office row per (task_id, agent_profile_id).
+  -- The Office-only discriminator remains a separate schema decision.
 
 office_task_approval_decisions
   id              TEXT PK

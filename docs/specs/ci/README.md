@@ -36,10 +36,12 @@ deployment, and pull request walkthrough generation.
 ### Requirements
 
 - [Unified contributor PR automation](requirements/unified-contributor-pr-automation.md)
+- [Contributor merge approval revocation](requirements/contributor-merge-approval-revocation.md)
 
 ### System design
 
 - [Unified contributor PR automation](system-design/unified-contributor-pr-automation.md)
+- [Contributor merge approval revocation](system-design/contributor-merge-approval-revocation.md)
 
 ## Migration
 

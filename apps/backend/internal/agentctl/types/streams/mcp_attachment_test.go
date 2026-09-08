@@ -69,6 +69,32 @@ func TestMCPAttachmentHistoryDoesNotRestoreFailedServerFromLateObservations(t *t
 	}
 }
 
+func TestMCPServerAttachmentConnectedAtIsWriteOnce(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	first := time.Unix(10, 0).UTC()
+	second := time.Unix(20, 0).UTC()
+
+	for _, when := range []time.Time{first, second} {
+		if !history.Apply(MCPAttachmentEvidence{
+			AttemptID:  "attempt-1",
+			ServerName: "kandev",
+			Kind:       MCPAttachmentEvidenceProtocolAccepted,
+			OccurredAt: when,
+		}) {
+			t.Fatal("Apply() rejected protocol acceptance evidence")
+		}
+	}
+
+	server, ok := history.CurrentServer("kandev")
+	if !ok || server.ConnectedAt == nil {
+		t.Fatalf("server = %+v, want connected timestamp", server)
+	}
+	if !server.ConnectedAt.Equal(first) {
+		t.Fatalf("connected_at = %v, want first acceptance %v", server.ConnectedAt, first)
+	}
+}
+
 func TestMCPAttachmentHistoryUpdatesToolCountToZero(t *testing.T) {
 	history := MCPAttachmentHistory{}
 	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})

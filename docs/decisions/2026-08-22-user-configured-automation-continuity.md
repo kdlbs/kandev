@@ -1,6 +1,6 @@
 # ADR-2026-08-22: Let Users Configure Continuity, Not MCP Authority
 
-**Status:** accepted
+**Status:** accepted (amended by ADR-2026-09-02-automation-self-archive)
 **Date:** 2026-08-22
 **Area:** backend, agentctl, frontend, protocol, security, workflow
 **Related ADRs:** [MCP tool profiles](2026-08-08-mcp-tool-profiles.md), [task-owned worktree lifetime](2026-08-08-task-owned-worktree-lifetime.md), [live agent permission authority](2026-08-11-live-agent-permission-authority.md)

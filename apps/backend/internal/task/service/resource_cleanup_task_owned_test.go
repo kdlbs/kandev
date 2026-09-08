@@ -51,14 +51,17 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	ctx := context.Background()
 	_, _, repo := createTestService(t)
 	seedCleanupTaskAndSession(t, repo, "task-zero-session", "session-zero-session")
+	repoPath := initSimpleGitRepo(t)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-zero-session", WorkspaceID: "ws-task-zero-session",
+		Name: "repo-zero-session", SourceType: "local", LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	initialMgr := newCleanupTestWorktreeManager(t, repo)
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-zero-session", TaskID: "task-zero-session", ExecutorType: "worktree",
 		WorkspacePath: "/tmp/zero", Status: models.TaskEnvironmentStatusReady,
-		Repos: []*models.TaskEnvironmentRepo{{
-			ID: "env-repo-zero-session", RepositoryID: "repo-zero-session",
-			WorktreeID: "wt-zero-session", WorktreePath: "/tmp/zero/repo",
-			WorktreeBranch: "feature/zero", Status: "active",
-		}},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -70,6 +73,15 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session: %v", err)
 	}
+	created, err := initialMgr.Create(ctx, worktree.CreateRequest{
+		TaskID: "task-zero-session", SessionID: "session-zero-session",
+		TaskTitle: "Zero session cleanup", RepositoryID: "repo-zero-session", RepositoryPath: repoPath,
+		BaseBranch: "main", TaskDirName: "task-zero-session", RepoName: "repo-zero-session",
+	})
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	worktreeID := created.ID
 
 	// Delete the only session through the orchestrator-style deletion.
 	if err := repo.DeleteTaskSession(ctx, "session-zero-session"); err != nil {
@@ -85,8 +97,8 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	if err != nil {
 		t.Fatalf("gather worktrees: %v", err)
 	}
-	if len(worktrees) != 1 || worktrees[0].ID != "wt-zero-session" {
-		t.Fatalf("zero-session inventory = %+v, want wt-zero-session", worktrees)
+	if len(worktrees) != 1 || worktrees[0].ID != worktreeID {
+		t.Fatalf("zero-session inventory = %+v, want %s", worktrees, worktreeID)
 	}
 
 	if err := svc2.DeleteTask(ctx, "task-zero-session"); err != nil {
@@ -103,8 +115,8 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Worktrees) != 1 || snapshot.Worktrees[0].ID != "wt-zero-session" {
-		t.Fatalf("snapshot worktrees = %+v, want wt-zero-session after task-row deletion", snapshot.Worktrees)
+	if len(snapshot.Worktrees) != 1 || snapshot.Worktrees[0].ID != worktreeID {
+		t.Fatalf("snapshot worktrees = %+v, want %s after task-row deletion", snapshot.Worktrees, worktreeID)
 	}
 }
 
@@ -187,6 +199,21 @@ func TestDeleteTaskCleanupRemovesEveryWorktreeAfterLastSessionDeletedAndRestart(
 
 	if err := svc.DeleteTask(ctx, taskID); err != nil {
 		t.Fatalf("delete task: %v", err)
+	}
+	var encodedSnapshot string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'delete'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&encodedSnapshot); err != nil {
+		t.Fatalf("load delete cleanup snapshot: %v", err)
+	}
+	var cleanupSnapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(encodedSnapshot), &cleanupSnapshot); err != nil {
+		t.Fatalf("decode delete cleanup snapshot: %v", err)
+	}
+	if len(cleanupSnapshot.WorktreeHeadOIDs) != 2 {
+		t.Fatalf("snapshot worktree identities = %#v, want both repository commits", cleanupSnapshot.WorktreeHeadOIDs)
 	}
 	var jobID string
 	if err := repo.DB().QueryRowContext(ctx, `

@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { MCPStrategySelect, useMCPStrategies } from "@/components/settings/mcp-strategy-select";
 import { updateCustomTUIAgentMCPStrategy } from "@/lib/api/domains/settings-api";
+import { isHandledApiError } from "@/lib/api/client";
 import type { Agent } from "@/lib/types/http-agents";
 
 type CustomTUIMcpCardProps = {
@@ -54,6 +55,7 @@ export function CustomTUIMcpCard({ agent }: CustomTUIMcpCardProps) {
         ),
       );
     } catch (error) {
+      if (isHandledApiError(error)) return;
       toast({
         title: t("agents:failedToSaveAgent"),
         description: error instanceof Error ? error.message : t("agents:requestFailed"),

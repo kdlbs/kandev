@@ -48,6 +48,7 @@ import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { mapOfficeTaskToTask } from "./map-office-task";
+import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -142,6 +143,10 @@ type IssueDetailData = {
   comments: TaskComment[] | null;
 };
 
+type OrderedIssueDetailData = IssueDetailData & {
+  activityEpochsAtRequestStart: Readonly<Record<string, number>>;
+};
+
 // ---------------------------------------------------------------------------
 // Task fetchers — pure async functions, no React state
 // ---------------------------------------------------------------------------
@@ -171,6 +176,18 @@ async function fetchIssueDetailData(workspaceId: string, id: string): Promise<Is
     sessions: rawSessions ? rawSessions.map(mapTaskSession) : null,
     rawSessions,
     comments: commentsResult.status === "fulfilled" ? commentsResult.value : null,
+  };
+}
+
+async function fetchOrderedIssueDetailData(
+  state: Parameters<typeof captureTaskSessionActivityEpochs>[0],
+  workspaceId: string,
+  id: string,
+): Promise<OrderedIssueDetailData> {
+  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(state, id);
+  return {
+    ...(await fetchIssueDetailData(workspaceId, id)),
+    activityEpochsAtRequestStart,
   };
 }
 
@@ -485,31 +502,68 @@ function handleInitialLoadFailure(
   }
 }
 
-export function useIssueData(id: string) {
-  const storeIssues = useAppStore((s) => s.office.tasks.items);
-  const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  const storeIssuesRef = useRef(storeIssues);
-  useEffect(() => {
-    storeIssuesRef.current = storeIssues;
-  }, [storeIssues]);
-
-  const [task, setTask] = useState<Task | null>(null);
+function useIssueDetailState(id: string) {
+  const store = useAppStoreApi();
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [activity, setActivity] = useState<TaskActivityEntry[]>([]);
   const [baseSessions, setBaseSessions] = useState<TaskSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorKey, setErrorKey] = useState<string | null>(null);
-
+  const fetchComments = useCallback(async () => {
+    setComments(await fetchIssueComments(id));
+  }, [id]);
   const applyDetail = useCallback(
-    (detail: IssueDetailData) => {
+    (detail: OrderedIssueDetailData) => {
       if (detail.activity) setActivity(detail.activity);
       if (detail.sessions) setBaseSessions(detail.sessions);
-      if (detail.rawSessions) setTaskSessionsForTask(id, detail.rawSessions);
+      if (detail.rawSessions) {
+        store
+          .getState()
+          .setTaskSessionsForTask(id, detail.rawSessions, detail.activityEpochsAtRequestStart);
+      }
       if (detail.comments) setComments(detail.comments);
     },
-    [id, setTaskSessionsForTask],
+    [id, store],
   );
+  return {
+    comments,
+    timeline,
+    setTimeline,
+    activity,
+    baseSessions,
+    loading,
+    setLoading,
+    errorKey,
+    setErrorKey,
+    fetchComments,
+    applyDetail,
+    getStoreState: store.getState,
+  };
+}
+
+export function useIssueData(id: string) {
+  const storeIssues = useAppStore((s) => s.office.tasks.items);
+  const storeIssuesRef = useRef(storeIssues);
+  useEffect(() => {
+    storeIssuesRef.current = storeIssues;
+  }, [storeIssues]);
+
+  const [task, setTask] = useState<Task | null>(null);
+  const {
+    comments,
+    timeline,
+    setTimeline,
+    activity,
+    baseSessions,
+    loading,
+    setLoading,
+    errorKey,
+    setErrorKey,
+    fetchComments,
+    applyDetail,
+    getStoreState,
+  } = useIssueDetailState(id);
 
   useEffect(() => {
     let cancelled = false;
@@ -552,7 +606,11 @@ export function useIssueData(id: string) {
           if (res.timeline) setTimeline(res.timeline);
           // AC-59: the initial load seeds each field's canonical value.
           seedCanonicalTitleAndDescription(id, freshTask);
-          const detail = await fetchIssueDetailData(freshTask.workspaceId, id);
+          const detail = await fetchOrderedIssueDetailData(
+            getStoreState(),
+            freshTask.workspaceId,
+            id,
+          );
           if (!cancelled) applyDetail(detail);
         }
       } catch {
@@ -566,12 +624,7 @@ export function useIssueData(id: string) {
     return () => {
       cancelled = true;
     };
-  }, [id, applyDetail]);
-
-  const fetchComments = useCallback(async () => {
-    const result = await fetchIssueComments(id);
-    setComments(result);
-  }, [id]);
+  }, [id, applyDetail, getStoreState]);
 
   const onTaskRefetch = useTaskDetailRefetch(setTask, setTimeline);
 

@@ -78,8 +78,8 @@ const legacySessionWorktreeDDL = `
 
 // openLegacyDB opens a SQLite database in the pre-cutover schema: it runs
 // the current initializer once (final shape for everything else), then
-// rewinds task_environments and task_environment_repos to the legacy shape
-// and recreates task_session_worktrees.
+// rewinds task_environments, task_environment_repos, and git snapshots to
+// their legacy shapes and recreates task_session_worktrees.
 func openLegacyDB(t *testing.T) *sqlx.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
@@ -98,6 +98,10 @@ func openLegacyDB(t *testing.T) *sqlx.DB {
 
 func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	t.Helper()
+	// The final git snapshot table owns a foreign key to task_environments.
+	// Recreate it in its legacy session-owned shape before dropping the
+	// environment tables, otherwise PostgreSQL correctly rejects the rewind.
+	replaceGitSnapshotTableWithLegacy(t, &Repository{db: db, ro: db})
 	if _, err := db.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		t.Fatalf("drop final env repos: %v", err)
 	}
@@ -265,6 +269,15 @@ func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed
 	seedLegacyEnvRepo(t, db, "env-repo-hybrid", seed.envID, seed.repoID,
 		"wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid", now)
 	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_git_snapshots (
+			id, task_environment_id, session_id, snapshot_type, branch,
+			files, metadata, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, '{}', ?)`),
+		"snapshot-hybrid-"+seed.envID, seed.envID, seed.sessionID,
+		string(models.SnapshotTypeStatusUpdate), "main", `{"hybrid.go":{"status":"modified"}}`, now); err != nil {
+		t.Fatalf("seed environment-owned git snapshot: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
 		UPDATE task_environment_repos
 		SET status = 'deleted', merged_at = ?, deleted_at = ?
 		WHERE id = 'env-repo-hybrid'`), now, now); err != nil {
@@ -306,6 +319,15 @@ func assertHybridCutoverResult(t *testing.T, repo *Repository, seed legacySeed) 
 	}
 	assertHybridWorktree(t, got[seed.repoID+"-session-only"], "wt-session-only",
 		"/tasks/hybrid/session-only", "feature/session-only")
+	var snapshotEnvironmentID string
+	if err := repo.db.Get(&snapshotEnvironmentID, repo.db.Rebind(`
+		SELECT task_environment_id FROM task_session_git_snapshots
+		WHERE id = ?`), "snapshot-hybrid-"+seed.envID); err != nil {
+		t.Fatalf("read preserved git snapshot: %v", err)
+	}
+	if snapshotEnvironmentID != seed.envID {
+		t.Fatalf("preserved git snapshot environment = %q, want %q", snapshotEnvironmentID, seed.envID)
+	}
 }
 
 func assertHybridWorktree(t *testing.T, got *models.TaskEnvironmentRepo, worktreeID, path, branch string) {

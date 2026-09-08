@@ -43,7 +43,6 @@ func TestWorkflowProviderAdapter_UpdateWorkflowPersistsPrompt(t *testing.T) {
 	if got.Prompt != created.Prompt {
 		t.Fatalf("Prompt = %q, want %q", got.Prompt, created.Prompt)
 	}
-
 	// Clear through the adapter must persist empty, not leave stale text.
 	created.Prompt = ""
 	if err := adapter.UpdateWorkflow(ctx, created); err != nil {

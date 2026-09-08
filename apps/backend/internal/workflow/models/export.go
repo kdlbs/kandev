@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"maps"
+	"math"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -48,20 +49,22 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                       string                `json:"name" yaml:"name"`
-	Position                   int                   `json:"position" yaml:"position"`
-	Color                      string                `json:"color" yaml:"color"`
-	Prompt                     string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                     StepEvents            `json:"events" yaml:"events"`
-	IsStartStep                bool                  `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel         bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove            bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours      int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile               *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	AutoAdvanceRequiresSignal  bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool                  `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
-	WIPLimit                   int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition       *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                       string                                       `json:"name" yaml:"name"`
+	Position                   int                                          `json:"position" yaml:"position"`
+	Color                      string                                       `json:"color" yaml:"color"`
+	Prompt                     string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                     StepEvents                                   `json:"events" yaml:"events"`
+	IsStartStep                bool                                         `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel         bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove            bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours      int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile               *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	AutoAdvanceRequiresSignal  bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	WIPLimit                   int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition       *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -98,6 +101,8 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			ShowInCommandPanel:         s.ShowInCommandPanel,
 			AllowManualMove:            s.AllowManualMove,
 			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
+			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
 			WIPLimit:                   s.WIPLimit,
@@ -254,8 +259,42 @@ func validateStepPositionRefs(steps []StepPortable, validPositions map[int]bool)
 				}
 			}
 		}
+		if err := validateGenericStepPositionRefs(step, validPositions); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// validateGenericStepPositionRefs checks move_to_step position refs across
+// the seven ADR-0004 Phase 2 GenericAction triggers.
+func validateGenericStepPositionRefs(step StepPortable, validPositions map[int]bool) error {
+	triggers := map[string][]GenericAction{
+		"on_comment":            step.Events.OnComment,
+		"on_blocker_resolved":   step.Events.OnBlockerResolved,
+		"on_children_completed": step.Events.OnChildrenCompleted,
+		"on_approval_resolved":  step.Events.OnApprovalResolved,
+		"on_heartbeat":          step.Events.OnHeartbeat,
+		"on_budget_alert":       step.Events.OnBudgetAlert,
+		"on_agent_error":        step.Events.OnAgentError,
+	}
+	for _, trigger := range genericTriggerOrder {
+		for _, a := range triggers[trigger] {
+			if a.Type == GenericActionMoveToStep {
+				if err := checkPositionRef(a.Config, validPositions); err != nil {
+					return fmt.Errorf("step %q %s: %w", step.Name, trigger, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// genericTriggerOrder fixes iteration order for validateGenericStepPositionRefs
+// so error messages are deterministic.
+var genericTriggerOrder = []string{
+	"on_comment", "on_blocker_resolved", "on_children_completed",
+	"on_approval_resolved", "on_heartbeat", "on_budget_alert", "on_agent_error",
 }
 
 func checkPositionRef(config map[string]any, validPositions map[int]bool) error {
@@ -371,8 +410,11 @@ func ConvertPositionToStepID(events StepEvents, posToID map[int]string) StepEven
 	})
 }
 
-// remapStepEvents rewrites move_to_step config in OnTurnStart and OnTurnComplete actions,
-// replacing fromKey with toKey using the provided lookup function.
+// remapStepEvents rewrites move_to_step config across every trigger —
+// OnTurnStart/OnTurnComplete plus the seven ADR-0004 Phase 2 GenericAction
+// triggers — replacing fromKey with toKey using the provided lookup function.
+// OnEnter and OnExit carry no step_id/step_position references and are
+// copied through unchanged.
 func remapStepEvents(events StepEvents, fromKey, toKey string, lookup func(any) (any, bool)) StepEvents {
 	result := StepEvents{
 		OnEnter: append([]OnEnterAction{}, events.OnEnter...),
@@ -393,6 +435,28 @@ func remapStepEvents(events StepEvents, fromKey, toKey string, lookup func(any) 
 			}
 		}
 		result.OnTurnComplete = append(result.OnTurnComplete, a)
+	}
+	result.OnComment = remapGenericActionsConfigKey(events.OnComment, fromKey, toKey, lookup)
+	result.OnBlockerResolved = remapGenericActionsConfigKey(events.OnBlockerResolved, fromKey, toKey, lookup)
+	result.OnChildrenCompleted = remapGenericActionsConfigKey(events.OnChildrenCompleted, fromKey, toKey, lookup)
+	result.OnApprovalResolved = remapGenericActionsConfigKey(events.OnApprovalResolved, fromKey, toKey, lookup)
+	result.OnHeartbeat = remapGenericActionsConfigKey(events.OnHeartbeat, fromKey, toKey, lookup)
+	result.OnBudgetAlert = remapGenericActionsConfigKey(events.OnBudgetAlert, fromKey, toKey, lookup)
+	result.OnAgentError = remapGenericActionsConfigKey(events.OnAgentError, fromKey, toKey, lookup)
+	return result
+}
+
+// remapGenericActionsConfigKey applies remapConfigKey to every move_to_step
+// GenericAction in actions, leaving other action types untouched.
+func remapGenericActionsConfigKey(actions []GenericAction, fromKey, toKey string, lookup func(any) (any, bool)) []GenericAction {
+	result := make([]GenericAction, 0, len(actions))
+	for _, a := range actions {
+		if a.Type == GenericActionMoveToStep {
+			if cfg, ok := remapConfigKey(a.Config, fromKey, toKey, lookup); ok {
+				a = GenericAction{Type: a.Type, Config: cfg}
+			}
+		}
+		result = append(result, a)
 	}
 	return result
 }
@@ -420,6 +484,9 @@ func remapConfigKey(config map[string]any, fromKey, toKey string, lookup func(an
 func toInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case float64:
+		if math.IsNaN(val) || math.IsInf(val, 0) || math.Trunc(val) != val {
+			return 0, false
+		}
 		return int(val), true
 	case int:
 		return val, true

@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { createRecentUseProfiles, seedTaskSessionRecency } from "./new-session-recency-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PROMPT_NAME = "e2e-new-agent-prompt";
@@ -19,6 +22,56 @@ test.describe("New session dialog", () => {
       if (!prompt.builtin && prompt.name === PROMPT_NAME) {
         await apiClient.deletePrompt(prompt.id);
       }
+    }
+  });
+
+  test("uses task-session recency for the Add Agent default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(300_000);
+    const { profileA, profileB } = await createRecentUseProfiles(apiClient);
+
+    try {
+      const { targetTaskId } = await seedTaskSessionRecency({
+        testPage,
+        apiClient,
+        seedData,
+        profileA,
+        profileB,
+      });
+      await testPage.goto(`/t/${targetTaskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openNewSessionDialog();
+
+      const selector = session.newSessionDialogPage.agentSelector();
+      await expect(selector).toContainText(profileB.name);
+      await selector.click();
+      const options = session.newSessionDialogPage.agentOptions();
+      await expect(options.filter({ hasText: profileB.name })).toHaveCount(1);
+      await expect(options.first()).toContainText(profileB.name);
+      await testPage.keyboard.press("Escape");
+
+      await session.newSessionPromptInput().fill("/e2e:simple-message");
+      await session.newSessionStartButton().click();
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(targetTaskId);
+            return sessions.find((candidate) => candidate.agent_profile_id === profileB.id)
+              ?.agent_profile_id;
+          },
+          { timeout: 30_000, message: "Waiting for the recent profile session" },
+        )
+        .toBe(profileB.id);
+    } finally {
+      await apiClient.deleteAgentProfile(profileA.id, true).catch(() => undefined);
+      await apiClient.deleteAgentProfile(profileB.id, true).catch(() => undefined);
     }
   });
 
@@ -204,6 +257,73 @@ test.describe("New session dialog", () => {
     // 9. Verify the backend has two sessions
     const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
     expect(allSessions).toHaveLength(2);
+  });
+
+  test("starts a second session with a staged attachment", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const prompt = "/e2e:simple-message";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "New Session Attachment Task",
+      seedData.agentProfileId,
+      {
+        description: prompt,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for first session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openNewSessionDialog();
+
+    fs.mkdirSync(testInfo.outputDir, { recursive: true });
+    const attachmentPath = path.join(testInfo.outputDir, "new-session-note.txt");
+    fs.writeFileSync(attachmentPath, "new session attachment body");
+    const dialog = session.newSessionDialog();
+    await dialog.locator('input[type="file"]').setInputFiles(attachmentPath);
+    await expect(dialog.getByText("new-session-note.txt", { exact: true })).toBeVisible();
+    await session.newSessionPromptInput().fill(prompt);
+    await session.newSessionStartButton().click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    let secondSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const second = sessions.find((candidate) => candidate.id !== task.session_id);
+          secondSessionId = second?.id ?? "";
+          return DONE_STATES.includes(second?.state ?? "");
+        },
+        { timeout: 30_000, message: "Waiting for attached New Agent session" },
+      )
+      .toBe(true);
+
+    const { messages } = await apiClient.listSessionMessages(secondSessionId);
+    const userMessage = messages.find(
+      (message) => message.author_type === "user" && message.content.includes(prompt),
+    );
+    const attachments = userMessage?.metadata?.attachments;
+    expect(Array.isArray(attachments) ? attachments[0] : undefined).toMatchObject({
+      name: "new-session-note.txt",
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(
+      session.activeChat().getByText("new-session-note.txt", { exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("selects a saved prompt without submitting, then launches explicitly", async ({

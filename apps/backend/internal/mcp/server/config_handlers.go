@@ -99,6 +99,9 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithNumber("position", mcp.Description("Step position (0-based). Defaults to end.")),
 			mcp.WithString("color", mcp.Description("Step color hex code (e.g. '#3b82f6')")),
 			mcp.WithString("prompt", mcp.Description("System prompt for agents in this step")),
+			mcp.WithString("agent_profile_id", mcp.Description("Optional agent profile ID for this destination step")),
+			mcp.WithString("profile_session_start_policy", mcp.Enum("reuse", "new"), mcp.Description("Session handling when this step starts after a profile switch")),
+			mcp.WithString("profile_session_end_policy", mcp.Enum("complete", "park"), mcp.Description("Session handling when this step ends for a profile switch")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
 			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step (default: false)")),
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
@@ -117,6 +120,9 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithString("name", mcp.Description("New step name")),
 			mcp.WithString("color", mcp.Description("New color hex code")),
 			mcp.WithString("prompt", mcp.Description("New system prompt")),
+			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID for this destination step")),
+			mcp.WithString("profile_session_start_policy", mcp.Enum("reuse", "new"), mcp.Description("Session handling when this step starts after a profile switch")),
+			mcp.WithString("profile_session_end_policy", mcp.Enum("complete", "park"), mcp.Description("Session handling when this step ends for a profile switch")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
 			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step")),
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
@@ -489,7 +495,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
+		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
 			if args[key] != nil {
 				payload[key] = args[key]
 			}
@@ -515,7 +521,7 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
+		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
 			if args[key] != nil {
 				payload[key] = args[key]
 			}

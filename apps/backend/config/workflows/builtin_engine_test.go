@@ -116,6 +116,43 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 	}
 }
 
+// TestOfficeDefault_OnAgentErrorEscalatesFromEveryAgentLaunchingStep verifies
+// that every agent-launching step in office-default (Work, Review, Approval,
+// Done) compiles on_agent_error to a single queue_run action targeting the
+// CEO agent. Before this fix only Work declared the block, so a reviewer or
+// approver session failure left Engine.HandleTrigger with zero actions
+// (ActionCount == 0) and no escalation ever reached the coordinator.
+func TestOfficeDefault_OnAgentErrorEscalatesFromEveryAgentLaunchingStep(t *testing.T) {
+	tmpl := loadTemplateForTest(t, "office-default")
+
+	for _, stepName := range []string{"Work", "Review", "Approval", "Done"} {
+		t.Run(stepName, func(t *testing.T) {
+			def := findStep(tmpl.Steps, stepName)
+			if def == nil {
+				t.Fatalf("step %q not present in template", stepName)
+			}
+			spec := engine.CompileStep(stepFromDefinition(*def))
+			actions := spec.Events[engine.TriggerOnAgentError]
+			if len(actions) != 1 {
+				t.Fatalf("%s.on_agent_error compiled to %d actions, want 1", stepName, len(actions))
+			}
+			action := actions[0]
+			if action.Kind != engine.ActionQueueRun {
+				t.Errorf("%s.on_agent_error[0].Kind = %q, want queue_run", stepName, action.Kind)
+			}
+			if action.QueueRun == nil {
+				t.Fatalf("%s.on_agent_error[0].QueueRun is nil", stepName)
+			}
+			if action.QueueRun.Target != engine.TargetWorkspaceCEO {
+				t.Errorf("%s.on_agent_error[0] target = %q, want %q", stepName, action.QueueRun.Target, engine.TargetWorkspaceCEO)
+			}
+			if action.QueueRun.Reason != "agent_error" {
+				t.Errorf("%s.on_agent_error[0] reason = %q, want %q", stepName, action.QueueRun.Reason, "agent_error")
+			}
+		})
+	}
+}
+
 func loadTemplateForTest(t *testing.T, id string) *wfmodels.WorkflowTemplate {
 	t.Helper()
 	templates, err := LoadTemplates()

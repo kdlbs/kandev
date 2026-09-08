@@ -140,6 +140,8 @@ func (r *planWriteErrorRepo) WritePlanRevision(
 	*models.TaskPlan,
 	*models.TaskPlanRevision,
 	*string,
+	bool,
+	bool,
 ) error {
 	return r.err
 }

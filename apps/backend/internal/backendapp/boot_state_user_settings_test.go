@@ -42,6 +42,52 @@ func TestMapUserSettingsStateIncludesTasksListShowDetails(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesSidebarTaskColorAutomation(t *testing.T) {
+	automation := usermodels.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []usermodels.SidebarTaskColorRule{{
+			ID:      "failed-red",
+			Enabled: true,
+			Condition: usermodels.SidebarTaskColorCondition{
+				Dimension: usermodels.SidebarTaskColorDimensionTaskState,
+				Value:     "FAILED",
+				Label:     "Failed",
+			},
+			Output: usermodels.SidebarTaskColorOutput{
+				Kind:  usermodels.SidebarTaskColorOutputFixed,
+				Color: "red",
+			},
+		}},
+	}
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{SidebarTaskColorAutomation: automation},
+	}, "workspace-1")
+
+	got, ok := state["sidebarTaskColorAutomation"].(usermodels.SidebarTaskColorAutomation)
+	if !ok || !got.Enabled || len(got.Rules) != 1 || got.Rules[0].ID != "failed-red" {
+		t.Fatalf(
+			"sidebarTaskColorAutomation = %#v, want the persisted rule set",
+			state["sidebarTaskColorAutomation"],
+		)
+	}
+}
+
+func TestMapUserSettingsStateIncludesSidebarTaskColors(t *testing.T) {
+	red := "red"
+	colors := map[string]*string{"task-red": &red, "task-cleared": nil}
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{SidebarTaskColors: colors},
+	}, "workspace-1")
+
+	got, ok := state["sidebarTaskColors"].(map[string]*string)
+	if !ok || got["task-red"] == nil || *got["task-red"] != "red" {
+		t.Fatalf("sidebarTaskColors = %#v, want red color", state["sidebarTaskColors"])
+	}
+	if value, present := got["task-cleared"]; !present || value != nil {
+		t.Fatalf("sidebarTaskColors tombstone = (%#v, %t), want (nil, true)", value, present)
+	}
+}
+
 // TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault verifies boot state normalizes the MCP task agent profile default.
 func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
@@ -182,6 +228,19 @@ func TestMapUserSettingsStateNormalizesLastSeenDisplay(t *testing.T) {
 				t.Fatalf("lastSeenDisplay = %#v, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID verifies boot state carries the
+// default utility agent profile id, the field the Settings UI actually writes.
+func TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{DefaultUtilityAgentProfileID: "profile-1"},
+	}, "workspace-1")
+
+	got, ok := state["defaultUtilityAgentProfileId"].(string)
+	if !ok || got != "profile-1" {
+		t.Fatalf("defaultUtilityAgentProfileId = %#v, want profile-1", state["defaultUtilityAgentProfileId"])
 	}
 }
 

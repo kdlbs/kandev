@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Concurrency policy values stored on office_routines.concurrency_policy.
@@ -141,14 +142,66 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 	case PolicySkipIfActive:
 		return d.repo.MarkWakeupRequestSkipped(ctx, req.ID, "policy:skip_if_active")
 	case PolicyCoalesceIfActive:
-		return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+		return d.coalesceIntoInflightRun(ctx, req, inflight)
 	}
 	// Unknown policies fall back to coalesce — the safest "do something"
 	// behaviour. Surface a warning so misconfigured rows are visible.
 	d.log.Warn("unknown wakeup concurrency policy; coalescing",
 		zap.String("policy", policy),
 		zap.String("agent_id", req.AgentProfileID))
+	return d.coalesceIntoInflightRun(ctx, req, inflight)
+}
+
+// coalesceIntoInflightRun merges req into inflight, promoting the run's
+// reason first when the merge would otherwise let a periodic
+// classification survive on top of an event/user-triggered request —
+// see docs/specs/office/scheduler.md ("Event-triggered wakeups always
+// proceed"). Promotion is monotonic (periodic → event only): a
+// periodic request coalescing into an already event-classified run
+// never demotes it back to periodic.
+//
+// The inflight run's Status field reflects a read taken before this
+// call, not the row's current state: the scheduler can claim it
+// concurrently. processRun evaluates checkIdleSkip against the
+// *models.Run it captured at claim time and never re-reads Reason, so
+// promoting a row the scheduler already claimed would race a decision
+// already in flight and could still let the event trigger be silently
+// idle-skipped. PromoteRunAndCoalesceWakeupIfQueued makes the run
+// status update, request transition, count increment, and payload merge
+// one transaction. Its conditional UPDATE only lands while the row is
+// still 'queued'. When it does not land (claimed out from under us),
+// route the event to its own fresh run instead of trusting the stale
+// in-memory status.
+func (d *Dispatcher) coalesceIntoInflightRun(
+	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
+) error {
+	reason := effectiveReason(req)
+	if reason != "" &&
+		shared.IsPeriodicTasklessWake(inflight.Reason) &&
+		!shared.IsPeriodicTasklessWake(reason) {
+		promoted, err := d.repo.PromoteRunAndCoalesceWakeupIfQueued(
+			ctx, req.ID, inflight.ID, reason,
+		)
+		if err != nil {
+			return fmt.Errorf("promote run and coalesce wakeup into %s: %w", inflight.ID, err)
+		}
+		if !promoted {
+			return d.createFreshRun(ctx, req)
+		}
+		return nil
+	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+}
+
+// effectiveReason returns the reason a run derived from req should carry:
+// req.Reason when set, else req.Source — mirroring createFreshRun's
+// fallback so a request is classified the same way whether it lands on
+// a fresh run or merges into an in-flight one.
+func effectiveReason(req *officesqlite.WakeupRequest) string {
+	if req.Reason != "" {
+		return req.Reason
+	}
+	return req.Source
 }
 
 // resolvePolicy returns the concurrency policy for a wakeup-request.
@@ -223,10 +276,7 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
-	reason := req.Reason
-	if reason == "" {
-		reason = req.Source
-	}
+	reason := effectiveReason(req)
 	payload := req.Payload
 	if payload == "" {
 		payload = "{}"

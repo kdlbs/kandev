@@ -47,6 +47,7 @@
   "pasteLink": "Colar a ligação...",
   "planFormattingToolbar": "Barra de formatação do plano",
   "pleaseTryAgain": "Tente novamente.",
+  "previewHtml": "Pré-visualizar HTML",
   "previewMarkdown": "Pré-visualizar o markdown",
   "queuedForTheAgent": "Em fila para o agente.",
   "reload": "Recarregar",
@@ -87,5 +88,6 @@
   "toggleCode": "Alternar código",
   "toggleWordWrap": "Alternar a quebra de linha",
   "underlineCmdU": "Sublinhado (Cmd+U)",
-  "failedToOpenEditor": "Falha ao abrir o editor"
+  "failedToOpenEditor": "Falha ao abrir o editor",
+  "downloadFile": "Transferir ficheiro"
 }

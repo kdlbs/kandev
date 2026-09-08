@@ -12,10 +12,10 @@ owners:
 
 Agent profile lists can contain many provider and model combinations. Users
 need the profiles they successfully used in a given operational flow to remain
-easy to reach without changing which profile the flow selects by default. The
-agent system owns this behavior because the remembered identity and eligibility
-rules belong to agent profiles, while task, quick-chat, and configuration-chat
-surfaces consume the same contract.
+easy to reach. The add-agent flow also uses its recent profile as the next
+default. The agent system owns this behavior because profile identity and
+eligibility belong to agent profiles. Task and chat surfaces consume the same
+contract.
 
 ## Terminology
 
@@ -30,9 +30,9 @@ surfaces consume the same contract.
 
 ### REQ-AGENTS-PROFILE-RECENT-USE-001: Contextual recent-use order
 
-**Intent:** Keep frequently used profiles near the top of the operational
-selector where they are useful without changing defaults or unrelated profile
-configuration surfaces.
+**Intent:** Keep frequently used profiles near the top of each operational
+selector. Use task-session history as the add-agent default without changing
+unrelated profile configuration surfaces.
 
 **User story:** As a user, I want each operational agent selector to remember
 the profiles I used there, so that repeated choices require less scanning.
@@ -51,13 +51,22 @@ the profiles I used there, so that repeated choices require less scanning.
   shall order eligible remembered profiles before eligible unseen profiles and
   preserve source order among unseen profiles.
 - **AC-AGENTS-PROFILE-RECENT-USE-001.4:** A selected profile shall remain the
-  first displayed option, and recent-use ordering shall not change any flow's
-  default-selection, compatibility, availability, disabled-profile, or search
-  rules.
+  first displayed option. Recent-use ordering shall not change compatibility,
+  availability, disabled-profile, or search rules.
 - **AC-AGENTS-PROFILE-RECENT-USE-001.5:** Agent selectors that configure
   workspace, workflow, automation, agent settings, or Office assignments shall
   retain their authoritative source order and shall not record operational
   recent use.
+- **AC-AGENTS-PROFILE-RECENT-USE-001.6:** When an ordinary add-agent or
+  new-session dialog opens, it shall select the first eligible and compatible
+  profile from `task_session` history. If the user starts the agent without
+  another profile change, the dialog shall launch that selected profile. This
+  profile shall take precedence over workflow-step profile resolution.
+- **AC-AGENTS-PROFILE-RECENT-USE-001.7:** When `task_session` history has no
+  eligible and compatible profile, the dialog shall retain its existing
+  current-session and source-order fallback.
+- **AC-AGENTS-PROFILE-RECENT-USE-001.8:** A handoff target and a later manual
+  profile choice shall take precedence over the recent-use default.
 
 ### REQ-AGENTS-PROFILE-RECENT-USE-002: Successful-use semantics
 
@@ -104,7 +113,8 @@ storage or synchronization costs to grow with normal product use.
 
 ## Out of scope
 
-- Changing default agent-profile selection or introducing recommendations.
+- Changing defaults outside ordinary add-agent and new-session dialogs.
+- Introducing agent-profile recommendations.
 - Workspace-, repository-, workflow-, task-, or device-specific histories.
 - User-managed pinning, manual ordering, history clearing, or recency UI.
 - Reordering non-operational configuration selectors.

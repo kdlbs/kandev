@@ -433,6 +433,10 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 		State: v1.TaskStateInProgress,
 	}
 	stepGetter := newMockStepGetter()
+	sourceStep := &wfmodels.WorkflowStep{
+		ID: "step-source", WorkflowID: "wf1", Name: "Source", AgentProfileID: source.AgentProfileID,
+	}
+	stepGetter.steps[sourceStep.ID] = sourceStep
 	step := &wfmodels.WorkflowStep{
 		ID:             "step-target",
 		WorkflowID:     "wf1",
@@ -459,7 +463,7 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0)
+		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0, sourceStep)
 		close(done)
 	}()
 
@@ -756,7 +760,7 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0)
+		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0, stepGetter.steps["step-source"])
 		close(done)
 	}()
 

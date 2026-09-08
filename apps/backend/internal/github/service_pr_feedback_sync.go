@@ -53,13 +53,14 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 		if tp == nil || tp.TaskID == "" {
 			continue
 		}
-		if _, dup := seen[tp.TaskID]; dup {
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, "", tp.TaskID, tp.RepositoryID, pr.Number)
+		if _, dup := seen[effectiveTaskID]; dup {
 			continue
 		}
-		seen[tp.TaskID] = struct{}{}
-		if syncErr := s.SyncTaskPR(ctx, tp.TaskID, status); syncErr != nil {
+		seen[effectiveTaskID] = struct{}{}
+		if syncErr := s.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
 			s.logger.Debug("task PR sync from PR feedback failed",
-				zap.String("task_id", tp.TaskID), zap.Int("pr_number", pr.Number), zap.Error(syncErr))
+				zap.String("task_id", effectiveTaskID), zap.Int("pr_number", pr.Number), zap.Error(syncErr))
 		}
 	}
 }

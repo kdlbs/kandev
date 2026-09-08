@@ -69,6 +69,44 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.canvases",
+			EnvVar:      "KANDEV_FEATURES_CANVASES",
+			Kind:        KindFeature,
+			Label:       "Agent-authored canvases",
+			Description: "Enables isolated agent-authored web application canvases for tasks and workspaces.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
+				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
+				"storage, and permission behavior of the experimental feature.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Canvases },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Canvases = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.multiTenancy",
+			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
+			Kind:        KindFeature,
+			Label:       "Organizations",
+			Description: "Adds organizations above users: every account belongs to exactly one org, and orgs cannot see each other's workspaces, tasks, or secrets. Requires Authentication & users.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Turning this ON puts every existing user, workspace and secret into a single default " +
+				"organization after restart, and adds an instance operator tier that manages organizations. " +
+				"It requires Authentication & users: with authentication off the instance refuses to start. " +
+				"Filesystem paths and agent CLI credentials are still shared across organizations, so this is " +
+				"an application-layer boundary, not a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.MultiTenancy },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.MultiTenancy = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.dynamicAgentRouting",
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
@@ -119,6 +157,23 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.officeSessionIdentity",
+			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
+			Kind:        KindFeature,
+			Label:       "Office per-agent session identity",
+			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
+				"Enable only after the companion (task_id, agent_profile_id) unique-index fix has shipped, since pre-existing duplicate rows are otherwise exposed.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

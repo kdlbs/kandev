@@ -1,6 +1,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { TaskTopBar } from "./task-top-bar";
 
 afterEach(() => cleanup());
@@ -115,6 +116,12 @@ describe("TaskTopBar executor environment controls", () => {
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
   });
+
+  it("shows the executor environment button for Kubernetes executors", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="k8s" />);
+
+    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+  });
 });
 
 describe("TaskTopBar GitHub issue link", () => {
@@ -189,5 +196,9 @@ describe("TaskTopBar archived task controls", () => {
 });
 
 function renderTopBar(ui: React.ReactNode) {
-  return render(<StateProvider>{ui}</StateProvider>);
+  return render(
+    <StateProvider>
+      <ToastProvider>{ui}</ToastProvider>
+    </StateProvider>,
+  );
 }

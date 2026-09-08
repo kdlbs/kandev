@@ -230,6 +230,7 @@ function buildBadgeDecorations(doc: DocLike, markTypeName: string): DecorationSe
 
 const orphanPluginKey = new PluginKey("commentMark-orphanDetection");
 const badgePluginKey = new PluginKey("commentMark-badges");
+const projectionReconciliationKey = new PluginKey("commentMark-projectionReconciliation");
 
 // ---------------------------------------------------------------------------
 // Helper: find commentId at a document position
@@ -361,20 +362,26 @@ export const CommentMark = Mark.create<CommentMarkOptions>({
       // Orphan detection — fire callback when a commentId disappears from the doc
       new Plugin({
         key: orphanPluginKey,
-        appendTransaction(transactions, oldState, newState) {
-          const docChanged = transactions.some((tr) => tr.docChanged);
-          if (!docChanged) return null;
+        appendTransaction(transactions, _, newState) {
+          const finalIds = collectCommentIds(newState.doc, markName);
+          const orphaned = new Set<string>();
 
-          const oldIds = collectCommentIds(oldState.doc, markName);
-          const newIds = collectCommentIds(newState.doc, markName);
-
-          const orphaned: string[] = [];
-          for (const id of oldIds) {
-            if (!newIds.has(id)) orphaned.push(id);
+          for (const transaction of transactions) {
+            if (
+              !transaction.docChanged ||
+              transaction.getMeta(projectionReconciliationKey) === true
+            ) {
+              continue;
+            }
+            const beforeIds = collectCommentIds(transaction.before, markName);
+            const afterIds = collectCommentIds(transaction.doc, markName);
+            for (const id of beforeIds) {
+              if (!afterIds.has(id) && !finalIds.has(id)) orphaned.add(id);
+            }
           }
 
-          if (orphaned.length > 0) {
-            setTimeout(() => onOrphanedComments(orphaned), 0);
+          if (orphaned.size > 0) {
+            setTimeout(() => onOrphanedComments([...orphaned]), 0);
           }
 
           return null;
@@ -468,6 +475,7 @@ export function rehydrateCommentMarks(
     }
 
     if (changed) {
+      tr.setMeta(projectionReconciliationKey, true);
       editor.view.dispatch(tr);
     }
   }, 0);

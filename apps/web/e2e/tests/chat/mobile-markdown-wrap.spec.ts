@@ -123,4 +123,143 @@ test.describe("mobile: Markdown table wrapping", () => {
       ),
     ).toBe(true);
   });
+
+  test("thinking preview stays visible and contained before expansion", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const firstLine =
+      "First meaningful reasoning summary stays visible while this long subject is truncated to the available mobile row width";
+    const laterLine = "Later reasoning detail remains available after expansion";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile Thinking Message Preview",
+      seedData.agentProfileId,
+      {
+        description: `e2e:thinking("${["", "## ", `**${firstLine}**`, "", laterLine].join("\\n")}")`,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("preview task did not create a session");
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) =>
+              message.type === "thinking" &&
+              String(message.metadata?.thinking ?? message.content ?? "").includes(firstLine),
+          );
+        },
+        { timeout: 30_000, message: "Waiting for thinking preview content to persist" },
+      )
+      .toBe(true);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const chat = session.activeChat();
+    const preview = chat.getByTestId("thinking-message-preview");
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveText(firstLine, { exact: true });
+    await expect(chat.getByText(laterLine, { exact: true })).toHaveCount(0);
+
+    const previewMetrics = await preview.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    }));
+    expect(previewMetrics.clientWidth).toBeGreaterThan(0);
+    expect(previewMetrics.scrollWidth).toBeGreaterThan(previewMetrics.clientWidth);
+    expect(previewMetrics.clientHeight).toBeLessThanOrEqual(previewMetrics.lineHeight + 1);
+    expect(await chat.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+
+    await chat.getByText("Thinking", { exact: true }).tap();
+    await expect(chat.getByText(laterLine, { exact: true })).toBeVisible();
+  });
+
+  test("compact thinking preview stays contained on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const compactLine =
+      "Compact thinking line remains within the available mobile row width for safe rendering";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile Compact Thinking Preview",
+      seedData.agentProfileId,
+      {
+        description: `e2e:thinking("${compactLine}")`,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("compact preview task did not create a session");
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) =>
+              message.type === "thinking" &&
+              String(message.metadata?.thinking ?? message.content ?? "").includes(compactLine),
+          );
+        },
+        { timeout: 30_000, message: "Waiting for compact thinking content to persist" },
+      )
+      .toBe(true);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const chat = session.activeChat();
+    const compact = chat.getByText(compactLine, { exact: true });
+    await expect(compact).toBeVisible();
+    await expect(chat.getByTestId("thinking-message-preview")).toHaveCount(0);
+
+    const compactMetrics = await compact.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+      text: element.textContent,
+      whiteSpace: getComputedStyle(element).whiteSpace,
+    }));
+    expect(compactMetrics.clientWidth).toBeGreaterThan(0);
+    expect(compactMetrics.scrollWidth).toBeLessThanOrEqual(compactMetrics.clientWidth + 1);
+    expect(compactMetrics.clientHeight).toBeGreaterThan(compactMetrics.lineHeight);
+    expect(compactMetrics.scrollHeight).toBe(compactMetrics.clientHeight);
+    expect(compactMetrics.text).toBe(compactLine);
+    expect(compactMetrics.whiteSpace).toBe("normal");
+    expect(await chat.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+  });
 });

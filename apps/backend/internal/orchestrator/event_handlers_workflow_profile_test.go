@@ -411,7 +411,7 @@ func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T
 	stepGetter.steps[step.ID] = step
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
 
-	effective, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step)
+	effective, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step, nil)
 	if err != nil {
 		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
 	}
@@ -454,6 +454,11 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 
 	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:             "step1",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-a",
+	}
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID:             "step2",
 		WorkflowID:     "wf1",
@@ -479,7 +484,7 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc.initWorkflowEngine()
 
-	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1", "step1"); err != nil {
 		t.Fatalf("dispatcher returned error: %v", err)
 	}
 
@@ -512,6 +517,101 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 	if old.State != models.TaskSessionStateCompleted {
 		t.Fatalf("initiating session state = %s, want completed", old.State)
+	}
+}
+
+func TestSwitchWorkflowDispatcherCarriesSourceEndPolicyAcrossWorkflowSwitch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.IsPrimary = true
+	session.TaskEnvironmentID = "env-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s1", "t1", "execution-a")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", AgentProfileID: "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+		// This must not control retirement of step1's source session.
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-profile-execution"}, nil
+		},
+	}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.logger = log
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	svc.initWorkflowEngine()
+
+	// switch_workflow dispatches on_exit before it changes the task row. The
+	// dispatcher must retain that source identity until the paired on_enter.
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnExit, "op-1:switch_workflow:on_exit", "step1"); err != nil {
+		t.Fatalf("on_exit dispatcher returned error: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	task.WorkflowStepID = "step2"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task to destination: %v", err)
+	}
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1:switch_workflow:on_enter", "step1"); err != nil {
+		t.Fatalf("on_enter dispatcher returned error: %v", err)
+	}
+
+	source, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reload source session: %v", err)
+	}
+	if source.State != models.TaskSessionStateWaitingForInput || source.IsPrimary {
+		t.Fatalf("source session = state %s primary %t, want parked nonprimary", source.State, source.IsPrimary)
+	}
+	if source.CompletedAt != nil {
+		t.Fatal("source session was completed; source step's park setting was not carried across the switch")
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var destination *models.TaskSession
+	for _, candidate := range sessions {
+		if candidate.AgentProfileID == "profile-b" {
+			destination = candidate
+			break
+		}
+	}
+	if destination == nil || !destination.IsPrimary {
+		t.Fatalf("destination session = %+v, want new primary profile-b session", destination)
 	}
 }
 
@@ -566,6 +666,11 @@ func TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction(t *testing
 	}
 
 	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:             "step1",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-a",
+	}
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID:             "step2",
 		WorkflowID:     "wf1",
@@ -593,7 +698,7 @@ func TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction(t *testing
 	svc.SetEngineDecisionStore(decisions)
 	svc.initWorkflowEngine()
 
-	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1", "step1"); err != nil {
 		t.Fatalf("dispatcher returned error: %v", err)
 	}
 
@@ -660,7 +765,7 @@ func TestSwitchWorkflowDispatcherSkipsPreflightForAppliedOperation(t *testing.T)
 		t.Fatalf("mark operation applied: %v", err)
 	}
 
-	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-replay"); err != nil {
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-replay", ""); err != nil {
 		t.Fatalf("dispatcher returned error: %v", err)
 	}
 
@@ -727,7 +832,7 @@ func TestSwitchWorkflowDispatcherSharesWorkflowMetaCacheWithAutoStart(t *testing
 		engine.ActionAutoStartAgent: probe,
 	})
 
-	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1", ""); err != nil {
 		t.Fatalf("dispatcher returned error: %v", err)
 	}
 	if got := stepGetter.metaCalls(); got != 1 {
@@ -1388,12 +1493,16 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 
 		sg := newMockStepGetter()
+		sourceStep := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", AgentProfileID: "profile-a",
+		}
 		step := &wfmodels.WorkflowStep{
 			ID:             "step2",
 			WorkflowID:     "wf1",
 			Name:           "Review",
 			AgentProfileID: "profile-b",
 		}
+		sg.steps[sourceStep.ID] = sourceStep
 		sg.steps["step2"] = step
 
 		agentMgr := &mockAgentManager{
@@ -1416,7 +1525,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0, sourceStep)
 
 		// The old session should be completed
 		oldSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1484,7 +1593,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0, nil)
 
 		// Session should remain running (not completed)
 		updatedSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1547,7 +1656,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0, nil)
 
 		// Session should remain running
 		sessions, err := repo.ListTaskSessions(ctx, "t1")
@@ -1608,7 +1717,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0, nil)
 
 		// Critical: no new profile-a session should be spawned, and the
 		// user-chosen profile-b session must NOT be marked COMPLETED.
@@ -1695,7 +1804,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0, nil)
 
 		updated, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {

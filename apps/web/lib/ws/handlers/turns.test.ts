@@ -73,7 +73,7 @@ function settleViaSetTaskSession(store: ReturnType<typeof makeStore>): void {
 }
 
 function settleViaSetTaskSessionsForTask(store: ReturnType<typeof makeStore>): void {
-  store.getState().setTaskSessionsForTask(TASK_ID, [IDLE_SESSION]);
+  store.getState().setTaskSessionsForTask(TASK_ID, [IDLE_SESSION], {});
 }
 
 function settleViaUpsertTaskSessionFromEvent(store: ReturnType<typeof makeStore>): void {

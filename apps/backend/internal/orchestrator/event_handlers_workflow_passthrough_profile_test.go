@@ -56,9 +56,13 @@ func TestPrepareWorkflowStepSessionSwitchesPassthroughProfile(t *testing.T) {
 	}
 
 	stepGetter := newMockStepGetter()
+	sourceStep := &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", AgentProfileID: "profile-a",
+	}
 	step := &wfmodels.WorkflowStep{
 		ID: "step2", WorkflowID: "wf1", AgentProfileID: "profile-b",
 	}
+	stepGetter.steps[sourceStep.ID] = sourceStep
 	stepGetter.steps[step.ID] = step
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{
@@ -76,7 +80,7 @@ func TestPrepareWorkflowStepSessionSwitchesPassthroughProfile(t *testing.T) {
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
 
-	effective, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step)
+	effective, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step, sourceStep)
 	if err != nil {
 		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
 	}
@@ -165,7 +169,7 @@ func TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingSte
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentManager,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
-		workflowStore: newWorkflowStore(repo, steps, agentManager, noopPublisher, log),
+		workflowStore: newWorkflowStore(repo, steps, agentManager, noopPublisher, log, &operationLedger{}),
 	}
 
 	applied := svc.applyEngineTransition(ctx, "t1", session, engine.HandleResult{

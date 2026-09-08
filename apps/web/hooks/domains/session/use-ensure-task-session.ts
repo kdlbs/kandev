@@ -163,7 +163,7 @@ export function useEnsureTaskSession(
     [preventAutoStart, task, kanbanWorkflowId, kanbanSteps, kanbanLoading, snapshots],
   );
 
-  // Latch keyed by `${taskId}:${retryToken}` so a re-mount on the same task
+  // Latch keyed by `${taskId}:${retryToken}` so a re-render on the same task
   // doesn't refire, but switching tasks or calling retry() does.
   const launchedKeyRef = useRef<string | null>(null);
   const previousTaskIdRef = useRef<string | null>(taskId);
@@ -186,7 +186,7 @@ export function useEnsureTaskSession(
     // branch does NOT latch, so a later steps hydration re-runs the effect
     // with the correct isFinalStep value (fixes late-hydration auto-start).
     if (preventAutoStart && !stepsKnown) return;
-    const key = `${taskId}:${retryToken}:${isFinalStep ? "gated" : "plain"}`;
+    const key = `${taskId}:${retryToken}`;
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
@@ -209,7 +209,7 @@ export function useEnsureTaskSession(
         if (cancelled || launchedKeyRef.current !== key) return;
         setStatus("error");
         setError(err instanceof Error ? err : new Error(String(err)));
-        launchedKeyRef.current = null;
+        // Keep the key latched. The retry token or a task change owns the next attempt.
       });
 
     return () => {

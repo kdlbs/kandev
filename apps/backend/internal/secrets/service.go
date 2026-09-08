@@ -24,7 +24,7 @@ func NewService(store SecretStore, log *logger.Logger) *Service {
 	}
 }
 
-// SetWorkspaceAuthorizer wires the workspace visibility check used by the
+// SetWorkspaceAuthorizer wires the workspace reach check used by the
 // workspace-scoped API. The callback is intentionally a function so the
 // secrets package does not depend on the task service package.
 func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {

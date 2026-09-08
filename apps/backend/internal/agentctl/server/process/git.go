@@ -249,6 +249,15 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 			continue
 		}
 
+		// Empty-remote publication uses an immutable commit-to-branch refspec.
+		// Validate it before the generic slash-bearing reference check.
+		if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok {
+			if securityutil.LooksLikeCommitSHA(source) &&
+				securityutil.IsValidBranchName(destination) {
+				continue
+			}
+		}
+
 		// Validate branch references (e.g., "origin/branch", "upstream/main")
 		// This provides defense-in-depth even though branches are validated at call sites
 		if strings.Contains(arg, "/") {
@@ -494,6 +503,16 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		result.Error = err.Error()
 		return result, nil
 	}
+	basePublication := emptyRemotePublication{}
+	if g.remoteContribution == nil && g.contributionDestination == nil {
+		basePublication = g.prepareEmptyRemotePublication(ctx, "")
+		if basePublication.err != nil {
+			result.Error = basePublication.err.Error()
+			result.ErrorCode = basePublication.errorCode
+			result.Output = basePublication.output
+			return result, nil
+		}
+	}
 
 	args := []string{"push"}
 	shouldSetUpstream := setUpstream || g.getUpstreamRef(ctx) == ""
@@ -524,8 +543,13 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 
 	if err != nil {
 		result.Error = err.Error()
+		if basePublication.active {
+			result.ErrorCode = emptyRemoteBranchPublishFailedErrorCode
+			result.Output = combineGitOutputs(basePublication.output, output)
+		}
 		return result, nil
 	}
+	result.Output = combineGitOutputs(basePublication.output, output)
 
 	result.Success = true
 	g.logger.Info("push completed",
@@ -1207,6 +1231,7 @@ type PRCreateResult struct {
 	Provider     string `json:"provider,omitempty"`
 	Output       string `json:"output,omitempty"`
 	Error        string `json:"error,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
 }
 
 // CreatePR creates a pull request using the repository host's CLI.
@@ -1294,13 +1319,26 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		return result, nil
 	}
 
+	basePublication := g.prepareEmptyRemotePublication(ctx, baseBranch)
+	if basePublication.err != nil {
+		result.Error = basePublication.err.Error()
+		result.ErrorCode = basePublication.errorCode
+		result.Output = basePublication.output
+		return result, nil
+	}
+
 	pushOutput, err := g.runGitCommand(ctx, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
 		sanitizedOutput := g.sanitizePRFailure(pushOutput, title, body)
 		result.Error = fmt.Sprintf("failed to push branch: %s", sanitizedOutput)
-		result.Output = sanitizedOutput
+		result.Output = combineGitOutputs(basePublication.output, sanitizedOutput)
+		if basePublication.active {
+			result.ErrorCode = emptyRemoteBranchPublishFailedErrorCode
+		}
 		return result, nil
 	}
+	result.Output = combineGitOutputs(basePublication.output, g.sanitizeGitPushOutput(pushOutput))
+	result.BranchPushed = true
 	g.logger.Debug("pushed branch to remote", zap.String("output", g.sanitizeGitPushOutput(pushOutput)))
 
 	switch provider {

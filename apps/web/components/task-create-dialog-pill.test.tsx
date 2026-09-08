@@ -81,11 +81,7 @@ vi.mock("@kandev/ui/tooltip", async () => {
 });
 
 import { Pill, type PillOption } from "./task-create-dialog-pill";
-import {
-  branchToOption,
-  computeBranchPlaceholder,
-  sortBranches,
-} from "./task-create-dialog-branch-options";
+import { branchToOption, computeBranchPlaceholder, sortBranches } from "./branch-picker-options";
 
 const CREATE_REPOSITORY = "Create new repository";
 

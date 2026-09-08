@@ -90,8 +90,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   // All in-memory state (selectedFile, reviewedFiles, staleFiles, fileRefs)
   // is keyed by `reviewFileKey(file)` so two files at the same path in
   // different repos (e.g. `kandev/README.md` + `lvc/README.md`) get
-  // distinct rows. Without this every multi-repo review with same-named
-  // files would mark them all reviewed when one is checked.
+  // distinct rows. Layer-qualified mixed changes use the same key helper so
+  // reviewing one facet does not mark the other facet reviewed.
   const selectedIndex = selectedFile
     ? files.findIndex((f) => reviewFileKey(f) === selectedFile)
     : -1;

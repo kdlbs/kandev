@@ -471,15 +471,15 @@ func (r *Repository) insertTemplateStep(
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color, prompt, events,
 			allow_manual_move, is_start_step, show_in_command_panel,
-			auto_archive_after_hours, agent_profile_id, stage_type,
+				auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type,
 			auto_advance_requires_signal, cancel_triggers_turn_complete,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		idMap[def.ID], workflowID, def.Name, def.Position, def.Color, def.Prompt,
 		string(eventsJSON), dialect.BoolToInt(def.AllowManualMove),
 		dialect.BoolToInt(def.IsStartStep), dialect.BoolToInt(def.ShowInCommandPanel),
-		def.AutoArchiveAfterHours, def.AgentProfileID, string(stage),
+		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), string(stage),
 		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete),
 		now, now,
 	)

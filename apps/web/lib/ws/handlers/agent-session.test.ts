@@ -36,6 +36,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     queue: { bySessionId: {}, metaBySessionId: {} },
     setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
+    bumpSessionGitCheckoutGeneration: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
     reconcileWorkspaceSourcesAdopted: vi.fn(),
@@ -124,11 +125,7 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(
-  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
-    active_subagent_count?: number;
-  },
-) {
+function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
   return {
     id: "m",
     type: "notification" as const,
@@ -479,12 +476,14 @@ describe("session.workspace_sources.updated handler", () => {
   it("adopts the workspace root and bumps the Files refresh key", () => {
     const setTaskSession = vi.fn();
     const bumpWorkspaceFilesRefresh = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "IDLE", worktree_path: "/old" } },
       },
       setTaskSession,
       bumpWorkspaceFilesRefresh,
+      bumpSessionGitCheckoutGeneration,
     });
 
     const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
@@ -500,6 +499,7 @@ describe("session.workspace_sources.updated handler", () => {
       expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
     // The server-issued envelope timestamp is forwarded as the adoption
     // boundary so the client clock can never retire legitimate turns.
     expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(
@@ -1244,6 +1244,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
   it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     const setTaskSession = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: {
@@ -1262,6 +1263,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
       setSessionAgentctlStatus: vi.fn(),
       setTaskSession,
+      bumpSessionGitCheckoutGeneration,
       upsertTaskSessionFromEvent,
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
@@ -1304,6 +1306,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         workspace_path: TASK_ROOT,
       }),
     );
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
   });
 
   it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {
@@ -1491,6 +1494,142 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
 
     expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBeNull();
     expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+});
+
+// task-05's publishParkedTransition shares this wire event but omits
+// `foreground_activity` entirely (unlike the ADR-0049 flip, which always
+// sends it, explicit null included). A naive `payload.foreground_activity
+// ?? null` default would clobber a live busy signal on every parked-only
+// event.
+describe("session.activity_changed handler — parked-only payload shape", () => {
+  it("does not clobber a live foreground_activity on a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING", foreground_activity: "generating" },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 3,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      foreground_activity: "generating",
+      parked_on_background_work: true,
+      revision: 3,
+      parked_epoch: 100,
+    });
+  });
+
+  it("applies parked_on_background_work/revision/parked_epoch from a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 1,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: true,
+      revision: 1,
+      parked_epoch: 100,
+      foreground_activity: undefined,
+    });
+  });
+});
+
+// ResetAgentContext transitions a parked session WAITING_FOR_INPUT ->
+// STARTING before the backend's clearParkedOnSessionStateLeft publishes the
+// parked-only clear; the backend's own projection is already false by then,
+// so the later STARTING -> WAITING_FOR_INPUT settle never republishes.
+describe("session.activity_changed handler — parked-only clear during STARTING", () => {
+  it("applies a parked-only clear while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "STARTING",
+            parked_on_background_work: true,
+          },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: false,
+        revision: 2,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: false,
+      revision: 2,
+    });
+  });
+
+  it("still rejects a foreground-activity event while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).not.toHaveBeenCalled();
   });
 });
 

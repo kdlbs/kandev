@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -590,6 +591,21 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
+// PublishTurnStarted is publishTurnEvent(events.TurnStarted, ...)'s exported
+// form, for callers outside this package that insert a turn directly
+// (bypassing StartTurn/ReserveTurn) but still need the frontend's
+// turns.bySession to learn about it. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds turns
+// with caller-controlled timestamps to construct D1 turn-ordering scenarios,
+// which StartTurn's always-now stamping cannot produce. Without this, a
+// message attached to a harness-seeded turn the frontend has never observed
+// via turn.started is silently excluded by D1's turn-scoped
+// clarification/permission detection.
+func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) error {
+	// had_output is only meaningful on turn.completed; omit it here too.
+	return s.publishTurnEvent(events.TurnStarted, turn, nil)
+}
+
 // publishTurnEvent publishes a turn event to the event bus. hadOutput reports
 // whether the turn produced any agent output; it is only meaningful for
 // turn.completed events (the frontend uses it to surface an "empty turn"
@@ -880,6 +896,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 	if taskEnv != nil {
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
+		info.ValidatedTaskEnvironmentID = taskEnv.ID
+		info.ValidatedExecutorType = taskEnv.ExecutorType
+		if info.ExecutorType == "" {
+			info.ExecutorType = taskEnv.ExecutorType
+		}
 		info.TaskDirName = taskEnv.TaskDirName
 	}
 	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
@@ -894,46 +915,73 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		} else {
-			s.logger.Warn("failed to get executor running for session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, err)
 		}
 	} else if running != nil {
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
+			info.AgentProfileID = officeProfileID
+		}
 		if running.ContainerID != "" {
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
 	}
-	if session.ExecutorID != "" {
-		exec, err := s.executors.GetExecutor(ctx, session.ExecutorID)
-		if err != nil {
-			s.logger.Warn("failed to get executor for session",
-				zap.String("session_id", sessionID),
-				zap.String("executor_id", session.ExecutorID),
-				zap.Error(err))
-		} else if exec != nil {
-			info.ExecutorType = string(exec.Type)
-			// Project the executor record's connection config (e.g. ssh_host,
-			// ssh_host_fingerprint, ssh_user) into the workspace metadata as a
-			// fallback. The agent-launch path gets these via the orchestrator's
-			// executor-config merge, but the workspace-restore / terminal path
-			// only carries them forward from a live ExecutorRunning record. When
-			// no running record exists — terminal-state sessions (completed /
-			// failed / cancelled), post-restart, or after agentctl cleanup — the
-			// SSH executor would otherwise fail with "host (or host_alias) is
-			// required in executor config" when opening a terminal or restoring
-			// the workspace. Existing values (from the running record) win.
-			// Scoped to SSH: this fallback only makes sense for the SSH executor
-			// and the projected keys are SSH connection/profile keys.
-			if exec.Type == models.ExecutorTypeSSH {
-				mergeExecutorConfigMetadata(info, exec.Config)
-			}
+	executorID := session.ExecutorID
+	recordedKubernetes := running != nil && running.Runtime == agentruntime.RuntimeKubernetes
+	if recordedKubernetes {
+		executorID = strings.TrimSpace(running.ExecutorID)
+		if executorID == "" {
+			return nil, errors.New("restore Kubernetes workspace: recorded executor ID is missing")
+		}
+	}
+	if executorID != "" {
+		if err := s.applyWorkspaceExecutorRecord(ctx, sessionID, executorID, recordedKubernetes, info); err != nil {
+			return nil, err
 		}
 	}
 
 	return info, nil
+}
+
+func (s *Service) applyWorkspaceExecutorRecord(
+	ctx context.Context,
+	sessionID, executorID string,
+	recordedKubernetes bool,
+	info *lifecycle.WorkspaceInfo,
+) error {
+	exec, err := s.executors.GetExecutor(ctx, executorID)
+	if err != nil {
+		if recordedKubernetes {
+			return fmt.Errorf("restore Kubernetes workspace executor %q: %w", executorID, err)
+		}
+		s.logger.Warn("failed to get executor for session",
+			zap.String("session_id", sessionID),
+			zap.String("executor_id", executorID),
+			zap.Error(err))
+		return nil
+	}
+	if exec == nil {
+		if recordedKubernetes {
+			return fmt.Errorf("restore Kubernetes workspace executor %q: executor not found", executorID)
+		}
+		return nil
+	}
+	if recordedKubernetes && exec.Type != models.ExecutorTypeKubernetes {
+		return fmt.Errorf("restore Kubernetes workspace executor %q: executor is no longer Kubernetes", executorID)
+	}
+	info.ExecutorType = string(exec.Type)
+	// Only stable SSH connection/profile keys fill missing metadata. A retained
+	// Kubernetes row instead keeps resource inventory while current connection
+	// config authoritatively replaces every connection key.
+	if exec.Type == models.ExecutorTypeSSH {
+		mergeExecutorConfigMetadata(info, exec.Config)
+	}
+	if exec.Type == models.ExecutorTypeKubernetes {
+		mergeKubernetesExecutorConfigMetadata(info, exec.Config)
+	}
+	return nil
 }
 
 type workspaceWorktreeKey struct {
@@ -1189,6 +1237,19 @@ func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[strin
 			continue
 		}
 		dst[k] = v
+	}
+}
+
+func mergeKubernetesExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
+	dst := ensureWorkspaceMetadata(info)
+	for _, key := range []string{
+		lifecycle.MetadataKeyKubernetesAuthMode,
+		lifecycle.MetadataKeyKubernetesKubeconfigPath,
+		lifecycle.MetadataKeyKubernetesKubeContext,
+		lifecycle.MetadataKeyKubernetesConfigNamespace,
+		lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds,
+	} {
+		dst[key] = config[key]
 	}
 }
 

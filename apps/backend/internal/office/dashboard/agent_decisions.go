@@ -25,6 +25,13 @@ type RecordAgentDecisionInput struct {
 	AgentProfileID string
 	Decision       string
 	Reason         string
+	// SessionID, when features.officeSessionIdentity is on, names the
+	// decider's own calling session so RecordDecision re-evaluates against
+	// it instead of the task's most-recently-started ("active") session.
+	// Populated unconditionally by the MCP handler; gated here because the
+	// flag decision belongs with the rest of this service's behavior, not
+	// the transport layer.
+	SessionID string
 }
 
 // AgentDecisionValidationError marks an error caused by a caller-provided
@@ -137,7 +144,7 @@ func (s *DashboardService) RecordAgentDecision(
 		return nil, agentDecisionValidation(fmt.Errorf("%s", agentDecisionReasonRequiredErr))
 	}
 
-	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
+	decisionInput := officeenginedispatcher.RecordDecisionInput{
 		TaskID:        in.TaskID,
 		StepID:        stepID,
 		ParticipantID: participantID,
@@ -146,7 +153,11 @@ func (s *DashboardService) RecordAgentDecision(
 		DeciderID:     in.AgentProfileID,
 		Role:          role,
 		Comment:       in.Reason,
-	})
+	}
+	if s.officeSessionIdentity {
+		decisionInput.SessionID = in.SessionID
+	}
+	result, err := dispatcher.RecordDecision(ctx, decisionInput)
 	if err != nil {
 		return nil, fmt.Errorf("record decision: %w", err)
 	}

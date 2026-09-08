@@ -231,13 +231,16 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 		if r.Watch.PRNumber == 0 {
 			continue
 		}
+		effectiveTaskID := p.service.reconcileTaskPROwnership(
+			ctx, r.Watch.SessionID, r.Watch.TaskID, r.Watch.RepositoryID, r.Watch.PRNumber,
+		)
 		pr := r.Status.PR
 		if pr != nil && (pr.State == prStateMerged || pr.State == prStateClosed) {
-			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
+			p.publishPRStatusEvent(ctx, r.Watch, effectiveTaskID, r.Status)
 			continue
 		}
 		if r.Changed {
-			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
+			p.publishPRStatusEvent(ctx, r.Watch, effectiveTaskID, r.Status)
 		}
 	}
 	return true
@@ -281,10 +284,21 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
+	// A numbered watch found its PR before this fix existed (or before the
+	// discovering session's own group redirect took effect) keeps the
+	// observing member's task_id forever — watches are never re-pointed once
+	// they have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner here, the same way associatePRWithTask does
+	// for the association write, so the background poller keeps syncing the
+	// owner's github_task_prs row instead of silently updating nothing.
+	effectiveTaskID := p.service.reconcileTaskPROwnership(
+		ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber,
+	)
+
 	// Always sync latest PR state to the task-PR record.
-	if syncErr := p.service.SyncTaskPR(ctx, watch.TaskID, status); syncErr != nil {
+	if syncErr := p.service.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
 		p.logger.Error("failed to sync task PR",
-			zap.String("task_id", watch.TaskID), zap.Error(syncErr))
+			zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
 		return // Keep watch so the next cycle can retry
 	}
 	// When the tracked PR is merged or closed, reset the watch back to the
@@ -293,13 +307,13 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	// closes #1 and opens #2 as a replacement) without requiring manual
 	// intervention. The watch is only deleted when its owning session is gone.
 	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
-		p.publishPRStatusEvent(ctx, watch, status)
+		p.publishPRStatusEvent(ctx, watch, effectiveTaskID, status)
 		hold, holdErr := p.service.ShouldHoldTerminalPRWatch(
-			ctx, watch.TaskID, watch.RepositoryID, watch.PRNumber, status.PR.State,
+			ctx, effectiveTaskID, watch.RepositoryID, watch.PRNumber, status.PR.State,
 		)
 		if holdErr != nil {
 			p.logger.Warn("failed to check terminal PR automation",
-				zap.String("task_id", watch.TaskID), zap.Error(holdErr))
+				zap.String("task_id", effectiveTaskID), zap.Error(holdErr))
 			return
 		}
 		if hold {
@@ -321,7 +335,7 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	p.publishPRStatusEvent(ctx, watch, status)
+	p.publishPRStatusEvent(ctx, watch, effectiveTaskID, status)
 }
 
 // detectPRForWatch searches GitHub for a PR on the watch's branch.
@@ -369,7 +383,10 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	if _, assocErr := p.service.AssociatePRWithTask(ctx, watch.TaskID, watch.RepositoryID, pr); assocErr != nil {
+	if _, assocErr := p.service.associatePRWithTaskForSession(
+		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
+		false, false, TaskPRSourceWatch,
+	); assocErr != nil {
 		p.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", watch.TaskID),
 			zap.Int("pr_number", pr.Number),
@@ -383,13 +400,13 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		zap.Int("pr_number", pr.Number))
 }
 
-func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, status *PRStatus) {
+func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, taskID string, status *PRStatus) {
 	if p.eventBus == nil {
 		return
 	}
 	evt := &PRFeedbackEvent{
 		SessionID:      watch.SessionID,
-		TaskID:         watch.TaskID,
+		TaskID:         taskID,
 		PRNumber:       watch.PRNumber,
 		Owner:          watch.Owner,
 		Repo:           watch.Repo,

@@ -148,6 +148,64 @@ func TestStop_MissingSessionReportsRuntimeNotFound(t *testing.T) {
 	})
 }
 
+func TestStopSessionSynchronouslyWaitsForAgentTeardown(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-sync"] = &models.TaskSession{
+		ID: "session-sync", TaskID: "task-sync", State: models.TaskSessionStateRunning,
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-sync", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-sync", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-sync" {
+			t.Fatalf("stopped execution = %q, want execution-sync", executionID)
+		}
+	default:
+		t.Fatal("synchronous stop returned before agent teardown ran")
+	}
+	if got := repo.sessions["session-sync"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+}
+
+func TestStopSessionSynchronouslyStopsLateExecutionAfterSessionDeletion(t *testing.T) {
+	repo := newMockRepository()
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, fmt.Errorf("session deleted: %w", models.ErrTaskSessionNotFound)
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-late", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-deleted", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	if got := <-stopCalls; got != "execution-late" {
+		t.Fatalf("stopped execution = %q, want execution-late", got)
+	}
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 
@@ -427,32 +485,24 @@ func TestStopExecution_PreservesRuntimeFailureClassification(t *testing.T) {
 	}
 }
 
-func TestPrepareModelSwitch_StopsBeforeReplacementWhenTeardownFails(t *testing.T) {
+func TestStopPreparedModelSwitchAgent_ReturnsTeardownFailure(t *testing.T) {
 	stopErr := errors.New("runtime teardown failed")
-	repo := newMockRepository()
-	repo.sessions["session-model-switch"] = &models.TaskSession{
-		ID: "session-model-switch", TaskID: "task-model-switch",
-	}
-	repo.tasks["task-model-switch"] = &models.Task{ID: "task-model-switch"}
 	manager := &mockAgentManager{
-		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
-			return "execution-model-switch", nil
-		},
-		stopAgentFunc: func(context.Context, string, bool) error {
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "execution-model-switch" || force {
+				t.Fatalf("StopAgent = (%q, %v), want (execution-model-switch, false)", executionID, force)
+			}
 			return stopErr
 		},
 	}
-	exec := newTestExecutor(t, manager, repo)
+	exec := newTestExecutor(t, manager, newMockRepository())
 
-	session, task, acpSessionID, existingRunning, err := exec.prepareModelSwitch(
-		context.Background(), "task-model-switch", "session-model-switch",
+	err := exec.stopPreparedModelSwitchAgent(
+		context.Background(), "execution-model-switch",
 	)
 
 	if !errors.Is(err, stopErr) {
-		t.Fatalf("prepareModelSwitch error = %v, want %v", err, stopErr)
-	}
-	if session != nil || task != nil || acpSessionID != "" || existingRunning != nil {
-		t.Fatalf("prepareModelSwitch returned replacement inputs after stop failure: session=%#v task=%#v acp=%q running=%#v", session, task, acpSessionID, existingRunning)
+		t.Fatalf("stopPreparedModelSwitchAgent error = %v, want %v", err, stopErr)
 	}
 }
 
@@ -666,5 +716,56 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 				t.Fatalf("model-switch credentials not workspace scoped: workspace=%q env=%#v", capturedReq.WorkspaceID, capturedReq.Env)
 			}
 		})
+	}
+}
+
+func TestSwitchModelFallback_PreservesExecutorProfileMetadata(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-profile"] = &models.Task{
+		ID:          "task-profile",
+		WorkspaceID: "workspace-1",
+		Title:       "Profile task",
+	}
+	repo.sessions["session-profile"] = &models.TaskSession{
+		ID:                "session-profile",
+		TaskID:            "task-profile",
+		AgentProfileID:    "agent-profile",
+		ExecutorID:        "exec-local-docker",
+		ExecutorProfileID: "profile-userns",
+		State:             models.TaskSessionStateRunning,
+	}
+	repo.executors["exec-local-docker"] = &models.Executor{
+		ID: "exec-local-docker", Type: models.ExecutorTypeLocalDocker,
+	}
+	repo.executorProfiles["profile-userns"] = &models.ExecutorProfile{
+		ID:         "profile-userns",
+		ExecutorID: "exec-local-docker",
+		Config: map[string]string{
+			lifecycle.MetadataKeyAllowUserNamespaces: "true",
+		},
+	}
+
+	var capturedReq *LaunchAgentRequest
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-old", nil
+		},
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{AgentExecutionID: "execution-new"}, nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if _, err := exec.SwitchModel(
+		context.Background(), "task-profile", "session-profile", "new-model", "continue",
+	); err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("fallback did not call LaunchAgent")
+	}
+	if got, _ := capturedReq.Metadata[lifecycle.MetadataKeyAllowUserNamespaces].(string); got != "true" {
+		t.Fatalf("user namespace metadata = %q, want profile value true", got)
 	}
 }

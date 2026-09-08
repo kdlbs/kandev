@@ -40,6 +40,10 @@ describe("vitest environment", () => {
     expect(typeof React.act).toBe("function");
   });
 
+  it("identifies the simulated browser as Chromium", () => {
+    expect(navigator.userAgent).toContain("Chrome/");
+  });
+
   it("can render a component to the DOM", () => {
     render(<div data-testid="vitest-environment-probe">{PROBE_TEXT}</div>);
 

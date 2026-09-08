@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -314,7 +315,7 @@ func (r *Repository) ListStepParticipantsForTask(
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE step_id = ? AND (task_id = '' OR task_id = ?)
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -327,13 +328,14 @@ func (r *Repository) ListStepParticipantsForTask(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -354,7 +356,7 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 		return nil, errors.New("task_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE task_id = ?
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -367,13 +369,14 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -396,7 +399,7 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 		return nil, errors.New("workflow_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at, p.provenance
 		FROM workflow_step_participants p
 		JOIN workflow_steps ws ON ws.id = p.step_id
 		WHERE p.task_id = ? AND ws.workflow_id = ?
@@ -410,13 +413,14 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -478,7 +482,7 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ''
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -491,13 +495,14 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 	var result []*models.WorkflowStepParticipant
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		result = append(result, p)
 	}
 	return result, rows.Err()
@@ -748,7 +753,51 @@ func isParticipantsNaturalKeyViolation(err error) bool {
 	return strings.Contains(err.Error(), sqliteParticipantsNaturalKeyViolationMessage)
 }
 
+// IsParticipantsNaturalKeyViolation is isParticipantsNaturalKeyViolation,
+// exported so office's AddTaskParticipant — a second writer of this same
+// table, in a different package — can recognize the same defensive
+// backstop EnsureRoleSeat retries on, instead of reimplementing the
+// per-dialect error matching against a private constant only this package
+// can see.
+func IsParticipantsNaturalKeyViolation(err error) bool {
+	return isParticipantsNaturalKeyViolation(err)
+}
+
 const participantsLockNamespace = "workflow-participant-role-seat:"
+
+// ParticipantRoleSeatLockKey derives the shared advisory-lock key
+// automatic casting (EnsureRoleSeat), manual registration (office
+// AddTaskParticipant), and decision recording (recordStepDecisionTx)
+// acquire before mutating or reading a role's seat slate for a task. One
+// exported function, not an exported namespace constant, so no caller
+// reassembles the key itself — a drift in separator or field order
+// between two reassemblies would produce two keys that look identical in
+// review and hash apart, closing nothing (system-design "The shared
+// exclusion").
+//
+// recordStepDecisionTx additionally serializing on this key (rather than
+// only its own decisionLockNamespace) is load-bearing, not defensive:
+// without it, a decision committing between AddTaskParticipant's
+// claimAutoSeat read and its conditional UPDATE is invisible to that
+// UPDATE's NOT EXISTS guard under PostgreSQL's READ COMMITTED isolation —
+// the guard only ever sees already-committed state, so an interleaved,
+// not-yet-committed decision insert does not block the claim. The two
+// writers previously locked on disjoint namespaces (participantsLockNamespace
+// vs decisionLockNamespace) and never actually contended.
+//
+// Keyed on task and role only, deliberately narrower than the namespace,
+// task, workflow and role EnsureRoleSeat locked on before this change.
+// Registration cannot know the task's workflow before it has resolved the
+// task's current step, and that step must be resolved inside the
+// exclusion — keeping the workflow in the key would force a provisional
+// read before the lock, a re-read inside it, and a retry when the two
+// disagree, which a shared exclusion is meant to avoid. A task belongs to
+// one workflow at a time, so every pair of writers that contended under
+// the four-part key still contends under this one; the change only adds
+// contention, never removes it.
+func ParticipantRoleSeatLockKey(taskID, role string) string {
+	return strings.Join([]string{participantsLockNamespace, taskID, role}, "|")
+}
 
 // ensureRoleSeatMaxAttempts bounds EnsureRoleSeat's retry loop. Mirrors
 // recordStepDecisionMaxAttempts: one retry resolves the race the unique
@@ -812,7 +861,8 @@ func (r *Repository) HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID,
 //
 // Returns the seat (existing or newly written) and whether this call
 // inserted it. On PostgreSQL, an advisory transaction lock keyed on
-// (workflow, task, role) serializes concurrent callers before the SELECT,
+// (task, role) — ParticipantRoleSeatLockKey, shared with office's
+// AddTaskParticipant — serializes concurrent callers before the SELECT,
 // matching recordStepDecisionTx's pattern — SQLite's single-writer lock
 // already provides that serialization.
 func (r *Repository) EnsureRoleSeat(
@@ -853,7 +903,7 @@ func (r *Repository) ensureRoleSeatTx(
 	defer func() { _ = tx.Rollback() }()
 
 	if dialect.IsPostgres(r.db.DriverName()) {
-		lockKey := strings.Join([]string{participantsLockNamespace, workflowID, taskID, role}, "|")
+		lockKey := ParticipantRoleSeatLockKey(taskID, role)
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return nil, false, fmt.Errorf("lock role seat identity: %w", err)
 		}
@@ -933,6 +983,13 @@ func (r *Repository) ensureRoleSeatTx(
 const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
 
 const decisionLockNamespace = "workflow-step-decision:"
+
+// ErrParticipantSeatChanged indicates that an agent decision used a seat that
+// no longer belongs to that agent when the decision transaction acquired the
+// participant-role lock.
+var ErrParticipantSeatChanged = errors.New("participant seat changed")
+
+const agentDeciderType = "agent"
 
 // sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
 // puts in a UNIQUE-constraint error for this index's column list.
@@ -1029,6 +1086,25 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return fmt.Errorf("lock active decision identity: %w", err)
 		}
+		// Also serialize on the participant-seat exclusion so a claim or
+		// promotion racing this decision under READ COMMITTED cannot
+		// interleave between its own read and write — see
+		// ParticipantRoleSeatLockKey's doc comment. Always held second,
+		// after decisionLockNamespace above and before any row write in
+		// this transaction, so the two lock acquisitions never order
+		// against each other in reverse across concurrent callers. Skipped
+		// when the role is unknown: nothing to serialize against.
+		if d.Role != "" {
+			seatLockKey := ParticipantRoleSeatLockKey(d.TaskID, d.Role)
+			if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), seatLockKey); err != nil {
+				return fmt.Errorf("lock participant role seat: %w", err)
+			}
+		}
+	}
+	// The shared lock closes the transaction-local seat read/write gap. This
+	// validation also covers the caller's earlier role-resolution read.
+	if err := r.validateDecisionParticipantSeatTx(ctx, tx, d); err != nil {
+		return err
 	}
 
 	if d.DeciderID != "" && d.Role != "" {
@@ -1065,6 +1141,45 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// validateDecisionParticipantSeatTx verifies an agent decision against the
+// current participant row after the role lock is held. The pre-write role
+// resolution happens outside this transaction, so the seat can change before
+// the decision reaches this boundary.
+func (r *Repository) validateDecisionParticipantSeatTx(
+	ctx context.Context, tx *sqlx.Tx, d *models.WorkflowStepDecision,
+) error {
+	if d.DeciderType != agentDeciderType || d.DeciderID == "" || d.Role == "" {
+		return nil
+	}
+
+	var currentAgentID string
+	var decisionRequired int
+	err := tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT agent_profile_id, decision_required
+		FROM workflow_step_participants
+		WHERE id = ?
+		  AND step_id = ?
+		  AND role = ?
+		  AND (task_id = ? OR task_id = '')
+	`), d.ParticipantID, d.StepID, d.Role, d.TaskID).Scan(&currentAgentID, &decisionRequired)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Engine-side callers can intentionally record a decision with a
+		// participant identifier that has no row. Preserve that existing
+		// behavior while rejecting a row that changed identity in place.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("validate participant seat: %w", err)
+	}
+	if currentAgentID != d.DeciderID || decisionRequired != 1 {
+		return fmt.Errorf(
+			"%w: participant %q is not held by agent %q",
+			ErrParticipantSeatChanged, d.ParticipantID, d.DeciderID,
+		)
 	}
 	return nil
 }

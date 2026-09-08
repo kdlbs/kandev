@@ -17,6 +17,7 @@ const MOVED_PATH = "review-status-a-very-long-new-name-that-must-truncate.ts";
 test.describe("Review file status", () => {
   test.describe.configure({ timeout: 120_000 });
 
+  // @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.4
   test("shows every status, keeps the marker visible at minimum width, and explains a pure move", async ({
     testPage,
     apiClient,
@@ -224,9 +225,13 @@ test.describe("Review file status", () => {
       .toBeGreaterThan(0);
 
     await movedRow.click();
+    const movedHeader = dialog.locator(
+      `[data-testid="review-file-header"][data-file-path="${MOVED_PATH}"]`,
+    );
+    const movedSection = movedHeader.locator("..");
     await expect(
-      dialog.getByText(`Moved from ${MOVED_FROM_PATH}; no textual changes`),
+      movedSection.getByText(`Moved from ${MOVED_FROM_PATH}; no textual changes`),
     ).toBeVisible();
-    await expect(dialog.getByText("Loading diff...")).toHaveCount(0);
+    await expect(movedSection.getByText("Loading diff...")).toHaveCount(0);
   });
 });

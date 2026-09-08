@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -17,9 +17,13 @@ import { useAppStore } from "@/components/state-provider";
 import { useSubtaskCountState, type SubtaskCountResult } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import {
+  TASK_CONFIRM_ACTION_CLASS,
+  TASK_CONFIRM_BODY_CLASS,
   TASK_CONFIRM_CLASS,
+  TASK_CONFIRM_FOOTER_CLASS,
   TASK_CONFIRM_HEADER_CLASS,
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
@@ -28,6 +32,7 @@ import { useTranslation } from "react-i18next";
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   taskTitle?: string;
   isBulkOperation?: boolean;
   count?: number;
@@ -102,6 +107,7 @@ function isArchiveActionDisabled(
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
+  focusReturnRef,
   taskTitle,
   isBulkOperation,
   count,
@@ -129,6 +135,12 @@ export function TaskArchiveConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
+  const confirmedRef = useRef(false);
+  const restoreFocus = () => {
+    if (confirmedRef.current) return;
+    const focusReturnTarget = focusReturnRef?.current;
+    if (focusReturnTarget?.isConnected) focusReturnTarget.focus();
+  };
   const requiresConfirmation = useArchiveConfirmationMode(
     open,
     confirmTaskArchive,
@@ -148,7 +160,10 @@ export function TaskArchiveConfirmDialog({
   const taskIsInFlight = computeTaskIsInFlight(isInFlight, storeInFlight);
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) setCascade(false);
+    if (!next) {
+      setCascade(false);
+      restoreFocus();
+    }
     onOpenChange(next);
   };
 
@@ -156,47 +171,58 @@ export function TaskArchiveConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocus();
+          confirmedRef.current = false;
+        }}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild className="text-sm leading-6">
-            <div>
-              <p>{firstLine}</p>
-              {cleanup.lines.map((line, i) => (
-                <p key={i} className="mt-2" data-testid="cleanup-line">
-                  {line}
-                </p>
-              ))}
+        </AlertDialogHeader>
+        <div data-testid="task-confirmation-body" className={TASK_CONFIRM_BODY_CLASS}>
+          <AlertDialogDescription asChild className="text-left text-sm leading-6">
+            <div className="space-y-3">
+              <p data-testid="task-confirmation-outcome">{firstLine}</p>
+              <TaskCleanupConsequences summary={cleanup} />
             </div>
           </AlertDialogDescription>
-        </AlertDialogHeader>
-        {taskIsInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
-        {subtaskCount > 0 && (
-          <label className="flex items-start gap-2 text-sm cursor-pointer">
-            <Checkbox
-              checked={cascade}
-              onCheckedChange={(v) => setCascade(v === true)}
-              disabled={isArchiving}
-              data-testid="archive-cascade-checkbox"
-            />
-            <span>
-              {t("task:alsoArchiveSubtasks", { count: subtaskCount })}
-              <span className="block text-sm text-muted-foreground">
-                {t("task:subtasksStayActiveUnlessYouTick")}
+          {taskIsInFlight && (
+            <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
+          )}
+          {subtaskCount > 0 && (
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <Checkbox
+                checked={cascade}
+                onCheckedChange={(v) => setCascade(v === true)}
+                disabled={isArchiving}
+                data-testid="archive-cascade-checkbox"
+              />
+              <span>
+                {t("task:alsoArchiveSubtasks", { count: subtaskCount })}
+                <span className="block text-sm text-muted-foreground">
+                  {t("task:subtasksStayActiveUnlessYouTick")}
+                </span>
               </span>
-            </span>
-          </label>
-        )}
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer !text-sm">
+            </label>
+          )}
+        </div>
+        <AlertDialogFooter className={TASK_CONFIRM_FOOTER_CLASS}>
+          <AlertDialogCancel className={TASK_CONFIRM_ACTION_CLASS}>
             {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
+            variant="default"
             disabled={archiveDisabled}
-            className="cursor-pointer !text-sm"
+            className={TASK_CONFIRM_ACTION_CLASS}
             data-testid={confirmTestId}
             onClick={() => {
               if (archiveDisabled) return;
+              confirmedRef.current = true;
               onConfirm({ cascade });
               handleOpenChange(false);
             }}

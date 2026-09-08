@@ -380,6 +380,27 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 	}
 }
 
+// TestCreateInstance_MarshalsMCPToolNamePresentationCapability covers the
+// wire portion of AC-TASKS-MCP-TOOL-NAMES-001.5.
+func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	req := &CreateInstanceRequest{
+		WorkspacePath:              "/workspace/task-1",
+		NamespacesMCPToolsByServer: true,
+	}
+
+	if _, err := newTestControlClient(t, srv).CreateInstance(context.Background(), req); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if got, ok := body["namespaces_mcp_tools_by_server"].(bool); !ok || !got {
+		t.Fatalf("serialized capability = %#v, want true", body["namespaces_mcp_tools_by_server"])
+	}
+}
+
 // 200 is accepted alongside 201 — agentctl returns 200 when it reuses an
 // existing instance for the same ID.
 func TestCreateInstance_AcceptsBoth200And201(t *testing.T) {

@@ -98,6 +98,7 @@ function applyPendingActionProjection(store: StoreApi<AppState>, payload: Messag
       payload.session_id,
       payload.pending_action ?? null,
       payload.pending_action_revision,
+      payload.task_id,
     );
 }
 

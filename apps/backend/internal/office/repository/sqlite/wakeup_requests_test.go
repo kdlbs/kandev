@@ -11,6 +11,7 @@ import (
 
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 func TestWakeupRequest_CreateAndGet(t *testing.T) {
@@ -204,6 +205,130 @@ func TestWakeupRequest_MarkCoalesced(t *testing.T) {
 	}
 	if !contains(gotRun.ContextSnapshot, `"extra":"value"`) {
 		t.Errorf("expected merged extra=value in snapshot, got %q", gotRun.ContextSnapshot)
+	}
+}
+
+func TestWakeupRequest_PromoteAndCoalesceCommitsAllState(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	run := &officemodels.Run{
+		ID:              "run-cron",
+		AgentProfileID:  "agent-1",
+		Reason:          shared.RunReasonRoutineDispatchCron,
+		Payload:         "{}",
+		Status:          "queued",
+		CoalescedCount:  1,
+		ContextSnapshot: `{"existing":"value"}`,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := repo.CreateWakeupRequest(ctx, &sqlite.WakeupRequest{
+		ID: "w-event", AgentProfileID: "agent-1", Source: "routine",
+		Reason:  shared.RunReasonRoutineDispatchEvent,
+		Payload: `{"routine_id":"r-1"}`,
+	}); err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+
+	coalesced, err := repo.PromoteRunAndCoalesceWakeupIfQueued(
+		ctx, "w-event", run.ID, shared.RunReasonRoutineDispatchEvent,
+	)
+	if err != nil {
+		t.Fatalf("promote and coalesce: %v", err)
+	}
+	if !coalesced {
+		t.Fatal("expected queued run to accept atomic coalesce")
+	}
+
+	gotReq, err := repo.GetWakeupRequest(ctx, "w-event")
+	if err != nil {
+		t.Fatalf("get wakeup: %v", err)
+	}
+	if gotReq.Status != sqlite.WakeupStatusCoalesced || gotReq.RunID != run.ID {
+		t.Errorf("wakeup state = (%q, %q), want (coalesced, %q)", gotReq.Status, gotReq.RunID, run.ID)
+	}
+	gotRun, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if gotRun.Reason != shared.RunReasonRoutineDispatchEvent {
+		t.Errorf("reason = %q, want %q", gotRun.Reason, shared.RunReasonRoutineDispatchEvent)
+	}
+	if gotRun.CoalescedCount != 2 {
+		t.Errorf("coalesced_count = %d, want 2", gotRun.CoalescedCount)
+	}
+	if !contains(gotRun.ContextSnapshot, `"routine_id":"r-1"`) {
+		t.Errorf("context_snapshot = %q, want routine payload", gotRun.ContextSnapshot)
+	}
+}
+
+func TestWakeupRequest_PromoteAndCoalesceClaimedRunDoesNothing(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	run := &officemodels.Run{
+		ID: "run-cron", AgentProfileID: "agent-1",
+		Reason: shared.RunReasonRoutineDispatchCron, Payload: "{}",
+		Status: "claimed", CoalescedCount: 1, ContextSnapshot: "{}",
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := repo.CreateWakeupRequest(ctx, &sqlite.WakeupRequest{
+		ID: "w-event", AgentProfileID: "agent-1", Source: "routine",
+		Payload: `{"routine_id":"r-1"}`,
+	}); err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+
+	coalesced, err := repo.PromoteRunAndCoalesceWakeupIfQueued(
+		ctx, "w-event", run.ID, shared.RunReasonRoutineDispatchEvent,
+	)
+	if err != nil {
+		t.Fatalf("promote and coalesce: %v", err)
+	}
+	if coalesced {
+		t.Fatal("claimed run must not accept atomic coalesce")
+	}
+	gotReq, _ := repo.GetWakeupRequest(ctx, "w-event")
+	if gotReq.Status != sqlite.WakeupStatusQueued {
+		t.Errorf("wakeup status = %q, want queued", gotReq.Status)
+	}
+	gotRun, _ := repo.GetRunByID(ctx, run.ID)
+	if gotRun.Reason != shared.RunReasonRoutineDispatchCron || gotRun.CoalescedCount != 1 {
+		t.Errorf("run state changed: reason=%q count=%d", gotRun.Reason, gotRun.CoalescedCount)
+	}
+}
+
+func TestWakeupRequest_PromoteAndCoalesceRollsBackOnMergeError(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	run := &officemodels.Run{
+		ID: "run-cron", AgentProfileID: "agent-1",
+		Reason: shared.RunReasonRoutineDispatchCron, Payload: "{}",
+		Status: "queued", CoalescedCount: 1, ContextSnapshot: "{}",
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := repo.CreateWakeupRequest(ctx, &sqlite.WakeupRequest{
+		ID: "w-event", AgentProfileID: "agent-1", Source: "routine", Payload: "{invalid-json",
+	}); err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+
+	if _, err := repo.PromoteRunAndCoalesceWakeupIfQueued(
+		ctx, "w-event", run.ID, shared.RunReasonRoutineDispatchEvent,
+	); err == nil {
+		t.Fatal("expected malformed payload to fail the atomic coalesce")
+	}
+	gotReq, _ := repo.GetWakeupRequest(ctx, "w-event")
+	if gotReq.Status != sqlite.WakeupStatusQueued || gotReq.RunID != "" {
+		t.Errorf("wakeup transaction was not rolled back: status=%q run_id=%q", gotReq.Status, gotReq.RunID)
+	}
+	gotRun, _ := repo.GetRunByID(ctx, run.ID)
+	if gotRun.Reason != shared.RunReasonRoutineDispatchCron || gotRun.CoalescedCount != 1 {
+		t.Errorf("run transaction was not rolled back: reason=%q count=%d", gotRun.Reason, gotRun.CoalescedCount)
 	}
 }
 

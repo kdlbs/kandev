@@ -12,6 +12,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,18 @@ import (
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
+
+// errIdempotencyKeyConflict signals that insertRun's CreateRun failed
+// because idx_run_idempotency rejected a duplicate idempotency_key —
+// distinct from the earlier CheckIdempotencyKey miss, which only looks
+// within IdempotencyWindowHours. Two independent producers deriving the
+// same operation id for the same event can both pass that fast-path check
+// before either commits (or the colliding row can simply be older than the
+// window); the unique index is what actually stops the second insert.
+// QueueRun treats this as a durable dedupe hit: QueueOutcomeDeduped, not an
+// error, so the losing producer's caller does not abort or log a spurious
+// failure for what is really a no-op.
+var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
 // runs from queue_run actions. Phase 2 final's parallel agent
@@ -43,9 +56,8 @@ type QueueOutcome string
 const (
 	// QueueOutcomeQueued means a new runs row was inserted.
 	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same
-	// IdempotencyKey already exists within the dedupe window, so nothing
-	// was inserted.
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable idempotency index, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
 	// queued row for the same agent + reason within the coalescing
@@ -64,8 +76,9 @@ const (
 //     action. Empty when the queue_run did not originate from the
 //     engine (legacy office paths).
 //   - Reason: the run reason (task_assigned, task_comment, …).
-//   - IdempotencyKey: when non-empty, the run is suppressed if a row
-//     with the same key landed in the last 24 hours.
+//   - IdempotencyKey: when non-empty, the run is suppressed if the durable
+//     queue identity already exists. QueueRun first checks recent rows, then
+//     relies on the unique index to close races and preserve that identity.
 //   - Payload: structured JSON-encoded payload. Must be a non-nil map
 //     when set; serialised before insert. QueueRun adds the resolved
 //     task / workflow / agent envelope before persisting.
@@ -84,9 +97,9 @@ type QueueRunRequest struct {
 // coalesced_count and replacing the payload.
 const CoalesceWindowSeconds = 5
 
-// IdempotencyWindowHours is the deduplication window. Requests with a
-// non-empty IdempotencyKey are suppressed if the same key was used
-// within this window.
+// IdempotencyWindowHours is the lookback used by the fast duplicate query.
+// The runs table's unique idempotency index remains durable for every
+// persisted key, including rows older than this window.
 const IdempotencyWindowHours = 24
 
 // signalBuffer sizes the in-process channel used for event-driven
@@ -153,7 +166,7 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 // QueueRun implements RunQueueAdapter. The flow is:
 //  1. Resolve agent_profile_id (from the request field, payload fallback,
 //     or a wired resolver).
-//  2. Idempotency check (24h) on req.IdempotencyKey if set.
+//  2. Recent idempotency check on req.IdempotencyKey if set.
 //  3. Coalescing (5s window for same agent + reason).
 //  4. Insert into runs table.
 //  5. Publish OfficeRunQueued.
@@ -207,6 +220,17 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 
 	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
 	if err != nil {
+		// idx_run_idempotency has no time bound, so a conflict here can
+		// come from a row older than IdempotencyWindowHours, not just the
+		// windowed race CheckIdempotencyKey guards against above. Either
+		// way the existing row is definitionally the same operation this
+		// key identifies, so treat it as a no-op dedupe rather than a hard
+		// error (see errIdempotencyKeyConflict's doc comment).
+		if errors.Is(err, errIdempotencyKeyConflict) {
+			s.log.Debug("run skipped (idempotency index race)",
+				zap.String("key", req.IdempotencyKey))
+			return QueueOutcomeDeduped, nil
+		}
 		return "", err
 	}
 
@@ -241,6 +265,9 @@ func (s *Service) insertRun(
 		RequestedAt:    time.Now().UTC(),
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
+		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
+			return nil, errIdempotencyKeyConflict
+		}
 		return nil, fmt.Errorf("enqueue run: %w", err)
 	}
 	return row, nil

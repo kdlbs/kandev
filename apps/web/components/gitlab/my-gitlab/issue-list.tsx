@@ -21,6 +21,19 @@ type IssueListProps = {
   host?: string;
 };
 
+function IssueMilestoneChip({ milestone }: { milestone: string }) {
+  if (!milestone) return null;
+  return (
+    <Badge
+      variant="outline"
+      className="text-[10px] px-1.5 py-0 h-4"
+      data-testid="gitlab-issue-milestone"
+    >
+      {milestone}
+    </Badge>
+  );
+}
+
 function IssueLabels({ labels }: { labels: string[] }) {
   if (!labels?.length) return null;
   return (
@@ -76,6 +89,7 @@ function IssueRow({
               time: formatRelativeTime(issue.created_at),
             })}
           </span>
+          <IssueMilestoneChip milestone={issue.milestone ?? ""} />
           <IssueLabels labels={issue.labels} />
         </div>
       </div>

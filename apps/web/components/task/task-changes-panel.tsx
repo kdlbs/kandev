@@ -17,12 +17,14 @@ import { ReviewDiffList } from "@/components/review/review-diff-list";
 import { ReviewPRDiffBoundary } from "@/components/review/review-dialog-pr-state";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import type { ReviewFile } from "@/components/review/types";
-import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
+import { reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ChangesTopBar } from "./changes-top-bar";
 import {
+  computeChangesReviewSets,
   resolveSelectedFileRepositoryName,
+  reviewDiffHashForKey,
   shouldBlockChangesForPR,
   shouldDeferReviewStateForPR,
   useAutoCloseWhenEmpty,
@@ -31,11 +33,13 @@ import {
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { useTranslation } from "react-i18next";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
   filePath?: string;
   fileRepositoryName?: string;
+  changeLayer?: GitChangeLayer;
   prKey?: string;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
@@ -118,18 +122,7 @@ function useChangesView(
     if (shouldDeferReviewStateForPR(Boolean(pr), prDiffLoading, sourceFilter)) {
       return { reviewedFiles: reviewed, staleFiles: stale };
     }
-    for (const file of allFiles) {
-      const key = reviewFileKey(file);
-      const reviewState = reviews.get(key);
-      if (!reviewState?.reviewed) continue;
-      const currentHash = hashDiff(file.diff);
-      if (reviewState.diffHash && reviewState.diffHash !== currentHash) {
-        stale.add(key);
-      } else {
-        reviewed.add(key);
-      }
-    }
-    return { reviewedFiles: reviewed, staleFiles: stale };
+    return computeChangesReviewSets(allFiles, reviews);
   }, [allFiles, reviews, pr, prDiffLoading, sourceFilter]);
 
   const totalCommentCount = useMemo(() => {
@@ -210,6 +203,7 @@ function useChangesPRPresentation(opts: {
   mode: "all" | "file";
   filePath: string | undefined;
   fileRepositoryName: string | undefined;
+  changeLayer: GitChangeLayer | undefined;
   visibleFiles: ReviewFile[];
 }) {
   const visibleSelectedFile = opts.visibleFiles.find((file) => file.path === opts.filePath);
@@ -222,6 +216,7 @@ function useChangesPRPresentation(opts: {
       opts.fileRepositoryName,
       visibleSelectedFile?.repository_name,
     ),
+    opts.changeLayer,
   );
   const blockChangesForPR = shouldBlockChangesForPR(opts.sourceFilter, opts.visibleFiles);
   return { selectedFileKey, blockChangesForPR };
@@ -258,8 +253,7 @@ function useChangesActions(
   const handleToggleReviewed = useCallback(
     (key: string, reviewed: boolean) => {
       if (reviewed) {
-        const file = allFiles.find((f) => reviewFileKey(f) === key);
-        markReviewed(key, file ? hashDiff(file.diff) : "");
+        markReviewed(key, reviewDiffHashForKey(allFiles, key));
       } else {
         markUnreviewed(key);
       }
@@ -338,6 +332,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
   fileRepositoryName,
+  changeLayer,
   prKey,
   selectedDiff,
   onClearSelected,
@@ -355,14 +350,13 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const relevantPRLoading = usesPRDiff && view.prDiffLoading;
   const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
   const handleRequestWalkthrough = useWalkthroughRequest(view.activeSessionId, view.allFiles);
+  const fileTarget = { filePath, fileRepositoryName, prKey, changeLayer };
   const visible = useVisibleDiffState({
     allFiles: view.allFiles,
     rawPRFiles: view.rawPRFiles,
     mode,
-    filePath,
-    fileRepositoryName,
+    ...fileTarget,
     sourceFilter,
-    prKey,
     fileRefs: view.fileRefs,
     reviewedFiles: view.reviewedFiles,
     staleFiles: view.staleFiles,
@@ -373,6 +367,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     mode,
     filePath,
     fileRepositoryName,
+    changeLayer,
     visibleFiles: visible.visibleFiles,
   });
   useAutoCloseWhenEmpty({

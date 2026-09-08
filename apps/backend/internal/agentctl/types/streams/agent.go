@@ -87,6 +87,14 @@ const (
 	// configuration delivery and observed use. It deliberately excludes raw
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
+
+	// EventTypeTurnStarted marks the single turn boundary this feature relies
+	// on: agentctl's own session/prompt dispatch, emitted on both a human
+	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
+	// session ID — the turn start itself stays in agentctl's memory and clock,
+	// never crossing the process boundary. The backend consumes it to clear
+	// the background-launch attestation for the turn that is starting.
+	EventTypeTurnStarted = "turn_started"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -101,21 +109,22 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents protocol-agnostic events from the agent, normalized from
-// various underlying protocols (ACP, Codex, Claude Code, etc.).
+// This represents agent-agnostic events. ACP session updates are normalized
+// into this shape; agentctl also synthesizes lifecycle and diagnostic events
+// (process exit, MCP attachment, permission cancellation) that never came from
+// the agent.
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
-	// Type identifies the event type. Use EventType* constants:
-	// "message_chunk", "reasoning", "tool_call", "tool_update", "plan", "complete", "error"
+	// Type identifies the event type. Use the EventType* constants for supported
+	// values.
 	Type string `json:"type"`
 
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
-	// OperationID identifies the current in-flight operation (turn, prompt, etc.).
-	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
+	// OperationID identifies an operation when the agent exposes an operation ID.
+	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this

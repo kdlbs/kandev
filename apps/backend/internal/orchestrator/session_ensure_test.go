@@ -126,9 +126,12 @@ func TestFindOfficeSessionForResumeUsesCanonicalOfficeProjection(t *testing.T) {
 			if tt.viewer != "" {
 				ctx = WithViewerAgent(ctx, tt.viewer)
 			}
-			got := svc.findOfficeSessionForResume(ctx, "task1")
-			if (got != nil) != tt.wantOffice {
-				t.Fatalf("office session found = %v, want %v", got != nil, tt.wantOffice)
+			got, isOffice := svc.findOfficeSessionForResume(ctx, "task1")
+			if isOffice != tt.wantOffice {
+				t.Fatalf("is office task = %v, want %v", isOffice, tt.wantOffice)
+			}
+			if (got != nil) != (tt.wantOffice && tt.viewer != "") {
+				t.Fatalf("office session found = %v, want %v", got != nil, tt.wantOffice && tt.viewer != "")
 			}
 		})
 	}

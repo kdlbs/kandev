@@ -35,6 +35,7 @@ const (
 	metaKeySessionID      = "session_id"
 	metaKeyTaskID         = "task_id"
 	metaKeyNewState       = "new_state"
+	metaKeyAgentID        = "agent_id"
 	metaKeyAgentProfileID = "agent_profile_id"
 	metaKeyUpdatedAt      = "updated_at"
 )
@@ -84,6 +85,7 @@ type capturedPrompt struct {
 	model       string
 	planMode    bool
 	attachments []v1.MessageAttachment
+	onAccepted  func(turnID string)
 }
 
 // transientRetryEntry tracks one session's in-progress retry loop: the current
@@ -108,6 +110,13 @@ func (e *transientRetryEntry) claim() bool {
 // rememberTurnPrompt caches the raw outbound prompt so a transient retry can
 // re-drive the same turn without the original caller's context.
 func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment) {
+	s.rememberTurnPromptWithAccepted(sessionID, text, model, planMode, attachments, nil)
+}
+
+func (s *Service) rememberTurnPromptWithAccepted(
+	sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment,
+	onAccepted func(turnID string),
+) {
 	if sessionID == "" {
 		return
 	}
@@ -116,6 +125,7 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 		model:       model,
 		planMode:    planMode,
 		attachments: attachments,
+		onAccepted:  onAccepted,
 	})
 }
 
@@ -125,11 +135,19 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 // handleRecoverableFailure); false for non-transient errors, office tasks,
 // or an exhausted retry budget.
 func (s *Service) handleTransientFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	data = s.withDynamicAttemptEvidence(data)
+	data = s.withPromptAttemptEvidence(data)
 	// Dynamic profiles own both error classes and their retry/reset policy. The
 	// legacy Kanban retry ladder must not consume a configured dynamic retry
 	// budget before the shared evaluator sees the failure.
 	if data.DynamicRouteAttempt {
+		return false
+	}
+	if !s.promptAttemptPreResultSafe(data) {
+		s.logger.Debug("refusing automatic transient retry without safe prompt-attempt evidence",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
 		return false
 	}
 	classified := classifyKanbanFailure(data)
@@ -166,6 +184,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessage(ctx, data, classified, attempt, delay, retryAt)
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Park the session in WAITING_FOR_INPUT (a calm, banner-less state that
@@ -297,7 +316,9 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 
-	if _, err := s.PromptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false); err != nil {
+	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, promptTaskOptions{
+		onAccepted: cp.onAccepted,
+	}); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
@@ -387,8 +408,13 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 	message := data.ErrorMessage
 	var resetHint *time.Time
 	if providerError := data.ProviderError; providerError != nil {
-		if providerError.ProviderID != "" {
-			providerID = providerError.ProviderID
+		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
+		// model-provider ID instead ("opencode-go"), which has no rules; keeping
+		// the agent ID there lets the OpenCode usage-limit rule classify the
+		// failure so dynamic routing can advance to the next candidate.
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
 		}
 		if providerError.Message != "" {
 			message = providerError.Message
@@ -559,6 +585,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		SessionID:        sessionID,
 		AgentExecutionID: execID,
 		ErrorMessage:     "Automatic provider retries cancelled. Resume or start fresh to continue.",
+		UserInitiated:    true,
 	})
 	return true
 }

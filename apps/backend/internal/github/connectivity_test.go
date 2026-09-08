@@ -22,8 +22,8 @@ func TestIsConnectivityError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isConnectivityError(tc.err); got != tc.want {
-				t.Errorf("isConnectivityError(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := IsConnectivityError(tc.err); got != tc.want {
+				t.Errorf("IsConnectivityError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}

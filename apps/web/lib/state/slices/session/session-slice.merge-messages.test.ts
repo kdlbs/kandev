@@ -87,12 +87,25 @@ describe("mergeMessages", () => {
     expect((next[0].metadata as { x: number }).x).toBe(2);
   });
 
-  it("applies metadata (hasMore / oldestCursor) on merge", () => {
+  it("applies history and pagination metadata on merge", () => {
     const store = makeStore();
-    store.getState().mergeMessages(SESSION, snapshot(), { hasMore: true, oldestCursor: "a" });
+    store.getState().mergeMessages(SESSION, snapshot(), {
+      historyInitialized: true,
+      hasMore: true,
+      oldestCursor: "a",
+    });
     const meta = store.getState().messages.metaBySession[SESSION];
+    expect(meta.historyInitialized).toBe(true);
     expect(meta.hasMore).toBe(true);
     expect(meta.oldestCursor).toBe("a");
+  });
+
+  it("does not initialize history from live-message inserts", () => {
+    const store = makeStore();
+    store.getState().addMessage(makeMessage({ id: "live", author_type: "agent" }));
+
+    const meta = store.getState().messages.metaBySession[SESSION];
+    expect(meta).toBeUndefined();
   });
 });
 

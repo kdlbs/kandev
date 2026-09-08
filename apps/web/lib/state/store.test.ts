@@ -45,6 +45,30 @@ describe("createAppStore", () => {
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["task-1"]);
   });
 
+  it("retains Threads boot settings after UI slice initialization", () => {
+    const store = createAppStore({
+      userSettings: {
+        threadViews: [
+          {
+            id: "capped",
+            name: "Capped",
+            taskScope: { mode: "all", taskIds: [] },
+            filters: [],
+            sort: { key: "title", direction: "asc" },
+            maxColumns: 1,
+          },
+        ],
+        threadActiveViewId: "capped",
+        threadViewDraft: null,
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(store.getState().threadViews.views).toHaveLength(1);
+    expect(store.getState().threadViews.activeViewId).toBe("capped");
+    expect(store.getState().threadViews.views[0]?.maxColumns).toBe(1);
+  });
+
   it("starts with no task-scoped Review PR overrides", () => {
     const store = createAppStore();
 

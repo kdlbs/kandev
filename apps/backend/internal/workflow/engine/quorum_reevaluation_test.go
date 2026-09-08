@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"expvar"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -487,5 +488,199 @@ func TestEvaluateStepQuorum_DoesNotRecordSlateEmptySideEffects(t *testing.T) {
 	}
 	if entries := logs.FilterMessage("workflow quorum required slate empty").All(); len(entries) != 0 {
 		t.Fatalf("expected no slate-empty warning log from a read-only snapshot, got %d: %+v", len(entries), entries)
+	}
+}
+
+// --- B1 companion: EvaluateStepQuorum must not depend on WHICH session ---
+
+// sessionScopedStateStore mirrors production assembleMachineState
+// (orchestrator/event_handlers_workflow.go): CurrentStepID and WorkflowID are
+// derived from the TASK row and are therefore identical for every session,
+// while SessionID, SessionState, Data and IsPassthrough are genuinely
+// per-session — Data being loaded from that session's own
+// metadata["workflow_data"] bag.
+type sessionScopedStateStore struct {
+	step              StepSpec
+	dataBySess        map[string]map[string]any
+	stateBySess       map[string]string
+	passthroughBySess map[string]bool
+	loadedData        []map[string]any
+	loadedStates      []string
+	loadedPassthrough []bool
+	applied           map[string]bool
+}
+
+func (s *sessionScopedStateStore) LoadState(_ context.Context, taskID, sessionID string) (MachineState, error) {
+	data := s.dataBySess[sessionID]
+	sessionState := s.stateBySess[sessionID]
+	isPassthrough := s.passthroughBySess[sessionID]
+	s.loadedData = append(s.loadedData, data)
+	s.loadedStates = append(s.loadedStates, sessionState)
+	s.loadedPassthrough = append(s.loadedPassthrough, isPassthrough)
+	return MachineState{
+		TaskID:        taskID,
+		SessionID:     sessionID,
+		WorkflowID:    "wf",
+		CurrentStepID: "review",
+		SessionState:  sessionState,
+		IsPassthrough: isPassthrough,
+		Data:          data,
+	}, nil
+}
+func (s *sessionScopedStateStore) LoadStep(_ context.Context, _, _ string) (StepSpec, error) {
+	return s.step, nil
+}
+func (s *sessionScopedStateStore) LoadNextStep(_ context.Context, _ string, _ int) (StepSpec, error) {
+	return StepSpec{ID: "approval", Position: 2}, nil
+}
+func (s *sessionScopedStateStore) LoadPreviousStep(_ context.Context, _ string, _ int) (StepSpec, error) {
+	return StepSpec{}, nil
+}
+func (s *sessionScopedStateStore) ApplyTransition(_ context.Context, _, _, _, _ string, _ Trigger) error {
+	return nil
+}
+func (s *sessionScopedStateStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, _, _ string, _ Trigger,
+) (bool, error) {
+	return false, nil
+}
+func (s *sessionScopedStateStore) PersistData(_ context.Context, _ string, _ map[string]any) error {
+	return nil
+}
+func (s *sessionScopedStateStore) IsOperationApplied(_ context.Context, op string) (bool, error) {
+	return s.applied[op], nil
+}
+func (s *sessionScopedStateStore) MarkOperationApplied(_ context.Context, op string) error {
+	s.applied[op] = true
+	return nil
+}
+
+// TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest pins the
+// invariant that lets engine_dispatcher's resolveLatestSessionID stay
+// task-scoped ("the task's most recent session, any state") once
+// features.officeSessionIdentity gives each participant agent its own
+// session per task and a task therefore has SEVERAL live sessions.
+//
+// Today EvaluateStepQuorum's guard evaluation reads TaskID, CurrentStepID
+// and WorkflowID off the loaded MachineState, all task-derived, so which
+// session the resolver happens to pick cannot change the answer. SessionID,
+// SessionState, Data and IsPassthrough are the session-derived fields, and
+// none of them is read by guard evaluation.
+//
+// If a guard ever starts reading SessionID, SessionState, Data or
+// IsPassthrough, that
+// stops being true silently: the resolver would hand the engine whichever
+// agent's state happened to be newest, and a decision could be evaluated
+// against another agent's state with nothing failing. This test makes that
+// regression loud. The fix at that point is to session-scope the CALL SITE
+// — pass the deciding session, as RecordDecision does via
+// resolveDeciderSessionID — not to add a defensive check inside the
+// task-scoped resolver, which would only make a wrong-scoped read look
+// safe.
+func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) {
+	newStore := func() *sessionScopedStateStore {
+		return &sessionScopedStateStore{
+			step: StepSpec{
+				ID: "review", WorkflowID: "wf", Position: 1,
+				Events: map[Trigger][]Action{
+					TriggerOnTurnComplete: {
+						{Kind: ActionMoveToNext, Guard: approvedGuard("reviewer")},
+					},
+				},
+			},
+			// The two live sessions carry DIFFERENT per-session bags and
+			// states, so a guard that started reading either would diverge
+			// between them.
+			dataBySess: map[string]map[string]any{
+				"sess-runner":   {"owner": "runner", "attempts": 3},
+				"sess-reviewer": {"owner": "reviewer", "attempts": 1},
+			},
+			stateBySess: map[string]string{
+				"sess-runner":   "RUNNING",
+				"sess-reviewer": "WAITING_FOR_INPUT",
+			},
+			passthroughBySess: map[string]bool{
+				"sess-runner":   true,
+				"sess-reviewer": false,
+			},
+			applied: map[string]bool{},
+		}
+	}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", DecisionRequired: true, AgentProfileID: "rev-A"},
+	}}
+	newDecisions := func() *fakeDecisionStore {
+		d := newFakeDecisionStore()
+		d.byKey[dkey("task-1", "review")] = []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}}
+		return d
+	}
+
+	runnerStore := newStore()
+	fromRunner, err := New(runnerStore, MapRegistry{},
+		WithDecisionStore(newDecisions()), WithParticipantStore(parts)).
+		EvaluateStepQuorum(context.Background(), "task-1", "sess-runner")
+	if err != nil {
+		t.Fatalf("EvaluateStepQuorum(sess-runner): %v", err)
+	}
+
+	reviewerStore := newStore()
+	fromReviewer, err := New(reviewerStore, MapRegistry{},
+		WithDecisionStore(newDecisions()), WithParticipantStore(parts)).
+		EvaluateStepQuorum(context.Background(), "task-1", "sess-reviewer")
+	if err != nil {
+		t.Fatalf("EvaluateStepQuorum(sess-reviewer): %v", err)
+	}
+
+	// Guard against a vacuous pass: if the fake ever stops handing the two
+	// runs genuinely different per-session bags and states, the comparison
+	// below proves nothing. Assert the divergence actually reached the engine.
+	if len(runnerStore.loadedData) != 1 || len(reviewerStore.loadedData) != 1 {
+		t.Fatalf("expected exactly one LoadState per run, got %d and %d",
+			len(runnerStore.loadedData), len(reviewerStore.loadedData))
+	}
+	if reflect.DeepEqual(runnerStore.loadedData[0], reviewerStore.loadedData[0]) {
+		t.Fatalf("test is vacuous: both sessions loaded the same Data %v", runnerStore.loadedData[0])
+	}
+	if len(runnerStore.loadedStates) != 1 || len(reviewerStore.loadedStates) != 1 {
+		t.Fatalf("expected exactly one LoadState per run, got %d and %d states",
+			len(runnerStore.loadedStates), len(reviewerStore.loadedStates))
+	}
+	if runnerStore.loadedStates[0] == reviewerStore.loadedStates[0] {
+		t.Fatalf("test is vacuous: both sessions loaded the same SessionState %q", runnerStore.loadedStates[0])
+	}
+	if len(runnerStore.loadedPassthrough) != 1 || len(reviewerStore.loadedPassthrough) != 1 {
+		t.Fatalf("expected exactly one LoadState per run, got %d and %d passthrough values",
+			len(runnerStore.loadedPassthrough), len(reviewerStore.loadedPassthrough))
+	}
+	if runnerStore.loadedPassthrough[0] == reviewerStore.loadedPassthrough[0] {
+		t.Fatalf("test is vacuous: both sessions loaded the same IsPassthrough value %v",
+			runnerStore.loadedPassthrough[0])
+	}
+
+	// The snapshot must be identical despite that divergence.
+	if fromRunner.StepID != fromReviewer.StepID {
+		t.Errorf("StepID differs by session: %q vs %q", fromRunner.StepID, fromReviewer.StepID)
+	}
+	if fromRunner.ReevaluationBlocked != fromReviewer.ReevaluationBlocked {
+		t.Errorf("ReevaluationBlocked differs by session: %v vs %v",
+			fromRunner.ReevaluationBlocked, fromReviewer.ReevaluationBlocked)
+	}
+	if len(fromRunner.Guards) != len(fromReviewer.Guards) {
+		t.Fatalf("guard count differs by session: %d vs %d",
+			len(fromRunner.Guards), len(fromReviewer.Guards))
+	}
+	for i := range fromRunner.Guards {
+		if !reflect.DeepEqual(fromRunner.Guards[i], fromReviewer.Guards[i]) {
+			t.Errorf("guard %d differs by session:\n  runner:   %#v\n  reviewer: %#v",
+				i, fromRunner.Guards[i], fromReviewer.Guards[i])
+		}
+	}
+
+	// Sanity: the snapshot is non-trivial, so the equality above has content.
+	if fromRunner.StepID != "review" || len(fromRunner.Guards) != 1 {
+		t.Fatalf("expected a one-guard snapshot at step review, got %#v", fromRunner)
+	}
+	if !fromRunner.Guards[0].Satisfied {
+		t.Fatalf("expected the quorum guard to be satisfied, got %#v", fromRunner.Guards[0])
 	}
 }

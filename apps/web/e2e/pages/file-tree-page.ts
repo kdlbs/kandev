@@ -15,6 +15,16 @@ export class FileTreePage {
     );
   }
 
+  /** The existing Files viewport that owns tree scrolling. */
+  fileTreeScrollViewport(): Locator {
+    return this.page.locator('[data-testid="file-tree-scroll"]:visible');
+  }
+
+  /** Visible tree rows, including only rows currently mounted by the tree. */
+  visibleFileTreeNodes(): Locator {
+    return this.page.locator('[data-testid="file-tree-node"]:visible');
+  }
+
   /** Visible search button in the Files panel, including the mobile panel mount. */
   fileSearchButton(): Locator {
     return this.page.locator('button[aria-label="Search files"]:visible');

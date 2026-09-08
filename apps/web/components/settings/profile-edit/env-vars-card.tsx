@@ -352,6 +352,10 @@ function EnvVarsFieldBody({
 export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(initialEnvVars));
 
+  const resetEnvVars = useCallback((envVars?: ProfileEnvVar[]) => {
+    setEnvVarRows(envVarsToRows(envVars));
+  }, []);
+
   const addEnvVar = useCallback((row: EnvVarRow) => {
     setEnvVarRows((prev) => [...prev, row]);
   }, []);
@@ -364,7 +368,7 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
-  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar };
+  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars };
 }
 
 export function EnvVarsCard(props: EnvVarsFieldProps) {

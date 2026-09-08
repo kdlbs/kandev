@@ -21,12 +21,19 @@ import (
 type stubSyncRepo struct {
 	rows   map[string]map[string]*models.Skill                // workspaceID → slug → row
 	agents map[string]map[string]*settingsmodels.AgentProfile // workspaceID → agentID → profile
+
+	// failUpdateAgentFor injects an error from UpdateAgentInstance for
+	// the named agent ID, so a test can simulate a mid-sequence failure
+	// (e.g. the agent-reference rewrite half of a slug normalization)
+	// without it actually persisting.
+	failUpdateAgentFor map[string]bool
 }
 
 func newStubSyncRepo() *stubSyncRepo {
 	return &stubSyncRepo{
-		rows:   map[string]map[string]*models.Skill{},
-		agents: map[string]map[string]*settingsmodels.AgentProfile{},
+		rows:               map[string]map[string]*models.Skill{},
+		agents:             map[string]map[string]*settingsmodels.AgentProfile{},
+		failUpdateAgentFor: map[string]bool{},
 	}
 }
 
@@ -37,6 +44,20 @@ func (s *stubSyncRepo) ListSystemSkills(
 	out := make([]*models.Skill, 0, len(ws))
 	for _, sk := range ws {
 		if sk.IsSystem {
+			out = append(out, sk)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
+func (s *stubSyncRepo) ListNonSystemSkills(
+	_ context.Context, workspaceID string,
+) ([]*models.Skill, error) {
+	ws := s.rows[workspaceID]
+	out := make([]*models.Skill, 0, len(ws))
+	for _, sk := range ws {
+		if !sk.IsSystem {
 			out = append(out, sk)
 		}
 	}
@@ -56,6 +77,9 @@ func (s *stubSyncRepo) GetSkillBySlug(
 }
 
 func (s *stubSyncRepo) CreateSkill(_ context.Context, skill *models.Skill) error {
+	if err := syncTestCreateSkillError(s, skill.Slug); err != nil {
+		return err
+	}
 	if _, ok := s.rows[skill.WorkspaceID]; !ok {
 		s.rows[skill.WorkspaceID] = map[string]*models.Skill{}
 	}
@@ -67,9 +91,19 @@ func (s *stubSyncRepo) CreateSkill(_ context.Context, skill *models.Skill) error
 	return nil
 }
 
+// UpdateSkill mirrors the real repository's update-by-ID semantics
+// (sqlite.Repository.UpdateSkill writes `WHERE id = ?`): it locates
+// the row by ID, not by the caller-supplied slug, so a slug rewrite
+// (e.g. normalizeUserSkillSlugs) re-keys the map instead of failing
+// to find a row under its now-stale old slug.
 func (s *stubSyncRepo) UpdateSkill(_ context.Context, skill *models.Skill) error {
-	if ws, ok := s.rows[skill.WorkspaceID]; ok {
-		if _, ok := ws[skill.Slug]; ok {
+	ws, ok := s.rows[skill.WorkspaceID]
+	if !ok {
+		return errors.New("not found for update")
+	}
+	for slug, sk := range ws {
+		if sk.ID == skill.ID {
+			delete(ws, slug)
 			copy := *skill
 			ws[skill.Slug] = &copy
 			return nil
@@ -90,13 +124,18 @@ func (s *stubSyncRepo) DeleteSkill(_ context.Context, id string) error {
 	return errors.New("not found for delete")
 }
 
+// ListAgentInstances returns copies, matching the real repository's
+// read-from-DB semantics: a caller mutating a returned profile (as
+// renameSkillSlugOnAgents does before its UpdateAgentInstance call)
+// must not silently affect stored state until that write succeeds.
 func (s *stubSyncRepo) ListAgentInstances(
 	_ context.Context, workspaceID string,
 ) ([]*settingsmodels.AgentProfile, error) {
 	ws := s.agents[workspaceID]
 	out := make([]*settingsmodels.AgentProfile, 0, len(ws))
 	for _, a := range ws {
-		out = append(out, a)
+		copy := *a
+		out = append(out, &copy)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -105,6 +144,9 @@ func (s *stubSyncRepo) ListAgentInstances(
 func (s *stubSyncRepo) UpdateAgentInstance(
 	_ context.Context, agent *settingsmodels.AgentProfile,
 ) error {
+	if s.failUpdateAgentFor[agent.ID] {
+		return errors.New("injected failure: agent update unavailable")
+	}
 	ws, ok := s.agents[agent.WorkspaceID]
 	if !ok {
 		return errors.New("workspace not found")

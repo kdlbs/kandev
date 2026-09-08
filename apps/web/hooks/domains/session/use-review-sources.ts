@@ -18,7 +18,7 @@ import {
   suppressAvailableGitlinkFiles,
 } from "@/components/review/types";
 import { createDebugLogger } from "@/lib/debug/log";
-import type { ReviewFile } from "@/components/review/types";
+import type { ReviewChangeFacet, ReviewFile } from "@/components/review/types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { prTaskKey } from "@/components/github/pr-utils";
@@ -38,6 +38,17 @@ type UncommittedFile = {
   deletions?: number;
   staged?: boolean;
   is_submodule?: boolean;
+  staged_change?: UncommittedChangeFacet;
+  unstaged_change?: UncommittedChangeFacet;
+};
+
+type UncommittedChangeFacet = {
+  diff?: string;
+  diff_skip_reason?: ReviewFile["diff_skip_reason"];
+  status?: string;
+  old_path?: string;
+  additions?: number;
+  deletions?: number;
 };
 
 type CumulativeFile = {
@@ -78,10 +89,26 @@ function addUncommittedFiles(
       source: "uncommitted",
       old_path: file.old_path,
       diff_skip_reason: skipReason,
+      staged_change: normalizeUncommittedFacet(file.staged_change),
+      unstaged_change: normalizeUncommittedFacet(file.unstaged_change),
       repository_name: repositoryName,
       is_submodule: file.is_submodule ?? isSubmodule,
     });
   }
+}
+
+function normalizeUncommittedFacet(
+  facet: UncommittedChangeFacet | undefined,
+): ReviewChangeFacet | undefined {
+  if (!facet) return undefined;
+  return {
+    diff: facet.diff ? normalizeDiffContent(facet.diff) : "",
+    status: normalizeFileChangeStatus(facet.status),
+    additions: facet.additions ?? 0,
+    deletions: facet.deletions ?? 0,
+    old_path: facet.old_path,
+    diff_skip_reason: facet.diff_skip_reason,
+  };
 }
 
 function addCumulativeFiles(

@@ -201,11 +201,18 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	createTaskWithoutRepositories(t, ctx, repo)
 
 	now := time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-1", TaskID: "task-1", WorkspacePath: "/workspace/task-1",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
 	session := &models.TaskSession{
-		ID:        "session-1",
-		TaskID:    "task-1",
-		State:     models.TaskSessionStateRunning,
-		IsPrimary: true,
+		ID:                "session-1",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "environment-1",
+		State:             models.TaskSessionStateRunning,
+		IsPrimary:         true,
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyLastAgentError: map[string]interface{}{
 				"message":     "agent failed to complete the turn",
@@ -316,6 +323,95 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	}
 	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
 		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
+	}
+}
+
+func TestReconcileTaskStatusSummariesUsesNewestSnapshotOncePerSharedEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	const environmentID = "environment-summary-shared"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-1", WorkspacePath: "/workspace/summary-shared",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	oldAt := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	newAt := oldAt.Add(time.Minute)
+	sessions := make([]*models.TaskSession, 0, 2)
+	for _, session := range []*models.TaskSession{
+		{ID: "summary-shared-old", TaskID: "task-1", TaskEnvironmentID: environmentID, State: models.TaskSessionStateCompleted, StartedAt: oldAt, UpdatedAt: oldAt},
+		{ID: "summary-shared-new", TaskID: "task-1", TaskEnvironmentID: environmentID, State: models.TaskSessionStateCompleted, StartedAt: newAt, UpdatedAt: newAt},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
+		}
+		sessions = append(sessions, session)
+	}
+	for _, snapshot := range []*models.GitSnapshot{
+		{ID: "summary-snapshot-old", SessionID: sessions[0].ID, TaskEnvironmentID: environmentID, Files: map[string]interface{}{"old.go": true}, CreatedAt: oldAt, Metadata: map[string]interface{}{"repository_name": "shared", "branch_additions": 1}},
+		{ID: "summary-snapshot-new", SessionID: sessions[1].ID, TaskEnvironmentID: environmentID, Files: map[string]interface{}{"new.go": true}, CreatedAt: newAt, Metadata: map[string]interface{}{"repository_name": "shared", "branch_additions": 9}},
+	} {
+		if err := repo.CreateGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("CreateGitSnapshot(%s): %v", snapshot.ID, err)
+		}
+	}
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx, []*models.Task{task}, map[string][]*models.TaskSession{task.ID: sessions},
+		map[string]models.TaskPendingAction{}, map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got[task.ID] == nil || got[task.ID].Git == nil {
+		t.Fatalf("summary = %+v, want Git summary", got[task.ID])
+	}
+	if got[task.ID].Git.Additions != 9 {
+		t.Fatalf("Git additions = %d, want newest shared-environment value 9", got[task.ID].Git.Additions)
+	}
+}
+
+func TestReconcileTaskStatusSummariesUsesTaskEnvironmentWithoutSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	const environmentID = "environment-summary-without-sessions"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-1", WorkspacePath: "/workspace/summary-without-sessions",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID:                "snapshot-without-session",
+		TaskEnvironmentID: environmentID,
+		Files:             map[string]interface{}{"main.go": true},
+		Metadata:          map[string]interface{}{"repository_name": "root", "branch_additions": 4},
+		CreatedAt:         time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("CreateGitSnapshot: %v", err)
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got["task-1"] == nil || got["task-1"].Git == nil {
+		t.Fatalf("summary = %+v, want Git summary from task-owned environment", got["task-1"])
+	}
+	if got["task-1"].Git.Additions != 4 || got["task-1"].Git.ChangedFiles != 1 {
+		t.Fatalf("Git summary = %+v, want additions=4 and changed_files=1", got["task-1"].Git)
 	}
 }
 

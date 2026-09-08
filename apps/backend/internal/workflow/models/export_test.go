@@ -270,6 +270,56 @@ func TestValidate(t *testing.T) {
 		e.Workflows[0].Steps[1].PullFromStepPosition = &firstPosition
 		assert.ErrorContains(t, e.Validate(), "cannot create a pull cycle")
 	})
+
+	t.Run("valid on_children_completed move_to_step position ref passes", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnChildrenCompleted: []GenericAction{
+				{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 1}},
+			},
+		}
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("invalid on_children_completed move_to_step position ref fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnChildrenCompleted: []GenericAction{
+				{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "does not match any step")
+	})
+
+	t.Run("missing step_position on generic move_to_step fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnHeartbeat: []GenericAction{
+				{Type: GenericActionMoveToStep, Config: map[string]any{"other": "val"}},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "missing step_position")
+	})
+
+	t.Run("missing config on generic move_to_step fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnBudgetAlert: []GenericAction{
+				{Type: GenericActionMoveToStep, Config: nil},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "missing config")
+	})
+
+	t.Run("non-move_to_step generic action needs no position ref", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnAgentError: []GenericAction{
+				{Type: GenericActionAutoStartAgent},
+			},
+		}
+		assert.NoError(t, e.Validate())
+	})
 }
 
 func TestConvertStepIDToPosition(t *testing.T) {
@@ -373,6 +423,51 @@ func TestConvertPositionToStepID(t *testing.T) {
 	})
 }
 
+func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
+	posToID := map[int]string{0: "new-a", 1: "new-b"}
+
+	t.Run("all seven Phase-2 GenericAction triggers survive conversion", func(t *testing.T) {
+		moveTo := func(pos int) []GenericAction {
+			return []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": pos}}}
+		}
+		events := StepEvents{
+			OnComment:           moveTo(0),
+			OnBlockerResolved:   moveTo(0),
+			OnChildrenCompleted: moveTo(0),
+			OnApprovalResolved:  moveTo(0),
+			OnHeartbeat:         moveTo(0),
+			OnBudgetAlert:       moveTo(0),
+			OnAgentError:        moveTo(0),
+		}
+		result := ConvertPositionToStepID(events, posToID)
+
+		triggers := map[string][]GenericAction{
+			"on_comment":            result.OnComment,
+			"on_blocker_resolved":   result.OnBlockerResolved,
+			"on_children_completed": result.OnChildrenCompleted,
+			"on_approval_resolved":  result.OnApprovalResolved,
+			"on_heartbeat":          result.OnHeartbeat,
+			"on_budget_alert":       result.OnBudgetAlert,
+			"on_agent_error":        result.OnAgentError,
+		}
+		for name, actions := range triggers {
+			require.Lenf(t, actions, 1, "%s dropped during ConvertPositionToStepID", name)
+			assert.Equalf(t, "new-a", actions[0].Config["step_id"], "%s did not remap step_position to step_id", name)
+			assert.Nilf(t, actions[0].Config["step_position"], "%s should no longer carry step_position", name)
+		}
+	})
+
+	t.Run("non-move_to_step generic action passes through untouched", func(t *testing.T) {
+		events := StepEvents{
+			OnHeartbeat: []GenericAction{{Type: GenericActionAutoStartAgent}},
+		}
+		result := ConvertPositionToStepID(events, posToID)
+		require.Len(t, result.OnHeartbeat, 1)
+		assert.Equal(t, GenericActionAutoStartAgent, result.OnHeartbeat[0].Type)
+		assert.Nil(t, result.OnHeartbeat[0].Config)
+	})
+}
+
 func TestRoundTrip(t *testing.T) {
 	t.Run("export then import preserves events", func(t *testing.T) {
 		// Build domain steps with step_id references.
@@ -416,6 +511,72 @@ func TestRoundTrip(t *testing.T) {
 					"Done should now reference new In Progress ID")
 			}
 		}
+	})
+}
+
+func TestRoundTripPhaseTwoTrigger(t *testing.T) {
+	t.Run("on_children_completed move_to_step round trips through export/import", func(t *testing.T) {
+		// Build domain steps: In Progress moves to Backlog once its children complete.
+		steps := []*WorkflowStep{
+			{ID: "orig-a", Name: "Backlog", Position: 0, Color: "gray"},
+			{
+				ID: "orig-b", Name: "In Progress", Position: 1, Color: "blue",
+				Events: StepEvents{
+					OnChildrenCompleted: []GenericAction{
+						{Type: GenericActionMoveToStep, Config: map[string]any{"step_id": "orig-a"}},
+					},
+				},
+			},
+		}
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Pipeline"}
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, nil)
+
+		require.NoError(t, export.Validate())
+
+		var exportedInProgress *StepPortable
+		for i := range export.Workflows[0].Steps {
+			if export.Workflows[0].Steps[i].Name == "In Progress" {
+				exportedInProgress = &export.Workflows[0].Steps[i]
+			}
+		}
+		require.NotNil(t, exportedInProgress)
+		require.Len(t, exportedInProgress.Events.OnChildrenCompleted, 1,
+			"on_children_completed must survive export, not be silently dropped")
+		assert.Equal(t, 0, exportedInProgress.Events.OnChildrenCompleted[0].Config["step_position"],
+			"export direction must remap step_id to step_position")
+		assert.Nil(t, exportedInProgress.Events.OnChildrenCompleted[0].Config["step_id"])
+
+		// Simulate import: assign new IDs by position.
+		posToID := map[int]string{0: "new-a", 1: "new-b"}
+		imported := ConvertPositionToStepID(exportedInProgress.Events, posToID)
+		require.Len(t, imported.OnChildrenCompleted, 1,
+			"on_children_completed must survive import, not be silently dropped")
+		assert.Equal(t, "new-a", imported.OnChildrenCompleted[0].Config["step_id"],
+			"import direction must remap step_position back to step_id")
+		assert.Nil(t, imported.OnChildrenCompleted[0].Config["step_position"])
+	})
+
+	t.Run("non-move_to_step generic action round trips untouched", func(t *testing.T) {
+		steps := []*WorkflowStep{
+			{
+				ID: "orig-a", Name: "Backlog", Position: 0, Color: "gray",
+				Events: StepEvents{
+					OnAgentError: []GenericAction{{Type: GenericActionAutoStartAgent}},
+				},
+			},
+		}
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Pipeline"}
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, nil)
+
+		require.NoError(t, export.Validate())
+		require.Len(t, export.Workflows[0].Steps[0].Events.OnAgentError, 1,
+			"on_agent_error must survive export, not be silently dropped")
+		assert.Equal(t, GenericActionAutoStartAgent, export.Workflows[0].Steps[0].Events.OnAgentError[0].Type)
+
+		posToID := map[int]string{0: "new-a"}
+		imported := ConvertPositionToStepID(export.Workflows[0].Steps[0].Events, posToID)
+		require.Len(t, imported.OnAgentError, 1)
+		assert.Equal(t, GenericActionAutoStartAgent, imported.OnAgentError[0].Type)
 	})
 }
 

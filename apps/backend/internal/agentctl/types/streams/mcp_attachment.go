@@ -87,6 +87,7 @@ const (
 	MCPAttachmentEvidenceUnavailable        MCPAttachmentEvidenceKind = "unavailable"
 	MCPAttachmentEvidenceDelivered          MCPAttachmentEvidenceKind = "delivered"
 	MCPAttachmentEvidenceSessionAccepted    MCPAttachmentEvidenceKind = "session_accepted"
+	MCPAttachmentEvidenceProtocolAccepted   MCPAttachmentEvidenceKind = "protocol_accepted"
 	MCPAttachmentEvidenceInitializeObserved MCPAttachmentEvidenceKind = "initialize_observed"
 	MCPAttachmentEvidenceToolsListObserved  MCPAttachmentEvidenceKind = "tools_list_observed"
 	MCPAttachmentEvidenceToolCallObserved   MCPAttachmentEvidenceKind = "tool_call_observed"
@@ -395,6 +396,8 @@ func (s *MCPServerAttachment) applyEvidenceStatus(evidence MCPAttachmentEvidence
 		if s.Status == MCPAttachmentStatusUnknown || s.Status == MCPAttachmentStatusFiltered || s.Status == MCPAttachmentStatusUnavailable {
 			s.Status = MCPAttachmentStatusDelivered
 		}
+	case MCPAttachmentEvidenceProtocolAccepted:
+		s.applyProtocolAccepted(when)
 	case MCPAttachmentEvidenceInitializeObserved:
 		s.applyInitializeObserved(when)
 	case MCPAttachmentEvidenceToolsListObserved:
@@ -410,7 +413,13 @@ func (s *MCPServerAttachment) applyEvidenceStatus(evidence MCPAttachmentEvidence
 }
 
 func (s *MCPServerAttachment) applyInitializeObserved(when time.Time) {
-	s.ConnectedAt = &when
+	s.applyProtocolAccepted(when)
+}
+
+func (s *MCPServerAttachment) applyProtocolAccepted(when time.Time) {
+	if s.ConnectedAt == nil {
+		s.ConnectedAt = &when
+	}
 	if s.Status != MCPAttachmentStatusActive && s.Status != MCPAttachmentStatusFailed {
 		s.Status = MCPAttachmentStatusConnected
 	}

@@ -411,6 +411,41 @@ func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.
 	}
 }
 
+func TestApplyWorkflowAndPlanMode_PreservesAcceptanceTimePromptContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID:     "step-1",
+		Prompt: "Implement this exactly:\n\n{{task_prompt}}",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+
+	basePrompt := "Use @my-prompt.\n\n" + sysprompt.Wrap(fakeResolvedPromptReferenceContext)
+	got, _, trustedContext := svc.applyWorkflowAndPlanModeWithPromptContext(
+		context.Background(),
+		basePrompt,
+		"task-1",
+		"session-1",
+		"step-1",
+		false,
+		false, // isEphemeral
+		false, // isPassthrough
+		fakeResolvedPromptReferenceContext,
+	)
+
+	if trustedContext != fakeResolvedPromptReferenceContext {
+		t.Fatalf("trusted context = %q, want acceptance-time context %q", trustedContext, fakeResolvedPromptReferenceContext)
+	}
+	if strings.Count(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) != 1 {
+		t.Fatalf("expected one acceptance-time expansion block, got %q", got)
+	}
+	if len(expander.calls) != 0 {
+		t.Fatalf("expected canonical direct prompt not to be re-expanded, got %d calls", len(expander.calls))
+	}
+}
+
 func TestGetWorkflowMeta_CachesPerRequest(t *testing.T) {
 	stepGetter := newMockStepGetter()
 	stepGetter.workflowAgentProfileID = "profile-wf"

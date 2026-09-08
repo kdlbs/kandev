@@ -89,6 +89,24 @@ describe("buildGitFileSignature", () => {
     } as FileInfo);
     expect(before).not.toBe(after);
   });
+
+  it("changes when only a mixed-change facet changes", () => {
+    const base = {
+      path: PATH,
+      status: "modified" as const,
+      staged: false,
+      diff: "combined",
+      staged_change: { status: "modified" as const, diff: "staged one" },
+      unstaged_change: { status: "modified" as const, diff: "unstaged" },
+    };
+
+    expect(buildGitFileSignature(base)).not.toBe(
+      buildGitFileSignature({
+        ...base,
+        staged_change: { status: "modified", diff: "staged two" },
+      }),
+    );
+  });
 });
 
 describe("syncOpenFileFromWorkspace", () => {

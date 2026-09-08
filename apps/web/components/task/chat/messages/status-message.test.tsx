@@ -42,4 +42,51 @@ describe("StatusMessage model selection warnings", () => {
     expect(screen.getByText("Check the agent version in the executor.")).toBeTruthy();
     expect(screen.getByText("The saved model was not advertised by the executor.")).toBeTruthy();
   });
+
+  it("explains when the executor applied the only advertised variation", () => {
+    const comment = modelSelectionWarningMessage();
+    comment.metadata = {
+      ...comment.metadata,
+      reason: "unique_variation_applied",
+      effective_model: "opus[1m]",
+      fallback_model: undefined,
+    };
+
+    render(<StatusMessage comment={comment} />);
+
+    expect(
+      screen.getByText("The executor applied the only advertised variation of the saved model."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/fallback model/i)).toBeNull();
+  });
+});
+
+describe("StatusMessage branch replacement warnings", () => {
+  it("states that conversation history continued but lost code did not", () => {
+    const comment: Message = {
+      id: "status-branch-1",
+      session_id: toSessionId("session-1"),
+      task_id: toTaskId("task-1"),
+      author_type: "agent",
+      content: "branch_recreated",
+      type: "status",
+      created_at: "2026-08-15T00:00:00Z",
+      metadata: {
+        variant: "warning",
+        kind: "branch_recreated",
+        original_branch: "feature/lost",
+        new_branch: "kandev/task-recovery-1",
+        base_branch: "main",
+      },
+    };
+
+    render(<StatusMessage comment={comment} />);
+
+    expect(screen.getByTestId("branch-recreated-warning")).toBeTruthy();
+    expect(screen.getByText("feature/lost")).toBeTruthy();
+    expect(screen.getByText("kandev/task-recovery-1")).toBeTruthy();
+    expect(screen.getByText("main")).toBeTruthy();
+    expect(screen.getByText(/conversation history continues/i)).toBeTruthy();
+    expect(screen.getByText(/code changes.*not recovered/i)).toBeTruthy();
+  });
 });

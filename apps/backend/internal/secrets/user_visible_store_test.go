@@ -54,6 +54,17 @@ func TestUserVisibleStoreRejectsInternalCreate(t *testing.T) {
 	}
 }
 
+func TestIsInternalIDRecognizesKubernetesRuntimeSecrets(t *testing.T) {
+	t.Parallel()
+
+	if !IsInternalID("kandev-runtime:execution-1:agentctl-auth-token") {
+		t.Fatal("Kubernetes runtime secret ID must be internal")
+	}
+	if IsInternalID("legacy-random-runtime-secret-id") {
+		t.Fatal("legacy random secret ID must remain user-visible")
+	}
+}
+
 func TestUserVisibleStoreWorkspaceOperationsFilterInternalSecrets(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()

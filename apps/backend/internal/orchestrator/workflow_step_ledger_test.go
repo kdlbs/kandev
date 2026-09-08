@@ -161,7 +161,7 @@ func TestApplyTransitionCrossWorkflowRecordsDifferingWorkflowIDs(t *testing.T) {
 	stepGetter.steps["step-wf2"] = &wfmodels.WorkflowStep{
 		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "on_turn_complete"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
@@ -205,7 +205,7 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step1")
 
-			store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+			store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 			if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", trigger); err != nil {
 				t.Fatalf("ApplyTransition: %v", err)
 			}
@@ -241,7 +241,7 @@ func TestApplyTransitionOnChildrenCompletedRecordsSystemActorNotSession(t *testi
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_children_completed"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestApplyTransitionPreservesOuterCallerTrigger(t *testing.T) {
 		ActorID: "s1", SessionID: "s1",
 	})
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(deferredCtx, "t1", "s1", "step1", "step2", "on_enter"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestApplyTransitionRepeatedToSameTargetWritesNoSecondRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete"); err != nil {
 		t.Fatalf("first ApplyTransition: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestApplyTransitionOnUserCancellationRecordsHumanActorNotAgent(t *testing.T
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleMember})
 	cancelCtx := cancellationTransitionAttribution(ctx)
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestApplyTransitionOnUserCancellationWithNoIdentityRecordsSystemActor(t *te
 
 	cancelCtx := cancellationTransitionAttribution(context.Background())
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
