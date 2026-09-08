@@ -51,7 +51,7 @@ read by the CLI but not currently set by Kandev (see
 | Key | Meaning in the CLI | Kandev managed default |
 | --- | --- | --- |
 | `MCP_TIMEOUT` | MCP connect deadline, and the deadline of the CLI's first-turn wait on the `subscriptions/listen` stream. CLI default is 30000 ms, clamped to at most 2147483647. | `30000` |
-| `MCP_TOOL_TIMEOUT` | Per-call tool budget and the per-request fetch deadline floor, clamped to `[60000, 2147483647]`. | `7200000` |
+| `MCP_TOOL_TIMEOUT` | Per-call tool budget, clamped to `[1000, 2147483647]` by the idle watchdog's `toolTimeoutMs` helper (see [Idle watchdog](#idle-watchdog)); separately floors the per-request fetch deadline at `[60000, 2147483647]` (see below). | `7200000` |
 | `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long, independent of `MCP_TOOL_TIMEOUT`. | Not set by Kandev. |
 
 Verified against the shipped CLI (version 2.1.258):
@@ -103,7 +103,7 @@ function idleTimeoutMs(server) {
     ?? (transport === "stdio" ? 1800000 : 300000);
   if (idle <= 0) return 0;
   const perServerTimeout = server?.timeout >= 1000 ? server.timeout : 0;
-  // toolTimeoutMs(server) = clamp(MCP_TOOL_TIMEOUT, 60000, 2147483647)
+  // toolTimeoutMs(server) = clamp(perServerTimeout ?? MCP_TOOL_TIMEOUT ?? 1e8, 1000, 2147483647)
   return Math.min(Math.max(idle, perServerTimeout, 1000), toolTimeoutMs(server));
 }
 ```
@@ -112,15 +112,19 @@ Kandev injects its MCP server as `type: "http"` (with an `"sse"` fallback;
 see `apps/backend/internal/agentctl/server/api/agent.go`), which is neither
 `stdio` nor in the disabled set, so the idle default is **300000 ms (300s)**.
 The outer `Math.min` in the formula above means `MCP_TOOL_TIMEOUT` can only
-lower that floor, never raise it: at Kandev's managed `MCP_TOOL_TIMEOUT=7200000`
-the clamp is a no-op and the effective idle deadline stays 300000 ms, but a
-profile override (clamped to a 60000 floor by the CLI) can shrink it, e.g.
-`MCP_TOOL_TIMEOUT=60000` yields a 60s idle deadline, not 300s. A tool call
-that goes past its idle deadline without emitting a response or a
-`notifications/progress` frame is aborted by the CLI with "sent no response
-or progress for <n>s; aborting". The 20s keepalive below survives either way,
-so this qualification has no production consequence today — it only affects
-the accuracy of this record.
+lower that default, never raise it: at Kandev's managed `MCP_TOOL_TIMEOUT=7200000`
+the clamp is a no-op and the effective idle deadline stays 300000 ms. But
+`toolTimeoutMs`'s own floor is 1000 ms, not 60000, so an agent-profile or
+executor-profile override of `MCP_TOOL_TIMEOUT` (see
+[Failure and recovery](#failure-and-recovery)) can shrink the idle deadline far
+below 300000 ms — e.g. `MCP_TOOL_TIMEOUT=10000` yields a 10s idle deadline. A
+tool call that goes past its idle deadline without emitting a response or a
+`notifications/progress` frame is aborted by the CLI with "sent no response or
+progress for <n>s; aborting". Kandev's managed default keeps the 20s keepalive
+below comfortably inside the deadline, but an override under roughly 20000 ms
+drives the idle deadline below the keepalive interval and would abort a
+blocking `ask_user_question_kandev` call outright: this is a real edge in the
+supported override path, not just a record-accuracy nit.
 
 `ask_user_question_kandev` (`apps/backend/internal/mcp/handlers/handlers.go`)
 is the only Kandev MCP tool that blocks on a person, so it is the only one
@@ -167,8 +171,9 @@ paid once per launch; at the previous value of 7200000 it was 1h 59m 55s. The
 degraded outcome is a bounded delay before the first token, after which the
 session proceeds normally with all tools available. A blocking Kandev MCP tool
 call is not, by itself, governed by `MCP_TOOL_TIMEOUT`: the CLI's idle
-watchdog (see [Idle watchdog](#idle-watchdog)) would abort it at 300s
-regardless of that budget. It survives because the server streams a
+watchdog (see [Idle watchdog](#idle-watchdog)) would abort it at 300s under
+Kandev's managed `MCP_TOOL_TIMEOUT=7200000`. It survives because the server
+streams a
 `notifications/progress` keepalive well inside that window.
 
 `MCP_TIMEOUT` remains the connect deadline, so it cannot be reduced to an

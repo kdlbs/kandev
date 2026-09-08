@@ -127,8 +127,8 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			// it must stay at the CLI's own default; MCP_TOOL_TIMEOUT bounds
 			// total call duration for Kandev's blocking MCP tool calls, but
 			// is not by itself sufficient: the CLI's separate per-tool-call
-			// idle watchdog aborts a silent call after ~300s regardless of
-			// this budget, so the long wait survives on the keepalive that
+			// idle watchdog aborts a silent call after ~300s at this budget,
+			// so the long wait survives on the keepalive that
 			// internal/mcp/server/handlers.go streams, not on this value.
 			// See docs/specs/agents/system-design/mcp-timeout-budgets.md.
 			"MCP_TIMEOUT":      "30000",

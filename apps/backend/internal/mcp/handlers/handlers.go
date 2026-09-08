@@ -3919,8 +3919,8 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Block until user responds or context is cancelled (agent MCP timeout).
 	// MCP_TOOL_TIMEOUT alone is not enough: Claude Code's CLI also runs a
 	// per-tool-call idle watchdog on non-stdio MCP transports (which Kandev
-	// uses) that aborts a call after ~300s of silence regardless of that
-	// budget. This wait survives because internal/mcp/server/handlers.go's
+	// uses) that aborts a call after ~300s of silence at Kandev's managed
+	// MCP_TOOL_TIMEOUT. This wait survives because internal/mcp/server/handlers.go's
 	// askQuestionKeepAliveInterval streams a progress notification well
 	// inside that window. See docs/specs/agents/system-design/mcp-timeout-budgets.md.
 	// If the agent times out, the entry is cleaned up and the event-based

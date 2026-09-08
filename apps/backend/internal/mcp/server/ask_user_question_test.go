@@ -472,10 +472,12 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 
 // TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor pins
 // askQuestionKeepAliveInterval comfortably below the measured 300000ms idle
-// watchdog floor that Claude Code's CLI applies to non-stdio MCP transports
-// (see docs/specs/agents/system-design/mcp-timeout-budgets.md). Raising the
-// production constant above that floor would silently break every question
-// that outlives it, and TestAskUserQuestion_StreamsKeepAliveDuringWait
+// watchdog default that Claude Code's CLI applies to non-stdio MCP transports
+// at Kandev's managed MCP_TOOL_TIMEOUT (see
+// docs/specs/agents/system-design/mcp-timeout-budgets.md). The <= 60s bound
+// is a chosen safety margin, not a value derived from that 300s default:
+// raising the production constant past it would silently break every
+// question that outlives it, and TestAskUserQuestion_StreamsKeepAliveDuringWait
 // wouldn't catch it because it overrides the interval before running.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor(t *testing.T) {
 	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
