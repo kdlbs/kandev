@@ -10,13 +10,14 @@
 **Implementation superseded:** 2026-09-08 by
 [0045: Install-wide storage maintenance](0045-install-wide-storage-maintenance.md), which
 records that `internal/system/storage` "replaces the periodic `office/infra` GC loop". The
-office garbage collector corrected here was never constructed in production; `gc.go` and
-its tests have since been deleted. The decision below is unchanged and still binds every
-cleanup path in Kandev, including the storage-maintenance providers that replaced it.
+install-wide service removed the Office collector's production start path in PR #1699. The
+obsolete implementation and its tests remained in the repository until this cleanup. The
+decision below is unchanged. It still binds all cleanup paths, including the replacement
+storage-maintenance providers.
 
 ## Context
 
-Kandev's office service runs a background garbage collector that, every three hours, walks `~/.kandev/tasks/` and removes "orphaned" worktree directories. It also walks kandev-labeled Docker containers and removes ones whose tasks are gone or terminal. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
+At the time of this decision, Kandev's Office service ran a background garbage collector every three hours. It walked `~/.kandev/tasks/` and removed "orphaned" worktree directories. It also inspected Kandev-labeled Docker containers and removed containers for missing or terminal tasks. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
 
 The original `sweepWorktrees` passed each directory's on-disk name (a semantic slug like `locstat-github-actio_5gz`, produced by `worktree.SemanticWorktreeName(title, suffix)`) into `GetTaskBasicInfo`, which keys on `tasks.id` (a UUID). Every lookup missed. An error or missing row was treated as "orphan → delete." On the first sweep — which runs immediately at startup, not on a delay — `os.RemoveAll` ran against every directory under the base. A user checked out `feature/orchestrate` on a machine carrying a production DB and lost 307 active worktrees. Every in-progress task's working copy was gone before the user noticed.
 
@@ -54,7 +55,7 @@ Concretely:
 
 ## References
 
-- Current implementation of this decision: `apps/backend/internal/system/storage/` (task-workspace and container providers), wired in `apps/backend/internal/backendapp/storage_maintenance.go`
-- Supporting queries retained: `apps/backend/internal/worktree/store.go`, `apps/backend/internal/office/repository/sqlite/tasks.go`
-- Regression tests: `apps/backend/internal/system/storage/workspaces/provider_test.go`, `apps/backend/internal/worktree/store_test.go`
-- Deleted 2026-09-08 (never constructed in production): `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/office/infra/gc_test.go`
+- Current providers: `apps/backend/internal/system/storage/workspaces/provider.go`, `apps/backend/internal/system/storage/dockerstore/provider.go`
+- Production composition and inventory: `apps/backend/internal/backendapp/storage_maintenance.go`, `apps/backend/internal/backendapp/storage_inventory.go`
+- Regression tests: `apps/backend/internal/system/storage/workspaces/provider_test.go`, `apps/backend/internal/system/storage/dockerstore/provider_test.go`
+- Deleted 2026-09-08 after PR #1699 removed its production start path: `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/office/infra/gc_test.go`
