@@ -32,6 +32,13 @@ function readSuccess(
   return { kind: "read-success", paused, record };
 }
 
+function mutateSuccess(
+  paused: boolean,
+  record: WorkspacePauseRecord | null = null,
+): WorkspacePauseOutcome {
+  return { kind: "mutate-success", paused, record };
+}
+
 describe("office pause store actions: begin/reset", () => {
   it("beginPauseRequest returns a strictly increasing tag", () => {
     const store = makeStore();
@@ -156,20 +163,40 @@ describe("office pause store actions: mutate outcomes", () => {
   it("mutate-success (pause) sets a record; mutate-success (resume) clears it", () => {
     const store = makeStore();
     const pauseTag = store.getState().beginPauseRequest();
-    store.getState().applyPauseResponse(pauseTag, WS_1, WS_1, {
-      kind: "mutate-success",
-      paused: true,
-      record: makeRecord(),
-    });
+    store.getState().applyPauseResponse(pauseTag, WS_1, WS_1, mutateSuccess(true, makeRecord()));
     expect(store.getState().office.pause.record?.id).toBe("pause-1");
 
     const resumeTag = store.getState().beginPauseRequest();
-    store.getState().applyPauseResponse(resumeTag, WS_1, WS_1, {
-      kind: "mutate-success",
-      paused: false,
-      record: null,
-    });
+    store.getState().applyPauseResponse(resumeTag, WS_1, WS_1, mutateSuccess(false));
     expect(store.getState().office.pause.record).toBeNull();
     expect(store.getState().office.pause.status).toBe("known");
+  });
+
+  // F51: mutate-success carries the same two supersession guards as
+  // read-success — a mutation response for a workspace the user has since
+  // navigated away from, or one superseded by a newer request, must not
+  // overwrite the current pause state.
+  it("mutate-success for a workspace other than the active one is discarded (F51)", () => {
+    const store = makeStore();
+    const tag = store.getState().beginPauseRequest();
+    const applied = store
+      .getState()
+      .applyPauseResponse(tag, WS_1, WS_2, mutateSuccess(true, makeRecord()));
+    expect(applied).toBe(false);
+    expect(store.getState().office.pause.status).toBe("unknown");
+    expect(store.getState().office.pause.record).toBeNull();
+  });
+
+  it("a superseded (stale-tag) mutate-success is discarded", () => {
+    const store = makeStore();
+    const older = store.getState().beginPauseRequest();
+    const newer = store.getState().beginPauseRequest();
+    store.getState().applyPauseResponse(newer, WS_1, WS_1, mutateSuccess(false));
+    const applied = store
+      .getState()
+      .applyPauseResponse(older, WS_1, WS_1, mutateSuccess(true, makeRecord()));
+    expect(applied).toBe(false);
+    // The newer (already-applied) response's outcome must survive.
+    expect(store.getState().office.pause.record).toBeNull();
   });
 });
