@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -49,7 +50,10 @@ func (s *Server) guardedTTYExecHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGuardedTTYExec, payload, &result); err != nil {
 			return mcp.NewToolResultError("Guarded TTY execution failed"), nil
 		}
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to encode guarded TTY result: %v", err)), nil
+		}
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

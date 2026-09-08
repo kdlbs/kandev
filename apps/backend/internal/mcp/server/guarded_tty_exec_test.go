@@ -135,4 +135,32 @@ func TestGuardedTTYExecForwardsOnlyBoundSessionAndArgv(t *testing.T) {
 	}, backend.lastPayload)
 }
 
+type cyclicGuardedTTYBackend struct{}
+
+func (cyclicGuardedTTYBackend) RequestPayload(_ context.Context, _ string, _ interface{}, result interface{}) error {
+	cycle := map[string]interface{}{}
+	cycle["self"] = cycle
+	*result.(*map[string]interface{}) = cycle
+	return nil
+}
+
+func TestGuardedTTYExecReturnsToolErrorWhenReceiptCannotBeEncoded(t *testing.T) {
+	profile := mcpprofile.New(
+		mcpprofile.SurfaceKanbanTask,
+		[]mcpprofile.Capability{mcpprofile.CapabilityGuardedTTYExec},
+		nil,
+	)
+	s := NewWithProfile(cyclicGuardedTTYBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, profile)
+	s.SetGuardedTTYAvailable(true)
+
+	result := callTool(t, s, guardedTTYExecToolName, map[string]interface{}{
+		"argv": []interface{}{"pwd"},
+	})
+
+	require.True(t, result.IsError)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), "failed to encode guarded TTY result")
+}
+
 var _ mcpsrv.ClientSession = (*providerRefreshTestSession)(nil)

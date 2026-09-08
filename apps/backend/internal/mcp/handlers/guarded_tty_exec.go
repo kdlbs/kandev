@@ -11,6 +11,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
 )
 
 type guardedTTYExecPayload struct {
@@ -48,7 +49,7 @@ func (h *Handlers) handleGuardedTTYExec(ctx context.Context, msg *ws.Message) (*
 		Argv:      append([]string(nil), payload.Argv...),
 	})
 	if err != nil || receipt == nil {
-		h.logger.Error("guarded TTY execution failed")
+		h.logger.Error("guarded TTY execution failed", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Guarded TTY execution failed", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, receipt)
