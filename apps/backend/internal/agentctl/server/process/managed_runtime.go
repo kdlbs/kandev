@@ -13,18 +13,30 @@ import (
 // RepairManagedRuntimeCache resolves npm's cache in the instance environment
 // and removes only the execution tree for one exact managed package spec.
 func (m *Manager) RepairManagedRuntimeCache(ctx context.Context, packageSpec string) error {
+	return m.RepairManagedRuntimeCacheWithEnvironment(ctx, packageSpec, nil, nil)
+}
+
+// RepairManagedRuntimeCacheWithEnvironment applies the failed process's
+// environment contract while resolving npm's cache.
+func (m *Manager) RepairManagedRuntimeCacheWithEnvironment(
+	ctx context.Context,
+	packageSpec string,
+	overrides map[string]string,
+	stripEnv []string,
+) error {
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return err
 	}
-	env, err := m.CommandEnvironment()
+	env, err := mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), overrides)
 	if err != nil {
 		return errors.New("resolve agent environment for managed runtime repair")
 	}
 	output, err := m.Output(ctx, tools.CommandSpec{
-		Path: "npm",
-		Args: []string{"config", "get", "cache"},
-		Dir:  m.cfg.WorkDir,
-		Env:  env,
+		Path:     "npm",
+		Args:     []string{"config", "get", "cache"},
+		Dir:      m.cfg.WorkDir,
+		Env:      env,
+		StripEnv: stripEnv,
 	})
 	if err != nil {
 		if ctx.Err() != nil {

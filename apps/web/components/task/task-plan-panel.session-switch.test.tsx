@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import { describe, expect, it, vi } from "vitest";
+import type { Editor } from "@tiptap/core";
+import { getAvailableTaskEditor } from "./task-plan-panel";
 import { usePlanSelection } from "./use-plan-selection";
 
 const PRIMARY_SESSION_ID = "session-primary";
@@ -42,5 +44,21 @@ describe("plan selection session ownership", () => {
 
     await waitFor(() => expect(view.result.current.textSelection).toBeNull());
     expect(setEditingCommentId).toHaveBeenLastCalledWith(null);
+  });
+
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.2
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.5
+  it("does not expose an editor that belongs to the outgoing task", () => {
+    const editor = { isDestroyed: false } as Editor;
+
+    expect(getAvailableTaskEditor({ taskId: "task-a", editor }, "task-b")).toBeNull();
+    expect(getAvailableTaskEditor({ taskId: "task-b", editor }, "task-b")).toBe(editor);
+  });
+
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.3
+  it("does not expose a destroyed editor for the selected task", () => {
+    const editor = { isDestroyed: true } as Editor;
+
+    expect(getAvailableTaskEditor({ taskId: "task-b", editor }, "task-b")).toBeNull();
   });
 });
