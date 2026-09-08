@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -56,6 +57,11 @@ test.describe("Executor reuse", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
+
+    // The suite seed is shared by this worker and must outlive the previous
+    // test's task cleanup. Reuse validation deliberately fails closed when it
+    // does not.
+    expect(existsSync(seedData.repositoryPath)).toBe(true);
 
     // 1. Create task with first session
     const task = await apiClient.createTaskWithAgent(
