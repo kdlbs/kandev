@@ -37,3 +37,4 @@ Use the record skill or follow the ADR format in
 stable decision ID. New decisions use a date-prefixed filename so branches do
 not reserve a shared sequence number.
 
+

@@ -240,7 +240,7 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)
 	}()
 
 	<-barrierRepo.claimReached
@@ -290,7 +290,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenPostClaimReloadFails(t *testin
 		repo:                  failingRepo,
 	}
 
-	err = svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+	err = svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)
 	if !errors.Is(err, reloadErr) {
 		t.Fatalf("auto-start error = %v, want post-claim reload error", err)
 	}
@@ -348,7 +348,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)
 	}()
 
 	<-barrierRepo.claimReached
@@ -528,7 +528,7 @@ func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)
 	}()
 
 	<-agentMgr.dispatched
@@ -618,7 +618,7 @@ func TestWorkflowAutoStartCreatedTerminalizedGuard(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, step, "review the task", false, false)
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, step, "review the task", false, false, nil)
 	}()
 
 	<-barrierRepo.lockAcquired

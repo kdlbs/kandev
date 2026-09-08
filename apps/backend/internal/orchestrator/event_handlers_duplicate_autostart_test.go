@@ -586,7 +586,7 @@ func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T
 		t.Fatalf("set session profile: %v", err)
 	}
 
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, "Do the work", false, true)
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, "Do the work", false, true, nil)
 	if err == nil {
 		t.Fatal("expected autoStartStepPrompt to return the launch error")
 	}
@@ -664,7 +664,7 @@ func TestAutoStartCreatedLaunch_DoesNotRestoreHandoffAfterQueueingMergedPrompt(t
 		t.Fatalf("seed handoff message: %v", err)
 	}
 
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true)
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, nil)
 	if err == nil {
 		t.Fatal("expected autoStartStepPrompt to return the launch error")
 	}
