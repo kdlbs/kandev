@@ -42,6 +42,7 @@ func (r *Repository) initSchema() error {
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
+		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -56,6 +57,23 @@ func (r *Repository) initSchema() error {
 		}
 	}
 	return nil
+}
+
+// ensureArchivedBranchCandidatesIndex runs after ownership normalization so
+// every supported schema shape has the lifecycle columns the index requires.
+func (r *Repository) ensureArchivedBranchCandidatesIndex() error {
+	_, err := r.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_task_environment_repos_archived_branch_candidates
+		ON task_environment_repos(
+			worktree_branch_owner,
+			worktree_branch_compacted_at,
+			status,
+			deleted_at,
+			updated_at,
+			worktree_id,
+			task_environment_id
+		)`)
+	return err
 }
 
 func (r *Repository) initDynamicRoutingSchema() error {
