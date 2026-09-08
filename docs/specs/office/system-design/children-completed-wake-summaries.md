@@ -132,6 +132,28 @@ zh-cn, zh-hk, zh-tw and pt-pt, and agent comments routinely contain non-ASCII, s
 this is the ordinary case rather than an exotic one. Both the comparison and the
 slice operate on runes.
 
+- **Each optional segment carries its own leading ` — `, and an omitted segment
+  takes that delimiter with it.** The template above is a shape, not a format
+  string: read as a format string it would emit `[state] —  — {pr urls}` for a
+  child with links and no comment, which is not the intent. Both optional
+  segments — comment and pull requests, in that order — are self-delimiting, so
+  exactly four renderings exist:
+
+  ```text
+  - {identifier} ({title}) [{state}]
+  - {identifier} ({title}) [{state}] — {"comment"}
+  - {identifier} ({title}) [{state}] — {pr urls}
+  - {identifier} ({title}) [{state}] — {"comment"} — {pr urls}
+  ```
+
+  This is enumerated rather than left to the renderer's existing shape because
+  only half of it has an existing shape: `writeChildSummaryLine` already places
+  the delimiter inside its `LastComment != ""` branch, which settles the comment,
+  but there is no pull-request segment in the code to imitate, because the
+  `PRLinks` field it renders is being added by this design.
+  AC-OFFICE-WAKE-CHILD-SUMMARIES-003.8 puts the whole section inside
+  a byte-identity contract, so a new segment's delimiter needs a test oracle for
+  the same reason the section heading does.
 - `identifier` falls back to `?` when empty, as today
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.9).
 - **The rendered line contains no line break, and no other control character,
@@ -193,7 +215,19 @@ slice operate on runes.
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7). At most 10 render; a child
   with more gets ` (+N more)` after the tenth, where **N is the number of links
   NOT rendered — the child's total link count minus 10**, never the total: a child
-  with 12 links renders ` (+2 more)`. Sorting before capping is what
+  with 12 links renders ` (+2 more)`. **The numeral itself is bounded: when N
+  exceeds 999 the marker renders ` (+999+ more)` instead of the exact figure**,
+  so the marker never exceeds 13 code points. N is derived from the child's total
+  link count, and nothing bounds that count — `ListTaskPRsByTaskIDs` selects a
+  task's links with no `LIMIT`, and no link-count constant exists — so without
+  this clamp the marker is the last unbounded thing on the line, every other
+  unbounded field having been capped above, and the ceiling in
+  [Persistence](#persistence) would be an estimate rather than a bound
+  (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6). Losing the exact figure past 999 costs
+  nothing a parent would act on: a child with more than 999 unlisted pull
+  requests is fetched through the API, not read off a number. The clamp bounds
+  the numeral only — it does not change which URLs render, nor the value of N for
+  any child at or below the threshold. Sorting before capping is what
   makes *which* URLs appear deterministic rather than a property of whatever
   order the link projection returned. **Each URL is itself capped at 200 code
   points**, under the same rule: a longer URL renders as its first 188 code points
@@ -379,18 +413,20 @@ lines whose length is bounded in turn by the per-field caps in
 step.** Every cap in this design is counted in code points, so a byte figure read
 straight off them would be wrong for exactly the non-ASCII content this design
 calls ordinary: a 500-code-point CJK comment occupies 1500 bytes. Per line the
-worst case is about 200 (title) + 996 (quoted comment, per the quoting bound in
-[Rendered line contract](#rendered-line-contract)) + 2033 (ten 200-code-point
-URLs, their `, ` separators and ` (+N more)`) + about 110 for identifier, state
-and the fixed punctuation, so roughly **3,350 code points**. Twenty of those plus
-the heading and the truncation notice put the section under **70,000 code
-points**, and UTF-8 encodes a code point in at most 4 bytes, so under **280 KB**.
-Reaching that requires all 20 children to carry both a capped comment and ten
-capped URLs. The ordinary case — one pull-request URL of well under 100
-characters and a short comment — is a few hundred bytes per line and lands in the
-low kilobytes. The caps are what make this a bound at all rather than an
-estimate: the task system limits title length, link count and URL length
-nowhere.
+worst case is 200 (title) + 996 (quoted comment, per the quoting bound in
+[Rendered line contract](#rendered-line-contract)) + 2031 (ten 200-code-point
+URLs, nine `, ` separators, and the 13-code-point ` (+999+ more)` marker) + about
+110 for identifier, state and the fixed punctuation, so roughly **3,340 code
+points**. Twenty of those plus the heading and the truncation notice put the
+section under **70,000 code points**, and UTF-8 encodes a code point in at most 4
+bytes, so under **280 KB**. Reaching that requires all 20 children to carry both
+a capped comment and ten capped URLs. The ordinary case — one pull-request URL of
+well under 100 characters and a short comment — is a few hundred bytes per line
+and lands in the low kilobytes. Every term above is a cap this design imposes,
+which is what makes the figure a bound rather than an estimate: the task system
+limits title length, link count and URL length nowhere, so the ceiling holds only
+because the title cap, the per-URL cap, the ten-URL cap and the clamp on the
+`(+N more)` numeral each replace an unbounded quantity with a fixed one.
 
 Runs queued before this change and claimed after it render the section normally,
 because the section does not depend on anything the producer recorded. No
