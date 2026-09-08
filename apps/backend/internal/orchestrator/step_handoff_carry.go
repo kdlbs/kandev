@@ -49,8 +49,16 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return false
 	}
-	queuedMsg, ok, autoRun := s.messageQueue.ReserveQueuedWithAutoRun(ctx, sessionID)
-	if !autoRun || !ok || queuedMsg == nil {
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID:               session.TaskID,
+		SessionID:            session.ID,
+		SessionIncarnationID: session.QueueIncarnationID,
+	}
+	if identity.TaskID != taskID || identity.SessionIncarnationID == "" {
+		return false
+	}
+	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	if err != nil || !autoRun || !ok || queuedMsg == nil {
 		return false
 	}
 	if queuedMsg.Content != "" || len(queuedMsg.Attachments) > 0 {
@@ -58,7 +66,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 			queuedMsg = withStepHandoffMetadata(queuedMsg, handoffText)
 		}
 	}
-	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
+	return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok)
 }
 
 // withStepHandoffMetadata returns a shallow copy of msg carrying handoffText

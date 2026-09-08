@@ -133,7 +133,7 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		repo:           repo,
 		taskRepo:       taskRepo,
 		agentManager:   agentMgr,
-		messageQueue:   messagequeue.NewServiceMemory(testLogger()),
+		messageQueue:   newAuthoritativeMemoryQueue(repo, testLogger()),
 		executor:       exec,
 		messageCreator: msgCreator,
 	}
@@ -441,7 +441,7 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 		repo:           repo,
 		taskRepo:       taskRepo,
 		agentManager:   agentMgr,
-		messageQueue:   messagequeue.NewServiceMemory(testLogger()),
+		messageQueue:   newAuthoritativeMemoryQueue(repo, testLogger()),
 		executor:       exec,
 		messageCreator: msgCreator,
 	}

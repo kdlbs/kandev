@@ -1598,6 +1598,7 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
+	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
 	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
 	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
 	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
@@ -1663,6 +1664,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                   s.ID,
 		"task_id":              s.TaskID,
+		"queue_incarnation_id": s.QueueIncarnationID,
 		"agent_execution_id":   s.AgentExecutionID,
 		"container_id":         s.ContainerID,
 		"agent_profile_id":     s.AgentProfileID,

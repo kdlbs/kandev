@@ -141,12 +141,13 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   const markerA = "mobile targeted A response";
   const markerB = "mobile targeted B response";
   const markerC = "mobile targeted C response";
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
   for (const message of [
     scriptedQueueMessage(markerA),
     scriptedQueueMessage(markerB, 1_000),
     scriptedQueueMessage(markerC),
   ]) {
-    await apiClient.queueMessage(taskId, sessionId, message);
+    await apiClient.queueMessage(queueIdentity, message);
   }
 
   await chat.getByTestId("queue-chip").tap();
@@ -154,11 +155,23 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
   const rowSendNow = panel.getByTestId("queue-entry-send-now").nth(1);
   const autoRun = panel.getByTestId("queue-auto-run");
+  const autoMerge = panel.getByTestId("queue-auto-merge");
   await expectTouchTarget(rowSendNow);
   await expectEffectiveTouchTarget(autoRun);
+  await expectEffectiveTouchTarget(autoMerge);
   await expect(autoRun).toHaveAttribute("data-state", "checked");
   await autoRun.tap();
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+  await expect(autoMerge).toBeEnabled();
+  await autoMerge.tap();
+  await expect
+    .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
+    .toBe(true);
+  await expect(autoMerge).toHaveAttribute("data-state", "checked");
+  await expect(autoMerge).toBeEnabled();
+  await autoMerge.tap();
+  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -198,6 +211,7 @@ test("mobile queue panel hides the desktop-only pin and keeps its controls", asy
   // queue panel, while the other header controls stay touch-sized.
   await expect(panel.getByTestId("queue-pin")).toHaveCount(0);
   await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-run"));
+  await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-merge"));
   await expectTouchTarget(panel.getByTestId("queue-clear-all"));
   await expectTouchTarget(panel.getByTestId("queue-close"));
 });
@@ -233,15 +247,16 @@ test.describe("Mobile queued row controls", () => {
     await session.sendMessageViaButton("/sleep 60");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionForegroundActivity(testPage, "generating");
-    const autoRunResponse = await apiClient.setQueueAutoRun(task.session_id, false);
+    const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+    const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
     expect(autoRunResponse).toMatchObject({
       session_id: task.session_id,
       auto_run: false,
     });
     await waitForComposerQueueMode(testPage);
-    await apiClient.queueMessage(task.id, task.session_id, fixture);
+    await apiClient.queueMessage(identity, fixture);
     await expect
-      .poll(() => apiClient.getQueueStatus(task.session_id!))
+      .poll(() => apiClient.getQueueStatus(identity))
       .toMatchObject({ count: 1, auto_run: false });
 
     const chat = session.activeChat();

@@ -36,3 +36,4 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [Tasks](../tasks/README.md): supplies durable work and workflow primitives.
 - [Agents](../agents/README.md): supplies agent profiles and permission policy.
 - [Integrations](../integrations/README.md): supplies provider connections.
+

@@ -68,6 +68,7 @@ type UseRunCommentParams = {
 type QueuePayload = {
   session_id: string;
   task_id: string;
+  session_incarnation_id: string;
   content: string;
   plan_mode?: boolean;
 };
@@ -84,10 +85,16 @@ type MessagePayload = {
 function buildQueuePayload(
   sessionId: string,
   taskId: string,
+  sessionIncarnationId: string,
   content: string,
   planModeEnabled: boolean,
 ): QueuePayload {
-  const payload: QueuePayload = { session_id: sessionId, task_id: taskId, content };
+  const payload: QueuePayload = {
+    session_id: sessionId,
+    session_incarnation_id: sessionIncarnationId,
+    task_id: taskId,
+    content,
+  };
   if (planModeEnabled) payload.plan_mode = true;
   return payload;
 }
@@ -141,7 +148,18 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
           throw new Error("Session is not available for input");
         }
         if (inputMode === "queue") {
-          await appendToQueue(buildQueuePayload(sessionId, taskId, content, planModeEnabled));
+          if (!activeSession?.queue_incarnation_id) {
+            throw new Error("Session is not available for input");
+          }
+          await appendToQueue(
+            buildQueuePayload(
+              sessionId,
+              taskId,
+              activeSession.queue_incarnation_id,
+              content,
+              planModeEnabled,
+            ),
+          );
         } else {
           const client = getWebSocketClient();
           if (!client) throw new Error("WebSocket client unavailable");
