@@ -319,6 +319,11 @@ func readGitdirPointer(gitEntry, checkout string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(checkout, path)
 	}
+	// EvalSymlinks below is only for canonical identity comparison. Refuse a
+	// pointer that traverses one before canonicalization can erase the evidence.
+	if err := rejectSymlinkComponents(path); err != nil {
+		return "", err
+	}
 	return canonicalExistingPath(path)
 }
 

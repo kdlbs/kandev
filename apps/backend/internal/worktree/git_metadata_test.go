@@ -73,6 +73,29 @@ func TestResolveGitMetadataRejectsSymlinkedGitEntry(t *testing.T) {
 	}
 }
 
+func TestResolveGitMetadataRejectsLinkedWorktreePointerThroughSymlink(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+
+	gitDir := runGitMetadata(t, checkout, "rev-parse", "--path-format=absolute", "--git-dir")
+	linkedMetadata := filepath.Join(t.TempDir(), "linked-metadata")
+	if err := os.Symlink(filepath.Dir(gitDir), linkedMetadata); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(checkout, ".git"),
+		[]byte("gitdir: "+filepath.Join(linkedMetadata, filepath.Base(gitDir))+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want symlinked gitdir pointer rejection", err)
+	}
+}
+
 func TestResolveGitMetadataRejectsSymlinkedLinkedWorktreeHead(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	checkout := filepath.Join(t.TempDir(), "task-checkout")
