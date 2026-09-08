@@ -106,6 +106,24 @@ func read() string { return stdos.Getenv("BAR") }
 	}
 }
 
+func TestUncoveredEnvReadsUncoveredDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func getenv() string { return Getenv("BAR") }
+func lookupenv() (string, bool) { return LookupEnv("BAZ") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 2 {
+		t.Fatalf("expected exactly two uncovered-name messages, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") || !strings.Contains(messages[1], "BAZ") {
+		t.Fatalf("messages %q do not name both uncovered variables", messages)
+	}
+}
+
 func TestUncoveredEnvReadsUnresolvableIdentifier(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 

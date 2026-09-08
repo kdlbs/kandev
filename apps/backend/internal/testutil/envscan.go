@@ -311,8 +311,8 @@ func envReadCalls(file *ast.File, extraReaders map[string]bool) []*ast.CallExpr 
 }
 
 // osPackageNames returns the local import names that name the os package in file.
-// A dot import cannot form a selector and a blank import names no package, so
-// neither belongs in the result.
+// A dot import is recorded as "." so isEnvRead can recognize its bare Getenv
+// and LookupEnv calls. A blank import names no package and is ignored.
 func osPackageNames(file *ast.File) map[string]bool {
 	names := make(map[string]bool)
 	for _, spec := range file.Imports {
@@ -324,7 +324,7 @@ func osPackageNames(file *ast.File) map[string]bool {
 			names["os"] = true
 			continue
 		}
-		if spec.Name.Name != "_" && spec.Name.Name != "." {
+		if spec.Name.Name != "_" {
 			names[spec.Name.Name] = true
 		}
 	}
@@ -346,7 +346,7 @@ func isEnvRead(fun ast.Expr, osNames, extraReaders map[string]bool) bool {
 		}
 		return target.Sel.Name == "Getenv" || target.Sel.Name == "LookupEnv"
 	case *ast.Ident:
-		return extraReaders[target.Name]
+		return extraReaders[target.Name] || (osNames["."] && (target.Name == "Getenv" || target.Name == "LookupEnv"))
 	default:
 		return false
 	}
