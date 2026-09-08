@@ -3309,7 +3309,6 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
 	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
 	if routineWake && coalesceKey != "" {
-		metadata[messagequeue.MetadataRoutinePostRunRequeue] = true
 		var replaced bool
 		queued, replaced, err = queue.QueueMessageWithCoalesceKey(
 			ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,

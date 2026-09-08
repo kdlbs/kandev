@@ -80,6 +80,7 @@ func TestHandleMessageTask_CoalescesOnlyIdenticalScheduledRoutineWakes(t *testin
 	require.Equal(t, 1, afterIdentical.Count, "identical pending scheduled wakes must coalesce")
 	assert.Equal(t, firstID, afterIdentical.Entries[0].ID, "coalescing retains the FIFO entry identity")
 	assert.Equal(t, true, afterIdentical.Entries[0].Metadata[messagequeue.MetadataRoutineWake])
+	assert.NotEqual(t, true, afterIdentical.Entries[0].Metadata[messagequeue.MetadataRoutinePostRunRequeue], "a pending routine wake does not need a post-run successor")
 	assert.Equal(t, "dirty-two", afterIdentical.Entries[0].Metadata[messagequeue.MetadataRoutineDirtyGeneration])
 	receipt := messagequeue.RoutineWakeReceiptFromMessage(&afterIdentical.Entries[0])
 	require.NotNil(t, receipt)
