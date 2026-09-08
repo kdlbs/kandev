@@ -6,20 +6,10 @@ import "github.com/kandev/kandev/internal/office/models"
 // a stored policy (AC-OFFICE-BUDGET-002.5/.11/.14). All fields are detected
 // in the same pass, never short-circuited at the first, so a policy
 // violating more than one criterion can be named for all of them in a
-// single activity entry (AC-OFFICE-BUDGET-002.13).
-type policyValidationIssues struct {
-	UnrecognizedPeriod bool
-	NonPositiveLimit   bool
-	UnrecognizedScope  bool
-	UnrecognizedAction bool
-	EmptyScopeID       bool
-}
-
-// Any reports whether classifyStoredPolicy found at least one issue.
-func (i policyValidationIssues) Any() bool {
-	return i.UnrecognizedPeriod || i.NonPositiveLimit || i.UnrecognizedScope ||
-		i.UnrecognizedAction || i.EmptyScopeID
-}
+// single activity entry (AC-OFFICE-BUDGET-002.13). Aliased from models so
+// internal/office/service can read a PreLaunchPolicyResult's SkipIssues
+// without importing this package.
+type policyValidationIssues = models.PolicyValidationIssues
 
 // classifyStoredPolicy implements AC-OFFICE-BUDGET-002.5/.11/.14: a stored
 // policy the build cannot evaluate as written — an unrecognized period,

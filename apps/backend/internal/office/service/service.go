@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -313,6 +314,22 @@ type BudgetEvaluator interface {
 	// pause). The office service discards the per-policy results; the
 	// costs package is responsible for any side effects.
 	EvaluateBudget(ctx context.Context, workspaceID, agentInstanceID, projectID string) error
+
+	// EvaluatePreLaunch and EvaluateDefaultCeiling back the pre-launch
+	// admission gates of REQ-OFFICE-BUDGET-001/-003/-006
+	// (internal/office/service/budget_admission.go). Unlike
+	// CheckPreExecutionBudget/EvaluateBudget above, neither has a
+	// nil-evaluator fallback: "no evaluator wired" is its own admission gate
+	// (AC-OFFICE-BUDGET-001.5/.6), decided by the caller before either method
+	// is invoked, never a fail-open default inside it.
+	EvaluatePreLaunch(
+		ctx context.Context,
+		workspaceID, agentInstanceID, projectID string,
+		hasProject bool,
+		provenance shared.RunProvenance,
+		at time.Time,
+	) (models.PreLaunchResult, error)
+	EvaluateDefaultCeiling(ctx context.Context, workspaceID string, at time.Time) (models.PreLaunchPolicyResult, error)
 }
 
 // SetBudgetChecker wires the costs.CostService (or a test fake) as the
@@ -700,6 +717,29 @@ func (s *Service) CheckBudget(ctx context.Context, workspaceID, agentInstanceID,
 		return nil
 	}
 	return s.budgetChecker.EvaluateBudget(ctx, workspaceID, agentInstanceID, projectID)
+}
+
+// EvaluatePreLaunch delegates to the wired BudgetEvaluator for the
+// pre-launch admission gates (budget_admission.go). Callers must check
+// gate 2 (evaluator presence, s.budgetChecker == nil) themselves before
+// calling this — see the BudgetEvaluator doc comment above.
+func (s *Service) EvaluatePreLaunch(
+	ctx context.Context,
+	workspaceID, agentInstanceID, projectID string,
+	hasProject bool,
+	provenance shared.RunProvenance,
+	at time.Time,
+) (models.PreLaunchResult, error) {
+	return s.budgetChecker.EvaluatePreLaunch(ctx, workspaceID, agentInstanceID, projectID, hasProject, provenance, at)
+}
+
+// EvaluateDefaultCeiling delegates to the wired BudgetEvaluator for gate 5
+// of budget_admission.go. See EvaluatePreLaunch above for the nil-evaluator
+// caveat.
+func (s *Service) EvaluateDefaultCeiling(
+	ctx context.Context, workspaceID string, at time.Time,
+) (models.PreLaunchPolicyResult, error) {
+	return s.budgetChecker.EvaluateDefaultCeiling(ctx, workspaceID, at)
 }
 
 // CreateBudgetPolicy creates a new budget policy.

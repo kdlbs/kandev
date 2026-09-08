@@ -168,6 +168,40 @@ func ProcessRunForTest(svc *Service, ctx context.Context, run *models.Run) {
 	si.processRun(ctx, run)
 }
 
+// Exported mirrors of resolveRunProject's unexported projectResolution
+// values, for external test packages using ResolveRunProjectForTest.
+const (
+	ProjectResolutionNoneForTest         = int(projectResolutionNone)
+	ProjectResolutionFoundForTest        = int(projectResolutionFound)
+	ProjectResolutionLookupErrorForTest  = int(projectResolutionLookupError)
+	ProjectResolutionUnparseableForTest  = int(projectResolutionUnparseable)
+	ProjectResolutionTaskNotFoundForTest = int(projectResolutionTaskNotFound)
+)
+
+// ResolveRunProjectForTest exposes resolveRunProject for external test
+// packages, so gate 4's project-resolution outcomes
+// (AC-OFFICE-BUDGET-006.7) can be tested directly rather than through the
+// full scheduler pipeline, which independently gates on task existence in
+// checkoutTask before admitRun/resolveRunProject ever runs.
+func ResolveRunProjectForTest(svc *Service, ctx context.Context, payload string) (projectID string, resolution int) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	pid, res := si.resolveRunProject(ctx, payload)
+	return pid, int(res)
+}
+
+// LogPolicyObservabilityForTest exposes logPolicyObservability for external
+// test packages, so the skip/degraded-admitted entries and their
+// per-policy-per-day dedup (AC-OFFICE-BUDGET-002.13/-004.8) can be tested
+// directly against a chosen set of PreLaunchPolicyResult values, without
+// needing a real admission evaluation (stored policies, spend events) to
+// produce them.
+func LogPolicyObservabilityForTest(
+	svc *Service, ctx context.Context, workspaceID, runID string, policies []models.PreLaunchPolicyResult, at time.Time,
+) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.logPolicyObservability(ctx, workspaceID, runID, policies, at)
+}
+
 // BuildEnvVarsForTest exposes buildEnvVars for external test packages.
 func BuildEnvVarsForTest(
 	si *SchedulerIntegration,

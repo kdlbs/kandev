@@ -33,51 +33,27 @@ func windowStart(period models.BudgetPeriod, at time.Time) (start time.Time, ok 
 }
 
 // PreLaunchDecision is EvaluatePreLaunch's admission outcome for one
-// candidate run, per REQ-OFFICE-BUDGET-006.
-type PreLaunchDecision string
+// candidate run, per REQ-OFFICE-BUDGET-006. Aliased from models so
+// internal/office/service can declare a BudgetEvaluator interface method
+// returning it without importing this package.
+type PreLaunchDecision = models.PreLaunchDecision
 
 const (
-	PreLaunchDecisionLaunch               PreLaunchDecision = "launch"
-	PreLaunchDecisionBlockedByLimit       PreLaunchDecision = "blocked_by_limit"
-	PreLaunchDecisionBlockedByDegradation PreLaunchDecision = "blocked_by_degradation"
+	PreLaunchDecisionLaunch               = models.PreLaunchDecisionLaunch
+	PreLaunchDecisionBlockedByLimit       = models.PreLaunchDecisionBlockedByLimit
+	PreLaunchDecisionBlockedByDegradation = models.PreLaunchDecisionBlockedByDegradation
 )
 
 // PreLaunchPolicyResult is one applicable policy's full evaluation, kept for
 // observability. Activity-entry writing and dedup (AC-OFFICE-BUDGET-002.13)
 // live one layer up, in the caller that owns side effects — EvaluatePreLaunch
-// itself stays a pure read (AC-OFFICE-BUDGET-006.2).
-type PreLaunchPolicyResult struct {
-	PolicyID           string
-	ScopeType          models.BudgetScopeType
-	Period             models.BudgetPeriod
-	ActionOnExceed     models.BudgetActionOnExceed
-	CreatedAt          time.Time
-	Skipped            bool
-	SkipIssues         policyValidationIssues
-	PricedSubcents     int64
-	LimitSubcents      int64
-	Degraded           bool
-	LimitExceeded      bool
-	DegradationBlocked bool
-	// IsDefault is true when this result is the built-in default ceiling
-	// (EvaluateDefaultCeiling), never a stored office_budget_policies row.
-	// PolicyID is "" in that case (AC-OFFICE-BUDGET-003.7's stable identifier
-	// distinct from any policy row).
-	IsDefault bool
-}
+// itself stays a pure read (AC-OFFICE-BUDGET-006.2). Aliased from models,
+// see PreLaunchDecision above.
+type PreLaunchPolicyResult = models.PreLaunchPolicyResult
 
-// PreLaunchResult is EvaluatePreLaunch's full output.
-type PreLaunchResult struct {
-	Decision       PreLaunchDecision
-	DecidingPolicy *PreLaunchPolicyResult
-	Policies       []PreLaunchPolicyResult
-	// WorkspaceDailyBlockingSuperseded is true when a workspace-scoped,
-	// non-skipped, blocking-capable (pause_agent/block_new_tasks) daily
-	// policy exists among the surviving set, independent of whether it
-	// fired: AC-OFFICE-BUDGET-003.4 supersedes the built-in default by
-	// existing, not by blocking.
-	WorkspaceDailyBlockingSuperseded bool
-}
+// PreLaunchResult is EvaluatePreLaunch's full output. Aliased from models,
+// see PreLaunchDecision above.
+type PreLaunchResult = models.PreLaunchResult
 
 // preLaunchApplicablePolicies implements AC-OFFICE-BUDGET-001.15:
 // workspace-scoped always applies; agent-scoped only when scope_id matches
@@ -156,7 +132,7 @@ func (s *CostService) evaluateOnePolicy(
 
 	window, werr := s.spendWindowForPolicy(ctx, workspaceID, p, at)
 	if werr != nil {
-		return PreLaunchPolicyResult{}, false, fmt.Errorf("spend window for policy %s: %w", p.ID, werr)
+		return PreLaunchPolicyResult{}, false, &models.UnevaluatedPolicyError{PolicyID: p.ID, Err: werr}
 	}
 	result.PricedSubcents = window.PricedSubcents
 	result.Degraded = window.Degraded

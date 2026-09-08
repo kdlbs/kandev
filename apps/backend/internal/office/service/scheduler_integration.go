@@ -254,8 +254,8 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		return
 	}
 
-	// Pre-execution budget check.
-	if !si.checkBudget(ctx, run, agent, taskID) {
+	// Pre-launch budget admission (AC-OFFICE-BUDGET-001.14's five gates).
+	if !si.admitRun(ctx, run, agent) {
 		return
 	}
 
@@ -827,38 +827,6 @@ func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, ru
 		si.logger.Error("failed to requeue contended checkout",
 			zap.String("run_id", run.ID), zap.Error(err))
 	}
-}
-
-// checkBudget runs pre-execution budget checks. Returns true if allowed.
-func (si *SchedulerIntegration) checkBudget(
-	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, taskID string,
-) bool {
-	projectID := si.extractProjectID(ctx, run.Payload)
-	allowed, reason, err := si.svc.CheckPreExecutionBudget(
-		ctx, agent.ID, projectID, agent.WorkspaceID)
-	if err != nil {
-		si.logger.Error("budget check failed",
-			zap.String("run_id", run.ID), zap.Error(err))
-		return true // fail-open on error
-	}
-	if !allowed {
-		si.logger.Info("run skipped (budget exceeded)",
-			zap.String("run_id", run.ID), zap.String("reason", reason))
-		si.releaseCheckoutIfNeeded(ctx, run)
-		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
-		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
-		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
-			"scheduler", "office-scheduler",
-			"run_budget_blocked", "run", run.ID,
-			mustJSON(map[string]string{
-				"agent":    agent.Name,
-				"agent_id": agent.ID,
-				"reason":   reason,
-			}), run.ID, "")
-		return false
-	}
-	return true
 }
 
 // releaseCheckoutIfNeeded releases the task checkout the given run may hold.
