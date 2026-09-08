@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   PluginHostApi as PublicPluginHostApi,
+  ChatSubmitDecorationSlotProps as PublicChatSubmitDecorationSlotProps,
   MainTopBarSlotProps as PublicMainTopBarSlotProps,
   PluginNavSection as PublicPluginNavSection,
   PluginRegistry as PublicPluginRegistry,
@@ -10,6 +11,7 @@ import type {
 } from "@kandev/plugin-sdk";
 import type {
   PluginHostApi,
+  ChatSubmitDecorationSlotProps as HostChatSubmitDecorationSlotProps,
   MainTopBarSlotProps as HostMainTopBarSlotProps,
   PluginNavSection,
   PluginRegistry,
@@ -54,6 +56,10 @@ describe("public plugin SDK", () => {
       HostMainTopBarSlotProps,
       PublicMainTopBarSlotProps
     > = true;
+    const chatSubmitDecorationSlotPropsAreCanonical: SameType<
+      HostChatSubmitDecorationSlotProps,
+      PublicChatSubmitDecorationSlotProps
+    > = true;
     expect(hostHasEveryPublicKey).toBe(true);
     expect(registryHasEveryPublicKey).toBe(true);
     expect(publicHasEveryRegistryKey).toBe(true);
@@ -64,6 +70,7 @@ describe("public plugin SDK", () => {
     expect(associationIsCanonical).toBe(true);
     expect(navSectionIsCanonical).toBe(true);
     expect(mainTopBarSlotPropsAreCanonical).toBe(true);
+    expect(chatSubmitDecorationSlotPropsAreCanonical).toBe(true);
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
   });

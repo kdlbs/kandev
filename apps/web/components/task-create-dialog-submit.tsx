@@ -199,6 +199,7 @@ export function useTaskSubmitHandlers({
   repositoryLocalPath,
   noRepository,
   workspacePath,
+  priority,
   blockedBy,
   editDependencies,
   transformDescriptionBeforeSubmit,
@@ -581,6 +582,7 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          priority,
           blockedBy,
         });
         submittedPayload = payload;
@@ -626,6 +628,7 @@ export function useTaskSubmitHandlers({
       autopilot,
       noRepository,
       workspacePath,
+      priority,
       onSuccess,
       onOpenChange,
       preserveTaskCreateLastUsedOnClose,
@@ -864,6 +867,7 @@ export function useTaskSubmitHandlers({
           attachments,
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          priority,
           blockedBy,
         });
         submittedPayload = p;
@@ -898,6 +902,7 @@ export function useTaskSubmitHandlers({
     noRepository,
     autopilot,
     workspacePath,
+    priority,
     validateForCreate,
     hasRemoteSubmitBlocker,
     getRepositoriesPayload,

@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useBulkConfirmDialog } from "./task-session-sidebar-selection";
+import { useBulkConfirmDialog, useSelectionHandlers } from "./task-session-sidebar-selection";
 
 const tasks = [
   { id: "a", remoteExecutorType: "docker" },
@@ -52,5 +52,43 @@ describe("useBulkConfirmDialog", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+describe("useSelectionHandlers", () => {
+  it("keeps bulk move stable when the selection aggregate is recreated", () => {
+    const clearSelection = vi.fn();
+    const selectRange = vi.fn();
+    const pruneToVisible = vi.fn();
+    const bulkMove = vi.fn();
+    const multiSelect = {
+      isSelecting: false,
+      clearSelection,
+      selectRange,
+      pruneToVisible,
+      bulkMove,
+    } as unknown as Parameters<typeof useSelectionHandlers>[0]["multiSelect"];
+    const stableArgs = {
+      pinTasks: vi.fn(),
+      unpinTasks: vi.fn(),
+      pinnedTaskIds: ["pinned"],
+      visibleTaskIds: ["a", "b"],
+      movableSelectedIds: new Set(["a", "b"]),
+    };
+
+    const { result, rerender } = renderHook(
+      ({ selection }: { selection: typeof multiSelect }) =>
+        useSelectionHandlers({ ...stableArgs, multiSelect: selection }),
+      { initialProps: { selection: multiSelect } },
+    );
+    const firstBulkMove = result.current.onBulkMove;
+
+    rerender({
+      selection: {
+        ...multiSelect,
+      },
+    });
+
+    expect(result.current.onBulkMove).toBe(firstBulkMove);
   });
 });

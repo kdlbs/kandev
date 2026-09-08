@@ -26,7 +26,7 @@ func (s *Store) ResetWorkspaceE2E(ctx context.Context, workspaceID string) (E2ER
 			(SELECT id FROM gitlab_issue_watches WHERE workspace_id = ?)`,
 	}
 	for _, query := range queries {
-		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), workspaceID); err != nil {
 			return E2EResetResult{}, err
 		}
 	}
@@ -40,13 +40,13 @@ func (s *Store) ResetWorkspaceE2E(ctx context.Context, workspaceID string) (E2ER
 		return E2EResetResult{}, err
 	}
 
-	reviewResult, err := tx.ExecContext(ctx,
-		`DELETE FROM gitlab_review_watches WHERE workspace_id = ?`, workspaceID)
+	reviewResult, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM gitlab_review_watches WHERE workspace_id = ?`), workspaceID)
 	if err != nil {
 		return E2EResetResult{}, err
 	}
-	issueResult, err := tx.ExecContext(ctx,
-		`DELETE FROM gitlab_issue_watches WHERE workspace_id = ?`, workspaceID)
+	issueResult, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM gitlab_issue_watches WHERE workspace_id = ?`), workspaceID)
 	if err != nil {
 		return E2EResetResult{}, err
 	}
@@ -59,7 +59,7 @@ func (s *Store) ResetWorkspaceE2E(ctx context.Context, workspaceID string) (E2ER
 			(SELECT id FROM tasks WHERE workspace_id = ?)`,
 	}
 	for _, query := range workspaceDeletes {
-		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), workspaceID); err != nil {
 			return E2EResetResult{}, err
 		}
 	}

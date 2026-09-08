@@ -60,6 +60,7 @@ export type GitCommitData = {
 
 // Git reset data
 export type GitResetData = {
+  repository_name?: string;
   previous_head: string;
   current_head: string;
   deleted_count: number;
@@ -67,6 +68,7 @@ export type GitResetData = {
 
 // Git branch switch data
 export type GitBranchSwitchData = {
+  repository_name?: string;
   previous_branch: string;
   current_branch: string;
   current_head: string;

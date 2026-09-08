@@ -32,23 +32,22 @@ Git state.
 
 
 
+- [Branch Policies](requirements/branch-policies.md)
 - [Create a Local Repository During Task Creation](requirements/create-local-repository.md)
 - [Empty Remote Repositories](requirements/empty-remote-repositories.md)
 - [Kanban workspace creation](requirements/creation.md)
 - [Workspace Deletion](requirements/deletion.md)
 - [Improve Kandev](requirements/improve-kandev.md)
 - [Local Workspace Repositories](requirements/local-repositories.md)
+- [Organization Units](requirements/org-units.md)
 - [Repository and Workspace Secrets](requirements/repository-secrets.md)
 - [Repository Sets](requirements/repository-sets.md)
 - [Copy and Move Secrets Between Scopes](requirements/secret-scope-transfer.md)
 - [Workspace Base-Branch Propagation](requirements/workspace-base-branch-propagation.md)
 - [Worktree Base Refresh](requirements/worktree-base-refresh.md)
 - [Worktree Branch Templates](requirements/worktree-branch-templates.md)
-- [Branch Policies](requirements/branch-policies.md)
 
 ### System design
-
-
 
 - [Empty Remote Repositories](system-design/empty-remote-repositories.md)
 - [Improve Kandev](system-design/improve-kandev.md)
@@ -56,6 +55,7 @@ Git state.
 - [Branch Policies](system-design/branch-policies.md)
 - [Worktree Base Refresh](system-design/worktree-base-refresh.md)
 - [Local Workspace Repositories](system-design/local-repositories.md)
+- [Organization Units](system-design/org-units.md)
 
 ## Migration record
 

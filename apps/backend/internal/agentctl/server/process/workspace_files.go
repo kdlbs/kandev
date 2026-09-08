@@ -58,9 +58,16 @@ func isRootOwnershipMarkerPath(path string) bool {
 
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
-	files, err := wt.getFileListClass(ctx, subproc.GitBackground)
+	wt.updateFilesClass(ctx, subproc.GitBackground)
+}
+
+func (wt *WorkspaceTracker) updateFilesClass(ctx context.Context, class subproc.GitWorkClass) {
+	files, err := wt.getFileListClass(ctx, class)
 	if err != nil {
-		wt.logger.Debug("failed to get file list", zap.Error(err))
+		wt.recordFilesystemFailure("workspace.file_monitor", workspaceTrigger(ctx, "poll"), err)
+		return
+	}
+	if err := ctx.Err(); err != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return
 	}
 
@@ -129,6 +136,7 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileT
 	// Check if path exists
 	info, err := os.Stat(safePath)
 	if err != nil {
+		wt.recordFilesystemFailure("workspace.file_tree", "user_select", err)
 		return nil, fmt.Errorf("path not found: %w", err)
 	}
 
@@ -158,6 +166,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 	// Read directory contents
 	entries, err := os.ReadDir(safePath)
 	if err != nil {
+		wt.recordFilesystemFailure("workspace.file_tree", "user_select", err)
 		return node, nil // Return node without children on error
 	}
 

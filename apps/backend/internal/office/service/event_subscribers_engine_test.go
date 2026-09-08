@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -427,12 +428,15 @@ func TestEngineDispatcher_AgentFailed_PostStartFallbackHandled_SkipsDispatch(t *
 	setTestTaskAssignee(t, svc, "task-1", "worker-1")
 	run := queueTaskAssignedRunForAgentFailedTests(t, svc, "worker-1", "task-1")
 	svc.ExecSQL(t, `UPDATE runs SET resolved_provider_id = 'test-provider' WHERE id = ?`, run.ID)
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'working', working_run_id = ? WHERE id = ?`, run.ID, "worker-1")
 
 	publishAgentFailed(t, eb, "task-1", "worker-1", "sess-err", "boom")
 
 	if calls := disp.Calls(); len(calls) != 0 {
 		t.Fatalf("dispatcher calls = %d, want 0 (post-start fallback handled)", len(calls))
 	}
+	assertAgentStatus(t, svc, context.Background(), "worker-1", models.AgentStatusIdle,
+		"after a handled post-start fallback")
 }
 
 // TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger pins
@@ -469,6 +473,7 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 		t.Fatalf("claim: %v (run=%v)", err, run)
 	}
 	run.RetryCount = service.MaxRetryCount
+	run.SessionID = "sess-pathb"
 
 	if err := svc.HandleRunFailure(ctx, run, errForTest("boom")); err != nil {
 		t.Fatalf("handle run failure: %v", err)
@@ -490,5 +495,12 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 	}
 	if next.Reason != service.RunReasonAgentError {
 		t.Errorf("reason = %q, want agent_error", next.Reason)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(next.Payload), &payload); err != nil {
+		t.Fatalf("decode CEO payload: %v", err)
+	}
+	if payload["failed_session_id"] != run.SessionID {
+		t.Errorf("failed_session_id = %q, want %q", payload["failed_session_id"], run.SessionID)
 	}
 }

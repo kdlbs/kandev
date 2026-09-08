@@ -307,6 +307,17 @@ func (h *Hub) setAuthPolicy(policy AuthPolicy) {
 // event never disappears entirely because ownership could not be resolved;
 // it only stops crossing user boundaries once ownership is known.
 func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	// Prefer the reach set: with team access a workspace is readable by its
+	// members and, when it is org-visible, by the whole organization. Routing
+	// to the owner alone would deliver a shared board's updates to nobody but
+	// the person who happened to create it.
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil && workspaceID != "" {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+			return
+		}
+	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil || workspaceID == "" {
 		h.Broadcast(msg)
@@ -318,6 +329,30 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		return
 	}
 	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToUsers delivers to exactly the given user IDs. An empty set
+// delivers to nobody: "no one may read this workspace" is a real answer, and
+// falling back to a global broadcast would invert it.
+func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	allowed := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		allowed[id] = struct{}{}
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceiveAny(client, allowed) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
 }
 
 // BroadcastToWorkspaceOrDrop is the fail-closed sibling of
@@ -410,7 +445,7 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	clients := h.authorizedTaskRecipients(taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
@@ -458,12 +493,64 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSessionRecipientsLocked(sessionID)
+	clients := h.authorizedSessionRecipients(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
+}
+
+func (h *Hub) authorizedTaskRecipients(taskID string) []*Client {
+	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	allowed, denied := h.partitionAuthorized(clients, taskID, h.authPolicy.Subscriptions.Task)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
+		delete(client.subscriptions, taskID)
+	}
+	h.mu.Unlock()
+	return allowed
+}
+
+func (h *Hub) authorizedSessionRecipients(sessionID string) []*Client {
+	clients := h.getSessionRecipientsLocked(sessionID)
+	allowed, denied := h.partitionAuthorized(clients, sessionID, h.authPolicy.Subscriptions.Session)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+		removeClientFromSubscriberMap(h.sessionMode.focusByClient, sessionID, client)
+		delete(client.sessionSubscriptions, sessionID)
+		delete(client.sessionFocus, sessionID)
+	}
+	h.mu.Unlock()
+	h.recomputeSessionMode(sessionID)
+	return allowed
+}
+
+func (h *Hub) partitionAuthorized(
+	clients []*Client,
+	topicID string,
+	authorize func(context.Context, string) error,
+) (allowed, denied []*Client) {
+	if authorize == nil {
+		return clients, nil
+	}
+	allowed = make([]*Client, 0, len(clients))
+	for _, client := range clients {
+		if err := authorize(client.dispatchContext(), topicID); err != nil {
+			denied = append(denied, client)
+			continue
+		}
+		allowed = append(allowed, client)
+	}
+	return allowed, denied
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user

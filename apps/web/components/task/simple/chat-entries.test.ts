@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRunErrorsFromSessions,
+  filterVisibleRunErrors,
   hasMatchingSessionLaunchError,
   liveSessionMetadataFromStore,
   mergeLiveSessionMetadata,
@@ -134,6 +135,32 @@ describe("hasMatchingSessionLaunchError", () => {
         },
       ]),
     ).toBe(true);
+  });
+});
+
+describe("filterVisibleRunErrors", () => {
+  it("keeps ordinary provider errors when the active summary is not a launch error", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "The provider rejected the request.",
+            code: "provider_auth_required",
+            stamp: "provider-stamp-1",
+          },
+        },
+      }),
+    ]);
+
+    expect(
+      filterVisibleRunErrors(errors, {
+        session_id: "s1",
+        stamp: "provider-stamp-1",
+        occurred_at: "2026-08-02T15:00:01Z",
+        preview: "The provider rejected the request.",
+        category: "provider_auth_required",
+      }),
+    ).toEqual(errors);
   });
 });
 

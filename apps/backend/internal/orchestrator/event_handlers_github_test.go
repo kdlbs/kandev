@@ -225,6 +225,13 @@ func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID
 		Signature:      signature,
 		CheckpointJSON: checkpointJSON,
 	})
+	if m.ciPRState != nil {
+		m.ciPRState.LastFixSignature = signature
+		m.ciPRState.LastFixCheckpointJSON = checkpointJSON
+		m.ciPRState.LastFixEnqueuedAt = nil
+		// A prompt-free refresh clears the active dispatch timestamp but keeps
+		// the session selected for the next repair round.
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {

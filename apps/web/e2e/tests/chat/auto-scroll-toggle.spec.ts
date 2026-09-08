@@ -7,6 +7,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 import { waitForStableActiveSession } from "../../helpers/session-store";
+import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
 
 type E2EMessageStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
@@ -194,6 +195,18 @@ test.describe("Transcript auto-scroll toggle", () => {
     expect(envB).toBeTruthy();
     expect(envA).not.toBe(envB);
 
+    const refreshHold = await routeMainWebSocketWithMessageListResponseHold(testPage);
+    const olderPageRequests: string[] = [];
+    testPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === `/api/v1/task-sessions/${taskA.session_id}/messages` &&
+        url.searchParams.has("before")
+      ) {
+        olderPageRequests.push(url.toString());
+      }
+    });
+
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -204,17 +217,41 @@ test.describe("Transcript auto-scroll toggle", () => {
     await waitForStableActiveSession(testPage, taskB.session_id);
     await session.showSessionContext();
     await waitForOverflow(testPage);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    olderPageRequests.length = 0;
     await session.sidebarTaskItem("Env switch transcript A").click();
     await waitForStableActiveSession(testPage, taskA.session_id);
     await session.showSessionContext();
     const list = chatList(testPage);
     await waitForOverflow(testPage);
     await expect
+      .poll(refreshHold.heldCount, {
+        timeout: 5_000,
+        message: "returning task should issue a latest-window refresh",
+      })
+      .toBe(1);
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 2_000,
+        message: "cached enabled transcript should be at the bottom before refresh release",
+      })
+      .toBeLessThan(10);
+    expect(olderPageRequests).toHaveLength(0);
+
+    refreshHold.releaseHeldResponse();
+    await expect
       .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
         timeout: 15_000,
         message: "enabled transcript should settle at the bottom after an environment switch",
       })
       .toBeLessThan(10);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "negative assertion window for an unwanted older-page request after placement unlock",
+    );
+    expect(olderPageRequests).toHaveLength(0);
 
     const targetScrollTop = await list.evaluate((el) => {
       el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
@@ -228,15 +265,39 @@ test.describe("Transcript auto-scroll toggle", () => {
 
     await session.sidebarTaskItem("Env switch transcript B").click();
     await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    olderPageRequests.length = 0;
     await session.sidebarTaskItem("Env switch transcript A").click();
     await waitForStableActiveSession(testPage, taskA.session_id);
     await session.showSessionContext();
+    await expect
+      .poll(refreshHold.heldCount, {
+        timeout: 5_000,
+        message: "disabled return should issue a latest-window refresh",
+      })
+      .toBe(1);
+    await expect
+      .poll(async () => Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop), {
+        timeout: 2_000,
+        message: "cached disabled transcript should restore its position before refresh release",
+      })
+      .toBeLessThanOrEqual(20);
+    expect(olderPageRequests).toHaveLength(0);
+
+    refreshHold.releaseHeldResponse();
     await expect
       .poll(async () => Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop), {
         timeout: 15_000,
         message: "disabled transcript should restore its own offset after an environment switch",
       })
       .toBeLessThanOrEqual(20);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "negative assertion window for pagination after disabled position restoration",
+    );
+    expect(olderPageRequests).toHaveLength(0);
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
 

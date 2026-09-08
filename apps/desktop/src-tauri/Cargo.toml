@@ -25,6 +25,7 @@ desktop-runtime = [
   "dep:tauri-plugin-opener",
   "dep:tauri-plugin-updater",
   "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-dialog",
   "dep:tauri-plugin-single-instance",
   "dep:tauri-runtime",
 ]
@@ -49,4 +50,5 @@ tauri-plugin-single-instance = { version = "=2.4.3", optional = true }
 tauri-plugin-updater = { version = "=2.10.1", optional = true }
 tauri-plugin-notification = { version = "=2.3.3", optional = true }
 tauri-plugin-opener = { version = "=2.5.4", optional = true }
+tauri-plugin-dialog = { version = "=2.7.2", optional = true }
 url = "2"

@@ -40,7 +40,10 @@ export type SidebarDialogsActions = {
   deletingTask: Target;
   setDeletingTask: (next: Target) => void;
   isDeleting: boolean;
-  handleDeleteConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
+  handleDeleteConfirm: (opts: {
+    cascade: boolean;
+    discardWorktreeChanges: boolean;
+  }) => Promise<void> | void;
   detachingTask: DetachTarget;
   setDetachingTask: (next: DetachTarget) => void;
   detachingTaskId: string | null;

@@ -35,9 +35,25 @@ The former legacy size exceptions for migrated sources were removed. All canonic
 The following specifications were added after this migration and remain in the legacy layout until they move into an owning system:
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
+- [Multi-tenancy](multi-tenancy/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Waiting Attribution](disambiguate-waiting/spec.md) (implemented)
+- [ACP Form Elicitation](acp-elicitation/spec.md) (draft)
+- [Parked-Session Notification Deferral](parked-notification-deferral/spec.md) (draft)
+- [Workflow Engine Operation Ledger Lifetime](workflow-engine-operation-ledger-lifetime/spec.md) (draft)
 
 ## Authoring rule
+
+- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
+- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
+- **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
+- **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
+
+## Cross-references
+
+- ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
+- Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)

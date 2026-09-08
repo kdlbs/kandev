@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 const archiveTaskMock = vi.fn();
+const deleteTaskMock = vi.fn();
 const removeTaskFromBoardMock = vi.fn();
 const getStateMock = vi.fn();
 const storeMock = { getState: getStateMock };
 const replaceTaskUrlMock = vi.fn();
 const setActiveSessionMock = vi.fn();
 const setActiveTaskMock = vi.fn();
+const toastMock = vi.fn();
 let storeState: {
   tasks: { activeTaskId: string | null; activeSessionId: string | null };
   setActiveSession: (...args: unknown[]) => void;
@@ -16,7 +18,7 @@ let storeState: {
 
 vi.mock("@/lib/api", () => ({
   archiveTask: (...args: unknown[]) => archiveTaskMock(...args),
-  deleteTask: vi.fn(),
+  deleteTask: (...args: unknown[]) => deleteTaskMock(...args),
   moveTask: vi.fn(),
   updateTask: vi.fn(),
 }));
@@ -34,8 +36,11 @@ vi.mock("@/hooks/use-task-removal", () => ({
     removeTaskFromBoard: (...args: unknown[]) => removeTaskFromBoardMock(...args),
   }),
 }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: toastMock }),
+}));
 
-import { useArchiveAndSwitchTask } from "./use-task-actions";
+import { useArchiveAndSwitchTask, useTaskActions } from "./use-task-actions";
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -143,5 +148,25 @@ describe("useArchiveAndSwitchTask", () => {
     expect(setActiveSessionMock).not.toHaveBeenCalled();
     expect(setActiveTaskMock).not.toHaveBeenCalled();
     expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useTaskActions", () => {
+  it("shows localized retry guidance for a dirty-worktree delete conflict", async () => {
+    const { ApiError } = await import("@/lib/api/client");
+    deleteTaskMock.mockRejectedValueOnce(
+      new ApiError("task worktree contains local changes", 409, {
+        error_code: "task_delete_dirty_worktree",
+      }),
+    );
+    const { result } = renderHook(() => useTaskActions());
+
+    await expect(result.current.deleteTaskById("task-1")).rejects.toMatchObject({ status: 409 });
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Task deletion needs your confirmation",
+      description:
+        "The task stays visible. Review the local changes, then select discard and try again.",
+      variant: "error",
+    });
   });
 });

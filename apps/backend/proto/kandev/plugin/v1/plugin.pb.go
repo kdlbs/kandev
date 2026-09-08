@@ -2366,24 +2366,26 @@ func (x *PageInfo) GetHasMore() bool {
 
 // ── Task ────────────────────────────────────────────────────────────────────
 type Task struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	WorkflowId   string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
-	Title        string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
-	Description  string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	State        string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"` // TaskState enum value as a string, stable
-	Priority     string                 `protobuf:"bytes,7,opt,name=priority,proto3" json:"priority,omitempty"`
-	CreatedBy    string                 `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
-	CreatedAt    string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // RFC3339
-	UpdatedAt    string                 `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	StartedAt    *string                `protobuf:"bytes,11,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	CompletedAt  *string                `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
-	ParentId     *string                `protobuf:"bytes,13,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
-	Identifier   string                 `protobuf:"bytes,14,opt,name=identifier,proto3" json:"identifier,omitempty"`
-	IsEphemeral  bool                   `protobuf:"varint,15,opt,name=is_ephemeral,json=isEphemeral,proto3" json:"is_ephemeral,omitempty"`
-	Repositories []*TaskRepository      `protobuf:"bytes,16,rep,name=repositories,proto3" json:"repositories,omitempty"`
-	Metadata     *structpb.Struct       `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"` // free-form; plugin-tolerant
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	WorkflowId  string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Title       string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	State       string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"` // TaskState enum value as a string, stable
+	// One of critical, high, medium, or low. Create defaults to medium when
+	// omitted; updates validate the supplied value.
+	Priority     string            `protobuf:"bytes,7,opt,name=priority,proto3" json:"priority,omitempty"`
+	CreatedBy    string            `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedAt    string            `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // RFC3339
+	UpdatedAt    string            `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	StartedAt    *string           `protobuf:"bytes,11,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
+	CompletedAt  *string           `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
+	ParentId     *string           `protobuf:"bytes,13,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
+	Identifier   string            `protobuf:"bytes,14,opt,name=identifier,proto3" json:"identifier,omitempty"`
+	IsEphemeral  bool              `protobuf:"varint,15,opt,name=is_ephemeral,json=isEphemeral,proto3" json:"is_ephemeral,omitempty"`
+	Repositories []*TaskRepository `protobuf:"bytes,16,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	Metadata     *structpb.Struct  `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"` // free-form; plugin-tolerant
 	// RFC3339, set only when the task is archived. Present so a plugin reading
 	// with include_archived can tell a live task from a retired one; absent is
 	// the normal case, not an unknown.
@@ -2403,8 +2405,10 @@ type Task struct {
 	// `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
 	// same read-time projection kandev's own callers consume.
 	AssigneeAgentProfileId string `protobuf:"bytes,22,opt,name=assignee_agent_profile_id,json=assigneeAgentProfileId,proto3" json:"assignee_agent_profile_id,omitempty"`
-	// Task labels. Stored as a JSON array string on the model; carried here as a
-	// real repeated field so a plugin does not have to re-parse it.
+	// Deprecated compatibility field shipped in API v1. New plugins should keep
+	// provider-specific labels in plugin-owned task state and UI slot data.
+	//
+	// Deprecated: Marked as deprecated in kandev/plugin/v1/plugin.proto.
 	Labels    []string `protobuf:"bytes,23,rep,name=labels,proto3" json:"labels,omitempty"`
 	Autopilot bool     `protobuf:"varint,24,opt,name=autopilot,proto3" json:"autopilot,omitempty"`
 	// Whether the task consumes a slot in its current step's WIP capacity. A
@@ -2605,6 +2609,7 @@ func (x *Task) GetAssigneeAgentProfileId() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in kandev/plugin/v1/plugin.proto.
 func (x *Task) GetLabels() []string {
 	if x != nil {
 		return x.Labels
@@ -6197,9 +6202,11 @@ type CreateTaskRequest struct {
 	ParentId       *string                `protobuf:"bytes,6,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
 	StartAgent     bool                   `protobuf:"varint,7,opt,name=start_agent,json=startAgent,proto3" json:"start_agent,omitempty"`
 	// kandev stamps source = "plugin:<id>" server-side; not settable here.
-	Repositories  []*PluginTaskRepository  `protobuf:"bytes,8,rep,name=repositories,proto3" json:"repositories,omitempty"`
-	Launch        *PluginTaskLaunchOptions `protobuf:"bytes,9,opt,name=launch,proto3,oneof" json:"launch,omitempty"`
-	Metadata      *structpb.Struct         `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"` // plugin namespace only; host reserves source.
+	Repositories []*PluginTaskRepository  `protobuf:"bytes,8,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	Launch       *PluginTaskLaunchOptions `protobuf:"bytes,9,opt,name=launch,proto3,oneof" json:"launch,omitempty"`
+	Metadata     *structpb.Struct         `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"` // plugin namespace only; host reserves source.
+	// One of critical, high, medium, or low; empty defaults to medium.
+	Priority      string `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6302,6 +6309,13 @@ func (x *CreateTaskRequest) GetMetadata() *structpb.Struct {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *CreateTaskRequest) GetPriority() string {
+	if x != nil {
+		return x.Priority
+	}
+	return ""
 }
 
 type PluginTaskRepository struct {
@@ -6625,6 +6639,7 @@ type UpdateTaskRequest struct {
 	Description    *string                `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
 	State          *string                `protobuf:"bytes,4,opt,name=state,proto3,oneof" json:"state,omitempty"`
 	WorkflowStepId *string                `protobuf:"bytes,5,opt,name=workflow_step_id,json=workflowStepId,proto3,oneof" json:"workflow_step_id,omitempty"`
+	Priority       *string                `protobuf:"bytes,6,opt,name=priority,proto3,oneof" json:"priority,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -6690,6 +6705,13 @@ func (x *UpdateTaskRequest) GetState() string {
 func (x *UpdateTaskRequest) GetWorkflowStepId() string {
 	if x != nil && x.WorkflowStepId != nil {
 		return *x.WorkflowStepId
+	}
+	return ""
+}
+
+func (x *UpdateTaskRequest) GetPriority() string {
+	if x != nil && x.Priority != nil {
+		return *x.Priority
 	}
 	return ""
 }
@@ -7404,7 +7426,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\bPageInfo\x12\x1f\n" +
 	"\vnext_cursor\x18\x01 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xf0\b\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xf4\b\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -7436,8 +7458,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\rpull_requests\x18\x13 \x03(\v2!.kandev.plugin.v1.TaskPullRequestR\fpullRequests\x12(\n" +
 	"\x10workflow_step_id\x18\x14 \x01(\tR\x0eworkflowStepId\x12\x1a\n" +
 	"\bposition\x18\x15 \x01(\x05R\bposition\x129\n" +
-	"\x19assignee_agent_profile_id\x18\x16 \x01(\tR\x16assigneeAgentProfileId\x12\x16\n" +
-	"\x06labels\x18\x17 \x03(\tR\x06labels\x12\x1c\n" +
+	"\x19assignee_agent_profile_id\x18\x16 \x01(\tR\x16assigneeAgentProfileId\x12\x1a\n" +
+	"\x06labels\x18\x17 \x03(\tB\x02\x18\x01R\x06labels\x12\x1c\n" +
 	"\tautopilot\x18\x18 \x01(\bR\tautopilot\x12!\n" +
 	"\fwip_admitted\x18\x19 \x01(\bR\vwipAdmitted\x12+\n" +
 	"\x12queued_for_step_id\x18\x1a \x01(\tR\x0fqueuedForStepId\x12 \n" +
@@ -7748,7 +7770,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x19InvokeUtilityAgentRequest\x12\x16\n" +
 	"\x06prompt\x18\x01 \x01(\tR\x06prompt\"0\n" +
 	"\x1aInvokeUtilityAgentResponse\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xf8\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x94\x04\n" +
 	"\x11CreateTaskRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -7762,7 +7784,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\frepositories\x18\b \x03(\v2&.kandev.plugin.v1.PluginTaskRepositoryR\frepositories\x12F\n" +
 	"\x06launch\x18\t \x01(\v2).kandev.plugin.v1.PluginTaskLaunchOptionsH\x02R\x06launch\x88\x01\x01\x123\n" +
 	"\bmetadata\x18\n" +
-	" \x01(\v2\x17.google.protobuf.StructR\bmetadataB\x13\n" +
+	" \x01(\v2\x17.google.protobuf.StructR\bmetadata\x12\x1a\n" +
+	"\bpriority\x18\v \x01(\tR\bpriorityB\x13\n" +
 	"\x11_workflow_step_idB\f\n" +
 	"\n" +
 	"_parent_idB\t\n" +
@@ -7809,17 +7832,19 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"_plan_mode\"@\n" +
 	"\x12CreateTaskResponse\x12*\n" +
-	"\x04task\x18\x01 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xe8\x01\n" +
+	"\x04task\x18\x01 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\x96\x02\n" +
 	"\x11UpdateTaskRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01\x12%\n" +
 	"\vdescription\x18\x03 \x01(\tH\x01R\vdescription\x88\x01\x01\x12\x19\n" +
 	"\x05state\x18\x04 \x01(\tH\x02R\x05state\x88\x01\x01\x12-\n" +
-	"\x10workflow_step_id\x18\x05 \x01(\tH\x03R\x0eworkflowStepId\x88\x01\x01B\b\n" +
+	"\x10workflow_step_id\x18\x05 \x01(\tH\x03R\x0eworkflowStepId\x88\x01\x01\x12\x1f\n" +
+	"\bpriority\x18\x06 \x01(\tH\x04R\bpriority\x88\x01\x01B\b\n" +
 	"\x06_titleB\x0e\n" +
 	"\f_descriptionB\b\n" +
 	"\x06_stateB\x13\n" +
-	"\x11_workflow_step_id\"@\n" +
+	"\x11_workflow_step_idB\v\n" +
+	"\t_priority\"@\n" +
 	"\x12UpdateTaskResponse\x12*\n" +
 	"\x04task\x18\x01 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xa6\x01\n" +
 	"\x0fMoveTaskRequest\x12\x17\n" +

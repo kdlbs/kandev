@@ -7,6 +7,7 @@ export type TaskStatusSummaryActiveError = {
   stamp: string;
   occurred_at: string;
   preview: string;
+  details?: string;
   category?: string;
   recovery_actions?: TaskLaunchRecoveryAction[];
 };

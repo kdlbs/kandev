@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // fuzzIdempotenceIterations bounds the seeded idempotence fuzz tests (see
@@ -214,6 +215,30 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustNotHave: []string{"***"},
 			mustHave:    []string{"tokens: 500 remaining"},
 		},
+		{
+			name:        "temporary workspace path",
+			in:          "file at /tmp/kandev/task/repo/main.go failed",
+			mustNotHave: []string{"/tmp/kandev/task/repo/main.go"},
+			mustHave:    []string{"[path-redacted]"},
+		},
+		{
+			name:        "workspace root path",
+			in:          "checkout failed in /workspace/kandev/repo/main.go",
+			mustNotHave: []string{"/workspace/kandev/repo/main.go"},
+			mustHave:    []string{"[path-redacted]"},
+		},
+		{
+			name:        "path redaction does not consume a following endpoint",
+			in:          "cannot read /workspace/.env while connecting to https://endpoint.example.test",
+			mustNotHave: []string{"/workspace/.env"},
+			mustHave:    []string{"https://endpoint.example.test"},
+		},
+		{
+			name:        "windows workspace path",
+			in:          `checkout failed in C:\Users\alice\workspace\repo\main.go`,
+			mustNotHave: []string{`C:\Users\alice\workspace\repo\main.go`},
+			mustHave:    []string{"[path-redacted]"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -232,12 +257,12 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 	}
 }
 
-// TestSanitize_IdempotentFuzz replaces a fixed golden list with a seeded
-// fuzz over a credential-flavoured alphabet: a golden list only proves
-// idempotence for the handful of inputs it enumerates, and a prior regression
-// (an unbalanced optional quote consumed by the key match but never
-// re-emitted) shrank output by one byte on the second pass for inputs the
-// golden list did not happen to cover.
+// TestSanitize_IdempotentFuzz complements TestSanitize_Idempotent's fixed
+// golden list with a seeded fuzz over a credential-flavoured alphabet: a
+// golden list only proves idempotence for the handful of inputs it
+// enumerates, and a prior regression (an unbalanced optional quote consumed
+// by the key match but never re-emitted) shrank output by one byte on the
+// second pass for inputs the golden list did not happen to cover.
 func TestSanitize_IdempotentFuzz(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for i := 0; i < fuzzIdempotenceIterations; i++ {
@@ -246,6 +271,26 @@ func TestSanitize_IdempotentFuzz(t *testing.T) {
 		second := Sanitize(first)
 		if first != second {
 			t.Fatalf("Sanitize not idempotent for %q: first=%q second=%q", s, first, second)
+		}
+	}
+}
+
+func TestSanitize_Idempotent(t *testing.T) {
+	inputs := []string{
+		"plain text",
+		"Bearer abcdefghij1234567890XYZ tail",
+		"sk-abcdefghijklmnop and ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"Authorization: foo bar baz qux\n",
+		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
+		"password: hunter2 token: foobar secret=abc",
+		"/Users/me/projects/x /home/me/x",
+		"/tmp/kandev/repo/main.go C:\\workspace\\repo\\main.go",
+	}
+	for _, in := range inputs {
+		first := Sanitize(in)
+		second := Sanitize(first)
+		if first != second {
+			t.Fatalf("Sanitize not idempotent for %q: first=%q second=%q", in, first, second)
 		}
 	}
 }
@@ -538,6 +583,34 @@ func TestSanitizeCredentials_IdempotentFuzz(t *testing.T) {
 		second := SanitizeCredentials(first)
 		if first != second {
 			t.Fatalf("SanitizeCredentials not idempotent for %q: first=%q second=%q", s, first, second)
+		}
+	}
+}
+
+// TestSanitize_TruncatesOnRuneBoundary proves Sanitize never splits a
+// multi-byte rune when cutting to MaxRawExcerptBytes. Vietnamese (3-byte) and
+// CJK (3-byte) runes are repeated at every byte alignment relative to
+// MaxRawExcerptBytes by padding the prefix with 0..3 ASCII bytes, so the
+// limit boundary falls inside a rune at some alignment if truncation is not
+// rune-safe (mirrors dynamic.bounded()'s own coverage for the same defect).
+func TestSanitize_TruncatesOnRuneBoundary(t *testing.T) {
+	vietnamese := "Xin chào các bạn, đây là một đoạn văn bản tiếng Việt có dấu để kiểm tra việc cắt chuỗi theo byte thay vì theo ký tự Unicode. "
+	cjk := "这是一段中文文本用来测试按字节截断而不是按字符截断可能导致的无效UTF八编码问题。"
+
+	for _, sample := range []struct {
+		name string
+		text string
+	}{
+		{"vietnamese", vietnamese},
+		{"cjk", cjk},
+	} {
+		repeated := strings.Repeat(sample.text, 200)
+		for alignment := 0; alignment < 4; alignment++ {
+			padded := strings.Repeat("x", alignment) + repeated
+			got := Sanitize(padded)
+			if !utf8.ValidString(got) {
+				t.Fatalf("%s alignment=%d: Sanitize() produced invalid UTF-8: %q", sample.name, alignment, got)
+			}
 		}
 	}
 }

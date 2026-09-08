@@ -295,5 +295,6 @@
   "savingProfile": "Saving...",
   "saveProfile": "Save profile",
   "createProfile": "Create profile",
-  "creatingProfile": "Creating..."
+  "creatingProfile": "Creating...",
+  "adminOnly": "Only administrators can change agents and agent profiles."
 }

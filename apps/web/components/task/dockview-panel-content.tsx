@@ -2,8 +2,10 @@
 
 import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
+import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
@@ -214,6 +216,19 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function CanvasContent({ params }: { params: Record<string, unknown> }) {
+  const enabled = useFeature("canvases");
+  if (!enabled) return null;
+  return (
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      data-testid="canvas-panel-boundary"
+    >
+      <CanvasHostRoute canvasId={typeof params.canvasId === "string" ? params.canvasId : ""} />
+    </div>
+  );
+}
+
 const COMPONENT_ALIASES: Record<string, string> = {
   "diff-files": "changes",
   "all-files": "files",
@@ -246,6 +261,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "prompt-history": () => <PromptHistoryContent />,
+  canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

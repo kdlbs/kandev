@@ -3,6 +3,7 @@ package routingerr
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
@@ -60,6 +61,7 @@ var redactions = append(append([]redaction{
 	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
 	literalRedaction(`/Users/[^/\s]+/`, "/Users/<redacted>/"),
 	literalRedaction(`/home/[^/\s]+/`, "/home/<redacted>/"),
+	redactLocalPaths,
 }...)
 
 // credentialAssignmentKey matches a password/secret/token/api-key field name
@@ -263,6 +265,61 @@ func scanContinuation(s string) int {
 	return i
 }
 
+// localUnixPathPattern and localWindowsPathPattern back redactLocalPaths,
+// the last rule in the broad redactions tier: any absolute filesystem path
+// mentioned in provider diagnostics can carry a workspace or account
+// identifier, so it is collapsed to a fixed placeholder rather than only
+// normalizing the well-known /Users and /home prefixes above.
+var (
+	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n\s"'<>]+`)
+	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
+)
+
+func redactLocalPaths(s string) string {
+	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
+		if len(path) >= 4 && path[2:4] == "//" {
+			return path
+		}
+		return "[path-redacted]"
+	})
+	matches := localUnixPathPattern.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+
+	var redacted strings.Builder
+	redacted.Grow(len(s))
+	last := 0
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		redacted.WriteString(s[last:start])
+		path := s[start:end]
+		if start >= 2 && s[start-2:start] == ":/" {
+			redacted.WriteString(path)
+			last = end
+			continue
+		}
+		redacted.WriteString(redactUnixPath(path))
+		last = end
+	}
+	redacted.WriteString(s[last:])
+	return redacted.String()
+}
+
+func redactUnixPath(path string) string {
+	if strings.Contains(path, "[path-redacted]") {
+		return path
+	}
+	switch {
+	case strings.HasPrefix(path, "/Users/"):
+		return "/Users/<redacted>/[path-redacted]"
+	case strings.HasPrefix(path, "/home/"):
+		return "/home/<redacted>/[path-redacted]"
+	default:
+		return "[path-redacted]"
+	}
+}
+
 // applyRedactionsUnbounded runs rules over the entire input with no output
 // cap, so every credential's key marker is guaranteed to stay attached to its
 // full value regardless of length. The credential rules have no maximum
@@ -279,7 +336,11 @@ func applyRedactionsUnbounded(s string, rules []redaction) string {
 func applyRedactions(s string, rules []redaction) string {
 	s = applyRedactionsUnbounded(s, rules)
 	if len(s) > MaxRawExcerptBytes {
-		s = s[:MaxRawExcerptBytes]
+		cut := MaxRawExcerptBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
 	}
 	return s
 }
