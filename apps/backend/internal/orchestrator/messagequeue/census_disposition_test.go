@@ -121,6 +121,35 @@ func TestExactDispositionIsIdempotentAndPreservesChangedAndNewRows(t *testing.T)
 	}
 }
 
+func TestExactDispositionDuplicateClaimsHaveDeterministicOutcomes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			svc := censusTestService(t, repo)
+			ctx := context.Background()
+			entry, err := svc.QueueMessage(ctx, "session-1", "task-1", "one", "", QueuedByUser, false, nil)
+			if err != nil {
+				t.Fatalf("queue: %v", err)
+			}
+			census, err := svc.Census(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("census: %v", err)
+			}
+			claim := QueueEntryClaim{ID: entry.ID, Claim: census.Entries[0].Claim}
+			if _, err := svc.DisposeExact(ctx, "session-1", []QueueEntryClaim{claim, claim}); !errors.Is(err, ErrInvalidQueueDisposition) {
+				t.Fatalf("duplicate claims error = %v, want ErrInvalidQueueDisposition", err)
+			}
+		})
+	}
+}
+
 func TestConcurrentExactDispositionRemovesEntryOnce(t *testing.T) {
 	tests := []struct {
 		name string

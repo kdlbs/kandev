@@ -187,3 +187,38 @@ func TestHandleMessageTask_RoutineWakeRejectsExplicitNonPrimaryTarget(t *testing
 	assertWSError(t, resp, ws.ErrorCodeForbidden)
 	assert.Equal(t, 0, orch.queue.GetStatus(ctx, nonPrimary.ID).Count)
 }
+
+func TestApplyScheduledRoutineWakeMetadata_LeavesOrdinarySchedulesLossless(t *testing.T) {
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID: "automation-1", WorkspaceID: "ws-1",
+		CallerTaskID: "sender-task", CallerSessionID: "sender-session",
+		Surface: mcpprofile.SurfaceAutomation,
+	})
+	sender := &models.Task{
+		ID: "sender-task", WorkspaceID: "ws-1", Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			"automation_id": "automation-1", "trigger_id": "trigger-1",
+			"trigger_type": string(automation.TriggerTypeScheduled),
+		},
+	}
+	target := &models.Task{ID: "target-task", WorkspaceID: "ws-1"}
+	session := &models.TaskSession{ID: "target-session", TaskID: target.ID, IsPrimary: true}
+	metadata := map[string]interface{}{}
+
+	require.NoError(t, applyScheduledRoutineWakeMetadata(
+		ctx, "same prompt", sender, "sender-session", target, session, false, metadata,
+	))
+	assert.NotContains(t, metadata, messagequeue.MetadataRoutineWake)
+	assert.NotContains(t, metadata, messagequeue.MetadataCoalesceKey)
+}
+
+func TestValidateRoutineWakeTarget_RejectsImplicitNonPrimaryTarget(t *testing.T) {
+	err := validateRoutineWakeTarget(
+		mcpscope.Principal{WorkspaceID: "ws-1"},
+		&models.Task{ID: "sender", WorkspaceID: "ws-1"},
+		&models.Task{ID: "target", WorkspaceID: "ws-1"},
+		&models.TaskSession{ID: "sibling", TaskID: "target", IsPrimary: false},
+		false,
+	)
+	require.Error(t, err)
+}

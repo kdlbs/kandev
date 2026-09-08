@@ -92,6 +92,73 @@ func TestRoutineWakeClaimPreservesOneSuccessorAndReceipt(t *testing.T) {
 	}
 }
 
+func TestRoutineWakeReservationCannotBeClaimedTwice(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			msg := &QueuedMessage{SessionID: "session-1", TaskID: "task-1", Content: "wake", QueuedBy: QueuedByAgent,
+				Metadata: canonicalRoutineMetadata("fence-1", "dirty-1")}
+			msg.Metadata[MetadataCoalesceKey] = "routine-wake:key-1"
+			if err := repo.Insert(ctx, msg, 0); err != nil {
+				t.Fatalf("insert: %v", err)
+			}
+			first, err := repo.ReserveHead(ctx, "session-1")
+			if err != nil || first == nil {
+				t.Fatalf("first reserve = %#v, %v", first, err)
+			}
+			second, err := repo.ReserveHead(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("second reserve: %v", err)
+			}
+			if second != nil {
+				t.Fatalf("in-flight routine was reserved twice: %#v", second)
+			}
+		})
+	}
+}
+
+func TestRoutineWakeRequeueClearsReservationInPlace(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := censusTestService(t, tt.new(t))
+			ctx := context.Background()
+			entry, _, err := svc.QueueMessageWithCoalesceKey(
+				ctx, "session-1", "task-1", "wake", "", QueuedByAgent, false, nil,
+				canonicalRoutineMetadata("fence-1", "dirty-1"), "routine-wake:key-1", true,
+			)
+			if err != nil {
+				t.Fatalf("queue: %v", err)
+			}
+			reserved, exists := svc.ReserveQueued(ctx, "session-1")
+			if !exists || reserved == nil {
+				t.Fatalf("reserve = %#v, exists=%t", reserved, exists)
+			}
+			if err := svc.RequeueAtHead(ctx, reserved); err != nil {
+				t.Fatalf("requeue: %v", err)
+			}
+			status := svc.GetStatus(ctx, "session-1")
+			if status.Count != 1 || len(status.Entries) != 1 || status.Entries[0].ID != entry.ID || status.Entries[0].IsReservedInFlight() {
+				t.Fatalf("requeued entries = %#v", status.Entries)
+			}
+		})
+	}
+}
+
 func TestRoutineWakeTransferPreservesCanonicalCoalescing(t *testing.T) {
 	for _, tt := range []struct {
 		name string

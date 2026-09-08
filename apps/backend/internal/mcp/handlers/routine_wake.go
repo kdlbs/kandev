@@ -30,13 +30,17 @@ func applyScheduledRoutineWakeMetadata(
 	if err := validateRoutineWakeTarget(principal, senderTask, targetTask, targetSession, explicitTargetSession); err != nil {
 		return err
 	}
+	routineType, routineTypeOK := routineMetadataString(senderTask.Metadata, "routine_type")
+	routineName, routineNameOK := routineMetadataString(senderTask.Metadata, "routine_name")
+	policyGeneration, policyGenerationOK := routineMetadataString(senderTask.Metadata, "routine_policy_generation")
+	scopeGeneration, scopeGenerationOK := routineMetadataString(senderTask.Metadata, "routine_scope_generation")
+	if !routineTypeOK || !routineNameOK || !policyGenerationOK || !scopeGenerationOK {
+		// Ordinary scheduled automation runs do not carry the scheduler's
+		// canonical routine generations. Preserve them as lossless messages.
+		return nil
+	}
 
 	payloadDigest := sha256.Sum256([]byte(prompt))
-	routineType := metadataValueOr(senderTask.Metadata, "routine_type", string(automation.TriggerTypeScheduled))
-	routineName := metadataValueOr(senderTask.Metadata, "routine_name",
-		metadataValueOr(senderTask.Metadata, "automation_name", automationID))
-	policyGeneration := metadataValueOr(senderTask.Metadata, "routine_policy_generation", hex.EncodeToString(payloadDigest[:]))
-	scopeGeneration := metadataValueOr(senderTask.Metadata, "routine_scope_generation", targetTask.ID)
 	identityPayload, _ := json.Marshal([]string{
 		principal.WorkspaceID, routineType, routineName, policyGeneration, scopeGeneration,
 	})
@@ -83,10 +87,15 @@ func validateRoutineWakeTarget(
 		senderTask.WorkspaceID != principal.WorkspaceID || targetTask.WorkspaceID != principal.WorkspaceID {
 		return fmt.Errorf("routine wake scope denied: sender and target must belong to authenticated workspace %s", principal.WorkspaceID)
 	}
-	if targetSession.TaskID != targetTask.ID || (explicitTargetSession && !targetSession.IsPrimary) {
+	if targetSession.TaskID != targetTask.ID || !targetSession.IsPrimary {
 		return fmt.Errorf("routine wake scope denied: target session is not the current primary for task %s", targetTask.ID)
 	}
 	return nil
+}
+
+func routineMetadataString(metadata map[string]interface{}, key string) (string, bool) {
+	value := metadataValueOr(metadata, key, "")
+	return value, value != ""
 }
 
 func metadataValueOr(metadata map[string]interface{}, key, fallback string) string {

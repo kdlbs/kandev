@@ -22,6 +22,7 @@ type sqliteRepository struct {
 
 	mu           sync.Mutex
 	sessionLocks map[string]*sync.Mutex
+	reservedIDs  map[string]map[string]struct{}
 
 	// tasksTablePresent is whether the owning tasks table exists, resolved at
 	// construction. The queue repository's isolated tests create only queue
@@ -35,7 +36,10 @@ type sqliteRepository struct {
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
 // and reader are taken from the shared DB pool. initSchema runs idempotently.
 func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
-	r := &sqliteRepository{db: writer, ro: reader, sessionLocks: make(map[string]*sync.Mutex)}
+	r := &sqliteRepository{
+		db: writer, ro: reader, sessionLocks: make(map[string]*sync.Mutex),
+		reservedIDs: make(map[string]map[string]struct{}),
+	}
 	if err := r.initSchema(); err != nil {
 		return nil, fmt.Errorf("messagequeue: init schema: %w", err)
 	}
@@ -1315,20 +1319,36 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		}
 	}
 
-	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
 		ORDER BY position ASC
-		LIMIT 1
 	`), sessionID)
-	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, true, nil
-	}
 	if err != nil {
 		return nil, true, fmt.Errorf("reserve head: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var msg *QueuedMessage
+	var storedMetadataJSON string
+	for rows.Next() {
+		candidate, candidateMetadataJSON, scanErr := scanQueuedRowWithMetadataJSON(rows)
+		if scanErr != nil {
+			return nil, true, fmt.Errorf("reserve head: %w", scanErr)
+		}
+		if candidate.IsReservedInFlight() && r.isLocallyReserved(sessionID, candidate.ID) {
+			continue
+		}
+		msg = candidate
+		storedMetadataJSON = candidateMetadataJSON
+		break
+	}
+	if err := rows.Err(); err != nil {
+		return nil, true, fmt.Errorf("reserve head: %w", err)
+	}
+	if msg == nil {
+		return nil, true, nil
 	}
 	if msg.IsDurableQueueDelivery() {
 		reserved, err := r.reserveDurableHead(ctx, tx, msg, storedMetadataJSON)
@@ -1370,7 +1390,24 @@ func (r *sqliteRepository) reserveDurableHead(
 		return nil, err
 	}
 	msg.reservedQueueDelivery = true
+	r.markLocallyReserved(msg.SessionID, msg.ID)
 	return msg, nil
+}
+
+func (r *sqliteRepository) isLocallyReserved(sessionID, entryID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.reservedIDs[sessionID][entryID]
+	return ok
+}
+
+func (r *sqliteRepository) markLocallyReserved(sessionID, entryID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reservedIDs[sessionID] == nil {
+		r.reservedIDs[sessionID] = make(map[string]struct{})
+	}
+	r.reservedIDs[sessionID][entryID] = struct{}{}
 }
 
 func (r *sqliteRepository) reserveOrdinaryHead(

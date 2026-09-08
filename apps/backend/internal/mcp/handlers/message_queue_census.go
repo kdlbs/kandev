@@ -8,6 +8,7 @@ import (
 
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -23,12 +24,22 @@ type disposeMessageQueueRequest struct {
 	Entries   []messagequeue.QueueEntryClaim `json:"entries"`
 }
 
+type messageQueueTaskAuthorizer interface {
+	AuthorizeTaskAccess(context.Context, string) error
+	AuthorizeSessionAccess(context.Context, string) error
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+}
+
 func (h *Handlers) handleGetMessageQueueCensus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req messageQueueScopeRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if response, err := authorizeOwnMessageQueue(ctx, msg, req.TaskID, req.SessionID); response != nil {
+	var authorizer messageQueueTaskAuthorizer
+	if h.taskSvc != nil {
+		authorizer = h.taskSvc
+	}
+	if response, err := authorizeOwnMessageQueue(ctx, msg, req.TaskID, req.SessionID, authorizer); response != nil {
 		return response, err
 	}
 	if h.queueManager == nil {
@@ -54,7 +65,11 @@ func (h *Handlers) handleDisposeMessageQueueEntries(ctx context.Context, msg *ws
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if response, err := authorizeOwnMessageQueue(ctx, msg, req.TaskID, req.SessionID); response != nil {
+	var authorizer messageQueueTaskAuthorizer
+	if h.taskSvc != nil {
+		authorizer = h.taskSvc
+	}
+	if response, err := authorizeOwnMessageQueue(ctx, msg, req.TaskID, req.SessionID, authorizer); response != nil {
 		return response, err
 	}
 	if len(req.Entries) == 0 {
@@ -88,6 +103,7 @@ func authorizeOwnMessageQueue(
 	msg *ws.Message,
 	taskID string,
 	sessionID string,
+	authorizer messageQueueTaskAuthorizer,
 ) (*ws.Message, error) {
 	taskID = strings.TrimSpace(taskID)
 	sessionID = strings.TrimSpace(sessionID)
@@ -96,6 +112,21 @@ func authorizeOwnMessageQueue(
 		principal.CallerTaskID != taskID || principal.CallerSessionID != sessionID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			"message queue access is limited to the calling task's current session", nil)
+	}
+	if authorizer != nil {
+		if err := authorizer.AuthorizeTaskAccess(ctx, taskID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+				"message queue access is limited to the calling task's current session", nil)
+		}
+		if err := authorizer.AuthorizeSessionAccess(ctx, sessionID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+				"message queue access is limited to the calling task's current session", nil)
+		}
+		session, err := authorizer.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil || session.TaskID != taskID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+				"message queue access is limited to the calling task's current session", nil)
+		}
 	}
 	return nil, nil
 }

@@ -472,7 +472,17 @@ func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 	if len(list) == 0 {
 		return nil
 	}
-	head := list[0]
+	headIndex := -1
+	for i, candidate := range list {
+		if !candidate.IsReservedInFlight() || !candidate.reservedQueueDelivery {
+			headIndex = i
+			break
+		}
+	}
+	if headIndex < 0 {
+		return nil
+	}
+	head := list[headIndex]
 	out := *head
 	if head.IsDurableQueueDelivery() {
 		// Mirror the SQLite reservation: the stored row is flagged in flight so
@@ -480,10 +490,11 @@ func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 		// unmarked metadata a requeue would write back.
 		out.Metadata = clearReservedMetadata(head.Metadata)
 		out.reservedQueueDelivery = true
+		head.reservedQueueDelivery = true
 		head.Metadata = markReservedMetadata(out.Metadata)
 		return &out
 	}
-	r.entries[sessionID] = list[1:]
+	r.entries[sessionID] = append(list[:headIndex], list[headIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)

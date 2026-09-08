@@ -1011,7 +1011,10 @@ func (s *Service) handleQueuedMessageExecutionError(
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Bool("manual_recovery", manualRecovery))
 		if manualRecovery {
-			s.restoreQueuedMessage(ctx, queuedMsg)
+			// ReserveHead keeps routine wakes in the queue with an in-flight
+			// marker. RequeueAtHead clears that marker in place; RestoreMessage
+			// would attempt a second insert with the same immutable ID.
+			s.requeueMessage(ctx, queuedMsg, "manual-recovery")
 		} else {
 			s.requeueMessage(ctx, queuedMsg, "workflow-auto-start-retry")
 		}
