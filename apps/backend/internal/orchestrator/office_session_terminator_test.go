@@ -81,6 +81,12 @@ func TestTerminateOfficeSession_MissingPair_NoOp(t *testing.T) {
 	}
 }
 
+// TestTerminateAllForAgent_CascadesAcrossTasks also covers
+// AC-OFFICE-SESSION-TERM-003.1: the cascade is deliberately unguarded. Both
+// seeded tasks name agent-a as their runner, so agent-a retains a capacity on
+// each, and every one of its sessions must still end. The retained-capacity
+// guard lives in the office dashboard service and this path never reaches it -
+// an agent instance going away holds nothing anywhere.
 func TestTerminateAllForAgent_CascadesAcrossTasks(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
