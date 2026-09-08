@@ -29,10 +29,19 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	older := queueRunAt(t, repo, "older", "a1", now.Add(-30*time.Second))
-	newer := queueRunAt(t, repo, "newer", "a1", now.Add(-10*time.Second))
+	older := mustCreateRun(t, repo, &models.Run{
+		ID: "older", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, older.ID, now.Add(-30*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"newer","merged":true}`)
+	newer := mustCreateRun(t, repo, &models.Run{
+		ID: "newer", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, newer.ID, now.Add(-10*time.Second))
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"t1","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}
@@ -42,11 +51,11 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 
 	got := mustGetRun(t, repo, newer.ID)
 	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
-	checkString(t, "payload", got.Payload, `{"task_id":"newer","merged":true}`)
+	checkString(t, "payload", got.Payload, `{"task_id":"t1","merged":true}`)
 
 	untouched := mustGetRun(t, repo, older.ID)
 	checkInt(t, "older coalesced_count", untouched.CoalescedCount, 1)
-	checkString(t, "older payload", untouched.Payload, `{"task_id":"older"}`)
+	checkString(t, "older payload", untouched.Payload, `{"task_id":"t1"}`)
 
 	if n := countRuns(t, repo); n != 2 {
 		t.Errorf("%d rows after coalescing, want 2 (no new run may be created)", n)
