@@ -455,11 +455,11 @@ func (r *Repository) CoalesceRun(
 	taskID := taskIDFromPayload(payload)
 	taskPredicate := ""
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
-	// Assignment wakes are task-specific: merging two tasks for the same
-	// agent would replace the first task's payload and silently drop its
-	// launch. Other reasons, such as task comments, intentionally retain
-	// their existing cross-task coalescing behaviour.
-	if taskID != "" && reason == "task_assigned" {
+	// Task assignment and failure recovery wakes are task-specific: merging
+	// two tasks for the same agent would replace the first task's payload and
+	// silently drop its launch. Other reasons, such as task comments,
+	// intentionally retain their existing cross-task coalescing behaviour.
+	if taskID != "" && isTaskScopedCoalescingReason(reason) {
 		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
 		args = append(args, taskID)
 	}
@@ -485,6 +485,10 @@ func (r *Repository) CoalesceRun(
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+func isTaskScopedCoalescingReason(reason string) bool {
+	return reason == "task_assigned" || reason == "manual_resume_after_failure"
 }
 
 func taskIDFromPayload(payload string) string {

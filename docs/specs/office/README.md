@@ -47,6 +47,7 @@ dashboard projections, and Office testing contracts.
 - [Office Config Sync Fetch](requirements/config-sync-fetch.md)
 - [Office Config Sync Reconciliation](requirements/config-sync-reconciliation.md)
 - [Office Config Sync Surfaces](requirements/config-sync-surfaces.md)
+- [Children-Completed Wake Summaries](requirements/children-completed-wake-summaries.md)
 - [Office Dashboard](requirements/dashboard.md)
 - [Office: Inbox, Approvals & Activity Log](requirements/inbox.md)
 - [Office Live Updates](requirements/live-updates.md)
@@ -90,6 +91,7 @@ dashboard projections, and Office testing contracts.
 - [Automations YAML Export System Design Part 4](system-design/automations-yaml-export-04.md)
 - [Automations YAML Export System Design Part 5](system-design/automations-yaml-export-05.md)
 - [Automations YAML Export System Design Part 6](system-design/automations-yaml-export-06.md)
+- [Children-Completed Wake Summaries System Design](system-design/children-completed-wake-summaries.md)
 - [Office Config Sync System Design](system-design/config-sync.md)
 - [Office Config Sync Reconciliation System Design](system-design/config-sync-reconciliation.md)
 - [Office: Cost Tracking & Budget Management System Design Part 1](system-design/costs-01.md)
@@ -113,6 +115,7 @@ dashboard projections, and Office testing contracts.
 - [Office Scheduler System Design Part 2](system-design/scheduler-02.md)
 - [Office Tasks System Design Part 1](system-design/tasks-01.md)
 - [Office Tasks System Design Part 2](system-design/tasks-02.md)
+- [Office: Slack-Style Unread Divider System Design](system-design/unread-divider.md)
 
 ## Migration record
 

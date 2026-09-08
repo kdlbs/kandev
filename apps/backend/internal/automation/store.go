@@ -135,8 +135,9 @@ const createTablesSQL = `
 
 // In-branch column additions. The canonical CREATE TABLE covers fresh
 // installs; these ALTERs cover DBs already initialised from an earlier
-// commit on this branch (the original PR #406 schema). SQLite returns a
-// duplicate-column error when the column already exists, which we swallow.
+// commit on this branch (the original PR #406 schema). Duplicate-column
+// errors are the only replay result that the required migration logger
+// tolerates; all other migration errors stop boot.
 //
 // automations.repository_id is retained as a legacy, write-once column: it
 // is never read or written by current code (repository selection now lives
@@ -191,19 +192,33 @@ func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
-	s.db.Exec(schemaSQLForDriver(migrateTaskTitleSQL, s.db.DriverName()))          //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateExecutionModeSQL, s.db.DriverName()))      //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRepositoryIDSQL, s.db.DriverName()))       //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateContinuationPolicySQL, s.db.DriverName())) //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateContinuationTaskSQL, s.db.DriverName()))   //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateTaskModeSQL, s.db.DriverName()))           //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRepositoryModeSQL, s.db.DriverName()))     //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName()))   //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName()))         //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRunTurnSQL, s.db.DriverName()))            //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
+	migrate := db.NewRequiredMigrateLogger(s.db, nil)
+	migrations := []struct {
+		name string
+		stmt string
+	}{
+		{"automations.task_title_template", schemaSQLForDriver(migrateTaskTitleSQL, s.db.DriverName())},
+		{"automations.execution_mode", schemaSQLForDriver(migrateExecutionModeSQL, s.db.DriverName())},
+		{"automations.repository_id", schemaSQLForDriver(migrateRepositoryIDSQL, s.db.DriverName())},
+		{"automations.continuation_policy", schemaSQLForDriver(migrateContinuationPolicySQL, s.db.DriverName())},
+		{"automations.continuation_task_id", schemaSQLForDriver(migrateContinuationTaskSQL, s.db.DriverName())},
+		{"automations.task_mode", schemaSQLForDriver(migrateTaskModeSQL, s.db.DriverName())},
+		{"automations.repository_mode", schemaSQLForDriver(migrateRepositoryModeSQL, s.db.DriverName())},
+		{"automation_repositories.base_branch", schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName())},
+		{"automation_runs.session_id", schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName())},
+		{"automation_runs.turn_id", schemaSQLForDriver(migrateRunTurnSQL, s.db.DriverName())},
+		{"automation_runs.thread_action", schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName())},
+		{"automation_runs.thread_reason", schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName())},
+		{"automation_runs.display_title", schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName())},
+	}
+	for _, migration := range migrations {
+		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
+			return fmt.Errorf("required automation migration: %w", err)
+		}
+	}
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("required automation migration: %w", err)
+	}
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
 	}
@@ -1825,14 +1840,7 @@ func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID st
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
-	if dialect.IsPostgres(driver) {
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-	}
-	return schema
+	return dialect.MustRenderSchema(driver, schema)
 }
 
 // generateSecret creates a random hex string for webhook authentication.

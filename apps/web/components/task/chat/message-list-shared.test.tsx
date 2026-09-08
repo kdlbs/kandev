@@ -93,6 +93,8 @@ import {
   getLastUserMessageId,
   getFirstUserMessageId,
   isElementFullyVisible,
+  filterLaunchErrorItems,
+  filterLaunchErrorMessages,
   resolveLastPromptControls,
   resolveLastPromptEdge,
   shouldAutoScrollToBottom,
@@ -128,6 +130,106 @@ describe("getEffectiveActiveTurnId", () => {
 
   it("ignores a stale active turn after the session settles", () => {
     expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
+
+describe("launch error-owned transcript filtering", () => {
+  it("removes launch-only messages only when the task card owns the error", () => {
+    const emptyTurn = {
+      id: "empty-turn-1",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+    const runtimeFailure = {
+      id: "runtime-failure-1",
+      metadata: { failure_kind: "provider_quota_limited" },
+    } as unknown as Message;
+
+    expect(filterLaunchErrorMessages([emptyTurn, runtimeFailure], false)).toEqual([
+      emptyTurn,
+      runtimeFailure,
+    ]);
+    expect(filterLaunchErrorMessages([emptyTurn, runtimeFailure], true)).toEqual([runtimeFailure]);
+  });
+
+  it("removes preparation and previous-agent rows while retaining transcript messages", () => {
+    const runtimeMessage = { id: "message-1" } as unknown as Message;
+    const items: RenderItem[] = [
+      { type: "prepare_progress", id: "prepare-1", sessionId: "s1" },
+      {
+        type: "agent_error_notice",
+        id: "agent-error-1",
+        sessionId: "s1",
+        error: { message: "matching error", stamp: "stamp-1" },
+      },
+      {
+        type: "agent_error_notice",
+        id: "agent-error-2",
+        sessionId: "s1",
+        error: { message: "unrelated error", stamp: "old-stamp" },
+      },
+      {
+        type: "message",
+        message: {
+          id: "empty-1",
+          created_at: "2026-06-14T12:00:01Z",
+          metadata: { empty_turn: true },
+        } as unknown as Message,
+      },
+      { type: "message", message: runtimeMessage },
+    ];
+
+    expect(filterLaunchErrorItems(items, true, "stamp-1", "2026-06-14T12:00:00Z")).toEqual([
+      {
+        type: "agent_error_notice",
+        id: "agent-error-2",
+        sessionId: "s1",
+        error: { message: "unrelated error", stamp: "old-stamp" },
+      },
+      { type: "message", message: runtimeMessage },
+    ]);
+  });
+
+  it("keeps stale launch-only history when the current failure has no carried stamp", () => {
+    const staleEmptyTurn = {
+      id: "empty-stale",
+      created_at: "2026-07-21T00:00:00Z",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+    const currentEmptyTurn = {
+      id: "empty-current",
+      created_at: "2026-07-22T00:00:00Z",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+
+    expect(filterLaunchErrorMessages([staleEmptyTurn, currentEmptyTurn], true)).toEqual([
+      staleEmptyTurn,
+    ]);
+    expect(
+      filterLaunchErrorItems(
+        [
+          { type: "message", message: staleEmptyTurn },
+          { type: "message", message: currentEmptyTurn },
+        ],
+        true,
+        "current-stamp",
+        "2026-07-22T00:00:00Z",
+      ),
+    ).toEqual([{ type: "message", message: staleEmptyTurn }]);
+  });
+
+  it("filters only launch-only rows carrying the active failure stamp", () => {
+    const staleMissingBranch = {
+      id: "missing-stale",
+      metadata: { failure_kind: "missing_pr_branch", launch_error_stamp: "old-stamp" },
+    } as unknown as Message;
+    const currentMissingBranch = {
+      id: "missing-current",
+      metadata: { failure_kind: "missing_pr_branch", launch_error_stamp: "current-stamp" },
+    } as unknown as Message;
+
+    expect(
+      filterLaunchErrorMessages([staleMissingBranch, currentMissingBranch], true, "current-stamp"),
+    ).toEqual([staleMissingBranch]);
   });
 });
 

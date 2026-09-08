@@ -287,6 +287,18 @@ type TaskDTO struct {
 	// ordinarily omitted partial projection so clients clear their cache and
 	// expose the coarse compatibility fallback.
 	StatusSummaryInvalidated bool `json:"status_summary_invalidated,omitempty"`
+	// ParkedOnBackgroundWork is the task-level OR across the task's sessions'
+	// parked_on_background_work projections (spec:
+	// docs/specs/disambiguate-waiting/spec.md). Always serialized so a
+	// settled projection clears stale client state. Stamped by
+	// EnrichTaskParkedProjection.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedRevision is the task's own monotonic transition counter for
+	// ParkedOnBackgroundWork — never derived from member sessions' revisions.
+	ParkedRevision uint64 `json:"parked_revision"`
+	// ParkedEpoch identifies the backend process that produced ParkedRevision
+	// (see "Revision epoch"); a lower-or-equal epoch update is stale.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 type TaskRepositoryDTO struct {
@@ -318,8 +330,9 @@ type TaskWorkspaceFolderDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -394,13 +407,26 @@ type TaskSessionDTO struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+	// ParkedOnBackgroundWork mirrors the orchestrator's runtime parked
+	// projection (spec: docs/specs/disambiguate-waiting/spec.md). Always
+	// serialized so a settled projection clears stale client state.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// Revision identifies the process-local parked-projection transition
+	// generation that produced ParkedOnBackgroundWork. Named "revision"
+	// rather than "parked_revision" for the session carrier — an accepted
+	// naming inconsistency with the task-level ParkedRevision field (see F20).
+	Revision uint64 `json:"revision"`
+	// ParkedEpoch identifies the backend process that produced Revision (see
+	// "Revision epoch"); a lower-or-equal epoch update is stale.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -455,6 +481,13 @@ type TaskSessionSummaryDTO struct {
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
 	// resolve it.
 	CommandCount int `json:"command_count"`
+	// ParkedOnBackgroundWork mirrors TaskSessionDTO.ParkedOnBackgroundWork for
+	// list endpoints.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// Revision mirrors TaskSessionDTO.Revision.
+	Revision uint64 `json:"revision"`
+	// ParkedEpoch mirrors TaskSessionDTO.ParkedEpoch.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 // ListTaskSessionSummariesResponse is the list response using summary DTOs.
@@ -965,30 +998,31 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                session.ID,
-		TaskID:            session.TaskID,
-		Name:              session.Name,
-		AgentExecutionID:  session.AgentExecutionID,
-		ContainerID:       session.ContainerID,
-		AgentProfileID:    session.AgentProfileID,
-		ExecutorID:        session.ExecutorID,
-		ExecutorProfileID: session.ExecutorProfileID,
-		EnvironmentID:     session.EnvironmentID,
-		RepositoryID:      session.RepositoryID,
-		BaseBranch:        session.BaseBranch,
-		BaseCommitSHA:     session.BaseCommitSHA,
-		WorkspacePath:     session.WorkspacePath,
-		State:             session.State,
-		ErrorMessage:      session.ErrorMessage,
-		Metadata:          session.Metadata,
-		StartedAt:         session.StartedAt,
-		CompletedAt:       session.CompletedAt,
-		UpdatedAt:         session.UpdatedAt,
-		IsPrimary:         session.IsPrimary,
-		IsPassthrough:     session.IsPassthrough,
-		ReviewStatus:      session.ReviewStatus,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		LastReadMessageID: session.LastReadMessageID,
+		ID:                 session.ID,
+		TaskID:             session.TaskID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name,
+		AgentExecutionID:   session.AgentExecutionID,
+		ContainerID:        session.ContainerID,
+		AgentProfileID:     session.AgentProfileID,
+		ExecutorID:         session.ExecutorID,
+		ExecutorProfileID:  session.ExecutorProfileID,
+		EnvironmentID:      session.EnvironmentID,
+		RepositoryID:       session.RepositoryID,
+		BaseBranch:         session.BaseBranch,
+		BaseCommitSHA:      session.BaseCommitSHA,
+		WorkspacePath:      session.WorkspacePath,
+		State:              session.State,
+		ErrorMessage:       session.ErrorMessage,
+		Metadata:           session.Metadata,
+		StartedAt:          session.StartedAt,
+		CompletedAt:        session.CompletedAt,
+		UpdatedAt:          session.UpdatedAt,
+		IsPrimary:          session.IsPrimary,
+		IsPassthrough:      session.IsPassthrough,
+		ReviewStatus:       session.ReviewStatus,
+		TaskEnvironmentID:  session.TaskEnvironmentID,
+		LastReadMessageID:  session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1003,6 +1037,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
+		QueueIncarnationID:   session.QueueIncarnationID,
 		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,

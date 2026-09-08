@@ -140,10 +140,17 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 	if e.onExecutionStopOwnerRegistration != nil {
 		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
 	}
-	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+	// A session already in a terminal state carries its own outcome (e.g. a
+	// launch failure's error_message); a runtime that outlived it in the
+	// in-memory execution store must still be torn down, but the DB row is
+	// not touched. transitionSessionState re-reads the session's current
+	// state itself rather than trusting the caller-supplied snapshot, so a
+	// session that turned terminal between the caller's read and this call
+	// (e.g. StopByTaskID iterating a list read once) can't be clobbered.
+	if _, _, err := e.transitionSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); err != nil {
 		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
-			zap.Error(dbErr))
+			zap.Error(err))
 	}
 	e.scheduleStop(ctx, session.ID, executionID, reason, force)
 	return nil
@@ -377,6 +384,9 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 	}
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentExecutionID != "" && executionID != session.AgentExecutionID {
 		return nil, ErrExecutionNotFound
 	}
 

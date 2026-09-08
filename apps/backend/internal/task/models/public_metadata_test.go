@@ -29,6 +29,28 @@ func TestPublicTaskMetadataStripsWorkflowMoveMarker(t *testing.T) {
 	}
 }
 
+func TestPublicTaskMetadataRedactsStepHandoffCarry(t *testing.T) {
+	metadata := map[string]interface{}{
+		"ordinary": "visible",
+		MetaKeyStepHandoffCarry: StepHandoffCarryToken{
+			Handoff: "private handoff",
+			StepID:  "step-next",
+			Stamp:   "private-stamp",
+		},
+	}
+
+	public := PublicTaskMetadata(metadata)
+	if _, ok := public[MetaKeyStepHandoffCarry]; ok {
+		t.Fatalf("public metadata must not expose %q", MetaKeyStepHandoffCarry)
+	}
+	if got := public["ordinary"]; got != "visible" {
+		t.Fatalf("ordinary metadata = %v, want visible", got)
+	}
+	if _, ok := metadata[MetaKeyStepHandoffCarry]; !ok {
+		t.Fatal("redaction must not mutate stored metadata")
+	}
+}
+
 func TestPublicTaskMetadataNilAndEmpty(t *testing.T) {
 	if got := PublicTaskMetadata(nil); got != nil {
 		t.Fatalf("nil metadata must project to nil, got %v", got)

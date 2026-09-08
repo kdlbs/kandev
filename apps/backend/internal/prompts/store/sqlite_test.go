@@ -76,6 +76,16 @@ func seedStoredWalkthroughPrompt(t *testing.T, sqlxDB *sqlx.DB, content string, 
 	}
 }
 
+func seedStoredBuiltinPrompt(t *testing.T, sqlxDB *sqlx.DB, id, name, content string, createdAt, updatedAt time.Time) {
+	t.Helper()
+	if _, err := sqlxDB.Exec(
+		`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`,
+		id, name, content, createdAt, updatedAt,
+	); err != nil {
+		t.Fatalf("seed stored built-in prompt: %v", err)
+	}
+}
+
 func readPromptFixture(t *testing.T, name string) string {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join("testdata", name))
@@ -334,6 +344,58 @@ func TestSQLiteRepository_PreservesUntouchedUnrecognizedChangesWalkthroughPrompt
 	}
 	if got.Content != customContent {
 		t.Fatalf("unrecognized untouched content was overwritten")
+	}
+}
+
+func TestSQLiteRepository_RefreshesUnmodifiedLegacyCIAutoFixPrompt(t *testing.T) {
+	for _, content := range []string{
+		"You are continuing work on a pull request because Kandev detected new CI or review feedback.\n\nFocus on the current pull request feedback provided in the task message:\n\n- Fix failing checks and actionable review comments.\n- Prioritize feedback marked as new or changed since the last automated fix round.\n- Preserve unrelated work and avoid broad refactors.\n- Run the narrowest relevant verification commands first, then broader checks if needed.\n- Do not merge the pull request. Kandev handles auto-merge separately when the PR is ready.\n\nWhen you finish, summarize what changed and which verification commands you ran.",
+		"You are continuing work on a pull request because Kandev detected new CI or review feedback.\n\nFocus on the current pull request feedback provided in the task message:\n\n- Fix failing checks and actionable review comments.\n- Prioritize feedback marked as new or changed since the last automated fix round.\n- Preserve unrelated work and avoid broad refactors.\n- Run the narrowest relevant verification commands first, then broader checks if needed.\n- Do not merge the pull request. Kandev handles auto-merge separately when the PR is ready.\n\nFirst classify the new PR feedback as actionable or non-actionable.\n\nIf the new feedback is not actionable, do not modify files, do not commit, and do not push.\nNon-actionable feedback includes summaries, status updates, no-finding reports, duplicated or\npreviously addressed comments, rate-limit notices, and review diagnostics that do not request a\nconcrete code or test change. In that case, reply only with a short summary that there is nothing actionable to address.\n\nOnly make code changes when there is a concrete failing check, actionable review request, or\nreproducible issue that needs a fix. Do not push a commit merely to acknowledge feedback.\n\nWhen you finish, summarize what changed and which verification commands you ran.",
+		"You are continuing work on a pull request because Kandev detected new CI or review feedback.\n\nFocus on the current pull request feedback provided in the task message:\n\n{{pr.feedback}}\n\n- Fix failing checks and actionable review comments.\n- Prioritize feedback marked as new or changed since the last automated fix round.\n- When an actionable PR review comment has been addressed, reply to that thread with the fix summary and resolve the addressed PR review threads so they do not keep the PR blocked.\n- Preserve unrelated work and avoid broad refactors.\n- Run the narrowest relevant verification commands first, then broader checks if needed.\n- Do not merge the pull request. Kandev handles auto-merge separately when the PR is ready.\n\nFirst classify the new PR feedback as actionable or non-actionable.\n\nIf the new feedback is not actionable, do not modify files, do not commit, and do not push.\nNon-actionable feedback includes summaries, status updates, no-finding reports, duplicated or\npreviously addressed comments, rate-limit notices, and review diagnostics that do not request a\nconcrete code or test change. In that case, reply only with a short summary that there is nothing actionable to address.\n\nOnly make code changes when there is a concrete failing check, actionable review request, or\nreproducible issue that needs a fix. Do not push a commit merely to acknowledge feedback.\n\nWhen you finish, summarize what changed and which verification commands you ran.",
+	} {
+		t.Run(strconv.Itoa(len(content)), func(t *testing.T) {
+			sqlxDB := createUnseededPromptDB(t)
+			now := time.Now().UTC()
+			seedStoredBuiltinPrompt(t, sqlxDB, builtinCIAutoFixPromptID, "ci-auto-fix", content, now, now)
+
+			if _, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB); err != nil {
+				t.Fatalf("initialize repository: %v", err)
+			}
+			var got string
+			if err := sqlxDB.Get(&got, `SELECT content FROM custom_prompts WHERE id = ?`, builtinCIAutoFixPromptID); err != nil {
+				t.Fatalf("read refreshed prompt: %v", err)
+			}
+			if got != promptcfg.Get("ci-auto-fix") {
+				t.Fatalf("stored legacy prompt was not refreshed")
+			}
+		})
+	}
+}
+
+func TestSQLiteRepository_PreservesEditedOrUnknownCIAutoFixPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		content   string
+		createdAt time.Time
+		updatedAt time.Time
+	}{
+		{name: "edited", content: "legacy prompt with a user edit", createdAt: time.Now().UTC().Add(-time.Hour), updatedAt: time.Now().UTC()},
+		{name: "unknown", content: "unknown untouched prompt revision", createdAt: time.Now().UTC(), updatedAt: time.Now().UTC()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sqlxDB := createUnseededPromptDB(t)
+			seedStoredBuiltinPrompt(t, sqlxDB, builtinCIAutoFixPromptID, "ci-auto-fix", tc.content, tc.createdAt, tc.updatedAt)
+			if _, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB); err != nil {
+				t.Fatalf("initialize repository: %v", err)
+			}
+			var got string
+			if err := sqlxDB.Get(&got, `SELECT content FROM custom_prompts WHERE id = ?`, builtinCIAutoFixPromptID); err != nil {
+				t.Fatalf("read preserved prompt: %v", err)
+			}
+			if got != tc.content {
+				t.Fatalf("prompt changed from %q to %q", tc.content, got)
+			}
+		})
 	}
 }
 

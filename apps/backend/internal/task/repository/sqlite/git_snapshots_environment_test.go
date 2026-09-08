@@ -39,7 +39,7 @@ func TestGitSnapshotEnvironmentPreservesStatusAfterSessionDelete(t *testing.T) {
 		t.Fatalf("CreateGitSnapshot: %v", err)
 	}
 
-	if err := repo.DeleteTaskSession(ctx, sessionID); err != nil {
+	if err := deleteTaskSessionForTest(t, repo, ctx, sessionID); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 

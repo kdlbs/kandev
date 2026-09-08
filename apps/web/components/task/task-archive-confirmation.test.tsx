@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { StateProvider } from "@/components/state-provider";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
@@ -21,6 +21,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 import { TaskArchiveConfirmation } from "./task-archive-confirmation";
 
 afterEach(cleanup);
+beforeEach(() => {
+  pointerState.isFinePointer = false;
+  getSubtaskCountMock.mockReset();
+});
 
 function ConfirmationHarness({
   onConfirm,
@@ -37,6 +41,9 @@ function ConfirmationHarness({
       <button ref={anchorRef} type="button" data-testid="archive-anchor">
         Archive source
       </button>
+      <button type="button" data-testid="outside-action">
+        Outside action
+      </button>
       <TaskArchiveConfirmation
         open
         onOpenChange={onOpenChange}
@@ -47,6 +54,43 @@ function ConfirmationHarness({
         onConfirm={onConfirm}
         confirmTestId={CONFIRM_TEST_ID}
         forceDialog={forceDialog}
+      />
+    </>
+  );
+}
+
+function AnchorLifecycleHarness({
+  showAnchor,
+  onOpenChange,
+}: {
+  showAnchor: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
+
+  return (
+    <>
+      {showAnchor ? (
+        <button ref={anchorRef} type="button" data-testid="archive-anchor">
+          Archive source
+        </button>
+      ) : null}
+      <TaskArchiveConfirmation
+        open={open}
+        onOpenChange={handleOpenChange}
+        anchorRef={anchorRef}
+        taskId="task-1"
+        taskTitle="Task One"
+        executorType="worktree"
+        onConfirm={vi.fn()}
       />
     </>
   );
@@ -64,12 +108,66 @@ function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn(), forceDi
   );
 }
 
-describe("TaskArchiveConfirmation classification", () => {
-  beforeEach(() => {
-    pointerState.isFinePointer = false;
-    getSubtaskCountMock.mockReset();
+function deferredSubtaskCount() {
+  let resolve: (result: { count: number }) => void = () => {};
+  const promise = new Promise<{ count: number }>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+describe("TaskArchiveConfirmation pending dismissal", () => {
+  it("dismisses the hidden desktop request on Escape and restores trigger focus", async () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(vi.fn(), onOpenChange);
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    const outsideAction = screen.getByTestId("outside-action");
+    outsideAction.focus();
+    fireEvent.keyDown(outsideAction, { key: "Escape" });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(document.activeElement).toBe(screen.getByTestId("archive-anchor"));
   });
 
+  it("dismisses the hidden desktop request on outside pointer intent", async () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(vi.fn(), onOpenChange);
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    fireEvent.pointerDown(screen.getByTestId("outside-action"));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("dismisses the hidden desktop request when its anchor disappears", async () => {
+    pointerState.isFinePointer = true;
+    const deferredCount = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(deferredCount.promise);
+    const onOpenChange = vi.fn();
+    const renderHarness = (showAnchor: boolean) => (
+      <StateProvider>
+        <AnchorLifecycleHarness showAnchor={showAnchor} onOpenChange={onOpenChange} />
+      </StateProvider>
+    );
+    const view = render(renderHarness(true));
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    view.rerender(renderHarness(false));
+    await act(async () => deferredCount.resolve({ count: 2 }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("TaskArchiveConfirmation classification", () => {
   it("does not expose an archive action while descendant classification is pending", () => {
     getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
 
@@ -79,20 +177,24 @@ describe("TaskArchiveConfirmation classification", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("shows a disabled anchored loading surface while desktop classification is pending", () => {
+  // @covers AC-TASKS-CONFIRMATION-SURFACE-002.4
+  it("waits for desktop classification before showing only the cascade dialog", async () => {
     pointerState.isFinePointer = true;
-    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
-    const onOpenChange = vi.fn();
+    const deferredCount = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(deferredCount.promise);
 
-    renderConfirmation(vi.fn(), onOpenChange);
+    renderConfirmation();
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
 
-    expect(screen.getByTestId("task-archive-confirm-popover")).toBeTruthy();
-    expect(screen.getByText("Loading…")).toBeTruthy();
-    expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId("task-archive-confirm-popover")).toBeNull();
     expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_TEST_ID)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    await act(async () => deferredCount.resolve({ count: 2 }));
+
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByTestId("archive-cascade-checkbox")).toBeTruthy();
+    expect(screen.queryByTestId("task-archive-confirm-popover")).toBeNull();
   });
 
   it("uses touch-sized local actions after a resolved zero-descendant result", async () => {

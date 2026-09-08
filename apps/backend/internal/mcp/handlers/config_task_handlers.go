@@ -185,16 +185,22 @@ func (h *Handlers) deferMoveTask(
 	// queued once for an existing session). No hand-off message is pre-queued
 	// here; instructions ride the entry overlay.
 	moveID := uuid.NewString()
-	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		MoveID:          moveID,
-		TaskID:          req.TaskID,
-		WorkflowID:      req.WorkflowID,
-		WorkflowStepID:  req.WorkflowStepID,
-		Position:        req.Position,
-		Actor:           string(wfmodels.StepTransitionActorAgent),
-		SenderSessionID: req.SenderSessionID,
-		EntryOptions:    req.EntryOptions,
-	})
+	if err := h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
+		MoveID:               moveID,
+		SessionIncarnationID: session.QueueIncarnationID,
+		TaskID:               req.TaskID,
+		WorkflowID:           req.WorkflowID,
+		WorkflowStepID:       req.WorkflowStepID,
+		Position:             req.Position,
+		Actor:                string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID:      req.SenderSessionID,
+		EntryOptions:         req.EntryOptions,
+	}); err != nil {
+		h.logger.Error("move_task: failed to persist deferred move",
+			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to persist deferred move", nil)
+	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
 		Task:         h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position),
 		MoveID:       moveID,
@@ -346,36 +352,65 @@ func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.Ta
 	return session, nil
 }
 
-// queueMoveTaskPrompt enqueues a user-supplied prompt on the task's primary session.
-// Returns an error when the queue itself is missing or QueueMessage fails — the
-// caller decides whether to fail the whole move (running-session deferred path)
-// or proceed (idle path), since a queue failure makes the deferred contract
-// impossible to honor.
-func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) error {
-	return h.queueMoveTaskPromptWithMoveID(ctx, taskID, sessionID, prompt, "")
+type queuedMoveTaskPrompt struct {
+	identity messagequeue.QueueSessionIdentity
+	entryID  string
 }
 
-func (h *Handlers) queueMoveTaskPromptWithMoveID(ctx context.Context, taskID, sessionID, prompt, moveID string) error {
+// queueMoveTaskPrompt enqueues a handoff for one exact session incarnation and
+// returns the entry identity needed to undo only that handoff.
+func (h *Handlers) queueMoveTaskPrompt(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	prompt string,
+) (*queuedMoveTaskPrompt, error) {
+	return h.queueMoveTaskPromptWithMoveID(ctx, identity, prompt, "")
+}
+
+func (h *Handlers) queueMoveTaskPromptWithMoveID(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	prompt string,
+	moveID string,
+) (*queuedMoveTaskPrompt, error) {
 	if h.messageQueue == nil {
-		return fmt.Errorf("message queue is unavailable")
+		return nil, fmt.Errorf("message queue is unavailable")
 	}
-	if sessionID == "" {
-		return fmt.Errorf("task has no primary session")
+	if identity.SessionID == "" {
+		return nil, fmt.Errorf("task has no primary session")
 	}
 	metadata := map[string]interface{}(nil)
 	if moveID != "" {
 		metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID}
 	}
-	if queueWithMetadata, ok := h.messageQueue.(messageMetadataQueuer); ok {
-		if _, err := queueWithMetadata.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata); err != nil {
-			return fmt.Errorf("queue message: %w", err)
+
+	var (
+		entry *messagequeue.QueuedMessage
+		err   error
+	)
+	if queue, ok := h.messageQueue.(*messagequeue.Service); ok {
+		entry, err = queue.QueueMessageWithMetadataForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata,
+		)
+		if err == nil {
+			h.publishQueueStatusEvent(ctx, identity, queue)
 		}
-		return nil
+	} else if queueWithMetadata, ok := h.messageQueue.(messageMetadataQueuer); ok {
+		entry, err = queueWithMetadata.QueueMessageWithMetadata(
+			ctx, identity.SessionID, identity.TaskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata,
+		)
+	} else {
+		entry, err = h.messageQueue.QueueMessage(
+			ctx, identity.SessionID, identity.TaskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil,
+		)
 	}
-	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil); err != nil {
-		return fmt.Errorf("queue message: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("queue message: %w", err)
 	}
-	return nil
+	if entry == nil || entry.ID == "" {
+		return nil, fmt.Errorf("queue message returned no entry identity")
+	}
+	return &queuedMoveTaskPrompt{identity: identity, entryID: entry.ID}, nil
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

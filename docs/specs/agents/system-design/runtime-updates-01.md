@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-09-04
+updated: 2026-09-07
 owners:
   - Kandev
 ---
@@ -53,12 +53,10 @@ Managed npm runtime recovery now has an authoritative requirement and design:
   and activates it only after a successful probe. Candidate failure preserves
   the prior active version and capability catalogue.
 - Every managed npm runtime has an exact Kandev default version. A successful
-  activation persists an operator-selected exact version for this Kandev
-  install. The effective version is the selected version when present and the
-  Kandev default otherwise.
-- Kandev does not persist the default as a selection. An installation without
-  an operator selection follows default-pin changes delivered by later Kandev
-  releases.
+  activation persists an exact selection for the current default generation.
+  The selection is effective until the operator or a later generation replaces it.
+- Kandev does not persist the default as an operator selection. Startup removes
+  an earlier selection when the trusted package or default version changes.
 - Every Kandev-built ACP command for the managed package uses the effective
   exact version, including probes, utility calls, standalone sessions,
   containers, and SSH executors. Active sessions continue unchanged.
@@ -115,6 +113,8 @@ remain outside this version action when they use another installer or package.
 
 Decision:
 [ADR-2026-08-12-validated-managed-runtime-version-selection](../../../decisions/2026-08-12-validated-managed-runtime-version-selection.md).
+Upgrade-time precedence is defined by the
+[runtime default activation design](runtime-default-activation.md).
 
 ## Version and operation semantics
 
@@ -123,9 +123,8 @@ Kandev distinguishes six version values:
 - `current_version` is the version reported by the last successful host ACP
   probe. It can be absent after a failed probe.
 - `default_version` is the exact reviewed version shipped with Kandev.
-- `active_version` is the exact operator-selected version persisted for future
-  managed-runtime commands. It is absent when the operator follows the Kandev
-  default.
+- `active_version` is the exact operator-selected version for the current
+  default generation. It is absent when the operator follows the Kandev default.
 - `effective_version` is `active_version` when present and `default_version`
   otherwise. It is never empty for a supported managed runtime.
 - `latest_version` is npm's stable `latest` version from the most recent update
@@ -302,7 +301,7 @@ produces a repair job.
 ## Command routing
 
 - Every managed-agent command resolves the effective version immediately before
-  building its command and emits the trusted `package@effective_version` spec.
+  building its command. It emits the trusted `package@effective_version` spec.
 - Boot probes, manual capability refreshes, model-configuration resolution,
   sessionless utility prompts, standalone sessions, containers, and SSH
   executors use the same effective-version resolver.
@@ -354,10 +353,12 @@ authoritative for launch-time stale metadata recovery.
 ## Persistence guarantees
 
 - The trusted package identity and operator-selected version are stored
-  install-wide per built-in agent in the system settings store and survive backend and browser
-  restarts. A record whose package no longer matches the agent's built-in
-  metadata is treated as having no active selection; the replacement package's
-  reviewed default becomes effective.
+  install-wide per built-in agent. Current-generation selections survive
+  restarts while the shipped package and default version remain unchanged. A
+  legacy selection without a generation marker is reset during the first
+  startup that applies this behavior.
+- Startup records one applied default generation per managed agent. A changed
+  package or default removes the earlier selection before runtime consumers start.
 - The Kandev default is compiled into the managed runtime catalogue and is not
   copied into the settings database. Clearing a selection deletes its settings
   record only after the default candidate passes validation.
@@ -419,14 +420,13 @@ authoritative for launch-time stale metadata recovery.
   **WHEN** an operator selects an older published stable version and approves
   **Roll back runtime**, **THEN** Kandev prepares and probes that exact version,
   persists it only after success, and restores its model list without restart.
-- **GIVEN** a healthy exact active version, **WHEN** Kandev restarts, **THEN**
-  boot probes and later managed commands use the same exact version.
+- **GIVEN** a healthy exact active version and an unchanged default generation,
+  **WHEN** Kandev restarts, **THEN** boot probes and later commands use that version.
 - **GIVEN** an agent has no operator selection, **WHEN** Kandev builds any of
   its managed npm ACP commands, **THEN** the command uses the exact reviewed
   Kandev default and never an unversioned package spec.
-- **GIVEN** an agent has a validated operator selection, **WHEN** Kandev builds
-  a local, container, or SSH managed npm ACP command, **THEN** the command uses
-  that exact selection instead of the Kandev default.
+- **GIVEN** an agent has a current-generation operator selection, **WHEN**
+  Kandev builds a managed ACP command, **THEN** the command uses that selection.
 - **GIVEN** an operator selection exists, **WHEN** the operator chooses **Use
   Kandev default**, **THEN** Kandev validates the exact default, deletes the
   selection only after success, and future commands follow shipped defaults.
@@ -519,8 +519,8 @@ problem solved by explicit dispatch.
 
 ## Out of scope
 
-- Automatic runtime installation, automatic operator-selection changes, and
-  automatic rollback after launch failure.
+- Automatic runtime installation, selection changes outside default-generation
+  activation, and automatic rollback after launch failure.
 - Global npm cache cleanup, registry replacement, dependency substitution, or
   automatic selection of another package version.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
