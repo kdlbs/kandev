@@ -1237,6 +1237,8 @@ const (
 	MessageTypeToolEdit MessageType = "tool_edit"
 	// MessageTypeToolRead is for file read operations
 	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolSearch is for code and file search operations
+	MessageTypeToolSearch MessageType = "tool_search"
 	// MessageTypeToolExecute is for command execution operations
 	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates

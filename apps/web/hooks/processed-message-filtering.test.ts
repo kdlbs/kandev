@@ -194,6 +194,15 @@ describe("dropSupersededEmptyTurnNotices", () => {
     const result = dropSupersededEmptyTurnNotices(messages);
     expect(result.map((m) => m.id)).toEqual(["tc1"]);
   });
+
+  it("drops the notice when a search tool lands on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "search-1", turn_id: "turn-1", type: "tool_search" }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["search-1"]);
+  });
 });
 
 describe("filterVisibleMessages empty-turn notice supersession", () => {
