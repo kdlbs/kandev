@@ -113,7 +113,11 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 // TestSchedulerTick_AgentFailedReleasesTaskCheckout is the failure-path
 // counterpart: HandleAgentFailure calls repo.MarkRunFailed directly
 // (not Service.FailRun / transitionRunTerminal), so it needs the same
-// checkout-release treatment as the completion path.
+// checkout-release treatment as the completion path. It also covers the
+// cooldown-stamp parity gap: HandleAgentFailure must stamp
+// office_agent_runtime.last_run_finished_at the same as the
+// completed/stopped paths do, so a below-threshold failing agent is
+// still paced by cooldown_sec on its next heartbeat-driven fire.
 func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -123,6 +127,7 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	if err := svc.RegisterEventSubscribers(eb); err != nil {
 		t.Fatalf("register subscribers: %v", err)
 	}
+	beforePublish := time.Now().UTC()
 
 	agent := &models.AgentInstance{
 		ID:                 "profile-checkout-fail",
@@ -179,6 +184,17 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected task checkout to be released after AgentFailed, but another agent still cannot check it out")
+	}
+
+	runtime, err := svc.GetAgentRuntimeForTest(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent runtime: %v", err)
+	}
+	if runtime == nil || runtime.LastRunFinishedAt == nil {
+		t.Fatal("expected last_run_finished_at to be stamped after AgentFailed, but it is still unset")
+	}
+	if runtime.LastRunFinishedAt.Before(beforePublish) {
+		t.Errorf("last_run_finished_at = %v, want at/after %v", runtime.LastRunFinishedAt, beforePublish)
 	}
 }
 
