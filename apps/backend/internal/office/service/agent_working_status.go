@@ -27,8 +27,15 @@ const (
 	eventKeyWorkspaceID    = "workspace_id"
 )
 
-// markAgentWorking flips an idle agent to "working" as its run is handed to
-// the adapter, recording runID as the owning run.
+// markAgentWorking flips an agent to "working" as its run is handed to the
+// adapter, recording runID as the owning run. This also takes ownership from
+// a same-agent predecessor run that is still recorded "working" but is no
+// longer in-flight (repo.MarkAgentWorking's CAS) — the handoff between two
+// back-to-back runs on one agent, where the predecessor's own clear has not
+// executed yet. So changed = false no longer means "the agent was not
+// idle": it means the agent was neither idle nor holding an abandoned
+// "working" owner, i.e. it was genuinely busy or in a non-launchable status
+// (paused, stopped, pending approval).
 //
 // Called BEFORE the launch rather than after it: the completion event for a
 // fast run can be processed as soon as the adapter is invoked, and a

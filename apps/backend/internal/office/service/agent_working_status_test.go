@@ -311,6 +311,44 @@ func TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate(t *testing.T)
 		"after the requeued run was terminated at a pre-launch gate")
 }
 
+// TestAgentStatus_TasklessCompletionClearsWorkingWhenNoRunResolves covers the
+// third DR-14 follow-up edit: handleTasklessAgentCompleted's sql.ErrNoRows
+// exit (no resolvable claimed run) must clear "working" like its two
+// siblings in handleAgentCompleted and handleAgentFailed, instead of
+// returning without a clear and stranding the agent's status.
+func TestAgentStatus_TasklessCompletionClearsWorkingWhenNoRunResolves(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	agent := makeAgent("worker-taskless-no-run", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	// Seed "working" directly rather than via a real launch: the run this
+	// status nominally belongs to has already left "claimed" via another
+	// path (mirroring the ErrNoRows condition resolveLifecycleRun hits),
+	// so no claimed run resolves for the event below.
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'working', working_run_id = 'ghost-run' WHERE id = ?`, agent.ID)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the taskless event")
+
+	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"run_id":           "ghost-run",
+		"agent_profile_id": agent.ID,
+		"session_id":       "session-" + agent.ID,
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, event); err != nil {
+		t.Fatalf("publish agent completed: %v", err)
+	}
+
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after a taskless AgentCompleted whose run no longer resolves as claimed")
+}
+
 func publishLifecycle(
 	t *testing.T, ctx context.Context, eb bus.EventBus,
 	topic, taskID, agentID string,
