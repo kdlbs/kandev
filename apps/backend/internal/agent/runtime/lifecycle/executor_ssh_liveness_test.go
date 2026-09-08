@@ -64,11 +64,11 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 // probe failure (missing/unsupported ps, a permission fault, an SSH-level
 // fault) must be reported as an error rather than folded into "no match".
 //
-// It also covers R3-F2: the `ps` argv match alone only proves "some agentctl
-// for this taskDir" — sibling sessions of the same task share taskDir in
-// their launch argv — so identity additionally requires the per-session
-// pidfile the launch wrapper writes at <sessionDir>/agentctl.pid to name the
-// same pid.
+// The pidfile leg has the same discipline: <sessionDir>/agentctl.pid must
+// name the pid about to be signalled, and a pidfile that cannot be read or
+// disagrees is an error rather than a mismatch verdict — the caller reclaims
+// the session directory on a mismatch, and that directory may belong to a
+// live process.
 func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 	t.Run("matching command line and pidfile reports identity", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
@@ -93,31 +93,50 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 		}
 	})
 
-	// R3-F2: a stale row's pid was recycled by a live sibling session's
-	// agentctl on the same taskDir — the argv matches, but this row's own
-	// sessionDir pidfile still names the pid its own (now-dead) launch
-	// recorded, which differs from the pid actually being probed.
-	t.Run("command line matches but pidfile names a different pid reports no identity", func(t *testing.T) {
+	// A pidfile that names a different pid means the session directory
+	// belongs to a launch other than the one this row describes — most
+	// plausibly a newer, live one. Identity is unproven, so the verdict is an
+	// error: a plain "not ours" would authorise the caller to remove that
+	// live launch's directory.
+	t.Run("command line matches but pidfile names a different pid leaves identity unproven", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("9999")},
 		).handle)
 
 		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
-		if err != nil || ours {
-			t.Fatalf("verify = (%v, %v), want (false, nil)", ours, err)
+		if err == nil || ours {
+			t.Fatalf("verify = (%v, %v), want (false, error)", ours, err)
+		}
+		if !strings.Contains(err.Error(), "names pid 9999") {
+			t.Fatalf("error = %v, want the disagreeing pid in the detail", err)
 		}
 	})
 
-	t.Run("missing pidfile reports no identity", func(t *testing.T) {
-		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
-			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshFail("No such file or directory")},
-		).handle)
+	// The pid is alive and the argv already matches this row's agentctl, so
+	// an unreadable pidfile cannot be read as absence. Reporting "not ours"
+	// here would leave a live agentctl running while deleting the very
+	// pidfile and log that identify it.
+	t.Run("unreadable pidfile leaves identity unproven", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			result sshExecResult
+		}{
+			{name: "missing file", result: sshFail("No such file or directory")},
+			{name: "channel fault under load", result: sshFail("ssh: unable to open channel")},
+			{name: "non-numeric content", result: sshOut("not-a-pid")},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+					sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+					sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: tc.result},
+				).handle)
 
-		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
-		if err != nil || ours {
-			t.Fatalf("verify = (%v, %v), want (false, nil)", ours, err)
+				ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
+				if err == nil || ours {
+					t.Fatalf("verify = (%v, %v), want (false, error)", ours, err)
+				}
+			})
 		}
 	})
 

@@ -84,14 +84,14 @@ func TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly(t *testing.T) {
 	}
 }
 
-// TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile covers R3-F2:
-// taskDir is shared by every sibling session of the same task (workspace
-// reuse), so a `ps` argv match alone only proves "some agentctl for this
-// task" — a stale row's persisted pid can be recycled by a live sibling
-// session's agentctl on the same taskDir. The per-session pidfile at
-// <sessionDir>/agentctl.pid must also name the same pid before a kill is
-// sent. Two rows share taskDir here — only the row whose own sessionDir
-// pidfile matches its persisted pid may be signalled.
+// TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile pins the
+// pidfile leg of identity. taskDir is shared by every sibling session of the
+// same task (workspace reuse), so a `ps` argv match alone only proves "some
+// agentctl for this task"; the per-session pidfile at
+// <sessionDir>/agentctl.pid must name the same pid before a kill is sent.
+// When the two disagree, the session directory demonstrably belongs to some
+// other launch, so the stop must neither signal the pid nor remove the
+// directory — it must fail so the row survives for a later attempt.
 func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 	sharedArgv := sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")
 
@@ -124,11 +124,11 @@ func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 		}
 	})
 
-	t.Run("row whose metadata pid was corrupted to a sibling's live pid is not signalled", func(t *testing.T) {
+	t.Run("row whose pidfile disagrees is neither signalled nor reclaimed", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sharedArgv},
-			// session-b's own launch recorded a different pid (9999); its
-			// persisted metadata pid of 4242 does not belong to it.
+			// The directory's pidfile names 9999, so /remote/session-b is
+			// owned by a launch other than the one this row describes.
 			sshScriptRule{match: "cat -- '/remote/session-b/agentctl.pid'", result: sshOut("9999")},
 			sshScriptRule{match: "rm -rf '/remote/session-b'", result: sshOK},
 		).handle)
@@ -144,14 +144,14 @@ func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 			StopReason: "startup terminal session cleanup",
 			Metadata:   metadata,
 		}, true)
-		if err != nil {
-			t.Fatalf("StopInstance: %v", err)
+		if err == nil {
+			t.Fatal("expected StopInstance to fail when the session dir's pidfile names a different pid")
 		}
 		if _, ok := server.lastCommandContaining("kill 4242"); ok {
 			t.Fatalf("expected no kill when the pidfile names a different pid, commands: %v", server.commands())
 		}
-		if _, ok := server.lastCommandContaining("rm -rf '/remote/session-b'"); !ok {
-			t.Fatalf("expected session-b's own session dir to still be reclaimed, commands: %v", server.commands())
+		if _, ok := server.lastCommandContaining("rm -rf '/remote/session-b'"); ok {
+			t.Fatalf("expected no removal of a session dir owned by another launch, commands: %v", server.commands())
 		}
 	})
 }
@@ -380,5 +380,71 @@ func TestSSHExecutorStopInstancePersistedMetadataUnresolvableTargetErrors(t *tes
 	}, true)
 	if err == nil {
 		t.Fatal("expected an error resolving an SSH target with no host information")
+	}
+}
+
+// TestSSHExecutorStopInstanceUnreadablePidfilePreservesLiveAgentctl pins the
+// most damaging way this path can fail: the pid is alive and its argv already
+// identifies it as this row's agentctl, but the session directory's pidfile
+// cannot be read (remote housekeeping reclaimed the directory, or an SSH
+// session channel could not be opened on a loaded runner). Treating that as
+// "not ours" would leave the agentctl running forever while deleting the
+// pidfile and log that identify it, and would report success so the caller
+// prunes the only row that could retry the reap.
+func TestSSHExecutorStopInstanceUnreadablePidfilePreservesLiveAgentctl(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshFail("ssh: unable to open channel")},
+		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
+	).handle)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "orphaned-instance",
+		StopReason: "startup terminal session cleanup",
+		Metadata:   metadata,
+	}, true)
+	if err == nil {
+		t.Fatal("expected StopInstance to fail when the pidfile of a live, argv-matching agentctl cannot be read")
+	}
+	if _, ok := server.lastCommandContaining("rm -rf '/remote/session'"); ok {
+		t.Fatalf("expected no removal while identity is unproven, commands: %v", server.commands())
+	}
+	if _, ok := server.lastCommandContaining("kill 4242"); ok {
+		t.Fatalf("expected no kill while identity is unproven, commands: %v", server.commands())
+	}
+}
+
+// TestRemoteAgentctlCommandLineMatchesRequiresWholeWorkdirValue pins the
+// --workdir comparison to a whole argument. A substring test also accepts a
+// sibling task directory that merely starts with this row's taskDir, which
+// would signal another task's agentctl.
+func TestRemoteAgentctlCommandLineMatchesRequiresWholeWorkdirValue(t *testing.T) {
+	tests := []struct {
+		name        string
+		commandLine string
+		taskDir     string
+		want        bool
+	}{
+		{name: "exact value", commandLine: "/opt/kandev/bin/agentctl --workdir /remote/task", taskDir: "/remote/task", want: true},
+		{name: "exact value with trailing flag", commandLine: "/opt/kandev/bin/agentctl --workdir /remote/task --verbose", taskDir: "/remote/task", want: true},
+		{name: "equals form", commandLine: "/opt/kandev/bin/agentctl --workdir=/remote/task", taskDir: "/remote/task", want: true},
+		{name: "sibling dir sharing the prefix", commandLine: "/opt/kandev/bin/agentctl --workdir /remote/task-other", taskDir: "/remote/task", want: false},
+		{name: "prefix then the real value", commandLine: "/opt/kandev/bin/agentctl --workdir /remote/task-other --workdir /remote/task", taskDir: "/remote/task", want: true},
+		{name: "value present but not as --workdir", commandLine: "/opt/kandev/bin/agentctl --log /remote/task", taskDir: "/remote/task", want: false},
+		{name: "not agentctl", commandLine: "/usr/bin/tail -f /remote/task", taskDir: "/remote/task", want: false},
+		{name: "empty task dir", commandLine: "/opt/kandev/bin/agentctl --workdir /remote/task", taskDir: "", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := remoteAgentctlCommandLineMatches(tc.commandLine, tc.taskDir); got != tc.want {
+				t.Fatalf("remoteAgentctlCommandLineMatches(%q, %q) = %v, want %v", tc.commandLine, tc.taskDir, got, tc.want)
+			}
+		})
 	}
 }

@@ -702,10 +702,11 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 		return fmt.Errorf("ssh: verify persisted agentctl identity for instance %q: %w", instance.InstanceID, err)
 	}
 	if !isOurs {
-		// The pid is gone or has been recycled by an unrelated process since
-		// this row was persisted (a stale row can outlive a remote reboot) —
-		// signalling it would risk killing something we don't own. The
-		// session directory is still ours to reclaim.
+		// Reached only for a *proven* abandoned row: the pid is gone, or it
+		// is held by something that is not an agentctl under this row's
+		// taskDir. Unproven identity arrives as an error above and never
+		// here, which is what makes reclaiming the directory safe — a
+		// directory is only removed once nothing is known to be using it.
 		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
 			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
 		}
