@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -422,5 +423,67 @@ func assertRunnerMutabilityConflict(t *testing.T, err error, wantReason string) 
 	}
 	if conflict.Reason != wantReason {
 		t.Fatalf("conflict reason = %q, want %q", conflict.Reason, wantReason)
+	}
+}
+
+// TestSwitchTaskRunner_ConcurrentExecutorRunningWriteNeverBlendsWithSwitch is
+// the AC-TASKS-RUNNER-SWITCH-002.3a/3b acceptance evidence for the
+// UpsertExecutorRunning retrofit: a runner switch racing an executors_running
+// write must land as one of exactly two outcomes — the switch commits first
+// and the running row is then created under the new profile, or the running
+// row lands first and the switch is rejected as executor_running — never a
+// switch that both commits and coexists with a running row it never saw.
+func TestSwitchTaskRunner_ConcurrentExecutorRunningWriteNeverBlendsWithSwitch(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old"}`,
+	})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	taskRepo := seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	var wg sync.WaitGroup
+	var switchErr, runningErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, switchErr = repo.SwitchTaskRunner(ctx, baseRunnerSwitchRequest("task-1", "profile-new", taskRepo))
+	}()
+	go func() {
+		defer wg.Done()
+		runningErr = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			SessionID: "session-race", TaskID: "task-1", ExecutorID: "executor-1", Status: "starting",
+		})
+	}()
+	wg.Wait()
+
+	if runningErr != nil {
+		t.Fatalf("UpsertExecutorRunning error = %v, want nil", runningErr)
+	}
+
+	switchRejectedAsExecutorRunning := false
+	if switchErr != nil {
+		var conflict *repoerrors.ErrRunnerMutabilityConflict
+		if !errors.As(switchErr, &conflict) || conflict.Reason != models.RunnerReasonExecutorRunning {
+			t.Fatalf("switch error = %v, want nil or ErrRunnerMutabilityConflict{executor_running}", switchErr)
+		}
+		switchRejectedAsExecutorRunning = true
+	}
+
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	stored, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
+
+	if switchRejectedAsExecutorRunning {
+		if stored != "profile-old" {
+			t.Fatalf("switch was rejected but stored profile = %q, want unchanged profile-old", stored)
+		}
+		return
+	}
+	if stored != "profile-new" {
+		t.Fatalf("switch committed but stored profile = %q, want profile-new", stored)
 	}
 }

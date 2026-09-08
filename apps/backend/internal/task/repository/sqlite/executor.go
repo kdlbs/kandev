@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -136,6 +138,13 @@ func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, err
 	return result, rows.Err()
 }
 
+// UpsertExecutorRunning takes the shared task-row lock (db.LockTaskRowInTx)
+// before writing so a concurrent runner switch (AC-TASKS-RUNNER-SWITCH-002.3a)
+// cannot land between this write's mutability read and its own re-check —
+// the two either fully precede or fully follow each other. A row with no
+// TaskID (defensive only; every production caller populates it from the
+// owning execution) skips the lock, matching guardWorkspaceSourceParentTx's
+// no-parent case.
 func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	if running == nil {
 		return fmt.Errorf("executor running is nil")
@@ -161,7 +170,20 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		metadataJSON = string(b)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if running.TaskID != "" {
+		if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); lockErr != nil &&
+			!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+			return lockErr
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
@@ -216,8 +238,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		metadataJSON,
 		running.CreatedAt,
 		running.UpdatedAt,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
