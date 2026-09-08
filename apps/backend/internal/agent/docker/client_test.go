@@ -1,11 +1,20 @@
 package docker
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/moby/moby/api/types/network"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestNormalizeDockerHostIP(t *testing.T) {
@@ -128,5 +137,111 @@ func TestParseHostPort(t *testing.T) {
 		if _, err := parseHostPort(in); err == nil {
 			t.Errorf("parseHostPort(%q) = nil error, want an error", in)
 		}
+	}
+}
+
+func TestContainerTeardownTreatsMissingContainersAsSuccess(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"No such container: missing-container"}`))
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	client, err := NewClient(config.DockerConfig{
+		Host:       "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+		APIVersion: "1.44",
+	}, log)
+	require.NoError(t, err)
+
+	require.NoError(t, client.StopContainer(context.Background(), "missing-container", time.Second))
+	require.NoError(t, client.KillContainer(context.Background(), "missing-container", "SIGKILL"))
+	require.NoError(t, client.RemoveContainer(context.Background(), "missing-container", true))
+}
+
+func TestRemoveContainerTreatsConcurrentRemovalAsSuccess(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"removal of container abc is already in progress"}`))
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	require.NoError(t, err)
+	client, err := NewClient(config.DockerConfig{
+		Host:       "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+		APIVersion: "1.44",
+	}, log)
+	require.NoError(t, err)
+
+	// Docker reports a conflict when another owner is already removing the
+	// same container. Removal is a convergence operation, so the in-flight
+	// owner has already taken responsibility for reaching the desired state.
+	require.NoError(t, client.RemoveContainer(context.Background(), "abc", true))
+}
+
+func TestBuildHostConfig_SecurityOptNilWhenEmpty(t *testing.T) {
+	cfg := ContainerConfig{
+		Memory:      256,
+		CPUQuota:    100000,
+		NetworkMode: "bridge",
+		AutoRemove:  true,
+	}
+	hc := buildHostConfig(cfg, nil, nil)
+	if hc.SecurityOpt != nil {
+		t.Errorf("SecurityOpt = %v, want nil", hc.SecurityOpt)
+	}
+}
+
+func TestBuildHostConfig_SecurityOptSetWhenProvided(t *testing.T) {
+	cfg := ContainerConfig{
+		Memory:      256,
+		CPUQuota:    100000,
+		NetworkMode: "bridge",
+		AutoRemove:  true,
+		SecurityOpt: []string{
+			`seccomp={"defaultAction":"SCMP_ACT_ALLOW","architectures":["SCMP_ARCH_X86_64"]}`,
+			"apparmor=unconfined",
+		},
+	}
+	hc := buildHostConfig(cfg, nil, nil)
+	if len(hc.SecurityOpt) != 2 {
+		t.Fatalf("SecurityOpt = %v, want 2 entries", hc.SecurityOpt)
+	}
+	if hc.SecurityOpt[0] != cfg.SecurityOpt[0] {
+		t.Errorf("SecurityOpt[0] = %q, want %q", hc.SecurityOpt[0], cfg.SecurityOpt[0])
+	}
+	if hc.SecurityOpt[1] != cfg.SecurityOpt[1] {
+		t.Errorf("SecurityOpt[1] = %q, want %q", hc.SecurityOpt[1], cfg.SecurityOpt[1])
+	}
+}
+
+func TestBuildDockerMounts(t *testing.T) {
+	in := []MountConfig{
+		{Source: "/src", Target: "/dst", ReadOnly: true},
+		{Source: "/data", Target: "/var/data", ReadOnly: false},
+	}
+	mounts := buildDockerMounts(in)
+	if len(mounts) != 2 {
+		t.Fatalf("got %d mounts, want 2", len(mounts))
+	}
+	if mounts[0].Source != "/src" || mounts[0].Target != "/dst" || !mounts[0].ReadOnly {
+		t.Errorf("mount 0 = %+v, want source=/src target=/dst readOnly=true", mounts[0])
+	}
+	if mounts[1].Source != "/data" || mounts[1].Target != "/var/data" || mounts[1].ReadOnly {
+		t.Errorf("mount 1 = %+v, want source=/data target=/var/data readOnly=false", mounts[1])
 	}
 }

@@ -36,6 +36,7 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     // Cancelling falls through to the red Resume / Start-fresh recovery banner.
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.recoveryFreshButton()).toBeVisible();
+    await expect(session.transientRetryCard()).toBeHidden();
   });
 
   test("retries are paced — the attempt counter advances across the backoff", async ({

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-enabled-column"]
 plan: "plan.md"
-spec: "../../specs/agents/profile-disable.md"
+spec: "../../specs/agents/requirements/profile-disable.md"
 ---
 
 # Task 02: Frontend types and selection filtering

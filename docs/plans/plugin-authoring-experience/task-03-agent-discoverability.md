@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-contract-reconciliation"]
 plan: "plan.md"
-spec: "../../specs/plugins/authoring-experience.md"
+spec: "../../specs/plugins/requirements/authoring-experience.md"
 ---
 
 # Task 03: Agent plugin discoverability

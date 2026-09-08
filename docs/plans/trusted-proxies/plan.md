@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/auth/trusted-proxies.md
+spec: docs/specs/auth/requirements/trusted-proxies.md
 created: 2026-08-15
 status: building
 ---

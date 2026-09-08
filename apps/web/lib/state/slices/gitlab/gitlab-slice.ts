@@ -9,7 +9,7 @@ export const defaultGitLabState: GitLabSliceState = {
   gitlabMRWatches: { items: [], loaded: false, loading: false },
   gitlabActionPresets: { byWorkspaceId: {}, loading: false },
   gitlabStats: { data: null, loading: false, loadedAt: null },
-  gitlabStatus: { workspaceId: null, data: null, loading: false, loadedAt: null },
+  gitlabStatus: { byWorkspaceId: {} },
   taskMRAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {}, externalGeneration: {} },
 };
 
@@ -192,18 +192,38 @@ function statsActions(set: ImmerSet) {
 function statusActions(set: ImmerSet) {
   return {
     setGitLabStatus: (
-      workspaceId: string | null,
-      status: GitLabSliceState["gitlabStatus"]["data"],
+      workspaceId: string,
+      status: GitLabSliceState["gitlabStatus"]["byWorkspaceId"][string]["data"],
     ) =>
       set((draft) => {
-        draft.gitlabStatus.workspaceId = workspaceId;
-        draft.gitlabStatus.data = status;
-        draft.gitlabStatus.loadedAt = Date.now();
+        const entry =
+          draft.gitlabStatus.byWorkspaceId[workspaceId] ??
+          (draft.gitlabStatus.byWorkspaceId[workspaceId] = {
+            data: null,
+            loading: false,
+            loadedAt: null,
+          });
+        entry.data = status;
+        entry.loadedAt = Date.now();
       }),
-    setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) =>
+    setGitLabStatusLoading: (workspaceId: string, loading: boolean) =>
       set((draft) => {
-        draft.gitlabStatus.workspaceId = workspaceId;
-        draft.gitlabStatus.loading = loading;
+        const entry =
+          draft.gitlabStatus.byWorkspaceId[workspaceId] ??
+          (draft.gitlabStatus.byWorkspaceId[workspaceId] = {
+            data: null,
+            loading: false,
+            loadedAt: null,
+          });
+        entry.loading = loading;
+      }),
+    resetGitLabStatus: (workspaceId: string) =>
+      set((draft) => {
+        draft.gitlabStatus.byWorkspaceId[workspaceId] = {
+          data: null,
+          loading: false,
+          loadedAt: null,
+        };
       }),
   };
 }
@@ -215,6 +235,10 @@ function taskMRAutomationActions(set: ImmerSet) {
       options: GitLabSliceState["taskMRAutomation"]["byTaskId"][string],
     ) =>
       set((draft) => {
+        const existing = draft.taskMRAutomation.byTaskId[taskId];
+        if (existing && (options.automation_revision ?? 0) < (existing.automation_revision ?? 0)) {
+          return;
+        }
         draft.taskMRAutomation.byTaskId[taskId] = options;
       }),
     setTaskMRAutomationLoading: (taskId: string, loading: boolean) =>

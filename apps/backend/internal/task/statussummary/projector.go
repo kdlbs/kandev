@@ -183,11 +183,14 @@ type pullRequestObservation struct {
 	reviewState           string
 	checksState           string
 	mergeableState        string
+	mergeQueueState       string
 	unresolvedReviewCount int
 	pendingReviewCount    int
 	requiredReviews       int
 	checksTotal           int
 	checksPassing         int
+	autoFixEnabled        bool
+	autoMergeEnabled      bool
 }
 
 func NewProjector(cfg ProjectorConfig) *Projector {
@@ -243,6 +246,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.BuildPermissionRequestWildcardSubject(),
 		events.BuildGitEventWildcardSubject(),
 		events.GitHubTaskPRUpdated,
+		events.GitHubTaskCIOptionsUpdated,
 		events.MessageQueueStatusChanged,
 	}
 	for _, pattern := range patterns {
@@ -330,6 +334,14 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		}
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
+	pullRequestChanged := false
+	if event.Type == events.GitHubTaskCIOptionsUpdated && p.loadPullRequests != nil {
+		before := derivePullRequestSummary(state)
+		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+			return err
+		}
+		pullRequestChanged = !equalPullRequestSummary(before, derivePullRequestSummary(state))
+	}
 	taskErrorChanged := false
 	if p.loadTaskLaunchError != nil && isTaskErrorRefreshEvent(event.Type) {
 		taskErrorChanged, err = p.refreshTaskLaunchError(ctx, taskID, state)
@@ -358,11 +370,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged
 	if !changed {
 		return nil
 	}

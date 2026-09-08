@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -462,6 +463,20 @@ func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, t
 	return taskDir, nil
 }
 
+// ensureReuseRequiredRemoteTaskDirExists verifies the canonical task directory
+// before a sibling launch creates its session-scoped runtime directory beneath
+// it. Attach-only reuse must never turn a missing workspace into a replacement
+// directory through the later mkdir -p for that session directory.
+func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Client, taskDir string) error {
+	if strings.TrimSpace(taskDir) == "" {
+		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
+		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
 // ensureRemoteSessionDir creates <taskDir>/.kandev/sessions/<sessionID>/ and
 // returns the absolute remote path. Per-session runtime data (PID file, logs,
 // agentctl socket) lives here.
@@ -470,7 +485,11 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 		return "", errors.New("ssh: session ID is empty")
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(sessionDir)); err != nil {
+	// Change into the canonical directory before creating session-scoped state.
+	// A path-based mkdir -p could recreate taskDir after an attach-only probe
+	// observed it, whereas cd fails if the canonical workspace disappeared.
+	command := "cd -- " + shellQuote(taskDir) + " && mkdir -p -- " + shellQuote(".kandev/sessions/"+sessionID)
+	if _, _, err := runSSHCommand(ctx, client, command); err != nil {
 		return "", fmt.Errorf("ssh: mkdir session dir: %w", err)
 	}
 	return sessionDir, nil
@@ -552,7 +571,7 @@ func startRemoteAgentctlOnPort(
 	// exactly the same resolved credentials as clone/setup commands.
 	innerScript := fmt.Sprintf(
 		`set -ae
-. /dev/stdin
+`+sshStdinEnvImport+`
 set +a
 set -e
 mkdir -p %[1]s
@@ -629,17 +648,18 @@ func buildSSHCreateInstanceRequest(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:               req.McpServers,
-		McpMode:                  req.McpMode,
-		McpProviders:             req.McpProviders,
-		McpProfile:               req.McpProfile,
-		RequiresProcessKill:      requiresProcessKillFromReq(req),
-		StripEnv:                 stripEnvFromReq(req),
-		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:      req.RemoteContributions,
-		ContributionDestinations: req.ContributionDestinations,
-		ComparisonTargets:        req.ComparisonTargets,
-		Env:                      sshRemoteContributionEnv(req, agentctlBin),
+		McpServers:                 req.McpServers,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		StripEnv:                   stripEnvFromReq(req),
+		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		ComparisonTargets:          req.ComparisonTargets,
+		Env:                        sshRemoteContributionEnv(req, agentctlBin),
 	}
 }
 
@@ -778,6 +798,8 @@ const (
 	envKeyGitLabToken          = "GITLAB_TOKEN"
 	envKeyGitLabHost           = "GITLAB_HOST"
 	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
+	envKeyMCPTimeout           = "MCP_TIMEOUT"
+	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -791,6 +813,13 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGitLabToken,
 	envKeyGitLabHost,
 	envKeyKandevGitLabHost,
+}
+
+// sshRemoteAgentRuntimeEnvKeys are non-secret runtime controls that must reach
+// the remote agent process after profile and agent precedence has been resolved.
+var sshRemoteAgentRuntimeEnvKeys = []string{
+	envKeyMCPTimeout,
+	envKeyMCPToolTimeout,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -808,6 +837,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	}
 	env := make(map[string]string)
 	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
+	for _, key := range sshRemoteAgentRuntimeEnvKeys {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
@@ -885,13 +919,46 @@ fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
 }
 
-// isRemoteAgentctlAlive returns true when a kill -0 on the pid succeeds.
-func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+// probeRemoteAgentctlLiveness distinguishes a completed remote process probe
+// from an SSH failure that leaves the process state unknown.
+func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid int) (bool, error) {
 	if pid <= 0 {
-		return false
+		return false, nil
 	}
-	_, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
-	return err == nil
+	_, stderr, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		if remoteProcessProbeConfirmsAbsence(stderr) {
+			return false, nil
+		}
+		return false, remoteProcessProbeError(pid, err, stderr)
+	}
+	return false, err
+}
+
+func remoteProcessProbeConfirmsAbsence(stderr string) bool {
+	message := strings.ToLower(strings.TrimSpace(stderr))
+	return strings.Contains(message, "no such process") ||
+		strings.Contains(message, "no such pid") ||
+		strings.Contains(message, "esrch")
+}
+
+func remoteProcessProbeError(pid int, err error, stderr string) error {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return fmt.Errorf("remote kill -0 %d failed: %w", pid, err)
+	}
+	return fmt.Errorf("remote kill -0 %d failed: %w (stderr: %s)", pid, err, detail)
+}
+
+// isRemoteAgentctlAlive is the best-effort boolean form used by status and
+// startup polling, where either absence or an unavailable probe means down.
+func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+	alive, _ := probeRemoteAgentctlLiveness(ctx, client, pid)
+	return alive
 }
 
 // SSHPortForwarder fans out incoming local-port connections to a remote port

@@ -60,7 +60,7 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
  * elsewhere (import popovers, Kanban external-link buttons, task-top-bar
  * buttons) — those keep gating on enabled-and-authed via each integration's
  * `useXAvailable`, unaffected by this hook. See
- * `docs/specs/integrations/enable-disable-toggle.md`.
+ * `docs/specs/integrations/requirements/enable-disable-toggle.md`.
  *
  * Availability is **not** deduplicated across consumers. GitHub and GitLab are
  * store-backed, but Jira, Linear and Azure DevOps go through

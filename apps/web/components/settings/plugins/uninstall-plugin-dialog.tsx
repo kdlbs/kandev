@@ -1,69 +1,78 @@
 "use client";
 
+import type { RefObject } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
+
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import type { PluginRecord } from "@/lib/types/plugins";
 
-type UninstallPluginDialogProps = {
-  target: PluginRecord | null;
-  busy: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
+type UninstallPluginConfirmationProps = {
+  target: PluginRecord;
+  open: boolean;
+  isFinePointer: boolean;
+  anchorRef: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
 };
 
-export function UninstallPluginDialog({
+/**
+ * Keeps plugin uninstall confirmation at its initiating control. The action
+ * hook still owns the target mutation, pending state, and failure feedback.
+ */
+export function PluginUninstallConfirmation({
   target,
-  busy,
-  onClose,
+  open,
+  isFinePointer,
+  anchorRef,
+  onOpenChange,
+  onCancel,
   onConfirm,
-}: UninstallPluginDialogProps) {
+}: UninstallPluginConfirmationProps) {
   const { t } = useTranslation();
+  const description = (
+    <Trans i18nKey="plugins:uninstallConfirm" values={{ name: target.display_name }}>
+      This will permanently remove{" "}
+      <span className="font-medium text-foreground">{target.display_name}</span> and revoke its API
+      key. This action cannot be undone.
+    </Trans>
+  );
+  const confirmAriaLabel = t("plugins:confirmUninstall");
+
+  if (!isFinePointer) {
+    if (!open) return null;
+    return (
+      <InlineConfirmActions
+        density="touch"
+        testId="plugin-uninstall-inline-confirmation"
+        ariaLabel={t("plugins:uninstallPlugin")}
+        description={description}
+        cancelLabel={t("plugins:cancel")}
+        confirmLabel={t("plugins:confirmUninstall")}
+        confirmAriaLabel={confirmAriaLabel}
+        confirmTestId="plugin-uninstall-confirm"
+        onCancel={onCancel}
+        onClose={() => onOpenChange(false)}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+
   return (
-    <Dialog
-      open={Boolean(target)}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("plugins:uninstallPlugin")}</DialogTitle>
-          <DialogDescription>
-            {/* The display name comes from the plugin's manifest, so it is
-                third-party data rather than our copy. */}
-            <Trans
-              i18nKey="plugins:uninstallConfirm"
-              values={{ name: target?.display_name ?? t("plugins:thisPlugin") }}
-            >
-              This will permanently remove{" "}
-              <span className="font-medium text-foreground">{target?.display_name}</span> and revoke
-              its API key. This action cannot be undone.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} className="cursor-pointer">
-            {t("plugins:cancel")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={onConfirm}
-            disabled={busy}
-            className="cursor-pointer"
-          >
-            {t("plugins:confirmUninstall")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={t("plugins:uninstallPlugin")}
+      description={description}
+      cancelLabel={t("plugins:cancel")}
+      confirmLabel={t("plugins:confirmUninstall")}
+      confirmAriaLabel={confirmAriaLabel}
+      confirmTestId="plugin-uninstall-confirm"
+      testId="plugin-uninstall-confirm-popover"
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }

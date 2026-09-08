@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-persistence-prompts"]
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 02: Backend CI Options API

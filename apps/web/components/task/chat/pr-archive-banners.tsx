@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
-import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
@@ -12,6 +12,7 @@ import {
   wasPRMergedBannerDismissed,
 } from "@/lib/local-storage";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
 // message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
@@ -38,19 +39,27 @@ function ArchiveDismissBanner({
 }) {
   const { t } = useTranslation();
   const archive = useTaskArchiveConfirm(taskId);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <>
-      <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
+      <div
+        data-testid={`${testIdPrefix}-banner`}
+        className={`${containerClass} ${archive.target && !isFinePointer ? "flex-wrap" : ""}`}
+      >
         {icon}
         <span className="flex-1">{text}</span>
-        <button
-          type="button"
-          data-testid={`${testIdPrefix}-archive-button`}
-          onClick={archive.requestArchive}
-          className={archiveClass}
-        >
-          {t("task:archive")}
-        </button>
+        {(!archive.target || isFinePointer) && (
+          <button
+            ref={archiveAnchorRef}
+            type="button"
+            data-testid={`${testIdPrefix}-archive-button`}
+            onClick={archive.requestArchive}
+            className={archiveClass}
+          >
+            {t("task:archive")}
+          </button>
+        )}
         <button
           type="button"
           aria-label={t("task:dismiss")}
@@ -60,12 +69,20 @@ function ArchiveDismissBanner({
         >
           <IconX className="h-3 w-3" />
         </button>
+        <TaskArchiveConfirmation
+          open={archive.target !== null}
+          anchorRef={archiveAnchorRef}
+          taskId={taskId}
+          taskTitle={archive.target?.title}
+          executorType={archive.target?.executorType}
+          isArchiving={archive.isPending}
+          onOpenChange={(open) => {
+            if (!open) archive.closeConfirm();
+          }}
+          onConfirm={archive.confirmArchive}
+          confirmTestId={`${testIdPrefix}-archive-confirm`}
+        />
       </div>
-      <TaskArchiveConfirmFlow
-        taskId={taskId}
-        archive={archive}
-        confirmTestId={`${testIdPrefix}-archive-confirm`}
-      />
     </>
   );
 }

@@ -5,7 +5,7 @@ status: in-progress
 wave: 3
 depends_on: ["02-form-controls-and-profile-migration", "03-workspace-provider-migration", "04-system-account-migration", "05-technical-surfaces-migration"]
 plan: "plan.md"
-spec: "../../specs/settings-typography/spec.md"
+spec: "../../specs/ui/requirements/settings-typography.md"
 ---
 
 # Task 06: Typography regression coverage
@@ -60,7 +60,7 @@ variants.
 
 ## Inputs
 
-- Spec: `docs/specs/settings-typography/spec.md`, all Scenarios.
+- Spec: `docs/specs/ui/requirements/settings-typography.md`, all Scenarios.
 - Plan: `plan.md`, Tests, E2E Tests, and Mobile design contract sections.
 - Audit: `docs/audits/settings-typography/012-expand-settings-typography-verification.md`
   and `010-align-mobile-settings-type-scale.md`.

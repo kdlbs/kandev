@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/task-sleep-inhibition.md
+spec: docs/specs/platform/requirements/task-sleep-inhibition.md
 created: 2026-08-04
 status: done
 ---

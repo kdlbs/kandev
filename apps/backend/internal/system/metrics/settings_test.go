@@ -53,6 +53,27 @@ func TestNormalizeSettingsValidatesIntervalAndMetrics(t *testing.T) {
 	}
 }
 
+// TestNormalizeSettingsRejectsAgentctlDiagnosticMetrics guards the design
+// decision that keeps the per-instance agentctl diagnostic metrics
+// (goroutine count, git poll latency, workspace monitor latency, create-to-ready time) out of persisted
+// settings. If NormalizeSettings ever accepted one of these IDs it could be
+// saved into GlobalSettings and would then reach the periodic broadcast and
+// the status bar's METRIC_OPTIONS surface — a user-visible contract change
+// this card deliberately does not make.
+func TestNormalizeSettingsRejectsAgentctlDiagnosticMetrics(t *testing.T) {
+	for _, id := range []string{MetricAgentctlGoroutines, MetricAgentctlGitPollMillis, MetricAgentctlMonitorMillis, MetricAgentctlCreateReadyMs} {
+		t.Run(id, func(t *testing.T) {
+			_, err := NormalizeSettings(GlobalSettings{
+				IntervalSeconds: DefaultIntervalSeconds,
+				Metrics:         []string{id},
+			})
+			if err == nil {
+				t.Fatalf("expected NormalizeSettings to reject diagnostic metric %q", id)
+			}
+		})
+	}
+}
+
 func TestCollectorResetClearsCPUBaseline(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "stat"), []byte("cpu  1 0 0 9 0 0 0 0\n"), 0o600); err != nil {

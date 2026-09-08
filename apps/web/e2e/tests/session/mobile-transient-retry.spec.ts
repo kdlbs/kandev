@@ -23,5 +23,6 @@ test.describe("mobile: transient provider error retry", () => {
     // Tap Cancel → red recovery banner.
     await session.recoveryCancelRetryButton().click();
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+    await expect(session.transientRetryCard()).toBeHidden();
   });
 });

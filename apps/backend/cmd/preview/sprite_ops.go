@@ -297,25 +297,35 @@ func waitForServiceStarted(stream *sprites.ServiceStream) error {
 	}
 }
 
-// waitForKandev polls the kandev /health endpoint inside the sprite via
-// CommandContext until kandev responds or the deadline is exceeded.
-// Using the internal address (localhost) avoids Sprites routing state that
-// may lag during a service restart triggered by enablePublicURL.
+// kandevReadyURL returns the readiness endpoint waitForKandev polls, broken
+// out so tests can pin the endpoint without going through the sprite exec/
+// websocket machinery. /health only proves the bootstrap listener has bound
+// the socket (it returns 200 immediately, before the real router is wired
+// in); /ready is what flips once the real router is swapped in and requests
+// stop getting the bootstrap handler's 503 "starting" response.
+func kandevReadyURL(port int) string {
+	return fmt.Sprintf("http://localhost:%d/ready", port)
+}
+
+// waitForKandev polls the kandev /ready endpoint inside the sprite via
+// CommandContext until kandev is ready to serve real traffic or the deadline
+// is exceeded. Using the internal address (localhost) avoids Sprites routing
+// state that may lag during a service restart triggered by enablePublicURL.
 func waitForKandev(ctx context.Context, sprite *sprites.Sprite, port int) error {
 	const (
 		timeout   = 90 * time.Second
 		retryWait = 3 * time.Second
 	)
-	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
+	readyURL := kandevReadyURL(port)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		out, err := sprite.CommandContext(checkCtx, "curl", "-sf", healthURL).Output()
+		out, err := sprite.CommandContext(checkCtx, "curl", "-sf", readyURL).Output()
 		cancel()
 
 		if err == nil && len(out) > 0 {
-			fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
+			fmt.Fprintf(os.Stderr, "  kandev is ready\n")
 			return nil
 		}
 
@@ -326,9 +336,9 @@ func waitForKandev(ctx context.Context, sprite *sprites.Sprite, port int) error 
 		}
 	}
 
-	// Health check timed out — fetch logs to help diagnose.
+	// Readiness check timed out — fetch logs to help diagnose.
 	diag := fetchSpriteLogs(ctx, sprite)
-	return fmt.Errorf("kandev did not become healthy within %v\n%s", timeout, diag)
+	return fmt.Errorf("kandev did not become ready within %v\n%s", timeout, diag)
 }
 
 // fetchSpriteLogs reads log files from the sprite for failure diagnostics.

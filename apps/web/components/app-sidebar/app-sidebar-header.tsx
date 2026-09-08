@@ -36,7 +36,11 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
     // Minimal rail: brand home + expand. The workspace switcher lives only in
     // the expanded header — a lone workspace glyph here read as noise.
     return (
-      <div className="flex flex-col items-center gap-1 px-1 py-1.5 border-b border-border shrink-0">
+      <div
+        data-testid="app-sidebar-header"
+        data-window-controls-overlay-region="sidebar"
+        className="flex flex-col items-center gap-1 px-1 py-1.5 border-b border-border shrink-0"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Link
@@ -76,6 +80,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
   return (
     <div
       data-testid="app-sidebar-header"
+      data-window-controls-overlay-region="sidebar"
       className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border"
     >
       <Link

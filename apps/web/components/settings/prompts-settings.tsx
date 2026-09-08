@@ -2,22 +2,17 @@
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { IconEdit, IconTrash, IconLock } from "@tabler/icons-react";
+import { IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
+import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
+import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -37,6 +32,10 @@ function errorMessage(error: unknown): string {
   // A thrown Error carries the backend's diagnostic, which stays English by
   // design; only the missing-payload fallback is copy.
   return error instanceof Error ? error.message : t("common:requestFailed");
+}
+
+function getPromptPreview(content: string) {
+  return content.split(/\r?\n/)[0] ?? "";
 }
 
 async function runPromptSave(
@@ -106,9 +105,13 @@ type PromptListItemProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
   onCancel: () => void;
   isBusy: boolean;
   showCreate: boolean;
+  isFinePointer: boolean;
+  isDeleteTarget: boolean;
 };
 
 function PromptListItem({
@@ -119,14 +122,16 @@ function PromptListItem({
   onFormChange,
   onStartEditing,
   onOpenDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
   onCancel,
   isBusy,
   showCreate,
+  isFinePointer,
+  isDeleteTarget,
 }: PromptListItemProps) {
   const { t } = useTranslation();
-  const getPromptPreview = (content: string) => {
-    return content.split(/\r?\n/)[0] ?? "";
-  };
+  const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
 
@@ -148,28 +153,32 @@ function PromptListItem({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onStartEditing(prompt)}
-            disabled={isBusy || showCreate}
-            className="cursor-pointer"
-            data-testid="prompt-edit-button"
-          >
-            <IconEdit className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onOpenDelete(prompt)}
-            disabled={isBusy}
-            className="cursor-pointer"
-          >
-            <IconTrash className="h-4 w-4" />
-          </Button>
-        </div>
+        <PromptRowActions
+          prompt={prompt}
+          deleteAnchorRef={deleteAnchorRef}
+          onStartEditing={onStartEditing}
+          onOpenDelete={onOpenDelete}
+          onDeleteClose={onDeleteCancel}
+          onDeleteCancel={onDeleteCancel}
+          onDeleteConfirm={onDeleteConfirm}
+          isBusy={isBusy}
+          showCreate={showCreate}
+          isFinePointer={isFinePointer}
+          isDeleteTarget={isDeleteTarget}
+        />
       </div>
+      {!isFinePointer ? (
+        <PromptDeleteConfirmation
+          promptName={prompt.name}
+          open={isDeleteTarget}
+          isFinePointer={isFinePointer}
+          anchorRef={deleteAnchorRef}
+          isBusy={isBusy}
+          onClose={onDeleteCancel}
+          onCancel={onDeleteCancel}
+          onConfirm={onDeleteConfirm}
+        />
+      ) : null}
       {isEditing ? (
         <div className="space-y-3">
           <Input
@@ -214,9 +223,13 @@ type PromptListContentProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
   onCancel: () => void;
   isBusy: boolean;
   showCreate: boolean;
+  isFinePointer: boolean;
+  deleteTargetId: string | null;
 };
 
 function PromptListContent({
@@ -228,9 +241,13 @@ function PromptListContent({
   onFormChange,
   onStartEditing,
   onOpenDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
   onCancel,
   isBusy,
   showCreate,
+  isFinePointer,
+  deleteTargetId,
 }: PromptListContentProps) {
   const { t } = useTranslation();
   if (!promptsLoaded) {
@@ -259,56 +276,16 @@ function PromptListContent({
           onFormChange={onFormChange}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
+          onDeleteCancel={onDeleteCancel}
+          onDeleteConfirm={onDeleteConfirm}
           onCancel={onCancel}
           isBusy={isBusy}
           showCreate={showCreate}
+          isFinePointer={isFinePointer}
+          isDeleteTarget={deleteTargetId === prompt.id}
         />
       ))}
     </>
-  );
-}
-
-type DeletePromptDialogProps = {
-  deleteTarget: CustomPrompt | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  isBusy: boolean;
-};
-
-function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: DeletePromptDialogProps) {
-  const { t } = useTranslation();
-  // The prompt's own name is user data; only the no-target fallback is copy.
-  const targetLabel = deleteTarget ? `@${deleteTarget.name}` : t("settings:promptDeleteThisPrompt");
-  return (
-    <Dialog
-      open={Boolean(deleteTarget)}
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("settings:promptDelete")}</DialogTitle>
-          <DialogDescription>
-            <Trans i18nKey="settings:promptDeleteDescription" values={{ name: targetLabel }}>
-              This will permanently remove{" "}
-              <span className="font-medium text-foreground">{targetLabel}</span>. This action cannot
-              be undone.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("settings:cancel")}
-          </Button>
-          <Button type="button" variant="destructive" onClick={onConfirm} disabled={isBusy}>
-            {t("settings:promptDelete")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -445,9 +422,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setDeleteTarget(null);
   };
   const confirmDelete = () => {
-    if (!deleteTarget) return;
-    deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
-    closeDeleteDialog();
+    if (!deleteTarget || isBusy) return;
+    return deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
   };
 
   return {
@@ -484,6 +460,7 @@ export function getPromptDraftMeta(
 
 export function PromptsSettings() {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const state = usePromptsState();
   const {
     editingId,
@@ -569,18 +546,16 @@ export function PromptsSettings() {
             onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
             onStartEditing={startEditing}
             onOpenDelete={openDeleteDialog}
+            onDeleteCancel={closeDeleteDialog}
+            onDeleteConfirm={confirmDelete}
             onCancel={resetForm}
             isBusy={isBusy}
             showCreate={showCreate}
+            isFinePointer={isFinePointer}
+            deleteTargetId={deleteTarget?.id ?? null}
           />
         </div>
       </div>
-      <DeletePromptDialog
-        deleteTarget={deleteTarget}
-        onClose={closeDeleteDialog}
-        onConfirm={confirmDelete}
-        isBusy={isBusy}
-      />
     </SettingsPageTemplate>
   );
 }

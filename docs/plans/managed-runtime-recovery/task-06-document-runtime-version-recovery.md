@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-add-responsive-version-recovery-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 06: Document runtime version recovery

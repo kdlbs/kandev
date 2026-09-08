@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/unread-divider.md
+spec: docs/specs/office/requirements/unread-divider.md
 created: 2026-07-31
 status: pending-approval
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-routing-profile-contract"]
 plan: "plan.md"
-spec: "../../specs/office/routing.md"
+spec: "../../specs/office/requirements/routing.md"
 ---
 
 # Task 02: Resolver and route persistence

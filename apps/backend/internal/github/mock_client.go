@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -58,10 +59,29 @@ type requestedReviewers struct {
 
 // mergedPR records a MergePR call for test assertions.
 type mergedPR struct {
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	Number      int    `json:"number"`
-	MergeMethod string `json:"merge_method"`
+	Owner           string `json:"owner"`
+	Repo            string `json:"repo"`
+	Number          int    `json:"number"`
+	MergeMethod     string `json:"merge_method"`
+	ExpectedHeadSHA string `json:"expected_head_sha"`
+}
+
+// mockPRMergeQueueState is the provider-side queue snapshot used by the E2E
+// controller. The in-memory client exposes it through GetPRStatus so the
+// normal TaskPR sync and automation event flow remains under test.
+type mockPRMergeQueueState struct {
+	HeadSHA                     string
+	State                       string
+	Position                    *int
+	EntryID                     string
+	EntryHeadSHA                string
+	EstimatedTimeToMergeSeconds *int
+	LastRemovalID               string
+	LastRemovedAt               *time.Time
+	LastRemovalReason           string
+	LastRemovalBeforeSHA        string
+	QueueObserved               bool
+	RecoveryObserved            bool
 }
 
 // repoKey is a composite key for per-repo lookups by owner/repo.
@@ -116,6 +136,7 @@ type MockClient struct {
 	requestedReviews  []requestedReviewers
 	mergedPRs         []mergedPR
 	mergeOutcomes     map[prKey]MergeOutcome
+	mergeFailures     map[prKey]string
 	mergeMethods      map[repoKey]RepoMergeMethods
 	repositoryDetails map[repoKey]*GitHubRepository
 	gists             map[string]mockGist
@@ -169,6 +190,7 @@ func NewMockClient() *MockClient {
 		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:      make(map[repoKey]RepoMergeMethods),
 		mergeOutcomes:     make(map[prKey]MergeOutcome),
+		mergeFailures:     make(map[prKey]string),
 		repositoryDetails: make(map[repoKey]*GitHubRepository),
 		gists:             make(map[string]mockGist),
 		repoFiles:         make(map[repoKey][]repoFileEntry),
@@ -750,13 +772,27 @@ func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMe
 	m.mergeMethods[repoKey{owner, repo}] = methods
 }
 
-func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mergedPRs = append(m.mergedPRs, mergedPR{
-		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
+		Owner: owner, Repo: repo, Number: number, MergeMethod: request.MergeMethod,
+		ExpectedHeadSHA: request.ExpectedHeadSHA,
 	})
-	outcome := m.mergeOutcomes[prKey{owner, repo, number}]
+	key := prKey{owner, repo, number}
+	if request.ExpectedHeadSHA != "" {
+		pr, ok := m.prs[key]
+		if !ok {
+			return "", fmt.Errorf("pull request not found for expected head %s", request.ExpectedHeadSHA)
+		}
+		if pr.HeadSHA != request.ExpectedHeadSHA {
+			return "", fmt.Errorf("pull request head changed: expected %s, current %s", request.ExpectedHeadSHA, pr.HeadSHA)
+		}
+	}
+	if message := m.mergeFailures[key]; message != "" {
+		return "", errors.New(message)
+	}
+	outcome := m.mergeOutcomes[key]
 	if outcome == "" {
 		outcome = MergeOutcomeMerged
 	}
@@ -775,7 +811,18 @@ func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, 
 func (m *MockClient) SetMergeOutcome(owner, repo string, number int, outcome MergeOutcome) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.mergeOutcomes[prKey{owner, repo, number}] = outcome
+	key := prKey{owner, repo, number}
+	m.mergeOutcomes[key] = outcome
+	delete(m.mergeFailures, key)
+}
+
+// SetMergeFailure configures a provider diagnostic for one pull request.
+func (m *MockClient) SetMergeFailure(owner, repo string, number int, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := prKey{owner, repo, number}
+	m.mergeFailures[key] = strings.TrimSpace(message)
+	delete(m.mergeOutcomes, key)
 }
 
 func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -870,10 +917,46 @@ func (m *MockClient) SetReposUnavailable(unavailable bool) {
 func (m *MockClient) AddPR(pr *PR) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if pr.MergeQueueState != "" || pr.MergeQueuePosition != nil ||
+		pr.MergeQueueEntryID != "" || pr.MergeQueueEntryHeadSHA != "" {
+		pr.mergeQueuePopulated = true
+	}
+	if pr.MergeQueueLastRemovalID != "" || pr.MergeQueueLastRemovedAt != nil ||
+		pr.MergeQueueLastRemovalReason != "" || pr.MergeQueueLastRemovalBeforeSHA != "" {
+		pr.mergeQueueRecoveryPopulated = true
+	}
 	m.prs[prKey{pr.RepoOwner, pr.RepoName, pr.Number}] = pr
 	if pr.HeadBranch != "" {
 		m.prsByBranch[branchKey{pr.RepoOwner, pr.RepoName, pr.HeadBranch}] = pr
 	}
+}
+
+// SetPRMergeQueue replaces the provider-side queue snapshot for a PR and can
+// advance its head. It is intentionally separate from AddPR so E2E tests can
+// drive removal and requeue transitions without replacing the whole fixture.
+func (m *MockClient) SetPRMergeQueue(owner, repo string, number int, state mockPRMergeQueueState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pr, ok := m.prs[prKey{owner, repo, number}]
+	if !ok {
+		return fmt.Errorf("mock: PR %s/%s#%d not found", owner, repo, number)
+	}
+	if state.HeadSHA != "" {
+		pr.HeadSHA = state.HeadSHA
+	}
+	pr.MergeQueueState = state.State
+	pr.MergeQueuePosition = state.Position
+	pr.MergeQueueEntryID = state.EntryID
+	pr.MergeQueueEntryHeadSHA = state.EntryHeadSHA
+	pr.MergeQueueEstimatedTimeToMergeSeconds = state.EstimatedTimeToMergeSeconds
+	pr.MergeQueueLastRemovalID = state.LastRemovalID
+	pr.MergeQueueLastRemovedAt = state.LastRemovedAt
+	pr.MergeQueueLastRemovalReason = state.LastRemovalReason
+	pr.MergeQueueLastRemovalBeforeSHA = state.LastRemovalBeforeSHA
+	pr.mergeQueuePopulated = state.QueueObserved
+	pr.mergeQueueRecoveryPopulated = state.RecoveryObserved
+	pr.UpdatedAt = time.Now().UTC()
+	return nil
 }
 
 func (m *MockClient) AddIssue(issue *Issue) {
@@ -1050,6 +1133,7 @@ func (m *MockClient) Reset() {
 	m.requestedReviews = nil
 	m.mergedPRs = nil
 	m.mergeOutcomes = make(map[prKey]MergeOutcome)
+	m.mergeFailures = make(map[prKey]string)
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil

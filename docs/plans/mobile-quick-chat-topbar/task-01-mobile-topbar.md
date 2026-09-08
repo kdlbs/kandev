@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/mobile-quick-chat-topbar/spec.md"
+spec: "../../specs/ui/requirements/mobile-quick-chat-topbar.md"
 ---
 
 # Task 01: Mobile Quick Chat topbar access
@@ -30,7 +30,7 @@ spec: "../../specs/mobile-quick-chat-topbar/spec.md"
 ## Inputs
 
 - Spec: `What` and all `Scenarios` in
-  `docs/specs/mobile-quick-chat-topbar/spec.md`.
+  `docs/specs/ui/requirements/mobile-quick-chat-topbar.md`.
 - Plan: `Frontend`, `Tests`, `E2E Tests`, and `Risks` in `plan.md`.
 - Existing patterns: `workspaceHomeHref` in
   `apps/web/components/app-sidebar/app-sidebar-workspace-navigation.ts`, and the existing

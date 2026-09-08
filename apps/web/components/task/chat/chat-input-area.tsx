@@ -263,7 +263,9 @@ export function useSubmitHandler(
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+  options: { enableFocusShortcut?: boolean } = {},
 ) {
+  const enableFocusShortcut = options.enableFocusShortcut ?? true;
   const handleCancelTurn = useCallback(async () => {
     if (!resolvedSessionId) return;
     const client = getWebSocketClient();
@@ -294,7 +296,7 @@ export function useChatPanelHandlers(
       },
       [chatInputRef],
     ),
-    { enabled: true, preventDefault: false },
+    { enabled: enableFocusShortcut, preventDefault: false },
   );
 
   return { handleCancelTurn };
@@ -310,6 +312,8 @@ type ChatInputAreaProps = {
   onRequestChangesTooltipDismiss?: () => void;
   panelState: ChatPanelState;
   isSending: boolean;
+  /** The task-owned launch card renders recovery for the failed start. */
+  launchErrorOwned?: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
   /** Hide ACP/session-specific controls (model picker, mode, MCP, reset context,
@@ -426,6 +430,7 @@ export function ChatInputArea({
   onScrollToStart,
   statusTaskId = null,
   showAgentStartHint = false,
+  launchErrorOwned = false,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
@@ -454,6 +459,7 @@ export function ChatInputArea({
     minimalToolbar,
     hideAgentControls,
     hidePlanMode,
+    launchErrorOwned,
   });
   return (
     <div

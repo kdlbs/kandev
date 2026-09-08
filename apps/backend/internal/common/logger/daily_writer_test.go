@@ -37,7 +37,7 @@ func TestDailyWriterAppendsAndRollsByUTCDay(t *testing.T) {
 		t.Fatalf("close day two: %v", err)
 	}
 
-	archived := readLogFile(t, filepath.Join(logDir, "backend-logs-2026-07-29.log"))
+	archived := readLogFile(t, filepath.Join(logDir, "backend-logs-2026-07-29-000001.log"))
 	if archived != "day-one\nsame-day\n" {
 		t.Fatalf("archived log = %q", archived)
 	}
@@ -131,7 +131,7 @@ func TestDailyWriterResumesJournalWithoutDuplicatingDestination(t *testing.T) {
 	}
 }
 
-func TestDailyWriterRejectsEntriesBeyondDailyByteLimit(t *testing.T) {
+func TestDailyWriterRejectsEntryLargerThanSegment(t *testing.T) {
 	logDir := t.TempDir()
 	activePath := filepath.Join(logDir, activeBackendLogName)
 	const dailyLimit = int64(len("full\n"))
@@ -148,8 +148,8 @@ func TestDailyWriterRejectsEntriesBeyondDailyByteLimit(t *testing.T) {
 		t.Fatalf("newDailyWriter: %v", err)
 	}
 	defer func() { _ = writer.Close() }()
-	if writer.maxBytes != dailyBackendLogBytes {
-		t.Fatalf("default daily limit = %d, want %d", writer.maxBytes, dailyBackendLogBytes)
+	if writer.maxBytes != backendLogSegmentBytes {
+		t.Fatalf("default segment limit = %d, want %d", writer.maxBytes, backendLogSegmentBytes)
 	}
 	writer.maxBytes = dailyLimit
 

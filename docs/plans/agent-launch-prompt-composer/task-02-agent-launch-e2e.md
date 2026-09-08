@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-reuse-shared-composer"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-launch-prompt-composer.md"
+spec: "../../specs/ui/requirements/agent-launch-prompt-composer.md"
 ---
 
 # Task 02: Cover agent launch flows

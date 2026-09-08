@@ -1,6 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { TaskTopBar } from "./task-top-bar";
 
 afterEach(() => cleanup());
@@ -115,6 +116,12 @@ describe("TaskTopBar executor environment controls", () => {
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
   });
+
+  it("shows the executor environment button for Kubernetes executors", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="k8s" />);
+
+    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+  });
 });
 
 describe("TaskTopBar GitHub issue link", () => {
@@ -151,6 +158,35 @@ describe("TaskTopBar registered change requests", () => {
   });
 });
 
+describe("TaskTopBar repository crumb", () => {
+  function repositoryCrumb(label: string) {
+    return within(screen.getByRole("navigation", { name: "breadcrumb" })).queryByText(label);
+  }
+
+  it("names the task's repository so an open task says which project it belongs to", () => {
+    renderTopBar(
+      <TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" repositoryLabel="kdlbs/kandev" />,
+    );
+
+    const crumb = repositoryCrumb("kdlbs/kandev");
+    expect(crumb).toBeTruthy();
+    // Orientation, not navigation: there is no repository route to land on.
+    expect(crumb!.closest("a")).toBeNull();
+    // Truncation is what protects the title, so the full name lives in `title`.
+    expect(crumb!.getAttribute("title")).toBe("kdlbs/kandev");
+  });
+
+  it("renders no repository crumb for a task with no repository", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" />);
+
+    // Any static crumb, not just a slug-shaped one: a repository with no
+    // provider falls back to a bare name like "scratchpad", which a
+    // slash-matching query would happily miss.
+    const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(breadcrumb.querySelector("[title]")).toBeNull();
+  });
+});
+
 describe("TaskTopBar archived task controls", () => {
   it("passes the task ID to the unarchive button", () => {
     renderTopBar(<TaskTopBar taskId="task-1" isArchived />);
@@ -160,5 +196,9 @@ describe("TaskTopBar archived task controls", () => {
 });
 
 function renderTopBar(ui: React.ReactNode) {
-  return render(<StateProvider>{ui}</StateProvider>);
+  return render(
+    <StateProvider>
+      <ToastProvider>{ui}</ToastProvider>
+    </StateProvider>,
+  );
 }

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-windows-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-windows-availability.md"
 ---
 
 # Task 01: Expose backend host OS

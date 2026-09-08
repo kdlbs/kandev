@@ -199,8 +199,8 @@ test.describe("Linear settings", () => {
     await settings.saveButton.click();
     await expect(settings.deleteButton).toBeVisible();
 
-    testPage.once("dialog", (d) => void d.accept());
     await settings.deleteButton.click();
+    await testPage.getByTestId("linear-remove-confirm").click();
     await expect(settings.deleteButton).toHaveCount(0);
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.statusBanner).toHaveCount(0);

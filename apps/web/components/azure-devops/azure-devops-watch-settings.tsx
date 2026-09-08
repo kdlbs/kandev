@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconPlayerPlay, IconPlus, IconRefresh, IconTrash, IconX } from "@tabler/icons-react";
+import { IconPlayerPlay, IconPlus, IconRefresh, IconX } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +19,8 @@ import { formatDateTime } from "@/lib/i18n/formats";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAzureDevOpsWatches } from "@/hooks/domains/azure-devops/use-azure-devops-watches";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
+import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
+import { WatcherDeleteAction } from "@/components/watches/watcher-delete-action";
 import {
   azurePullRequestWatchPlaceholders,
   azureWorkItemWatchPlaceholders,
@@ -32,6 +34,12 @@ import type {
 } from "@/lib/types/azure-devops";
 
 type Kind = "work-item" | "pull-request";
+
+type AzureResetTarget = {
+  kind: Kind;
+  id: string;
+  integrationLabel: string;
+};
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
@@ -181,15 +189,15 @@ function WatchActions({
       >
         <IconRefresh className="h-4 w-4" /> {t("common:reset")}
       </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="min-h-11 cursor-pointer text-destructive"
-        onClick={onDelete}
-      >
-        <IconTrash className="h-4 w-4" /> {t("azuredevops:delete")}
-      </Button>
+      <WatcherDeleteAction
+        title={t("azuredevops:deleteWatchConfirm")}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={t("azuredevops:delete")}
+        ariaLabel={t("azuredevops:deleteWatchConfirm")}
+        triggerTestId={`azure-${kind}-watch-delete-${watch.id}`}
+        confirmTestId="azure-watch-delete-confirm"
+        onConfirm={onDelete}
+      />
     </div>
   );
 }
@@ -585,6 +593,18 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
     initial?: AzureDevOpsWorkItemWatchInput | AzureDevOpsPullRequestWatchInput;
   } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const resetCtrl = useWatchResetController<AzureResetTarget>({
+    preview: ({ kind, id }) => watches.previewReset(kind, id),
+    reset: async ({ kind, id }) => {
+      try {
+        await watches.reset(kind, id);
+        setMessage(t("azuredevops:watchReset"));
+      } catch (error) {
+        setMessage(String(error));
+        throw error;
+      }
+    },
+  });
   const run = async (kind: Kind, id: string) => {
     try {
       const result = await watches.trigger(kind, id);
@@ -593,21 +613,12 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
       setMessage(String(error));
     }
   };
-  const reset = async (kind: Kind, id: string, policy: string) => {
-    try {
-      const preview = await watches.previewReset(kind, id);
-      const confirmed = confirm(
-        t("azuredevops:resetWatchConfirm", {
-          policy: t(CLEANUP_POLICY_KEYS[policy] ?? CLEANUP_POLICY_KEYS.auto),
-          count: preview.taskCount,
-        }),
-      );
-      if (!confirmed) return;
-      await watches.reset(kind, id);
-      setMessage(t("azuredevops:watchReset"));
-    } catch (error) {
-      setMessage(String(error));
-    }
+  const reset = (kind: Kind, id: string) => {
+    resetCtrl.setResetting({
+      kind,
+      id,
+      integrationLabel: t(KIND_NOUN_KEYS[kind]),
+    });
   };
   const toggle = async (kind: Kind, id: string, enabled: boolean) => {
     try {
@@ -619,7 +630,6 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
     }
   };
   const remove = async (kind: Kind, id: string) => {
-    if (!confirm(t("azuredevops:deleteWatchConfirm"))) return;
     try {
       await watches.remove(kind, id);
       setMessage(t("azuredevops:watchDeleted"));
@@ -672,7 +682,7 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
               onEdit={() => setEditor({ kind: "pull-request", id: watch.id, initial: watch })}
               onToggle={() => void toggle("pull-request", watch.id, !watch.enabled)}
               onTrigger={() => void run("pull-request", watch.id)}
-              onReset={() => void reset("pull-request", watch.id, watch.cleanupPolicy)}
+              onReset={() => reset("pull-request", watch.id)}
               onDelete={() => void remove("pull-request", watch.id)}
             />
           ))}
@@ -708,12 +718,22 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
               onEdit={() => setEditor({ kind: "work-item", id: watch.id, initial: watch })}
               onToggle={() => void toggle("work-item", watch.id, !watch.enabled)}
               onTrigger={() => void run("work-item", watch.id)}
-              onReset={() => void reset("work-item", watch.id, watch.cleanupPolicy)}
+              onReset={() => reset("work-item", watch.id)}
               onDelete={() => void remove("work-item", watch.id)}
             />
           ))}
         </div>
       </SettingsSection>
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel={resetCtrl.resetting.integrationLabel}
+          previewLoader={resetCtrl.previewLoader}
+          requirePreviewSuccess
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
       {editor && (
         <WatchEditor
           key={`${editor.kind}:${editor.id ?? "new"}`}

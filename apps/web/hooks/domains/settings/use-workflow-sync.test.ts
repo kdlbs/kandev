@@ -111,13 +111,11 @@ describe("useWorkflowSync", () => {
     expect(result.current.syncing).toBe(false);
   });
 
-  it("handleDelete clears config and resets the form when confirmed", async () => {
+  it("handleDelete clears config and resets the form without a browser confirmation", async () => {
     getWorkflowSyncConfigMock.mockResolvedValue(makeConfig());
     deleteWorkflowSyncConfigMock.mockResolvedValue({ deleted: true });
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true),
-    );
+    const confirmMock = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmMock);
     const { result } = renderHook(() => useWorkflowSync("ws-1"));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -126,6 +124,7 @@ describe("useWorkflowSync", () => {
     });
 
     expect(deleteWorkflowSyncConfigMock).toHaveBeenCalledWith({ workspaceId: "ws-1" });
+    expect(confirmMock).not.toHaveBeenCalled();
     expect(result.current.config).toBeNull();
     expect(result.current.form.repo_owner).toBe("");
   });

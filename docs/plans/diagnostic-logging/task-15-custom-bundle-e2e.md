@@ -6,7 +6,7 @@ wave: 12
 depends_on:
   - "14-bundle-customizer-ui"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 15: Custom bundle E2E

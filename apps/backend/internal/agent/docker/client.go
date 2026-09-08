@@ -12,9 +12,11 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -40,6 +42,11 @@ type ContainerConfig struct {
 	Labels       map[string]string
 	AutoRemove   bool
 	PortBindings []PortBindingConfig
+	// SecurityOpt specifies Docker SecurityOpt values. Each entry is a
+	// "<key>=<value>" string accepted by the Docker daemon, such as
+	// "seccomp=<profile>" or "apparmor=<profile>". A nil or empty slice
+	// leaves SecurityOpt unset (nil), preserving Docker defaults.
+	SecurityOpt []string
 }
 
 // PortBindingConfig describes a container port to publish on the Docker host.
@@ -259,18 +266,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		zap.String("image", cfg.Image),
 	)
 
-	// Build mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-
-	// Container configuration
+	mounts := buildDockerMounts(cfg.Mounts)
 	exposedPorts, portBindings, err := buildDockerPortBindings(cfg.PortBindings)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container %s: %w", cfg.Name, err)
@@ -285,17 +281,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		ExposedPorts: exposedPorts,
 	}
 
-	// Host configuration
-	hostCfg := &container.HostConfig{
-		Mounts:       mounts,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:   cfg.AutoRemove,
-		PortBindings: portBindings,
-		Resources: container.Resources{
-			Memory:   cfg.Memory,
-			CPUQuota: cfg.CPUQuota,
-		},
-	}
+	hostCfg := buildHostConfig(cfg, mounts, portBindings)
 
 	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     containerCfg,
@@ -312,6 +298,39 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 
 	c.logger.Info("Container created", zap.String("id", resp.ID), zap.String("name", cfg.Name))
 	return resp.ID, nil
+}
+
+// buildDockerMounts converts MountConfig entries to Docker SDK mount.Mount values.
+func buildDockerMounts(configs []MountConfig) []mount.Mount {
+	mounts := make([]mount.Mount, 0, len(configs))
+	for _, m := range configs {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+	return mounts
+}
+
+// buildHostConfig constructs a container.HostConfig from a ContainerConfig,
+// pre-built mounts, and port bindings.
+func buildHostConfig(cfg ContainerConfig, mounts []mount.Mount, portBindings network.PortMap) *container.HostConfig {
+	hc := &container.HostConfig{
+		Mounts:       mounts,
+		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		AutoRemove:   cfg.AutoRemove,
+		PortBindings: portBindings,
+		Resources: container.Resources{
+			Memory:   cfg.Memory,
+			CPUQuota: cfg.CPUQuota,
+		},
+	}
+	if len(cfg.SecurityOpt) > 0 {
+		hc.SecurityOpt = cfg.SecurityOpt
+	}
+	return hc
 }
 
 func buildDockerPortBindings(bindings []PortBindingConfig) (network.PortSet, network.PortMap, error) {
@@ -389,6 +408,12 @@ func (c *Client) StopContainer(ctx context.Context, containerID string, timeout 
 		Timeout: &timeoutSeconds,
 	})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Container teardown is intentionally idempotent. A container can
+			// disappear between the task resource snapshot and this stop call
+			// (for example, after an explicit environment reset).
+			return nil
+		}
 		c.logger.Error("Failed to stop container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to stop container %s: %w", containerID, err)
 	}
@@ -409,12 +434,32 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 		RemoveVolumes: true,
 	})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Remove is a convergence operation. Another cleanup owner may have
+			// removed the container already, which is the desired end state.
+			return nil
+		}
+		if containerRemovalInProgress(err) {
+			// A concurrent cleanup owner is already removing the container. Treat
+			// this conflict as success because both callers converge on removal.
+			return nil
+		}
 		c.logger.Error("Failed to remove container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to remove container %s: %w", containerID, err)
 	}
 
 	c.logger.Info("Container removed", zap.String("container_id", containerID))
 	return nil
+}
+
+func containerRemovalInProgress(err error) bool {
+	if !errdefs.IsConflict(err) {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "removal of container") &&
+		strings.Contains(message, "already in progress")
 }
 
 func (c *Client) containerRemover() containerRemover {
@@ -433,6 +478,11 @@ func (c *Client) KillContainer(ctx context.Context, containerID string, signal s
 
 	_, err := c.cli.ContainerKill(ctx, containerID, client.ContainerKillOptions{Signal: signal})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// A forced cleanup may race with Docker auto-removal or another
+			// teardown pass. Missing already means the container is stopped.
+			return nil
+		}
 		c.logger.Error("Failed to kill container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to kill container %s: %w", containerID, err)
 	}
@@ -726,17 +776,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		zap.String("image", cfg.Image),
 	)
 
-	// Build mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-
+	mounts := buildDockerMounts(cfg.Mounts)
 	// Container configuration with stdin attached. Mirror CreateContainer's
 	// handling of ContainerConfig fields — including Entrypoint — so the same
 	// config struct produces consistent container behavior on both paths.
@@ -760,17 +800,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		Tty:          false, // Important: no TTY for JSON-RPC
 	}
 
-	// Host configuration
-	hostCfg := &container.HostConfig{
-		Mounts:       mounts,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:   cfg.AutoRemove,
-		PortBindings: portBindings,
-		Resources: container.Resources{
-			Memory:   cfg.Memory,
-			CPUQuota: cfg.CPUQuota,
-		},
-	}
+	hostCfg := buildHostConfig(cfg, mounts, portBindings)
 
 	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     containerCfg,

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-link-and-indicator"]
 plan: "plan.md"
-spec: "../../specs/tasks/link-existing-task-github-issue.md"
+spec: "../../specs/tasks/requirements/link-existing-task-github-issue.md"
 ---
 
 # Task 03: Issue Indicator E2E And Verification

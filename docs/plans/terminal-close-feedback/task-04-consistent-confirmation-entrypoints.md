@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-terminal-close-e2e"]
 plan: "plan.md"
-spec: "../../specs/ui/terminal-close-feedback.md"
+spec: "../../specs/ui/requirements/terminal-close-feedback.md"
 parallelism: sequential
 ---
 

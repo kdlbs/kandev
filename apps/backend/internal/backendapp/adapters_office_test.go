@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -18,6 +20,42 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+type fakeOfficeCommentWindowReader struct {
+	comments []*officemodels.TaskComment
+	total    int
+}
+
+func (f *fakeOfficeCommentWindowReader) ListTaskCommentsWindow(
+	context.Context, string, int,
+) ([]*officemodels.TaskComment, int, error) {
+	return f.comments, f.total, nil
+}
+
+func TestOfficeCommentReaderAdapterMapsPersistenceRows(t *testing.T) {
+	createdAt := time.Date(2026, 1, 1, 2, 3, 4, 0, time.UTC)
+	adapter := officeCommentReaderAdapter{reader: &fakeOfficeCommentWindowReader{
+		comments: []*officemodels.TaskComment{{
+			ID: "comment-1", TaskID: "task-1", AuthorType: "agent", AuthorID: "agent-1",
+			Body: "done", Source: "run", ReplyChannelID: "private", CreatedAt: createdAt,
+		}},
+		total: 4,
+	}}
+
+	rows, total, err := adapter.ListTaskCommentsWindow(context.Background(), "task-1", 2)
+	if err != nil {
+		t.Fatalf("ListTaskCommentsWindow: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("total = %d, want 4", total)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].ID != "comment-1" || rows[0].Body != "done" || !rows[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("row = %+v, want mapped comment", rows[0])
+	}
+}
 
 type adapterStartStepResolver struct {
 	repo *tasksqlite.Repository
@@ -31,6 +69,18 @@ func (r *adapterStartStepResolver) ResolveStartStep(ctx context.Context, workflo
 	).Scan(&stepID)
 	if err == sql.ErrNoRows {
 		return r.ResolveFirstStep(ctx, workflowID)
+	}
+	return stepID, err
+}
+
+func (r *adapterStartStepResolver) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	var stepID string
+	err := r.repo.DB().QueryRowContext(ctx,
+		`SELECT id FROM workflow_steps WHERE workflow_id = ? AND events LIKE '%auto_start_agent%' ORDER BY position LIMIT 1`,
+		workflowID,
+	).Scan(&stepID)
+	if err == sql.ErrNoRows {
+		return r.ResolveStartStep(ctx, workflowID)
 	}
 	return stepID, err
 }
@@ -132,6 +182,64 @@ func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
 	}
 	if len(steps) == 0 {
 		t.Fatal("Kanban workflow has no usable steps")
+	}
+}
+
+// TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata covers
+// WO-36's routine-launch-inputs gap: a materialized heavy routine run lands
+// on the Routine workflow's start step, which pins no agent (routine.yml).
+// The kanban auto-start path's only fallback for the agent to launch with is
+// task.Metadata[MetaKeyAgentProfileID] — AssigneeAgentProfileID alone (a
+// separate DB column) never reaches it. Without this, the routine's task
+// gets created but the orchestrator has no agent profile to start.
+//
+// It also covers WO-36 round 2: handleTaskCreated only evaluates a step's
+// on_enter for a freshly created task when the task carries the positive
+// MetaKeyAutoStartOnCreate opt-in (see event_handlers_workflow.go). This
+// method is that opt-in's only production setter, so both cases here —
+// with and without an assignee — must always stamp it true.
+func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.T) {
+	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+
+	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: %v (len=%d)", err, len(workflows))
+	}
+	workflowID := workflows[0].ID
+
+	taskID, err := adapter.CreateOfficeTaskInWorkflow(
+		ctx, "ws-1", "", "routine-assignee", workflowID, "Routine run", "Materialized run",
+	)
+	if err != nil {
+		t.Fatalf("CreateOfficeTaskInWorkflow: %v", err)
+	}
+	task, err := taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got, _ := task.Metadata[models.MetaKeyAgentProfileID].(string); got != "routine-assignee" {
+		t.Errorf("task.Metadata[MetaKeyAgentProfileID] = %q, want routine-assignee", got)
+	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set, want true")
+	}
+
+	noAssigneeTaskID, err := adapter.CreateOfficeTaskInWorkflow(
+		ctx, "ws-1", "", "", workflowID, "Unassigned run", "Materialized run",
+	)
+	if err != nil {
+		t.Fatalf("CreateOfficeTaskInWorkflow (no assignee): %v", err)
+	}
+	noAssigneeTask, err := taskSvc.GetTask(ctx, noAssigneeTaskID)
+	if err != nil {
+		t.Fatalf("GetTask (no assignee): %v", err)
+	}
+	if _, ok := noAssigneeTask.Metadata[models.MetaKeyAgentProfileID]; ok {
+		t.Errorf("task.Metadata[MetaKeyAgentProfileID] set for an unassigned routine, want absent")
+	}
+	if !models.HasAutoStartOnCreateIntent(noAssigneeTask.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set for an unassigned routine, want true")
 	}
 }
 

@@ -18,6 +18,13 @@ type Store struct {
 	ro *sqlx.DB
 }
 
+// Entry is a setting value together with the timestamp persisted by Save.
+type Entry struct {
+	Key       string
+	Value     []byte
+	UpdatedAt time.Time
+}
+
 func NewStore(pool *db.Pool) (*Store, error) {
 	store := &Store{db: pool.Writer(), ro: pool.Reader()}
 	if err := store.initSchema(); err != nil {
@@ -72,11 +79,35 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	return []byte(raw), true, nil
 }
 
+// GetEntry reads one setting row, including its persisted update timestamp.
+func (s *Store) GetEntry(ctx context.Context, key string) (Entry, bool, error) {
+	var row struct {
+		Key       string    `db:"key"`
+		Value     string    `db:"value"`
+		UpdatedAt time.Time `db:"updated_at"`
+	}
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
+		SELECT key, value, updated_at FROM settings WHERE key = ?
+	`), key)
+	if err == sql.ErrNoRows {
+		return Entry{}, false, nil
+	}
+	if err != nil {
+		return Entry{}, false, err
+	}
+	return Entry{Key: row.Key, Value: []byte(row.Value), UpdatedAt: row.UpdatedAt}, true, nil
+}
+
 func (s *Store) Save(ctx context.Context, key string, value []byte) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO settings (key, value, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
 	`), key, string(value), time.Now().UTC())
+	return err
+}
+
+func (s *Store) Delete(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM settings WHERE key = ?`), key)
 	return err
 }

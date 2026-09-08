@@ -275,9 +275,6 @@ export function useWorkflowSync(workspaceId: string) {
   }, [workspaceId, form, toast, reset]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm(t("workflows:removeSyncConfirm"))) {
-      return false;
-    }
     try {
       await deleteWorkflowSyncConfig({ workspaceId });
       setConfig(null);

@@ -6,7 +6,6 @@ import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { TaskRowMetadata } from "@/components/task/task-row-plugin-slots";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
-import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
@@ -44,12 +43,14 @@ function PrimaryTaskLine({
         foregroundActivity: task.foreground_activity,
         hasPendingPermission: pendingInput.permission,
         interrupted: task.interrupted,
+        // task.parked_on_background_work — snake_case, per this file's Task type
+        // (lib/types/http.ts), not the camelCase store shape kanban-card-content.tsx
+        // reads. Wrong casing here silently unparks the row (round-5 F19).
+        parkedOnBackgroundWork: task.parked_on_background_work,
       })}
-      <TaskTitleHoverCard taskId={task.id} title={task.title}>
-        <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
-          {task.title}
-        </span>
-      </TaskTitleHoverCard>
+      <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
+        {task.title}
+      </span>
       {showContributions && (
         <span
           className="inline-flex items-center gap-1"

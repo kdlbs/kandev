@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 ---
 
 # Task 01: Recover Hybrid Cutover Schemas
@@ -34,7 +34,7 @@ go test ./internal/task/repository/sqlite -count=1
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_normalize.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_migration_test.go`
 - `apps/backend/internal/task/repository/sqlite/postgres_schema_test.go`
-- `docs/specs/session-delete-resource-cleanup/spec.md`
+- `docs/specs/tasks/requirements/session-delete-resource-cleanup.md`
 - `docs/plans/task-worktree-cutover-hybrid-schema/plan.md`
 - `docs/plans/task-worktree-cutover-hybrid-schema/task-01-recover-hybrid-schema.md`
 

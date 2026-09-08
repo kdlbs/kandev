@@ -7,7 +7,7 @@ depends_on:
   - "03-mobile-github-pr-review"
   - "04-e2e-rerequest-review"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 07: Mobile PR identity and narrow-row safety

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-isolate-replaceable-session-delivery"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 03: Bound Frontend Stream Work

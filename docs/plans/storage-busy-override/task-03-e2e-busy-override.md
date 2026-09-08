@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-activity-api", "02-frontend-busy-override"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 03: Desktop and Mobile Override Coverage

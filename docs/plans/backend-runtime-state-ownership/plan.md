@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/port-collision-safety/spec.md
+spec: docs/specs/executors/requirements/port-collision-safety.md
 created: 2026-08-09
 status: completed
 ---

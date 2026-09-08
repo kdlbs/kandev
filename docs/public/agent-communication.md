@@ -146,18 +146,15 @@ Task A (backend) was created by a coordinator. The coordinator also created Task
 
 ### The exchange
 
-```mermaid
-sequenceDiagram
-    participant A as Agent A (Backend)
-    participant B as Agent B (Frontend)
-    A->>B: message_task_kandev(B, "Proposing GET /items → {id, name}. Does this cover your needs?")
-    Note over B: idle → "sent" (new turn)
-    B->>A: message_task_kandev(A, "Need created_at too, ISO-8601 format please.")
-    Note over A: running → "queued" (next turn)
-    A->>B: message_task_kandev(B, "Agreed: GET /items → {id, name, created_at} (ISO-8601). Starting impl.")
-    Note over A,B: Contract agreed; both implement
-    A-->>A: get_task_conversation_kandev(B) to confirm spec
-```
+![Agent communication sequence: a backend agent proposes a GET items contract, the frontend agent requests created_at, the backend queues an agreement, and both agents implement after a conversation read-back.](../screenshots/agent-communication.svg)
+
+[Open full-size SVG diagram][agent-communication-diagram]
+
+[agent-communication-diagram]: ../../docs/screenshots/agent-communication.svg
+
+The sequence keeps the state changes beside the messages: an idle recipient is
+sent a new turn, a running sender queues its next turn, and a final read-back
+confirms the contract before implementation.
 
 ### Agent A's actual tool calls (turn by turn)
 

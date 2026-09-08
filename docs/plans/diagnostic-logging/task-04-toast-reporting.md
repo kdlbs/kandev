@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-frontend-error-endpoint"]
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 04: Toast reporting

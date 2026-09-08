@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-project-runtime-capability", "02-project-cli", "03-office-capability-context"]
 plan: "plan.md"
-spec: "../../specs/office/overview.md"
+spec: "../../specs/office/requirements/overview.md"
 ---
 
 # Task 04: Verify the Office setup contract

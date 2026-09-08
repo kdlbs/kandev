@@ -9,9 +9,21 @@ const mocks = vi.hoisted(() => ({
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
-  quickChat: { unseenIdleByWorkspace: {} as Record<string, Record<string, true>> },
+  quickChat: {
+    isOpen: false,
+    sessions: [] as Array<{
+      sessionId: string;
+      workspaceId: string;
+      kind: "chat";
+      taskId?: string;
+    }>,
+    unseenIdleByWorkspace: {} as Record<string, Record<string, true>>,
+  },
+  taskSessions: { items: {} as Record<string, { state: string; task_id: string }> },
+  prepareProgress: { bySessionId: {} as Record<string, { status: string }> },
 };
 const QUICK_CHAT_LABEL = "Quick Chat";
+const QUICK_CHAT_RUNNING_LABEL = "Quick Chat, agent working";
 const QUICK_CHAT_UNSEEN_LABEL = "Quick Chat, new response";
 let mode: "office" | "kanban" | "unknown" = "kanban";
 let pathname = "/";
@@ -53,7 +65,11 @@ describe("AppSidebarPrimaryNav", () => {
   beforeEach(() => {
     state.workspaces.activeId = "ws-1";
     state.office.inboxCountByWorkspaceId = {};
+    state.quickChat.isOpen = false;
+    state.quickChat.sessions = [];
     state.quickChat.unseenIdleByWorkspace = {};
+    state.taskSessions.items = {};
+    state.prepareProgress.bySessionId = {};
     mode = "kanban";
     pathname = "/";
     mocks.openQuickChat.mockClear();
@@ -70,11 +86,36 @@ describe("AppSidebarPrimaryNav", () => {
   });
 
   it("renders an unseen marker on the collapsed Quick Chat rail entry", () => {
+    state.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: "ws-1", kind: "chat", taskId: "task-1" },
+    ];
+    state.taskSessions.items = {
+      "session-1": { state: "COMPLETED", task_id: "task-1" },
+    };
     state.quickChat.unseenIdleByWorkspace = { "ws-1": { "session-1": true } };
     renderNav(true);
     const quickChat = screen.getByRole("button", { name: QUICK_CHAT_UNSEEN_LABEL });
 
-    expect(quickChat.querySelector('[data-testid="quick-chat-unseen-dot"]')).not.toBeNull();
+    const indicator = quickChat.querySelector('[data-testid="quick-chat-activity-indicator"]');
+    expect(indicator?.getAttribute("data-state")).toBe("finished");
+  });
+
+  it("prioritizes a running activity marker over an unseen response", () => {
+    state.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: "ws-1", kind: "chat", taskId: "task-1" },
+    ];
+    state.taskSessions.items = {
+      "session-1": { state: "RUNNING", task_id: "task-1" },
+    };
+    state.quickChat.unseenIdleByWorkspace = { "ws-1": { "session-1": true } };
+    renderNav(true);
+
+    const quickChat = screen.getByRole("button", { name: QUICK_CHAT_RUNNING_LABEL });
+    expect(
+      quickChat
+        .querySelector('[data-testid="quick-chat-activity-indicator"]')
+        ?.getAttribute("data-state"),
+    ).toBe("running");
   });
 
   it("omits the standalone Quick Chat row while expanded", () => {

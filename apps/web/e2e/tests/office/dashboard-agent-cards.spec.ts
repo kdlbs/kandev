@@ -4,7 +4,7 @@ import { test, expect } from "../../fixtures/office-fixture";
  * E2E coverage for the office dashboard "Agents" panel: per-agent cards
  * rendered always (even with zero activity), driven reactively by the
  * existing WS pipeline (`session.state_changed`, `office.task.updated`,
- * `office.agent.updated`). Spec: docs/specs/office-dashboard-agent-cards.
+ * `office.agent.updated`). Spec: docs/specs/office/requirements/dashboard.md.
  *
  * The lifecycle harness is rich enough to drive these scenarios without a
  * real executor: `apiClient.seedTaskSession` writes directly to the DB

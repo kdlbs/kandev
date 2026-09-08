@@ -15,28 +15,33 @@ import (
 
 // Service coordinates snapshot construction, backend upload, and persistence.
 type Service struct {
-	repo      *Repository
-	taskRepo  TaskReader
-	backend   Backend
-	log       *logger.Logger
-	kandevVer string
+	repo       *Repository
+	taskRepo   TaskReader
+	authorizer TaskAccessAuthorizer
+	backend    Backend
+	log        *logger.Logger
+	kandevVer  string
 }
 
 // New constructs a Service. All arguments are required.
-func New(repo *Repository, taskRepo TaskReader, backend Backend, log *logger.Logger, kandevVer string) *Service {
+func New(repo *Repository, taskRepo TaskReader, authorizer TaskAccessAuthorizer, backend Backend, log *logger.Logger, kandevVer string) *Service {
 	return &Service{
-		repo:      repo,
-		taskRepo:  taskRepo,
-		backend:   backend,
-		log:       log,
-		kandevVer: kandevVer,
+		repo:       repo,
+		taskRepo:   taskRepo,
+		authorizer: authorizer,
+		backend:    backend,
+		log:        log,
+		kandevVer:  kandevVer,
 	}
 }
 
 // PreviewSnapshot builds and returns the redacted snapshot that would be
 // uploaded for the given session, without uploading or persisting anything.
 // Returns ErrSessionNotCompleted if the session is not yet completed.
-func (s *Service) PreviewSnapshot(ctx context.Context, taskSessionID string) (*Snapshot, error) {
+func (s *Service) PreviewSnapshot(ctx context.Context, taskID, taskSessionID string) (*Snapshot, error) {
+	if err := s.authorizeTaskSessionAccess(ctx, taskID, taskSessionID); err != nil {
+		return nil, err
+	}
 	return BuildSnapshot(ctx, s.taskRepo, taskSessionID, s.kandevVer)
 }
 
@@ -47,7 +52,10 @@ func (s *Service) PreviewSnapshot(ctx context.Context, taskSessionID string) (*S
 // published artifact; the artifact is static, so this is the only point at
 // which a locale can be chosen. Pass i18n.DefaultLocale when there is no
 // request to resolve one from.
-func (s *Service) CreateShare(ctx context.Context, taskSessionID, locale string) (*Share, error) {
+func (s *Service) CreateShare(ctx context.Context, taskID, taskSessionID, locale string) (*Share, error) {
+	if err := s.authorizeTaskSessionAccess(ctx, taskID, taskSessionID); err != nil {
+		return nil, err
+	}
 	workspaceID, err := s.workspaceForSession(ctx, taskSessionID)
 	if err != nil {
 		return nil, err
@@ -96,6 +104,9 @@ func (s *Service) RevokeShare(ctx context.Context, shareID string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.authorizeSessionAccess(ctx, row.TaskSessionID); err != nil {
+		return err
+	}
 	if row.IsRevoked() {
 		return nil
 	}
@@ -121,7 +132,10 @@ func (s *Service) RevokeShare(ctx context.Context, shareID string) error {
 
 // CheckBackendAccess resolves the task's workspace and validates its backend
 // identity. Dry-run previews intentionally do not call this method.
-func (s *Service) CheckBackendAccess(ctx context.Context, taskSessionID string) error {
+func (s *Service) CheckBackendAccess(ctx context.Context, taskID, taskSessionID string) error {
+	if err := s.authorizeTaskSessionAccess(ctx, taskID, taskSessionID); err != nil {
+		return err
+	}
 	workspaceID, err := s.workspaceForSession(ctx, taskSessionID)
 	if err != nil {
 		return err
@@ -152,7 +166,10 @@ func (s *Service) workspaceForSession(ctx context.Context, taskSessionID string)
 }
 
 // ListBySession returns every share row for a session (including revoked).
-func (s *Service) ListBySession(ctx context.Context, taskSessionID string) ([]*Share, error) {
+func (s *Service) ListBySession(ctx context.Context, taskID, taskSessionID string) ([]*Share, error) {
+	if err := s.authorizeTaskSessionAccess(ctx, taskID, taskSessionID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListByTaskSession(ctx, taskSessionID)
 }
 

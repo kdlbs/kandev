@@ -61,6 +61,7 @@ func TestCreateRun_PersistsEveryWrittenColumn(t *testing.T) {
 	checkString(t, "failure_reason", got.FailureReason, want.FailureReason)
 	checkString(t, "session_id", got.SessionID, want.SessionID)
 	checkString(t, "error_message", got.ErrorMessage, want.ErrorMessage)
+	checkString(t, "continuation_scope", got.ContinuationScope, "agent:agent-42")
 	checkInt(t, "coalesced_count", got.CoalescedCount, want.CoalescedCount)
 	checkInt(t, "retry_count", got.RetryCount, want.RetryCount)
 	checkStringPtr(t, "idempotency_key", got.IdempotencyKey, want.IdempotencyKey)
@@ -71,6 +72,19 @@ func TestCreateRun_PersistsEveryWrittenColumn(t *testing.T) {
 	} else if !got.ScheduledRetryAt.Equal(fixedRetryAt) {
 		t.Errorf("scheduled_retry_at = %s, want %s", got.ScheduledRetryAt, fixedRetryAt)
 	}
+}
+
+func TestCreateRun_PersistsRoutineContinuationScope(t *testing.T) {
+	repo := newTestRepo(t)
+	want := &models.Run{
+		AgentProfileID:  "agent-routine",
+		Reason:          "routine_trigger",
+		ContextSnapshot: `{"routine_id":"routine-1"}`,
+	}
+	mustCreateRun(t, repo, want)
+
+	got := mustGetRun(t, repo, want.ID)
+	checkString(t, "continuation_scope", got.ContinuationScope, "routine:routine-1")
 }
 
 // TestCreateRun_LeavesUnwrittenColumnsAtTheirDefaults pins the other
@@ -261,7 +275,7 @@ func TestFinishRun_SetsStatusAndFinishedAt(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second)
 	run := mustCreateRun(t, repo, fullRun())
 
-	if err := repo.FinishRun(ctx, run.ID, "finished"); err != nil {
+	if err := repo.FinishRun(ctx, run.ID, "finished", nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	got := mustGetRun(t, repo, run.ID)
@@ -291,6 +305,7 @@ func TestSetRunStatusForTest_WritesStatusAndBothTimestamps(t *testing.T) {
 	if got.FinishedAt == nil || !got.FinishedAt.Equal(finished) {
 		t.Errorf("finished_at = %v, want %s", got.FinishedAt, finished)
 	}
+	checkStringPtr(t, "outcome", got.Outcome, nil)
 
 	setStatus(t, repo, run.ID, "queued", nil, nil)
 	got = mustGetRun(t, repo, run.ID)
@@ -298,6 +313,25 @@ func TestSetRunStatusForTest_WritesStatusAndBothTimestamps(t *testing.T) {
 	if got.ClaimedAt != nil || got.FinishedAt != nil {
 		t.Errorf("timestamps = (%v, %v), want both nil", got.ClaimedAt, got.FinishedAt)
 	}
+	checkStringPtr(t, "outcome", got.Outcome, nil)
+}
+
+// TestSetRunStatusForTest_FinishedDefaultsOutcomeToProcessed covers the
+// one branch the E2E harness actually depends on: a bare
+// status="finished" seed (apiClient.seedRun with no outcome override)
+// must classify as "succeeded" under RunCountsByDayForAgent's
+// outcome-aware bucketing, or every E2E spec asserting a succeeded
+// segment count regresses the moment this diff ships (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome").
+func TestSetRunStatusForTest_FinishedDefaultsOutcomeToProcessed(t *testing.T) {
+	repo := newTestRepo(t)
+	run := mustCreateRun(t, repo, fullRun())
+	finished := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	setStatus(t, repo, run.ID, "finished", nil, timePtr(finished))
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status", string(got.Status), "finished")
+	checkStringPtr(t, "outcome", got.Outcome, strPtr("processed"))
 }
 
 // TestSetRunRequestedAtAndErrorMessageForTest covers the two remaining

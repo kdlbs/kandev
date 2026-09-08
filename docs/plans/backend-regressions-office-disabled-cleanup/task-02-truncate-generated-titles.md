@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 parallel-safe: true
 ---
 
@@ -71,7 +71,7 @@ None.
 
 ## Inputs
 
-- Amended spec: `docs/specs/tasks/title-length-limit.md` (watcher-title bullet
+- Amended spec: `docs/specs/tasks/requirements/title-length-limit.md` (watcher-title bullet
   and scenarios).
 - Confirmed 5 "task title is too long" review-task failures in the logs
   (PRs #12096, #12057, #12054).

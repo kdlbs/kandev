@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/ci-pr-automation.md
+spec: docs/specs/ui/requirements/ci-pr-automation.md
 created: 2026-06-18
 status: building
 ---

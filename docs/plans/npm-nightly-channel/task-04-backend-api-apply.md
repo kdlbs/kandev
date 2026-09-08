@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["03-backend-channel-foundation"]
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 04: Backend API and apply semantics

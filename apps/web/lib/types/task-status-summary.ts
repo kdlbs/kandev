@@ -7,6 +7,7 @@ export type TaskStatusSummaryActiveError = {
   stamp: string;
   occurred_at: string;
   preview: string;
+  details?: string;
   category?: string;
   recovery_actions?: TaskLaunchRecoveryAction[];
 };
@@ -38,6 +39,8 @@ export type TaskStatusSummary = {
     count?: number;
     open_count?: number;
     attention?: boolean;
+    auto_fix_enabled?: boolean;
+    auto_merge_enabled?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

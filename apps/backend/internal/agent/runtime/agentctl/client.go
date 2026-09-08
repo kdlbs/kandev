@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -480,6 +481,45 @@ func (c *Client) SetPluginTools(ctx context.Context, snapshot plugintools.Snapsh
 		return fmt.Errorf("set plugin tools failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
+}
+
+// StreamCanvasSource requests the assigned canvas source root from agentctl.
+// The response is a bounded tar stream and must be closed by the caller. The
+// route is deliberately kept in the agentctl client so every executor type
+// uses the same authenticated transfer contract.
+func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", types.CanvasSourceTransferPath, c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(types.CanvasSourceTransferRequest{Root: root})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+types.CanvasSourceTransferPath, bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			tracing.TraceHTTPResponse(span, resp.StatusCode, readErr)
+			return nil, fmt.Errorf("canvas source request failed with status %d: %w", resp.StatusCode, readErr)
+		}
+		httpErr := fmt.Errorf("canvas source request failed with status %d: %s", resp.StatusCode, string(responseBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return nil, httpErr
+	}
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return resp.Body, nil
 }
 
 // Start starts the agent process and returns the full command that was executed.

@@ -71,6 +71,16 @@ Every row has **Send Now** for targeted priority. It sends that row directly whe
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
+## View active conversations in Threads
+
+Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
+
+Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+
+On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+
+Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
 <details>
 <summary>Let agents coordinate sessions</summary>
 
@@ -119,7 +129,16 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
-Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+
+![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
+
+Open **Settings > Preferences > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+
+When you save a custom default, Kandev reapplies its split proportions to new
+and reset desktop tasks and scales them to the available workbench.
+
+![Settings > Preferences > Layouts showing built-in desktop workbench profiles and the Default layout editor.](../screenshots/settings-layouts.png)
 
 **PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden, even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
@@ -161,6 +180,8 @@ Changes are grouped by repository and then by state:
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
+
 For a linked fork pull request, the Changes header shows the exact comparison target, such as
 `upstream/widget:main`. Kandev keeps this target separate from `origin`, the checked-out branch,
 and the push remote. Desktop hover details and the mobile touch drawer show the same target.
@@ -187,6 +208,8 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
 When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+
+An automatic-merge error shows **Retry** in the selected PR tab on desktop and mobile. This action requests one new evaluation for that pull request. Kandev applies all current readiness rules before it sends another merge request. Other automation and state-loading errors show **Refresh**. Refresh loads the current state and does not authorize a merge.
 
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"
@@ -256,6 +279,10 @@ The PR panel has two action controls:
 - **Auto-fix CI and address comments** waits for a check run to finish, then sends newly failed checks or review comments to the agent. It refreshes about once a minute, coalesces queued updates, and stops after 10 repair rounds for that PR. Disable and re-enable it after manual review to reset the limit.
 - **Auto-merge when ready** merges only after CI, required reviews, and mergeability are all ready.
 
+Auto-fix also sends one repair round for an ordinary merge conflict or an actionable merge-queue removal after the PR checks settle. It snapshots each feedback state, so the same conflict, check, comment, or removal does not create duplicate rounds. A resolved conflict clears its checkpoint without using a round, while an unknown mergeability state keeps the prior checkpoint. A retained queue removal starts repair only when durable evidence from an attempted or adopted queue entry matches the current pull-request head. If that provenance is unavailable, Kandev fails closed without using a round. Updating an already queued message does not use another round, and the 10-round limit still applies.
+
+Kandev keeps a queued or running auto-fix attempt separate from its feedback checkpoint. If a turn ends without a recorded outcome, Kandev can send the same settled snapshot again, and that retry uses another round. After an `action_taken` outcome, Kandev waits for provider progress before retrying. A `non_actionable` or `blocked` outcome acknowledges unchanged feedback and does not retry it.
+
 Open **PR events** for three notification controls:
 
 - **Your review is requested** wakes the agent for any new request, including re-review after changes.
@@ -274,7 +301,7 @@ The GitLab MR topbar control has an **Automation** group with the same two actio
 - **Auto-fix CI and address comments** sends the agent a new or changed failing pipeline job or unresolved discussion note once the pipeline settles, and stops after 10 repair rounds for that MR. Disable and re-enable it to reset the limit.
 - **Auto-merge when ready** merges only after the pipeline passes, unresolved discussions are cleared, and GitLab's own merge-readiness check agrees.
 
-Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
+Below that, open **Review follow-up** for the same three notification switches GitHub uses. Every switch above belongs to one merge request: a task with several linked MRs shows an **Automation** group per MR, each labelled with its MR number, and turning a switch on for one leaves the others alone.
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added (for example, for a re-review after changes) does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.

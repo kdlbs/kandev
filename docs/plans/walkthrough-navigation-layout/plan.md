@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/walkthrough-navigation-layout/spec.md
+spec: docs/specs/ui/requirements/walkthrough-navigation-layout.md
 created: 2026-07-28
 status: done
 ---

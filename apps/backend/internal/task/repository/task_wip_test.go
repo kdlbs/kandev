@@ -27,7 +27,7 @@ type workflowStepMoveAdmissionRepository interface {
 }
 
 type workflowStepMoveAdmissionWithStateRepository interface {
-	UpdateTaskWithWorkflowStepAdmissionAndState(context.Context, *models.Task, string, int, *v1.TaskState, bool) (bool, error)
+	UpdateTaskWithWorkflowStepAdmissionAndState(context.Context, *models.Task, string, int, *v1.TaskState, bool, string) (bool, error)
 }
 
 type queuedTaskPromoter interface {
@@ -288,7 +288,7 @@ func TestUpdateTaskWithWorkflowStepAdmissionAndState_PersistsMoveLifecycleAtomic
 		t.Fatalf("seed candidate: %v", err)
 	}
 	admittedState := v1.TaskStateCompleted
-	admitted, err := mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, candidate, targetStepID, 1, &admittedState, true)
+	admitted, err := mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, candidate, targetStepID, 1, &admittedState, true, "")
 	if err != nil {
 		t.Fatalf("move candidate: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestUpdateTaskWithWorkflowStepAdmissionAndState_PersistsMoveLifecycleAtomic
 	if err != nil {
 		t.Fatalf("load unlimited candidate: %v", err)
 	}
-	admitted, err = mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, admittedCandidate, "atomic-unlimited-target", 0, &admittedState, true)
+	admitted, err = mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, admittedCandidate, "atomic-unlimited-target", 0, &admittedState, true, "")
 	if err != nil || !admitted {
 		t.Fatalf("unlimited move admitted=%t err=%v", admitted, err)
 	}

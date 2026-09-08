@@ -5,7 +5,7 @@
 // entry against the GitHub API to discover its latest release, package asset,
 // star count, last-push time, and manifest presentation metadata, and emits a
 // single static index.json document. That document is the fetch contract Kandev
-// consumes (docs/specs/plugins/marketplace.md → "Data model" → index.json);
+// consumes (docs/specs/plugins/requirements/marketplace.md → "Data model" → index.json);
 // additional corporate/team sources serve the same shape.
 //
 // Zero dependencies: Node stdlib + global fetch only, matching the repo's other

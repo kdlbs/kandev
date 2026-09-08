@@ -2,7 +2,7 @@
 id: "01-pr-head-checkout"
 title: "Review the current PR diff without checkout"
 status: completed
-spec: "../../specs/claude-fork-review-allowlist/spec.md"
+spec: "../../specs/integrations/requirements/claude-fork-review-allowlist.md"
 plan: "plan.md"
 depends_on: []
 ---

@@ -2,15 +2,119 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
+
+// errServerBindFailed signals that the HTTP listener could not be bound.
+// startGatewayAndServe checks for it with errors.Is so it can skip the
+// "Failed to start orchestrator" log for what is actually a bind failure —
+// bindBootstrapListeners (via startHTTPServers) already logs the specific
+// cause at the appropriate level.
+var errServerBindFailed = errors.New("server bind failed")
+
+// handlerSwitch is an http.Handler whose effective implementation can be
+// swapped at runtime without closing or rebinding the underlying listener.
+// Startup constructs it holding the bootstrap handler and later Store()s the
+// fully wired Gin router once buildHTTPServer returns, so exactly one
+// *http.Server/*serverListeners pair flows from bind through shutdown.
+type handlerSwitch struct {
+	current atomic.Pointer[http.Handler]
+}
+
+// newHandlerSwitch returns a handlerSwitch already serving initial.
+func newHandlerSwitch(initial http.Handler) *handlerSwitch {
+	hs := &handlerSwitch{}
+	hs.Store(initial)
+	return hs
+}
+
+// Store replaces the handler that serves subsequent requests.
+func (hs *handlerSwitch) Store(h http.Handler) {
+	hs.current.Store(&h)
+}
+
+func (hs *handlerSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	(*hs.current.Load()).ServeHTTP(w, r)
+}
+
+// newBootstrapHandler answers every request while the real router is still
+// being built. GET /health always returns 200 (plus the desktop health
+// token header, if configured) so the launcher's liveness probe
+// (internal/launcher/health.go) succeeds regardless of startup progress —
+// making liveness depend on readiness here would bring back the crash loop
+// this handler exists to fix. Every other path returns a deterministic 503
+// with a parseable "starting" body instead of hanging, resetting, or 404ing.
+// GET /health's body is identical to healthHandler's in helpers.go (status
+// "ok", service, mode, version) since /health is a pure liveness probe and
+// its shape must not depend on startup progress.
+func newBootstrapHandler(version string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/health" {
+			body := map[string]any{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+			}
+			writeBootstrapJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		if token := desktopHealthToken(); token != "" {
+			w.Header().Set(desktopHealthTokenHeader, token)
+		}
+		writeBootstrapJSON(w, http.StatusOK, map[string]any{
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
+			"mode":          "websocket+http",
+			versionFieldKey: version,
+		})
+	})
+}
+
+func writeBootstrapJSON(w http.ResponseWriter, status int, body map[string]any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// bindBootstrapListeners binds the configured HTTP addresses immediately,
+// before any startup work runs, and serves them with the bootstrap handler.
+// The returned handlerSwitch is later Store()d with the real router; the
+// returned *http.Server and *serverListeners are the same instances that
+// must flow unmodified into awaitShutdown, so shutdown needs no changes.
+func bindBootstrapListeners(cfg *config.Config, log *logger.Logger, version string) (*handlerSwitch, *http.Server, *serverListeners, error) {
+	handler := newHandlerSwitch(newBootstrapHandler(version))
+	server := &http.Server{
+		Handler:      handler,
+		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
+		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
+	}
+
+	port := resolvedHTTPPort(cfg)
+	hosts, err := cfg.Server.ResolvedBinds()
+	if err != nil {
+		log.Error("Invalid server bind configuration", zap.Error(err))
+		return nil, nil, nil, errServerBindFailed
+	}
+	listeners, ok := startHTTPServers(server, hosts, port, log)
+	if !ok {
+		return nil, nil, nil, errServerBindFailed
+	}
+
+	log.Info("HTTP listener bound; serving liveness probe while startup continues",
+		zap.Int("port", port), zap.Strings("hosts", hosts))
+
+	return handler, server, listeners, nil
+}
 
 // serverBindRetryInterval is how often the background retry loop re-attempts a
 // bind for an address that failed the initial bind (e.g. a tailnet IP that only
@@ -161,22 +265,4 @@ func (sl *serverListeners) Stop() {
 			<-sl.retryDone
 		}
 	})
-}
-
-// probeAddr returns an address the readiness probe can dial. It prefers a bound
-// address that resolves to loopback (always reachable from the box without
-// depending on a routable interface), falling back to the first bound address.
-func (sl *serverListeners) probeAddr() string {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
-	if len(sl.bound) == 0 {
-		return ""
-	}
-	for _, a := range sl.bound {
-		probe := serverProbeAddr(a)
-		if host, _, err := net.SplitHostPort(probe); err == nil && config.IsLoopbackHost(host) {
-			return probe
-		}
-	}
-	return serverProbeAddr(sl.bound[0])
 }

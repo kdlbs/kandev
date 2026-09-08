@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ExecutorProfilesCardProps = {
   executorId: string;
@@ -56,6 +57,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const [dialogOpen, setDialogOpen] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
+  const executorType = executors.find((executor) => executor.id === executorId)?.type;
 
   const refreshProfiles = useCallback(async () => {
     try {
@@ -75,9 +77,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const handleProfileCreated = useCallback(
     (profile: ExecutorProfile) => {
       refreshProfiles();
-      router.push(`/settings/executor/${executorId}/profile/${profile.id}`);
+      router.push(executorProfileSettingsPath({ id: executorId, type: executorType }, profile.id));
     },
-    [executorId, refreshProfiles, router],
+    [executorId, executorType, refreshProfiles, router],
   );
 
   const handleDelete = useCallback(
@@ -112,7 +114,12 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                   key={profile.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
                   onClick={() =>
-                    router.push(`/settings/executor/${executorId}/profile/${profile.id}`)
+                    router.push(
+                      executorProfileSettingsPath(
+                        { id: executorId, type: executorType },
+                        profile.id,
+                      ),
+                    )
                   }
                 >
                   <div className="flex items-center gap-2 min-w-0">

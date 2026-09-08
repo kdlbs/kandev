@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["05-native-notifications"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 06: Scoped Native External-Link Handling

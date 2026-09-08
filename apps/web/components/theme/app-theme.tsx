@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -93,7 +94,7 @@ export function AppThemeProvider({
     return () => media.removeEventListener("change", listener);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const update = () => applyTheme(attribute, resolvedTheme);
     if (disableTransitionOnChange) {
       withDisabledTransitions(update);

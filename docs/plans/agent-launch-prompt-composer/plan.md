@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/agent-launch-prompt-composer.md
+spec: docs/specs/ui/requirements/agent-launch-prompt-composer.md
 created: 2026-08-02
 status: complete
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-profile-row-actions"]
 plan: "plan.md"
-spec: "../../specs/agents/settings-profile-layout.md"
+spec: "../../specs/agents/requirements/settings-profile-layout.md"
 ---
 
 # Task 02: Profile action responsive E2E coverage
@@ -49,7 +49,7 @@ action contract and managed fixture state.
 
 ## Inputs
 
-- Spec: `docs/specs/agents/settings-profile-layout.md`, responsive action
+- Spec: `docs/specs/agents/requirements/settings-profile-layout.md`, responsive action
   scenarios.
 - Plan: `plan.md`, E2E Tests and Mobile design contract sections.
 - Existing patterns: `agent-profile-duplicate.spec.ts`,

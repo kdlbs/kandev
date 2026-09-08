@@ -5,6 +5,7 @@ import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
+import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-message";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -85,7 +86,16 @@ export function useNextWorkflowStep(taskId: string | null) {
       return true;
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
-      toast({ description: t("task:failedToProceedToNextStep"), variant: "error" });
+      // The backend refuses some transitions (an active session, a WIP limit)
+      // and says why in the response. Reporting only the headline left the user
+      // on a phone with no way to see the reason short of devtools.
+      const title = t("task:failedToProceedToNextStep");
+      const detail = getTaskMoveErrorDetail(err, title, t);
+      toast({
+        title,
+        ...(detail !== null && { description: detail }),
+        variant: "error",
+      });
       setMoveFromSessionId(null);
       return false;
     }

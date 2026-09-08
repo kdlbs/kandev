@@ -536,6 +536,7 @@ func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
 			nil,
 			nil,
 			"",
+			false,
 		)
 		claimDone <- err
 	}()

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/fix-duplicated-tab-stale-data/spec.md
+spec: docs/specs/ui/requirements/fix-duplicated-tab-stale-data.md
 created: 2026-08-16
 status: in-progress
 ---

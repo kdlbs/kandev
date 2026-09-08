@@ -56,6 +56,22 @@ func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, oper
 	return nil
 }
 
+// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+// exact running cleanup attempt. A newer retry or cancellation wins when the
+// claim no longer matches.
+func (r *Repository) UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET resource_snapshot = ?, updated_at = ?
+		WHERE id = ? AND state = ? AND attempts = ?
+	`), snapshot, time.Now().UTC(), id, models.TaskResourceCleanupStateRunning, attempt)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows == 1, nil
+}
+
 // HasActiveTaskResourceCleanupJob reports whether teardown has been admitted
 // for a task. The prepared state is included because the cleanup intent is
 // persisted before task deletion and before the worker is allowed to run.

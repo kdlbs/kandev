@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-quick-chat-setup"]
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-repository-context.md"
+spec: "../../specs/tasks/requirements/quick-chat-repository-context.md"
 ---
 
 # Task 04: Quick-chat repository E2E verification

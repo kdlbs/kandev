@@ -59,6 +59,33 @@ func turnDispatchAttemptedPredicate(driverName, turnAlias string) string {
 	)
 }
 
+// currentTurnAuthority composes turnAuthorityPredicate with R1's lifecycle
+// exclusion into predicate, and D1's total order into orderBy. Every
+// current-turn resolution site takes both values from this one call and
+// hand-writes neither (AC-3).
+//
+// predicate is a single parenthesized conjunct for `WHERE ... AND %s`.
+// orderBy is a bare, turnAlias-qualified expression list with no ORDER BY
+// keyword and no LIMIT, so it drops into both `ORDER BY %s` and
+// `ROW_NUMBER() OVER (... ORDER BY %s)`. Its first key ranks an open turn
+// (completed_at IS NULL) ahead of a completed one regardless of timestamps;
+// the remaining keys break ties by started_at, created_at, then id — all
+// descending, with id (the primary key) providing a total order.
+func currentTurnAuthority(driverName, turnAlias string) (predicate, orderBy string) {
+	authority := turnAuthorityPredicate(driverName, turnAlias)
+	lifecycle := turnLifecycleOnlyPredicate(driverName, turnAlias)
+	predicate = fmt.Sprintf("(%s AND NOT (%s))", authority, lifecycle)
+	orderBy = fmt.Sprintf(
+		"CASE WHEN %s.completed_at IS NULL THEN 0 ELSE 1 END ASC, %s.started_at DESC, %s.created_at DESC, %s.id DESC",
+		turnAlias, turnAlias, turnAlias, turnAlias,
+	)
+	return predicate, orderBy
+}
+
+func turnLifecycleOnlyPredicate(driverName, turnAlias string) string {
+	return turnMetadataFlagPredicate(driverName, turnAlias, models.TurnMetaKeyLifecycleOnly)
+}
+
 func turnMetadataFlagPredicate(driverName, turnAlias, key string) string {
 	value := dialect.JSONExtract(
 		driverName,

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-negotiate-steer-capability", "03-fold-handoff-fixtures"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 04: Admit a steer while the foreground is generating

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-gitlab-workspace-repo-contents", "04-workflowsync-provider-dispatch"]
 plan: "plan.md"
-spec: "../../specs/gitlab-workflow-sync/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-workflow-sync.md"
 ---
 
 # Task 05: Wire The GitLab Provider Into Workflow Sync

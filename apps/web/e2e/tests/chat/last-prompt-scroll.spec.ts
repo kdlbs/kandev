@@ -12,8 +12,19 @@ import {
   seedScrolledPastLastPrompt,
 } from "./last-prompt-scroll-helpers";
 
+const ANCHORED_PROMPT_NAME = "e2e-anchored-template";
+const ANCHORED_PROMPT_CONTENT = "Pinned prompt preview content.";
+
+const PROMPT_MENTION_CHIP = "custom-prompt-mention";
+
 test.describe("@chat last prompt scroll affordance", () => {
   test.afterEach(async ({ apiClient }) => {
+    const { prompts } = await apiClient.listPrompts();
+    for (const prompt of prompts) {
+      if (!prompt.builtin && prompt.name === ANCHORED_PROMPT_NAME) {
+        await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+      }
+    }
     // The anchored-bar test flips this setting; restore the default so later
     // tests in this worker see it again.
     await apiClient.saveUserSettings({
@@ -76,7 +87,7 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(chat.getByTestId("scroll-to-start-button")).toHaveCount(0);
   });
 
-  test("loads older pages only until it finds the latest prompt", async ({
+  test("keeps task opening bounded before last-prompt navigation", async ({
     testPage,
     apiClient,
     seedData,
@@ -110,7 +121,8 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(marker).not.toBeInViewport();
     const button = chat.getByTestId("scroll-to-last-prompt-button");
     await expect(button).toBeVisible({ timeout: 15_000 });
-    expect(olderPageRequests.length).toBeGreaterThan(0);
+    // Opening the task must not fetch older pages just to locate the prompt.
+    expect(olderPageRequests).toHaveLength(0);
     await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
@@ -240,7 +252,8 @@ test.describe("@chat last prompt scroll affordance", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const richPrompt = `${LAST_PROMPT_MARKER}\n\nRun \`terraform apply\` after review.`;
+    await apiClient.createPrompt(ANCHORED_PROMPT_NAME, ANCHORED_PROMPT_CONTENT);
+    const richPrompt = `${LAST_PROMPT_MARKER} @${ANCHORED_PROMPT_NAME}\n\nRun \`terraform apply\` after review.`;
     await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
     const session = await seedScrolledPastLastPrompt(
       testPage,
@@ -253,6 +266,12 @@ test.describe("@chat last prompt scroll affordance", () => {
 
     await expect(bar).toHaveAttribute("data-state", "open", { timeout: 10_000 });
     await expect(bar.locator("code")).toHaveText("terraform apply");
+    const chip = bar.getByTestId(PROMPT_MENTION_CHIP);
+    await expect(chip).toHaveAttribute("data-prompt-name", ANCHORED_PROMPT_NAME);
+    await chip.hover();
+    await expect(testPage.getByText(ANCHORED_PROMPT_CONTENT, { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("anchored bar stays closed while the last prompt is partially visible", async ({

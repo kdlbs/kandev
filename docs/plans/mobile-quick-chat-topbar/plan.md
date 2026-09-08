@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/mobile-quick-chat-topbar/spec.md
+spec: docs/specs/ui/requirements/mobile-quick-chat-topbar.md
 created: 2026-07-17
 status: complete
 ---

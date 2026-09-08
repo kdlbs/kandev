@@ -30,12 +30,15 @@ func provideLifecycleManager(
 	eventBus bus.EventBus,
 	agentSettingsRepo settingsstore.Repository,
 	agentRegistry *registry.Registry,
-	secretStore secrets.SecretStore,
+	rawSecretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
 	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
+	mcpIdentityScoper lifecycle.MCPIdentityScoper,
+	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
+	secretStores := newLifecycleSecretStores(rawSecretStore)
 
 	// Create runtime registry to manage multiple runtimes
 	executorRegistry := lifecycle.NewExecutorRegistry(log)
@@ -78,18 +81,19 @@ func provideLifecycleManager(
 
 	// Register Sprites runtime (remote sandboxes via Sprites.dev)
 	agentctlResolver := lifecycle.NewAgentctlResolver(log)
-	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentRegistry, agentctlResolver, 8765, log)
+	spritesExec := lifecycle.NewSpritesExecutor(secretStores.credentials, agentRegistry, agentctlResolver, 8765, log)
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
 
 	// Register SSH runtime (run an agent on any Linux box reachable over SSH).
-	sshExec := lifecycle.NewSSHExecutor(secretStore, agentRegistry, agentctlResolver, log)
+	sshExec := lifecycle.NewSSHExecutor(secretStores.credentials, agentRegistry, agentctlResolver, log)
 	executorRegistry.Register(sshExec)
 	log.Info("SSH runtime registered")
+	registerKubernetesBackend(executorRegistry, agentctlResolver, log)
 
 	credsMgr := credentials.NewManager(log)
-	if secretStore != nil {
-		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
+	if secretStores.credentials != nil {
+		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStores.credentials))
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
@@ -123,8 +127,9 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeLocalDocker, lifecycle.NewDockerPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSprites, lifecycle.NewSpritesPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
+	registerKubernetesPreparer(preparerRegistry, log)
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
-	lifecycleMgr.SetSecretStore(secretStore)
+	lifecycleMgr.SetSecretStore(secretStores.runtime)
 	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
 		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
 	}
@@ -147,6 +152,16 @@ func provideLifecycleManager(
 	// Wire the comparison-target provider before Start so recovered executions
 	// hydrate the exact provider-qualified ref before their first status poll.
 	lifecycleMgr.SetComparisonTargetProvider(comparisonTargetProvider)
+	// Recovered executions can dispatch MCP calls as soon as Start resumes
+	// their streams. Install both trusted scopes before Start, not after route
+	// registration, so the first recovered call has the same authority boundary
+	// as every later call.
+	if mcpIdentityScoper != nil {
+		lifecycleMgr.SetMCPIdentityScoper(mcpIdentityScoper)
+	}
+	if mcpPrincipalScoper != nil {
+		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
+	}
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
@@ -156,6 +171,32 @@ func provideLifecycleManager(
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
+}
+
+type lifecycleSecretStores struct {
+	runtime     secrets.SecretStore
+	credentials secrets.SecretStore
+}
+
+func newLifecycleSecretStores(raw secrets.SecretStore) lifecycleSecretStores {
+	return lifecycleSecretStores{
+		runtime:     raw,
+		credentials: secrets.NewUserVisibleStore(raw),
+	}
+}
+
+func registerKubernetesBackend(
+	registry *lifecycle.ExecutorRegistry,
+	agentctlResolver *lifecycle.AgentctlResolver,
+	log *logger.Logger,
+) {
+	registry.Register(lifecycle.NewKubernetesExecutor(agentctlResolver, log))
+	log.Info("Kubernetes runtime registered (lazy initialization)")
+}
+
+func registerKubernetesPreparer(registry *lifecycle.PreparerRegistry, log *logger.Logger) {
+	registry.Register(models.ExecutorTypeKubernetes, lifecycle.NewKubernetesPreparer(log))
+	log.Info("Kubernetes preparer registered")
 }
 
 func credentialFilePath(cfg *config.Config) string {

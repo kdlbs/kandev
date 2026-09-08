@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["06-frontend-browse"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 07: E2E, Security Review, And Documentation

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -17,6 +18,10 @@ afterEach(() => {
 
 function task(overrides: Partial<TaskSwitcherItem> = {}): TaskSwitcherItem {
   return { id: "task-1", title: "Task 1", state: "IN_PROGRESS", ...overrides };
+}
+
+function ArchiveAwareRow({ archiveConfirmation }: { archiveConfirmation?: ReactNode }) {
+  return <div data-testid="task-row">Task 1{archiveConfirmation}</div>;
 }
 
 /**
@@ -43,7 +48,7 @@ function renderWithDragHandle(overrides: Partial<TaskSwitcherItem> = {}) {
           onClick={onClick}
         >
           <TaskItemWithContextMenu task={task(overrides)} onArchiveTask={onArchiveTask}>
-            <div data-testid="task-row">Task 1</div>
+            <ArchiveAwareRow />
           </TaskItemWithContextMenu>
         </div>
       </ToastProvider>
@@ -129,6 +134,20 @@ function stubTouchEvent() {
 }
 
 describe("TaskItemWithContextMenu — pointer containment", () => {
+  it("shows a flag-labelled priority submenu with the current value", async () => {
+    renderWithDragHandle({ priority: "high" } as Partial<TaskSwitcherItem>);
+    await openContextMenu();
+
+    const priority = screen.getByTestId("task-context-priority");
+    expect(priority.querySelector("svg")).not.toBeNull();
+    fireEvent.pointerMove(priority, { pointerType: "mouse" });
+
+    expect(await screen.findByTestId("task-context-priority-current-high")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-critical")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-medium")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-low")).not.toBeNull();
+  });
+
   // Regression: the menu renders in a portal whose fiber ancestors include the
   // drag handle. Without a guard, mousedown/pointerdown on any menu item
   // bubbles through the React fiber tree to the handle's dnd-kit sensor
@@ -180,8 +199,13 @@ describe("TaskItemWithContextMenu — pointer containment", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: /archive/i }));
 
-    expect(onArchiveTask).toHaveBeenCalledTimes(1);
-    expect(onArchiveTask).toHaveBeenCalledWith("task-1");
+    expect(onArchiveTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Archive$/ }));
+    await waitFor(() => {
+      expect(onArchiveTask).toHaveBeenCalledTimes(1);
+      expect(onArchiveTask).toHaveBeenCalledWith("task-1", { cascade: false });
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-workflow-memory.md"
+spec: "../../specs/tasks/requirements/task-create-workflow-memory.md"
 ---
 
 # Task 01: Persist Per-Workspace Workflow Memory

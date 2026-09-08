@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["08-conditional-pin-sync"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 09: E2E coverage
@@ -38,7 +38,7 @@ message history.
   exists).
 - **Parallelism:** `sequential` (E2E follows the frontend changes it covers).
 - **Inputs:** Spec Scenarios section
-  (`docs/specs/ui/agent-todo-list-panel.md`); the existing
+  (`docs/specs/ui/requirements/agent-todo-list-panel.md`); the existing
   `todo-list-panel.spec.ts` helpers (`createTaskWithSession`,
   `createTaskWithTodos`, `setTodoListPanelPreference`, `readTodosLayout`,
   `todosTabWrapper`) as the base; the settings-page switch locator pattern

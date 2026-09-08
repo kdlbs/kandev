@@ -32,6 +32,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
   /**
@@ -89,6 +91,8 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -127,7 +131,6 @@ export function RepoChipsRow({
   //   - "Fork a new branch" toggle is a separate flow that creates a NEW branch
   //     from the selected base
   // Other executors: branch is fully editable (no special pre-fill).
-  const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
   if (isTaskStarted) return null;
 
@@ -137,6 +140,7 @@ export function RepoChipsRow({
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
+  const branchPolicyDisabledReason = policyDisabled(isLocalExecutor, freshBranchAvailable);
 
   return (
     // min-h-9 reserves enough vertical space for the tallest mode body so the
@@ -152,14 +156,17 @@ export function RepoChipsRow({
         fs={fs}
         repositories={repositories}
         workspaceId={workspaceId}
-        branchLocked={branchLocked}
+        branchLocked={false}
         isLocalExecutor={!!isLocalExecutor}
         canAddMore={canAddMore}
         addHint={addHint}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={freshBranchEnabled}
+        branchPolicyDisabledReason={branchPolicyDisabledReason}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
@@ -245,8 +252,11 @@ function ModeBody({
   addHint,
   freshBranchAvailable,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleFreshBranch,
   onWorkspacePathChange,
   lastUsedBranch,
@@ -264,8 +274,11 @@ function ModeBody({
   addHint: string | undefined;
   freshBranchAvailable?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
@@ -274,15 +287,8 @@ function ModeBody({
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
 }) {
-  const { t } = useTranslation();
   if (fs.noRepository) {
-    return (
-      <FolderPicker
-        value={fs.workspacePath}
-        onChange={onWorkspacePathChange ?? (() => {})}
-        placeholder={t("task:pickAStartingFolderOptional")}
-      />
-    );
+    return <NoRepositoryMode fs={fs} onWorkspacePathChange={onWorkspacePathChange} />;
   }
   if (fs.useRemote) {
     return (
@@ -306,24 +312,45 @@ function ModeBody({
       currentLocalBranch={fs.currentLocalBranch}
       currentLocalBranchLoading={fs.currentLocalBranchLoading}
       freshBranchEnabled={fs.freshBranchEnabled}
+      branchPolicyDisabledReason={branchPolicyDisabledReason}
       canAddMore={canAddMore}
       addHint={addHint}
       onAdd={fs.addRepository}
       onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      onRowPolicyChange={onRowPolicyChange}
+      onPolicySelected={onPolicySelected}
+      showBranchPolicies
+      showDiscoveryControls
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
       onRefreshRepositories={onRefreshRepositories}
       repositoriesRefreshing={repositoriesRefreshing}
       freshBranchToggle={
-        // Multi-repo runs use worktrees, so the existing-vs-fork choice
-        // is irrelevant — only surface the toggle for single-repo flows.
+        // Multi-repo worktrees do not need the existing-vs-fork choice.
         freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
           <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
         ) : null
       }
+    />
+  );
+}
+
+function NoRepositoryMode({
+  fs,
+  onWorkspacePathChange,
+}: {
+  fs: DialogFormState;
+  onWorkspacePathChange?: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FolderPicker
+      value={fs.workspacePath}
+      onChange={onWorkspacePathChange ?? (() => {})}
+      placeholder={t("task:pickAStartingFolderOptional")}
     />
   );
 }
@@ -366,4 +393,13 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   if (canAddMore) return undefined;
   if (workspaceRepoCount === 0) return t("task:noRepositoriesAvailableInWorkspace");
   return t("task:allWorkspaceRepositoriesAdded");
+}
+
+function policyDisabled(
+  isLocalExecutor: boolean | undefined,
+  freshBranchAvailable: boolean | undefined,
+): string | undefined {
+  return isLocalExecutor && !freshBranchAvailable
+    ? t("task:branchPolicyRequiresSingleRepository")
+    : undefined;
 }

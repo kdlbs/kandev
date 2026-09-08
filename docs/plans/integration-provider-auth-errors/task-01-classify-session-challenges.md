@@ -5,8 +5,8 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/auth/spec.md"
-related_spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/auth/requirements/auth.md"
+related_spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 01: Classify session challenges and preserve PAT errors
@@ -56,8 +56,8 @@ cd apps && pnpm --filter @kandev/web test -- lib/api/client.test.ts components/g
 
 ## Inputs
 
-- `docs/specs/auth/spec.md` — session challenge versus provider failure behavior.
-- `docs/specs/integrations/github-authentication.md` — invalid PAT save behavior.
+- `docs/specs/auth/requirements/auth.md` — session challenge versus provider failure behavior.
+- `docs/specs/integrations/requirements/github-authentication.md` — invalid PAT save behavior.
 - `apps/backend/internal/auth/httpmw/middleware.go` — authoritative Kandev session challenge.
 - `apps/web/src/main.tsx` — global unauthorized callback.
 

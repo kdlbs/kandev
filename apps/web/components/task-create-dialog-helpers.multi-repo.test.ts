@@ -3,6 +3,8 @@ import { buildRepositoriesPayload, findDuplicateRemoteRepo } from "./task-create
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 
+const FRONT_REPOSITORY_ID = "repo-front";
+
 /** Minimal TaskRemoteRepoRow builder for the dedup tests. */
 function remoteRow(key: string, url: string, branch = ""): TaskRemoteRepoRow {
   return { key, url, branch, source: "paste" };
@@ -23,7 +25,7 @@ describe("buildRepositoriesPayload — unified rows", () => {
       useRemote: false,
       remoteRepos: [],
       repositories: [
-        { key: "r0", repositoryId: "repo-front", branch: "main" },
+        { key: "r0", repositoryId: FRONT_REPOSITORY_ID, branch: "main" },
         { key: "r1", repositoryId: "repo-back", branch: "develop" },
         { key: "r2", branch: "" }, // no repo picked yet — dropped
         { key: "r3", repositoryId: "repo-shared", branch: "" },
@@ -31,9 +33,38 @@ describe("buildRepositoriesPayload — unified rows", () => {
       discoveredRepositories: [],
     });
     expect(payload).toEqual([
-      { repository_id: "repo-front", base_branch: "main", checkout_branch: undefined },
+      {
+        repository_id: FRONT_REPOSITORY_ID,
+        base_branch: "main",
+        checkout_branch: undefined,
+      },
       { repository_id: "repo-back", base_branch: "develop", checkout_branch: undefined },
       { repository_id: "repo-shared", base_branch: undefined, checkout_branch: undefined },
+    ]);
+  });
+
+  it("submits a selected branch policy id without deriving identity from its label", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [
+        {
+          key: "r0",
+          repositoryId: FRONT_REPOSITORY_ID,
+          branch: "develop",
+          branchPolicyId: "policy-hotfix",
+        },
+      ],
+      discoveredRepositories: [],
+    });
+
+    expect(payload).toEqual([
+      {
+        repository_id: FRONT_REPOSITORY_ID,
+        base_branch: "develop",
+        checkout_branch: undefined,
+        branch_policy_id: "policy-hotfix",
+      },
     ]);
   });
 

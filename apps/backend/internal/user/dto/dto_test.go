@@ -16,6 +16,50 @@ func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
 	}
 }
 
+func TestSidebarTaskColorAutomationDTOContract(t *testing.T) {
+	value := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "blocked",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "BLOCKED", Label: "Blocked"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColorAutomation: value})
+	if !reflect.DeepEqual(got.SidebarTaskColorAutomation, value) {
+		t.Fatalf("SidebarTaskColorAutomation = %#v, want %#v", got.SidebarTaskColorAutomation, value)
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_automation":{"enabled":true,"rules":[]}}`), &request); err != nil {
+		t.Fatalf("decode automatic color patch: %v", err)
+	}
+	if request.SidebarTaskColorAutomation == nil || !request.SidebarTaskColorAutomation.Enabled {
+		t.Fatalf("SidebarTaskColorAutomation patch = %#v, want explicit enabled value", request.SidebarTaskColorAutomation)
+	}
+}
+
+func TestSidebarTaskColorsDTOContract(t *testing.T) {
+	red := "red"
+	value := map[string]*string{"task-red": &red, "task-cleared": nil}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColors: value})
+	if !reflect.DeepEqual(got.SidebarTaskColors, value) {
+		t.Fatalf("SidebarTaskColors = %#v, want %#v", got.SidebarTaskColors, value)
+	}
+	if got.SidebarTaskColors["task-red"] == value["task-red"] {
+		t.Fatal("DTO color map aliases the model pointer")
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_patch":{"if_missing":true,"colors":{"task-red":"red","task-cleared":null}}}`), &request); err != nil {
+		t.Fatalf("decode manual color patch: %v", err)
+	}
+	if request.SidebarTaskColorPatch == nil || !request.SidebarTaskColorPatch.IfMissing {
+		t.Fatalf("SidebarTaskColorPatch = %#v, want missing-only patch", request.SidebarTaskColorPatch)
+	}
+}
+
 // TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
@@ -99,6 +143,58 @@ func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
 			t.Fatalf("KanbanHiddenStepIDs = %#v, want non-nil empty map", req.KanbanHiddenStepIDs)
 		}
 	})
+}
+
+func TestWorkflowIDsWithAutoHideEmptyStepsContract(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !ok || field.Tag.Get("json") != "workflow_ids_with_auto_hide_empty_steps,omitempty" {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps patch field = %+v, want JSON preference field", field)
+	}
+
+	defaultSettings := FromUserSettings(&models.UserSettings{})
+	encoded, err := json.Marshal(defaultSettings)
+	if err != nil {
+		t.Fatalf("encode default settings: %v", err)
+	}
+	var serialized struct {
+		WorkflowIDs []string `json:"workflow_ids_with_auto_hide_empty_steps"`
+	}
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("decode default settings: %v", err)
+	}
+	if serialized.WorkflowIDs == nil || len(serialized.WorkflowIDs) != 0 {
+		t.Fatalf("serialized default WorkflowIDs = %#v, want non-nil empty", serialized.WorkflowIDs)
+	}
+
+	want := []string{"wf-a", "wf-b"}
+	source := &models.UserSettings{}
+	sourceField := reflect.ValueOf(source).Elem().FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !sourceField.IsValid() {
+		t.Fatal("models.UserSettings.WorkflowIDsWithAutoHideEmptySteps field is absent")
+	}
+	sourceField.Set(reflect.ValueOf(want))
+	settings := FromUserSettings(source)
+	value := reflect.ValueOf(settings)
+	mapped := value.FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !mapped.IsValid() || !reflect.DeepEqual(mapped.Interface(), want) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", mapped, want)
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted preference: %v", err)
+	}
+	if omitted.WorkflowIDsWithAutoHideEmptySteps != nil {
+		t.Fatalf("omitted WorkflowIDsWithAutoHideEmptySteps = %#v, want nil", omitted.WorkflowIDsWithAutoHideEmptySteps)
+	}
+
+	var cleared UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"workflow_ids_with_auto_hide_empty_steps":[]}`), &cleared); err != nil {
+		t.Fatalf("decode cleared preference: %v", err)
+	}
+	if cleared.WorkflowIDsWithAutoHideEmptySteps == nil || len(*cleared.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("cleared WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty slice", cleared.WorkflowIDsWithAutoHideEmptySteps)
+	}
 }
 
 // TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.

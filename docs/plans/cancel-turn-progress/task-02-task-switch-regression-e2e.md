@@ -6,7 +6,7 @@ wave: 2
 depends_on: ["01-session-scoped-cancel-state"]
 superseded_by: "06-cancel-reload-regression-e2e"
 plan: "plan.md"
-spec: "../../specs/ui/cancel-turn-progress.md"
+spec: "../../specs/ui/requirements/cancel-turn-progress.md"
 ---
 
 # Task 02: Task-switch cancellation regression

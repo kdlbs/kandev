@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-dynamic-conductor-policy-integration"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 05: Kanban recovery convergence

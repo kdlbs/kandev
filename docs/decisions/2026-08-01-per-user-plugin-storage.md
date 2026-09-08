@@ -1,6 +1,6 @@
 # ADR-2026-08-01-per-user-plugin-storage: Host-Provided Per-User Plugin Storage
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-12)
 **Date:** 2026-08-01
 **Area:** backend, frontend, security
 
@@ -9,10 +9,19 @@
 The plugin contract's only persistence is `plugin_state`
 (`apps/backend/internal/plugins/state/store.go`), keyed
 `(plugin_id, scope, scope_id, state_key)` with no user dimension, written only
-by a plugin's own gRPC-connected Go backend via the Host `SetState` RPC. The
-only frontend-reachable plugin HTTP route is the public, unauthenticated
-`/api/plugins/:id/webhooks/:key` proxy, explicitly bypassed in
+by a plugin's own gRPC-connected Go backend via the Host `SetState` RPC. At
+the time of this ADR, the only frontend-reachable plugin HTTP route was the
+unauthenticated `/api/plugins/:id/webhooks/:key` proxy, explicitly bypassed in
 `internal/auth/httpmw/middleware.go`'s allowlist.
+
+**Amendment (2026-08-12):** that allowlist entry was removed — see
+`2026-08-12-plugin-webhook-auth-gate.md` — so the webhook proxy is
+authenticated by default too, unless its manifest entry opts out with
+`webhooks[].public: true`. This does not change the rest of this ADR's
+reasoning: what motivated `host.storage` was the *browser session's own
+user identity* being reachable at all from a plugin's frontend bundle, which
+the webhook proxy still does not provide (it relays a request, not a
+per-user storage API).
 
 A UI-only plugin (a native JS bundle with no Go backend) that needs to persist
 data scoped to the calling browser session's user — a scratchpad, a checklist,
@@ -21,7 +30,7 @@ follow-up Notes plugin (porting PR #2050's native task-notes feature into a
 plugin) that needs exactly one per-user, per-task document with no Go binary
 of its own.
 
-`docs/specs/auth/spec.md` records hard per-user privacy: workspaces are
+`docs/specs/auth/requirements/auth.md` records hard per-user privacy: workspaces are
 per-user, cross-user access returns 404, and admins get no visibility into
 other users' data. Any new storage surface must hold that invariant.
 

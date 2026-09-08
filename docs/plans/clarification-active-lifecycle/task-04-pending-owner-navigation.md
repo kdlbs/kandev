@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-summary-pending-convergence"]
 plan: "plan.md"
-spec: "../../specs/clarification-active-lifecycle/spec.md"
+spec: "../../specs/tasks/requirements/clarification-active-lifecycle.md"
 ---
 
 # Task 04: Pending-owner navigation

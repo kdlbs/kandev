@@ -40,6 +40,23 @@ function useTaskPRWithStore(taskId: string | null) {
   return { result, store };
 }
 
+function useTwoTaskPRs(taskId: string | null) {
+  return {
+    first: useTaskPR(taskId),
+    second: useTaskPR(taskId),
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const linkedPR = { id: "association-1", task_id: "task-1" } as TaskPR;
 
 function unlinkState(workspaceId: string | null): Partial<AppState> {
@@ -135,6 +152,31 @@ describe("useTaskPR — loading state", () => {
   });
 });
 
+describe("useTaskPR — shared synchronization", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-TASK-PR-SYNC-COORDINATION-001.1
+  it("shares initial and retry requests across consumers in one store", async () => {
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTwoTaskPRs("task-1"), {
+      wrapper: createStateWrapper({
+        workspaces: { items: [], activeId: "workspace-1" },
+      }),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(result.current.first.loaded).toBe(true);
+    expect(result.current.second.loaded).toBe(true);
+  });
+});
+
 describe("useTaskPR — unlink", () => {
   it("rejects without a task or active workspace and skips the API", async () => {
     const noTask = renderHook(() => useTaskPR(null), {
@@ -164,6 +206,33 @@ describe("useTaskPR — unlink", () => {
     });
 
     expect(deleteTaskPRMock).toHaveBeenCalledWith(linkedPR.id, "ws-1");
+    expect(view.result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+  });
+
+  it("drops an in-flight sync response after unlink removes local state", async () => {
+    const pending = deferred<{ prs: TaskPR[] }>();
+    requestMock.mockReturnValueOnce(pending.promise);
+    deleteTaskPRMock.mockResolvedValue(undefined);
+    const view = renderHook(() => useTaskPRWithStore("task-1"), {
+      wrapper: createStateWrapper(unlinkState("ws-1")),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await view.result.current.result.unlink(linkedPR.id);
+    });
+    expect(view.result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+
+    pending.resolve({ prs: [linkedPR] });
+    await act(async () => {
+      await pending.promise;
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
     expect(view.result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
   });
 

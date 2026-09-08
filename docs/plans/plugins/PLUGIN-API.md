@@ -47,7 +47,7 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    from an expired generation cannot mutate the replacement generation. Failure or
    timeout does **not** unregister `registry` contributions (nav items, routes,
    etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's *next* load revokes them.
+   lifecycle status becomes failed, until the plugin's _next_ load revokes them.
 
 ## Global entry point
 
@@ -164,7 +164,11 @@ interface PluginHostApi {
   // Publishes one integration registration's live enabled state for one
   // workspace. The value is memory-only; persist it with host.storage and
   // republish it for every workspace after plugin load.
-  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
+  setIntegrationEnabled(
+    integrationId: string,
+    workspaceId: string,
+    enabled: boolean,
+  ): void;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
@@ -412,6 +416,57 @@ Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
 
+### First-use repository inspection action
+
+A manifest-owned repository provider that supports native task creation from a
+new URL declares this workspace-scoped action:
+
+```yaml
+actions:
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+The host invokes the active manifest owner from the backend. The plugin receives
+the verified workspace context and this bounded body. Browser descriptor fields
+are not forwarded:
+
+```json
+{ "url": "https://code.example.com/owner/repository" }
+```
+
+Return the preferred nested response:
+
+```json
+{
+  "repository": {
+    "provider_id": "example-provider",
+    "provider_host": "https://code.example.com",
+    "provider_scope": "https://code.example.com/context-a",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+The host accepts the descriptor at the top level for compatibility and accepts
+`{"matched":false}` for a URL the provider does not own. A successful response
+must use the requested provider ID and include a provider host, provider scope,
+repository ID, owner or project, name, credential-free HTTPS clone URL, and
+default branch. The clone origin must match the HTTPS provider origin. Provider
+scope is limited to 512 bytes and identity fields cannot contain NUL bytes. Any
+scope or repository ID hint from the task request must match the response.
+
+The host enforces the manifest body limit, a 15-second timeout, and a 1 MiB
+response limit. It validates the response before it writes a repository or task.
+Malformed output is invalid, `matched:false` is not found, and provider or
+transport failures are unavailable. Error responses do not include plugin body
+content or upstream credentials.
+
 ### Persisted repository branch action
 
 A manifest-owned repository provider that participates in Kandev's native task branch
@@ -423,6 +478,10 @@ actions:
     scope: "workspace"
     max_body_bytes: 16384
 ```
+
+Browser-invoked actions may additionally declare `access: "admin"`. Omitting
+`access` preserves the default `authenticated` policy. The host rejects a
+non-administrator before it forwards any request body to an admin action.
 
 This action is invoked by the host backend, not the browser callback. Kandev resolves the
 active plugin that owns the repository's persisted provider ID and supplies a verified
@@ -525,9 +584,17 @@ cleared when the plugin unloads. Persist the source of truth with
 `host.storage`, then republish it after load:
 
 ```ts
-function publishAll(host: PluginHostApi, integrationId: string, enabledByWorkspace: Map<string, boolean>) {
+function publishAll(
+  host: PluginHostApi,
+  integrationId: string,
+  enabledByWorkspace: Map<string, boolean>,
+) {
   for (const workspaceId of host.context.getWorkspaceIds()) {
-    host.setIntegrationEnabled(integrationId, workspaceId, enabledByWorkspace.get(workspaceId) === true);
+    host.setIntegrationEnabled(
+      integrationId,
+      workspaceId,
+      enabledByWorkspace.get(workspaceId) === true,
+    );
   }
 }
 
@@ -631,7 +698,11 @@ own write).
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+export type PluginNavSection =
+  | "main"
+  | "settings"
+  | "integrations"
+  | "sidebar-footer";
 
 interface NavItem {
   id: string;
@@ -684,7 +755,9 @@ interface PluginRegistry {
   registerNavItem(item: NavItem): void;
 
   // Route under /settings/plugins/{id}/... rendered inside settings shell.
-  // The settings shell already provides its own topbar chrome — no options here.
+  // The exact /settings/plugins/{id} route retains the host-owned personal
+  // shortcut card beside the plugin component; nested routes are fully
+  // plugin-owned. The settings shell already provides its own topbar chrome.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
 
   // Native Settings > Integrations contribution. The host adds index/navigation
@@ -695,7 +768,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "chat-input-actions", "task-create-input-actions",
+  // "settings-nav", "chat-input-actions", "chat-submit-decoration",
+  // "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
   // "plugin-settings", "task-card-indicators", "task-card-tags",
@@ -719,6 +793,26 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // "chat-submit-decoration" renders *over* the chat composer's send button
+  // rather than beside it — for adornments that belong on the send affordance
+  // itself (a progress ring, a state dot), which a sibling slot cannot draw.
+  // The host owns the geometry: the layer is absolutely positioned to the send
+  // button's 28px circular box, so a decoration sizes itself against `inset-0`
+  // without measuring the DOM and stays on the button's rim; a negative inset
+  // can be clipped by the collapsed desktop toolbar. The plugin component is
+  // rendered inside the layer, not beside the button. The layer is
+  // `pointer-events-none` so a decoration can never swallow a click meant for
+  // send. For hover or focus disclosure, keep the decoration inert and observe
+  // the host button from an effect, removing listeners on unmount. Use
+  // `pointer-events-auto` only as a last resort for a separate hit target that
+  // does not obstruct send; prefer "chat-input-actions" when the plugin needs
+  // its own action. The slot forwards
+  // `ChatSubmitDecorationSlotProps`: `{ taskId, taskTitle, activeSessionId,
+  // sessionIds, presentation, isSending, isAgentBusy, disabled,
+  // planModeEnabled }`, so a decoration can react to the button's live state.
+  // The slot renders only while the send button does: when the agent is
+  // mid-turn with an empty composer the button is replaced by Cancel, and the
+  // decoration goes with it.
   // "chat-top-bar" renders status in the session top bar (beside the
   // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
@@ -771,8 +865,10 @@ interface PluginRegistry {
   // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
   // combo, so a user override that drops the modifier silently falls back to
   // skipping editables rather than swallowing ordinary keystrokes. Combos are
-  // user-overridable in Settings > Keyboard Shortcuts, namespaced
-  // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
+  // user-overridable on the installed plugin detail page (Settings > Plugins >
+  // <plugin>), namespaced `plugin:{pluginId}:{id}`. Overrides are personal to
+  // the signed-in user; plugin configuration and lifecycle controls remain
+  // administrator-only. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's
   // effective-shortcut resolution keys off the manifest list.
   //
@@ -786,8 +882,8 @@ interface PluginRegistry {
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 
   // Requires manifest ownership of provider.id. One active plugin owns one provider;
-  // unload revokes it and aborts in-flight provider work. inspectURL returns a complete
-  // credential-free HTTPS descriptor—host does not parse plugin provider URLs.
+  // unload revokes it and aborts in-flight provider work. inspectURL returns browser
+  // picker data only. Native first-use task creation also requires repositories.inspect.
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
 
   // Native task-menu contribution. placement "link" renders in Link menus on desktop
@@ -811,6 +907,7 @@ interface PluginRegistry {
   // dropdown, alongside the built-in Workflow/Repository sections. See
   // "Task filters" below.
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 interface IntegrationSettingsRegistration {
@@ -857,6 +954,7 @@ interface RepositoryProviderRegistration {
     repository: RepositoryInspection;
     signal: AbortSignal;
   }): Promise<RepositoryProviderBranch[]>;
+  // Browser picker callback. Its result is not authoritative for a native task write.
   inspectURL(context: {
     workspaceId: string;
     url: string;
@@ -1242,6 +1340,19 @@ combine with AND (a task must match every section with an active selection),
 mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
+
+### Task-list facets
+
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
+Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
+color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
+and keep one label and color for a value across all tasks. Facet sorting uses the first value label
+after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
+persisted or sent to the backend. The host catches callback errors and revokes registrations and
+active subscriptions when the owning plugin unloads. A task with multiple values appears in each
+matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
+indentation is preserved only within a group both tasks match, so a matching child without its
+parent is rendered at that group's root.
 
 ## Registry internals (host side)
 

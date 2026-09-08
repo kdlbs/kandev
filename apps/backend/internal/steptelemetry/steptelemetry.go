@@ -37,6 +37,7 @@ const (
 	TriggerUnarchiveRestore Trigger = "unarchive_restore"
 	TriggerWorkflowAttached Trigger = "workflow_attached"
 	TriggerWorkflowDetached Trigger = "workflow_detached"
+	TriggerPluginMove       Trigger = "plugin_move"
 	TriggerUnknown          Trigger = "unknown"
 )
 

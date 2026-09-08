@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-frontend-dnd-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-reorder.md"
+spec: "../../specs/ui/requirements/message-queue-reorder.md"
 ---
 
 # Task 05: E2E reorder desktop and mobile

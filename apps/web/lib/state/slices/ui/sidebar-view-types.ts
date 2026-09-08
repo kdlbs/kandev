@@ -1,3 +1,5 @@
+import type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+
 export type FilterDimension =
   | "archived"
   | "state"
@@ -26,6 +28,8 @@ export type SortKey = "state" | "updatedAt" | "lastActivityAt" | "createdAt" | "
 export type SortDirection = "asc" | "desc";
 export type SortSpec = { key: SortKey; direction: SortDirection };
 
+export type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+
 export type GroupKey =
   | "none"
   | "repository"
@@ -41,6 +45,7 @@ export type SidebarView = {
   sort: SortSpec;
   group: GroupKey;
   collapsedGroups: string[];
+  taskRow?: SidebarTaskRowPresentation;
 };
 
 export type SidebarSliceState = {
@@ -56,4 +61,5 @@ export type SidebarViewDraft = {
   filters: FilterClause[];
   sort: SortSpec;
   group: GroupKey;
+  taskRow?: SidebarTaskRowPresentation;
 };

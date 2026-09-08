@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-lifecycle-profile-ownership"]
 plan: "plan.md"
-spec: "../../specs/office/routing.md"
+spec: "../../specs/office/requirements/routing.md"
 ---
 
 # Task 05: Cross-provider continuation

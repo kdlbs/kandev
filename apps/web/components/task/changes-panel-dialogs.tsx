@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { IconGitCommit, IconLoader2, IconCheck } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -27,6 +27,7 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Trans, useTranslation } from "react-i18next";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 
 // --- Discard Confirmation Dialog ---
 
@@ -35,45 +36,71 @@ type DiscardDialogProps = {
   onOpenChange: (open: boolean) => void;
   fileToDiscard: string | null;
   filesToDiscard: string[] | null;
+  anchorRef: RefObject<HTMLElement | null>;
   onConfirm: () => void;
 };
+
+function DiscardFileDescription({ file }: { file: string | null }) {
+  return (
+    <Trans i18nKey="task:discardChangesToFile" values={{ file }}>
+      This will permanently discard all changes to{" "}
+      <span className="font-semibold [overflow-wrap:anywhere]">{file}</span>. This action cannot be
+      undone.
+    </Trans>
+  );
+}
 
 export function DiscardDialog({
   open,
   onOpenChange,
   fileToDiscard,
   filesToDiscard,
+  anchorRef,
   onConfirm,
 }: DiscardDialogProps) {
   const { t } = useTranslation();
-  const isBulk = filesToDiscard && filesToDiscard.length > 1;
+  const bulkCount = filesToDiscard?.length ?? 0;
+  const isBulk = bulkCount > 1;
   const displayFile = fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0] : null);
-  const description = isBulk
-    ? t("task:discardAllChangesToFiles", { count: filesToDiscard.length })
-    : null;
+  const description = isBulk ? t("task:discardAllChangesToFiles", { count: bulkCount }) : null;
+  const title = t("task:discardChanges");
+  const cancelLabel = t("common:cancel");
+  const confirmLabel = t("task:discard");
+
+  if (!isBulk) {
+    return (
+      <ActionConfirmPopover
+        open={open}
+        anchorRef={anchorRef}
+        title={title}
+        description={<DiscardFileDescription file={displayFile} />}
+        cancelLabel={cancelLabel}
+        confirmLabel={confirmLabel}
+        confirmTestId="discard-local-changes-confirm"
+        testId="discard-local-changes-confirm-popover"
+        onOpenChange={onOpenChange}
+        onCancel={() => onOpenChange(false)}
+        onConfirm={onConfirm}
+      />
+    );
+  }
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("task:discardChanges")}</AlertDialogTitle>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription className="break-words">
-            {description ?? (
-              <Trans i18nKey="task:discardChangesToFile" values={{ file: displayFile }}>
-                This will permanently discard all changes to{" "}
-                <span className="font-semibold [overflow-wrap:anywhere]">{displayFile}</span>. This
-                action cannot be undone.
-              </Trans>
-            )}
+            {description ?? <DiscardFileDescription file={displayFile} />}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {t("task:discard")}
+            {confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

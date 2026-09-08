@@ -19,17 +19,25 @@ import (
 
 // fakeRunQueueAdapter is a minimal engine.RunQueueAdapter test double that
 // captures QueueRun calls on a channel so tests can assert both that a call
-// happened and what it carried, without a sleep-based race.
+// happened and what it carried, without a sleep-based race. outcome
+// defaults to QueueOutcomeQueued when unset and err is nil.
 type fakeRunQueueAdapter struct {
-	calls chan engine.QueueRunRequest
-	err   error
+	calls   chan engine.QueueRunRequest
+	err     error
+	outcome engine.QueueOutcome
 }
 
-func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
+func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) (engine.QueueOutcome, error) {
 	if f.calls != nil {
 		f.calls <- req
 	}
-	return f.err
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.outcome == "" {
+		return engine.QueueOutcomeQueued, nil
+	}
+	return f.outcome, nil
 }
 
 // fakePrimaryAgentResolver is a minimal engine.PrimaryAgentResolver test
@@ -328,9 +336,16 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		svc.engineRunQueue = queued
 		svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: "resolved-primary"}
 
+		// A real task.moved publication always carries the persisted
+		// step-transition row ID (see publishTaskMovedEvent), so the
+		// fixture sets one here too rather than exercising
+		// officeAutoStartIdempotencyKey's legacy (StepTransitionID==0)
+		// fallback for pre-rollout events, which is covered separately by
+		// TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries.
 		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
-			TaskID:   "t-office",
-			ToStepID: "step2",
+			TaskID:           "t-office",
+			ToStepID:         "step2",
+			StepTransitionID: 42,
 		})
 
 		select {
@@ -347,8 +362,9 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			if req.Reason != officeAutoStartRunReason {
 				t.Errorf("Reason = %q, want %q", req.Reason, officeAutoStartRunReason)
 			}
-			if req.IdempotencyKey != "task_assigned:t-office:resolved-primary:step2" {
-				t.Errorf("IdempotencyKey = %q, want task_assigned:t-office:resolved-primary:step2", req.IdempotencyKey)
+			wantKey := "task_assigned:t-office:resolved-primary:step2:42"
+			if req.IdempotencyKey != wantKey {
+				t.Errorf("IdempotencyKey = %q, want %q", req.IdempotencyKey, wantKey)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for QueueRun call")

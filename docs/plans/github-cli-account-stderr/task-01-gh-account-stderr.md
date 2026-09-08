@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 01: Handle `gh` account status on stderr
@@ -28,7 +28,7 @@ spec: "../../specs/integrations/github-authentication.md"
 
 - `apps/backend/internal/github/gh_accounts.go`
 - `apps/backend/internal/github/gh_accounts_test.go`
-- `docs/specs/integrations/github-authentication.md`
+- `docs/specs/integrations/requirements/github-authentication.md`
 - `docs/plans/github-cli-account-stderr/plan.md`
 - `docs/plans/github-cli-account-stderr/task-01-gh-account-stderr.md`
 
@@ -44,7 +44,7 @@ output contract.
 ## Inputs
 
 - The amended named-CLI behavior and scenario in
-  `docs/specs/integrations/github-authentication.md`.
+  `docs/specs/integrations/requirements/github-authentication.md`.
 - The confirmed root cause in `systemGHAccountRunner.Run` and the existing
   stderr-first pattern in `GHClient.RunAuthDiagnostics`.
 - Issue `kdlbs/kandev#2348`.

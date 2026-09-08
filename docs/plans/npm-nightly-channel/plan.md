@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/npm-nightly-channel/spec.md
+spec: docs/specs/release/requirements/npm-nightly-channel.md
 created: 2026-07-31
 status: implemented
 ---

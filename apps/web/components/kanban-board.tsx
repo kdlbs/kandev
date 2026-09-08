@@ -552,6 +552,7 @@ function KanbanBoardDialogs({
                 workflowStepId: editingTask.workflowStepId,
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
+                repositories: editingTask.repositories,
               }
             : null
         }
@@ -563,6 +564,7 @@ function KanbanBoardDialogs({
                 description: editingTask.description,
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
+                repositories: editingTask.repositories,
               }
             : undefined
         }

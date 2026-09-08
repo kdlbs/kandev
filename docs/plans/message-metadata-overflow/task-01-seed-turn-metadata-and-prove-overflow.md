@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-metadata-overflow.md"
+spec: "../../specs/ui/requirements/message-metadata-overflow.md"
 ---
 
 # Task 01: Seed Turn Metadata and Prove the Overflow in E2E
@@ -62,7 +62,7 @@ land together with Task 02's layout fix.
 
 ## Inputs
 
-- `docs/specs/ui/message-metadata-overflow.md`
+- `docs/specs/ui/requirements/message-metadata-overflow.md`
 - `apps/web/e2e/tests/chat/mobile-message-timestamp-tooltip.spec.ts` (fixture
   pattern)
 - `apps/web/e2e/fixtures/test-base.ts` (seed fixture)

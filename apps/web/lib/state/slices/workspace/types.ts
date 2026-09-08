@@ -1,4 +1,10 @@
-import type { Repository, Branch, RepositoryScript, RepositorySet } from "@/lib/types/http";
+import type {
+  Repository,
+  Branch,
+  RepositoryBranchPolicy,
+  RepositoryScript,
+  RepositorySet,
+} from "@/lib/types/http";
 
 export type WorkspaceState = {
   items: Array<{
@@ -6,6 +12,13 @@ export type WorkspaceState = {
     name: string;
     description?: string | null;
     owner_id: string;
+    /** The unit this workspace sits in; reach follows the tree. */
+    unit_id?: string;
+    /** The requesting user's role here. */
+    viewer_role?: string;
+    /** Scopes the requesting user holds here; gates every owner-only control. */
+    scopes?: string[];
+    member_count?: number;
     default_executor_id?: string | null;
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;
@@ -50,6 +63,13 @@ export type RepositoryBranchesState = {
   fetchErrorByRepositoryId: Record<string, string | undefined>;
 };
 
+export type RepositoryBranchPoliciesState = {
+  itemsByRepositoryId: Record<string, RepositoryBranchPolicy[]>;
+  loadingByRepositoryId: Record<string, boolean>;
+  loadedByRepositoryId: Record<string, boolean>;
+  revisionByRepositoryId: Record<string, number>;
+};
+
 export type RepositoryScriptsState = {
   itemsByRepositoryId: Record<string, RepositoryScript[]>;
   loadingByRepositoryId: Record<string, boolean>;
@@ -60,6 +80,7 @@ export type WorkspaceSliceState = {
   workspaces: WorkspaceState;
   repositories: RepositoriesState;
   repositorySets: RepositorySetsState;
+  repositoryBranchPolicies: RepositoryBranchPoliciesState;
   repositoryBranches: RepositoryBranchesState;
   repositoryScripts: RepositoryScriptsState;
 };
@@ -95,6 +116,14 @@ export type WorkspaceSliceActions = {
   upsertRepositorySet: (workspaceId: string, set: RepositorySet) => void;
   removeRepositorySet: (workspaceId: string, setId: string) => void;
   invalidateRepositorySets: (workspaceId: string) => void;
+  setRepositoryBranchPolicies: (
+    repositoryId: string,
+    policies: RepositoryBranchPolicy[],
+    expectedRevision?: number,
+  ) => void;
+  setRepositoryBranchPoliciesLoading: (repositoryId: string, loading: boolean) => void;
+  upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
+  removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
 };
 
 export type WorkspaceSlice = WorkspaceSliceState & WorkspaceSliceActions;

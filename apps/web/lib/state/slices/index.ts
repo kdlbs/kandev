@@ -121,6 +121,8 @@ export type {
   SettingsDataState,
   SleepInhibitionStoreState,
   UserSettingsState,
+  AgentProfileRecentUseState,
+  AgentProfileRecentUseRecord,
 } from "./settings/types";
 export type {
   MessagesState,

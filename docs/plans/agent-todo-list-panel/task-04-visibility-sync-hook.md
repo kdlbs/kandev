@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-todos-panel-registration"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 04: Visibility-sync hook

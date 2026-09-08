@@ -7,7 +7,7 @@ depends_on:
   - "07-diagnostic-bundle-backend"
   - "11-merge-risk-hardening"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 12: Custom bundle contracts and runtime index

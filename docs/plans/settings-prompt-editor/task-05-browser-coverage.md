@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-quick-actions", "03-watch-prompts", "04-core-settings-prompts"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-prompt-editor.md"
+spec: "../../specs/ui/requirements/settings-prompt-editor.md"
 ---
 
 # Task 05: Add browser coverage

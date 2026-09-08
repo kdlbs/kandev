@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 01: Restore live add-branch materialization

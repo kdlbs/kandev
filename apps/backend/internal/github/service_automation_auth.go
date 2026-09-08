@@ -185,8 +185,11 @@ func (s *Service) MergePRForAutomation(
 	ctx context.Context,
 	workspaceID, owner, repo string,
 	number int,
-	mergeMethod string,
+	mergeMethod, expectedHeadSHA string,
 ) error {
+	if strings.TrimSpace(expectedHeadSHA) == "" {
+		return fmt.Errorf("automatic merge requires an expected head SHA")
+	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return err
 	}
@@ -198,7 +201,9 @@ func (s *Service) MergePRForAutomation(
 		return err
 	}
 	_, err = s.mergePRWithClient(
-		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, MergePRRequest{
+			MergeMethod: mergeMethod, ExpectedHeadSHA: expectedHeadSHA,
+		},
 	)
 	return err
 }

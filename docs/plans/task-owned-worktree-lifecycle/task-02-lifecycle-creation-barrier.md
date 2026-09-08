@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-task-worktree-persistence"]
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 decision: "../../decisions/2026-08-08-task-owned-worktree-lifetime.md"
 ---
 

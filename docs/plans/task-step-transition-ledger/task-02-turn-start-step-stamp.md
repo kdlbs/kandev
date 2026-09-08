@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-telemetry-activation-registry"]
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 02: Turn-start step stamp (Slice 1)

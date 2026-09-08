@@ -8,6 +8,10 @@ import { applyLayout } from "@/lib/state/layout-manager";
 import { setupGroupTracking, setupPortalCleanup } from "@/components/task/dockview-layout-setup";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
+  resolveTaskPullRequestProps,
+  selectWorkspaceRepositories,
+} from "@/components/task/task-page-content-helpers";
+import {
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -29,6 +33,7 @@ import {
   ContextMenuTab,
   renderPanel,
 } from "@/components/task/dockview-shared";
+import type { Task as OfficeTask } from "./types";
 
 // ---------------------------------------------------------------------------
 // OFFICE LAYOUT — no sidebar, no persistence, no multi-session
@@ -57,13 +62,22 @@ function officeLayout(): LayoutState {
 type OfficeDockviewLayoutProps = {
   taskId: string;
   sessionId: string | null;
+  task?: OfficeTask;
 };
 
-export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayoutProps) {
+export function OfficeDockviewLayout({ taskId, sessionId, task }: OfficeDockviewLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
   const appStore = useAppStoreApi();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
+  const storedOfficeTask = useAppStore((s) =>
+    s.office.tasks.items.find((item) => item.id === taskId),
+  );
+  const officeTask = task ?? storedOfficeTask;
+  const workspaceRepositories = useAppStore((s) =>
+    selectWorkspaceRepositories(s.repositories.itemsByWorkspaceId, officeTask?.workspaceId),
+  );
+  const pullRequestProps = resolveTaskPullRequestProps(officeTask ?? null, workspaceRepositories);
 
   // Wire office session into the global store so shared panels can read it.
   useEffect(() => {
@@ -135,7 +149,14 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
   );
 
   return (
-    <VcsDialogsProvider sessionId={sessionId}>
+    <VcsDialogsProvider
+      sessionId={sessionId}
+      baseBranch={pullRequestProps.baseBranch}
+      pullRequestBaseBranch={pullRequestProps.pullRequestTarget}
+      pullRequestTargetsByRepository={pullRequestProps.pullRequestTargetsByRepository}
+      taskTitle={pullRequestProps.taskTitle}
+      displayBranch={officeTask?.repositories?.[0]?.checkout_branch}
+    >
       <div className="flex-1 min-h-0">
         <DockviewReact
           theme={themeKandev}

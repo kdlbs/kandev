@@ -270,9 +270,14 @@ function ParentCrumbLabel({ crumb }: { crumb: ParentCrumb }) {
       </>
     );
   }
-  // Static crumb: orientation only, dimmed so it does not read as a link.
+  // Static crumb: orientation only, dimmed so it does not read as a link. The
+  // `title` is what makes a name longer than `max-w-40` readable at all, since
+  // truncation is the only thing standing between a long label and a squeezed
+  // page title.
   return (
-    <span className="max-w-40 cursor-default truncate text-muted-foreground/60">{crumb.label}</span>
+    <span title={crumb.label} className="max-w-40 cursor-default truncate text-muted-foreground/60">
+      {crumb.label}
+    </span>
   );
 }
 
@@ -575,6 +580,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     <header
       ref={ref}
       data-testid={testId}
+      data-window-controls-overlay-region="content"
       className={cn(
         "relative flex shrink-0 items-center gap-3 border-b px-3 py-1",
         TOPBAR_HEIGHT_CLASSNAME,

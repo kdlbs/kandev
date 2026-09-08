@@ -5,7 +5,7 @@ status: pending
 wave: 2
 depends_on: ["01-schema-and-backfill"]
 plan: "plan.md"
-spec: "../../specs/subagent-context-persistence/spec.md"
+spec: "../../specs/agents/requirements/subagent-context-persistence.md"
 ---
 
 > **Amendment 1 update:** the shipped conflict key is

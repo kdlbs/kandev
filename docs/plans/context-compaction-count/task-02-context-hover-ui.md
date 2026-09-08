@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-compaction-count"]
 plan: "plan.md"
-spec: "../../specs/context-compaction-count/spec.md"
+spec: "../../specs/ui/requirements/context-compaction-count.md"
 ---
 
 # Task 02: Show compactions in context hover

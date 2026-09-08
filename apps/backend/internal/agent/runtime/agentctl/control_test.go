@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -378,6 +380,27 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 	}
 }
 
+// TestCreateInstance_MarshalsMCPToolNamePresentationCapability covers the
+// wire portion of AC-TASKS-MCP-TOOL-NAMES-001.5.
+func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	req := &CreateInstanceRequest{
+		WorkspacePath:              "/workspace/task-1",
+		NamespacesMCPToolsByServer: true,
+	}
+
+	if _, err := newTestControlClient(t, srv).CreateInstance(context.Background(), req); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if got, ok := body["namespaces_mcp_tools_by_server"].(bool); !ok || !got {
+		t.Fatalf("serialized capability = %#v, want true", body["namespaces_mcp_tools_by_server"])
+	}
+}
+
 // 200 is accepted alongside 201 — agentctl returns 200 when it reuses an
 // existing instance for the same ID.
 func TestCreateInstance_AcceptsBoth200And201(t *testing.T) {
@@ -460,6 +483,39 @@ func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 	}
 }
 
+func TestDeleteInstance_LostResponseThenNotFoundIsSuccessfulRetry(t *testing.T) {
+	transport := &lostDeleteResponseTransport{}
+	client := NewControlClient("agentctl.test", 80, newTestLogger())
+	client.httpClient = &http.Client{Transport: transport}
+
+	if err := client.DeleteInstance(context.Background(), "inst-9"); err == nil {
+		t.Fatal("first DeleteInstance error = nil, want lost-response error")
+	}
+	if err := client.DeleteInstance(context.Background(), "inst-9"); err != nil {
+		t.Fatalf("DeleteInstance retry after completed delete: %v", err)
+	}
+	if transport.requests != 2 {
+		t.Fatalf("requests = %d, want 2", transport.requests)
+	}
+}
+
+type lostDeleteResponseTransport struct {
+	requests int
+}
+
+func (t *lostDeleteResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests++
+	if t.requests == 1 {
+		return nil, errors.New("delete response lost")
+	}
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"instance not found"}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
 func TestDeleteInstance_FailureModes(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -469,9 +525,9 @@ func TestDeleteInstance_FailureModes(t *testing.T) {
 	}{
 		{
 			name:    "structured error",
-			status:  http.StatusNotFound,
-			body:    `{"error":"no such instance"}`,
-			wantErr: "failed to delete instance: no such instance (status 404)",
+			status:  http.StatusConflict,
+			body:    `{"error":"instance still stopping"}`,
+			wantErr: "failed to delete instance: instance still stopping (status 409)",
 		},
 		{
 			name:    "unparseable error body",

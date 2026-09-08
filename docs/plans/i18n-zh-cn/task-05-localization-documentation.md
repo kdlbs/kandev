@@ -9,7 +9,7 @@ depends_on:
   - "03-catalog-parity-gate"
   - "04-chinese-locale-e2e"
 plan: "plan.md"
-spec: "../../specs/platform/i18n.md"
+spec: "../../specs/platform/requirements/i18n.md"
 ---
 
 # Task 05: Localization documentation
@@ -28,14 +28,14 @@ spec: "../../specs/platform/i18n.md"
 ```bash
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
-rg -n "zh-cn|简体中文|real language|真实语言" docs/i18n.md docs/public/feature-status.md docs/specs/platform/i18n.md
+rg -n "zh-cn|简体中文|real language|真实语言" docs/i18n.md docs/public/feature-status.md docs/specs/platform/requirements/i18n.md
 ```
 
 ## Files likely touched
 
 - `docs/i18n.md`
 - `docs/public/feature-status.md`
-- `docs/specs/platform/i18n.md`
+- `docs/specs/platform/requirements/i18n.md`
 
 ## Dependencies
 

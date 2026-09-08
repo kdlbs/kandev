@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatTimeAgo, getTimeAgoColor } from "@/components/github/pr-shared";
 import { t } from "@/lib/i18n";
+import { ChangeRequestDetailCopyButton } from "./change-request-detail-copy-button";
 import type {
   ChangeRequestDetailAction,
   ChangeRequestDetailModel,
@@ -209,6 +210,11 @@ export function ChangeRequestDetailHeader({
       <div className="flex flex-wrap items-center gap-1.5">
         <StateBadge state={state} />
         <span className="text-xs text-muted-foreground">#{detail.number}</span>
+        <ChangeRequestDetailCopyButton
+          url={detail.url}
+          kind="changeRequest"
+          testId="change-request-copy-url"
+        />
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {detail.sourceBranch}
         </code>

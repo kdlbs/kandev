@@ -12,7 +12,7 @@ import (
 )
 
 // ExportHandler serves the two read-only YAML/zip automation export
-// endpoints (see docs/specs/automations-yaml-export/spec.md § API surface).
+// endpoints (see docs/specs/office/requirements/automations-yaml-export.md § API surface).
 type ExportHandler struct {
 	svc *Service
 	log *logger.Logger

@@ -123,7 +123,7 @@ type CreateRequest struct {
 	// AgentCommand is an optional command to start the agent. If empty, a default is used.
 	AgentCommand string `json:"agent_command,omitempty"`
 
-	// Protocol is the protocol adapter to use (acp, codex, auggie). If empty, default is used.
+	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
@@ -162,12 +162,17 @@ type CreateRequest struct {
 	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
 	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
 
-	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
+	// McpMode controls which MCP tools are registered: "task" (default),
+	// "task-title-pending", "config", "office", or "automation".
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.
 	McpProviders []string            `json:"mcp_providers,omitempty"`
 	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
+
+	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
+	// clients that append the injected server name to every tool.
+	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose

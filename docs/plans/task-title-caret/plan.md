@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/title-length-limit.md
+spec: docs/specs/tasks/requirements/title-length-limit.md
 created: 2026-08-11
 status: complete
 ---
@@ -159,7 +159,7 @@ spec proves the same user value on the phone viewport.
 - `apps/web/components/automations/automation-editor-sections.tsx`
 - `apps/web/e2e/tests/task/task-title-caret.spec.ts` (new)
 - `apps/web/e2e/tests/task/mobile-task-title-caret.spec.ts` (new)
-- `docs/specs/tasks/title-length-limit.md` (amended: caret scenario)
+- `docs/specs/tasks/requirements/title-length-limit.md` (amended: caret scenario)
 
 ## Verification
 

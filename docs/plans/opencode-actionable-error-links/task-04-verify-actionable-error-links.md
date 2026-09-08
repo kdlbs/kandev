@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-persist-recovery-link", "03-render-recovery-link"]
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 04: Verify Actionable Error Links

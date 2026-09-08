@@ -27,16 +27,20 @@ export function computePopupMenuStyle(args: {
   const minLeft = args.viewport.offsetLeft + margin;
   const maxLeft = Math.max(minLeft, viewportRight - width - margin);
   const left = Math.min(Math.max(minLeft, args.position.x), maxLeft);
+  const minVerticalEdge = args.viewport.offsetTop + margin;
+  const maxVerticalEdge = Math.max(minVerticalEdge, viewportBottom - margin);
+  const requestedVerticalEdge =
+    args.placement === "above" ? args.position.y - margin : args.position.y + margin;
+  const verticalEdge = Math.min(Math.max(minVerticalEdge, requestedVerticalEdge), maxVerticalEdge);
   const availableHeight =
     args.placement === "above"
-      ? Math.max(0, args.position.y - args.viewport.offsetTop - margin * 2)
-      : Math.max(0, viewportBottom - args.position.y - margin * 2);
+      ? Math.max(0, verticalEdge - args.viewport.offsetTop - margin)
+      : Math.max(0, viewportBottom - verticalEdge - margin);
   const maxHeight = Math.min(MENU_HEIGHT, availableHeight);
-  const top = args.placement === "above" ? args.position.y - margin : args.position.y + margin;
   return {
     position: "fixed",
     left,
-    top,
+    top: verticalEdge,
     width,
     maxWidth: width,
     maxHeight,

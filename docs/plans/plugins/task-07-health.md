@@ -14,7 +14,7 @@ Poll each active/error plugin's health endpoint on an interval and drive the
 state machine (active↔error), flushing buffered events on recovery.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "State machine" health monitoring: every
+- Spec `docs/specs/plugins/requirements/plugins.md` → "State machine" health monitoring: every
   30s, `GET {base_url}{endpoints.health}` must return 200 within 5s; 3 consecutive
   failures → `error` + inbox item; next success → `active` + flush buffered events
   in order.

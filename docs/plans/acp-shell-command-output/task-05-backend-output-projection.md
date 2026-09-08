@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-e2e-and-verification"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 05: Backend Shell Output Projection

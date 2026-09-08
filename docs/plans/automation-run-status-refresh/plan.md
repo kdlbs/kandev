@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/automation-runs.md
+spec: docs/specs/office/requirements/automation-runs.md
 created: 2026-08-05
 status: building
 ---

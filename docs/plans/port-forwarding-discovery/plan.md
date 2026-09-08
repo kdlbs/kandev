@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/port-forwarding-discovery.md
+spec: docs/specs/ui/requirements/port-forwarding-discovery.md
 created: 2026-08-07
 status: complete
 ---

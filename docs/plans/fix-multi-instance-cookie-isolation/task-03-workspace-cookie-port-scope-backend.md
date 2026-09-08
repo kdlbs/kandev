@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-shared-port-cookie-helper"]
 plan: "plan.md"
-spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
+spec: "../../specs/auth/requirements/fix-multi-instance-cookie-isolation.md"
 ---
 
 # Task 03: Port-scope workspace cookie reads (backend)

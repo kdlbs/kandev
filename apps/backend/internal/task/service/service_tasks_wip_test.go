@@ -21,6 +21,10 @@ func (r fixedStartStepResolver) ResolveFirstStep(context.Context, string) (strin
 	return r.stepID, nil
 }
 
+func (r fixedStartStepResolver) ResolveAutoStartStep(context.Context, string) (string, error) {
+	return r.stepID, nil
+}
+
 func TestCreateTask_QueuesFullWIPStepWithoutFeeder(t *testing.T) {
 	svc, events, repo := createTestService(t)
 	ctx := context.Background()

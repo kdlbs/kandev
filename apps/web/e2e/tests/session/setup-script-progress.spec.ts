@@ -37,24 +37,24 @@ test.describe("Setup script progress UX", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // Slow `git fetch` (worktree sync step) to keep the prepare panel reliably
-    // expanded while the page mounts and the WS subscribes — without this the
-    // whole prepare can finish before the client is listening, so events are
-    // missed and the running state is never observed. Same shim pattern as
-    // `long-prepare-panels.spec.ts`. The final `prepare.completed` payload
-    // carries all captured stdout, so the streaming assertion is still valid
-    // even if the page races past the per-progress events.
-    const delayFile = path.join(backend.tmpDir, "git-delay-ms");
+    // Gate the preceding fetch until the browser subscribes, then hold the
+    // setup script so its preparing state and streamed output stay observable.
+    const gateID = Date.now();
+    const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
+    const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);
+    const gitReleaseFile = path.join(backend.tmpDir, `git-release-${gateID}`);
+    const startedFile = path.join(backend.tmpDir, `setup-started-${gateID}`);
+    const releaseFile = path.join(backend.tmpDir, `setup-release-${gateID}`);
     let profile: { id: string } | null = null;
     try {
-      // Inside the try so the finally always cleans up — if profile creation
-      // throws after the shim is written, leaving the delay file behind would
-      // contaminate every other test in this worker.
-      fs.writeFileSync(delayFile, "5000");
-
+      fs.writeFileSync(
+        gitGateFile,
+        JSON.stringify({ startedFile: gitStartedFile, releaseFile: gitReleaseFile }),
+      );
       const setupScript = [
         "echo '[setup] installing deps'",
-        "sleep 1",
+        `touch '${startedFile}'`,
+        `while [ ! -f '${releaseFile}' ]; do sleep 0.1; done`,
         "echo '[setup] ready'",
       ].join("; ");
       profile = await createWorktreeProfileWithScript(
@@ -80,6 +80,20 @@ test.describe("Setup script progress UX", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
 
+      await expect
+        .poll(() => fs.existsSync(gitStartedFile), {
+          message: "repository preparation should reach its deterministic git gate",
+          timeout: 45_000,
+        })
+        .toBe(true);
+      fs.writeFileSync(gitReleaseFile, "release");
+      await expect
+        .poll(() => fs.existsSync(startedFile), {
+          message: "setup script should reach its deterministic test gate",
+          timeout: 45_000,
+        })
+        .toBe(true);
+
       // Panel appears inline in the chat, expanded while running.
       const panel = testPage.getByTestId("prepare-progress-panel");
       await expect(panel).toBeVisible({ timeout: 15_000 });
@@ -90,17 +104,25 @@ test.describe("Setup script progress UX", () => {
       // Setup script output reaches the expanded step list — either streamed
       // in real time or captured from the final `prepare.completed` payload.
       await expect(panel).toContainText("[setup] installing deps", { timeout: 30_000 });
+      fs.writeFileSync(releaseFile, "release");
 
       // On clean success the panel stays visible but auto-collapses.
       await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
       await expect(panel).toHaveAttribute("data-expanded", "false");
     } finally {
-      if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
+      // Always release a setup process that is still waiting before teardown.
+      if (!fs.existsSync(gitReleaseFile)) fs.writeFileSync(gitReleaseFile, "release");
+      if (!fs.existsSync(releaseFile)) fs.writeFileSync(releaseFile, "release");
       if (profile) {
         await apiClient.deleteExecutorProfile(profile.id).catch(() => {
           // Profile may already be deleted if the test tore down mid-run.
         });
       }
+      if (fs.existsSync(gitGateFile)) fs.unlinkSync(gitGateFile);
+      if (fs.existsSync(gitStartedFile)) fs.unlinkSync(gitStartedFile);
+      if (fs.existsSync(gitReleaseFile)) fs.unlinkSync(gitReleaseFile);
+      if (fs.existsSync(startedFile)) fs.unlinkSync(startedFile);
+      if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
     }
   });
 

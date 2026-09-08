@@ -6,7 +6,7 @@ wave: 10
 depends_on:
   - "12-custom-bundle-contracts"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 13: On-demand ACP collection

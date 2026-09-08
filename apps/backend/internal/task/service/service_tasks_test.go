@@ -48,6 +48,67 @@ func TestPrepareAutoTitleRejectsOfficeRequests(t *testing.T) {
 	}
 }
 
+func TestPrepareAutoTitleQuickChatPreservesProvisionalTitleWithoutPrompt(t *testing.T) {
+	req := &CreateTaskRequest{
+		Title:       "Agent A - Chat 1",
+		AutoTitle:   true,
+		IsEphemeral: true,
+	}
+
+	if err := prepareAutoTitle(req); err != nil {
+		t.Fatalf("prepare quick chat auto title: %v", err)
+	}
+	if req.Title != "Agent A - Chat 1" {
+		t.Fatalf("title = %q, want provisional title", req.Title)
+	}
+	if !models.IsAgentTitlePending(req.Metadata) {
+		t.Fatalf("metadata = %#v, want pending agent title", req.Metadata)
+	}
+}
+
+func TestPrepareAutoTitleExcludesConfigRequests(t *testing.T) {
+	req := &CreateTaskRequest{
+		Title:       "Config Chat",
+		AutoTitle:   true,
+		IsEphemeral: true,
+		Metadata:    map[string]interface{}{"config_mode": true},
+	}
+
+	if err := prepareAutoTitle(req); err != nil {
+		t.Fatalf("prepare config auto title: %v", err)
+	}
+	if req.Title != "Config Chat" {
+		t.Fatalf("title = %q, want config title", req.Title)
+	}
+	if models.IsAgentTitlePending(req.Metadata) {
+		t.Fatalf("metadata = %#v, config request must not become title-pending", req.Metadata)
+	}
+}
+
+func TestCreateTaskQuickChatAutoTitlePersistsProvisionalTitleWithoutPrompt(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-quick-auto-title", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-quick-auto-title",
+		Title:       "Agent A - Chat 1",
+		AutoTitle:   true,
+		IsEphemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("create quick chat: %v", err)
+	}
+	if taskResult.Task.Title != "Agent A - Chat 1" {
+		t.Fatalf("title = %q, want provisional title", taskResult.Task.Title)
+	}
+	if !models.IsAgentTitlePending(taskResult.Task.Metadata) {
+		t.Fatalf("metadata = %#v, want pending agent title", taskResult.Task.Metadata)
+	}
+}
+
 func TestCreateTaskAutoTitlePersistsPendingMarker(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

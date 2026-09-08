@@ -1,7 +1,7 @@
 ---
 status: done
 plan: "./plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 wave: 1
 parallel-safe: no
 parallelism: sequential

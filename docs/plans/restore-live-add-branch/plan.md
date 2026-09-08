@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/attach-workspace-sources.md
+spec: docs/specs/tasks/system-design/attach-workspace-sources.md
 decision: docs/decisions/2026-07-27-legacy-add-branch-live-rescan.md
 created: 2026-07-27
 status: completed

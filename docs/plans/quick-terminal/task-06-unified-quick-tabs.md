@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["05-detachable-pty-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 06: Unify Quick Chat and terminal tabs

@@ -61,7 +61,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
 
   const wrappedDelete = useCallback(
     async (w: JiraIssueWatch) => {
-      if (!confirm(t("jira:deleteThisJiraWatcher"))) return;
       try {
         await remove(w.id, w.workspaceId);
         toast({ description: t("jira:watcherDeleted"), variant: "success" });

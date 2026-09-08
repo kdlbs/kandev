@@ -64,7 +64,7 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
           <span className="text-sm text-muted-foreground">{t("office:agentSessionEnded")}</span>
         </div>
       )}
-      <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} />
+      <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} task={task} />
     </div>
   );
 }

@@ -5,7 +5,7 @@ status: completed
 wave: 3e
 depends_on: ["12d-host-native-task-link-parity"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 decision: "../../decisions/2026-08-06-plugin-code-host-dashboard-parity.md"
 ---
 

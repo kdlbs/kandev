@@ -5,7 +5,7 @@ status: pending
 wave: 9
 depends_on: ["11-mobile-parity"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 12: Mock-agent review scenario and Playwright E2E

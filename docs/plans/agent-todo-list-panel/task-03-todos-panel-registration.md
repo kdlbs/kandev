@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-frontend-settings-plumbing"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 03: Todos panel registration and rendering

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-transcript-threshold-and-controls"]
 plan: "plan.md"
-spec: "../../specs/last-prompt-pinning-regressions/spec.md"
+spec: "../../specs/ui/requirements/last-prompt-pinning-regressions.md"
 ---
 
 # Task 02: Measure pinned prompt overflow

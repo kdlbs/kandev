@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/multi-branch/spec.md
+spec: docs/specs/tasks/requirements/multi-branch.md
 created: 2026-07-22
 status: completed
 ---

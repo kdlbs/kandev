@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/review-markdown-preview.md
+spec: docs/specs/ui/requirements/review-markdown-preview.md
 created: 2026-07-29
 status: done
 ---

@@ -8,7 +8,7 @@ depends_on:
   - "02-backend-locale-negotiation"
   - "03-catalog-parity-gate"
 plan: "plan.md"
-spec: "../../specs/platform/i18n.md"
+spec: "../../specs/platform/requirements/i18n.md"
 ---
 
 # Task 04: Chinese locale E2E

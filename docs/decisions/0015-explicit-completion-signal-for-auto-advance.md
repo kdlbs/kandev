@@ -139,4 +139,4 @@ Frontend:
 - `apps/web/lib/types/http.ts` *(extend `WorkflowStep`)*
 - `apps/web/lib/state/slices/` *(transitional state for "completion pending")*
 
-Spec: `docs/specs/workflow/explicit-completion-signal/spec.md` *(to be written via `/spec` once this ADR is accepted)*
+Spec: `docs/specs/tasks/requirements/workflow-explicit-completion-signal.md`

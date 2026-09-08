@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-runtime-inventory", "02-task-cleanup-ordering", "03-agentctl-process-group-shutdown", "04-startup-reconciliation"]
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 05: Verification and Doc Sync
@@ -27,7 +27,7 @@ make -C apps/backend build
 
 ## Files likely touched
 
-- `docs/specs/tasks/runtime-cleanup.md`
+- `docs/specs/tasks/system-design/runtime-cleanup.md`
 - `docs/decisions/0025-runtime-cleanup-uses-executors-running.md`
 - `docs/plans/task-runtime-cleanup/plan.md`
 - `apps/backend/AGENTS.md`

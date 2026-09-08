@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/context-compaction-count/spec.md
+spec: docs/specs/ui/requirements/context-compaction-count.md
 created: 2026-08-02
 status: complete
 ---

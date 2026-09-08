@@ -20,6 +20,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -58,7 +59,7 @@ type sshSessionState struct {
 // Each session owns its own *ssh.Client (no shared pool). One SSH connection
 // per session keeps teardown simple — closing the executor instance closes
 // the client — at the cost of an extra TCP+handshake per session on the same
-// host. See docs/specs/ssh-executor/spec.md for the full design.
+// host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
 	agentctlResolver *AgentctlResolver
 	secretStore      secrets.SecretStore
@@ -232,17 +233,33 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, err := r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
-	if err != nil {
-		return nil, err
-	}
-	r.maybeUploadCredentials(baseCtx, client, req, platform)
-	if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
-		return nil, err
+	taskDir := ""
+	if req.WorkspaceReuseRequired {
+		// A sibling SSH execution gets its own agentctl/session directory, but
+		// must use the already materialized task directory verbatim. In
+		// particular it must not run the remote prepare script or checkout
+		// verification, either of which can mutate an active shared checkout.
+		taskDir, err = reuseRequiredRemoteTaskDir(req)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
+		if err != nil {
+			return nil, err
+		}
+		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
+			return nil, err
+		}
 	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
 	defer launchCancel()
-	if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+	if !req.WorkspaceReuseRequired {
+		if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+			return nil, err
+		}
+	} else if err := ensureReuseRequiredRemoteTaskDirExists(launchCtx, client, taskDir); err != nil {
 		return nil, err
 	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
@@ -277,6 +294,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
 }
 
+func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	return taskDir, nil
+}
+
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
 	if req == nil || hasManagedGitHubBrokerEnv(req.Env) {
 		return nil, false
@@ -304,7 +332,7 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 			return nil, err
 		}
 		input := strings.NewReader(envScript)
-		wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+command)
+		wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+command)
 		stdout, stderr, err := runSSHCommandStdin(ctx, client, wrapped, input)
 		return []byte(stdout + stderr), err
 	})
@@ -607,8 +635,8 @@ func (r *SSHExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, 
 // port forward to the recorded remote agentctl port, verifies /health, and
 // updates the request's metadata so CreateInstance-style state is consistent.
 //
-// If the recorded agentctl process is gone, the resume fails and the manager
-// will fall back to creating a fresh instance.
+// If the recorded agentctl process is confirmed gone, stale runtime metadata
+// is cleared so the manager's normal create step starts a fresh instance.
 func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCreateRequest) error {
 	pidStr := getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPID)
 	portStr := getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort)
@@ -658,10 +686,20 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
 	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
 	// host-local check here (#1597 runtime-aware liveness).
-	pid, _ := strconv.Atoi(pidStr)
-	if !isRemoteAgentctlAlive(ctx, client, pid) {
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
 		_ = client.Close()
-		return fmt.Errorf("ssh resume: agentctl pid %d not alive on remote", pid)
+		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
+	}
+	alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
+	if err != nil {
+		_ = client.Close()
+		return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
+	}
+	if !alive {
+		_ = client.Close()
+		clearSSHResumeRuntimeMetadata(req.Metadata)
+		return nil
 	}
 
 	remotePort, _ := strconv.Atoi(portStr)
@@ -925,7 +963,7 @@ func (r *SSHExecutor) preflightAgentBinary(
 		return nil
 	}
 
-	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	cmd := buildRemotePreflightAgentCommand(req)
 	args := cmd.Args()
 	if len(args) == 0 {
 		return nil
@@ -943,6 +981,16 @@ func (r *SSHExecutor) preflightAgentBinary(
 	}
 	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
 	return nil
+}
+
+func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command {
+	if req == nil || req.AgentConfig == nil {
+		return agents.Command{}
+	}
+	return req.AgentConfig.BuildCommand(agents.CommandOptions{
+		Runtime:               agentruntime.RuntimeSSH,
+		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+	})
 }
 
 // probeNativeBinary probes the remote for the agent's standalone CLI (if it

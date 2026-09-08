@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-task-surfaces"]
 plan: "plan.md"
-spec: "../../specs/ui/port-forwarding-discovery.md"
+spec: "../../specs/ui/requirements/port-forwarding-discovery.md"
 ---
 
 # Task 04: Port-forwarding coverage

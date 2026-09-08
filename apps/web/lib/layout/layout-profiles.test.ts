@@ -10,6 +10,7 @@ import {
   getBuiltInLayoutOverride,
   getBuiltInLayoutOverrideId,
   getBuiltInLayoutProfile,
+  getLayoutProfileIdentity,
   getLayoutProfileCompatibility,
   isBuiltInLayoutOverride,
   renameLayoutProfile,
@@ -293,6 +294,16 @@ describe("layout profile defaults", () => {
 });
 
 describe("layout profile IDs", () => {
+  it("maps reserved overrides to their built-in identity", () => {
+    expect(getLayoutProfileIdentity({ id: getBuiltInLayoutOverrideId(DEFAULT_LAYOUT_ID) })).toEqual(
+      { kind: "built-in", id: DEFAULT_LAYOUT_ID },
+    );
+    expect(getLayoutProfileIdentity({ id: "layout-copied-default" })).toEqual({
+      kind: "custom",
+      id: "layout-copied-default",
+    });
+  });
+
   it("uses UUID-backed IDs", () => {
     const first = createLayoutProfileId();
     const second = createLayoutProfileId();

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/automations-pr-merged-trigger/spec.md"
+spec: "../../specs/office/requirements/automations-pr-merged-trigger.md"
 ---
 
 # Task 01: Repair Event Delivery and Startup

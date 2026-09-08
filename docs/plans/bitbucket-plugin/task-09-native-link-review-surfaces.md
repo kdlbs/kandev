@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-design-package", "04-frontend-plugin-registry"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 09: Native Link and review surfaces

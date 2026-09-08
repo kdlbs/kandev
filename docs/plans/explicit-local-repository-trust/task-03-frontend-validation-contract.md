@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-explicit-path-contract", "02-identity-bound-git-operations"]
 plan: "plan.md"
-spec: "../../specs/workspaces/local-repositories.md"
+spec: "../../specs/workspaces/requirements/local-repositories.md"
 ---
 
 # Task 03: Frontend Validation Contract

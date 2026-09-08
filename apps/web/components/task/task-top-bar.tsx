@@ -5,7 +5,7 @@ import Link from "@/components/routing/app-link";
 import { IconBug, IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageTopbar, type ParentCrumb } from "@/components/page-topbar";
 import { useOfficeProject } from "@/hooks/use-office-workspace-data";
 import { TaskTopBarTitle } from "@/components/task/task-top-bar-title";
 import { EditorsMenu } from "@/components/task/editors-menu";
@@ -20,6 +20,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
+import { TaskAssigneeControl } from "@/components/task/task-assignee-control";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
@@ -31,6 +32,8 @@ type TaskTopBarProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
@@ -45,12 +48,15 @@ type TaskTopBarProps = {
   remoteExecutorType?: string | null;
   officeTaskHref?: string | null;
   onTaskUnarchived?: (taskId: string) => void;
+  onMoveStart?: () => void;
+  onMoveError?: (error: unknown) => void;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
   taskId,
   activeSessionId,
   taskTitle,
+  repositoryLabel,
   showDebugOverlay,
   onToggleDebugOverlay,
   workflowSteps,
@@ -65,6 +71,8 @@ const TaskTopBar = memo(function TaskTopBar({
   remoteExecutorType,
   officeTaskHref,
   onTaskUnarchived,
+  onMoveStart,
+  onMoveError,
 }: TaskTopBarProps) {
   const { t } = useTranslation();
   // Projects only exist for office-owned tasks, so kanban-mode tasks render no
@@ -72,6 +80,7 @@ const TaskTopBar = memo(function TaskTopBar({
   const project = useOfficeProject(projectId);
   const showExecutorSettings =
     !isArchived && shouldShowExecutorEnvironmentControls(remoteExecutorType);
+  const parents = buildTaskCrumbs(project, repositoryLabel);
   return (
     <PageTopbar
       testId="task-topbar"
@@ -79,9 +88,7 @@ const TaskTopBar = memo(function TaskTopBar({
       // name and the measured width never diverge from what is shown.
       title={taskTitle ?? t("task:taskDetails")}
       titleSlot={<TaskTopBarTitle taskId={taskId} taskTitle={taskTitle} isArchived={isArchived} />}
-      parents={
-        project ? [{ label: project.name, href: `/office/projects/${project.id}` }] : undefined
-      }
+      parents={parents}
       // This bar is desktop-only (the mobile session bar owns phones), so the
       // phone-only home crumb and status trigger have no surface here.
       homeAffordance="none"
@@ -99,6 +106,8 @@ const TaskTopBar = memo(function TaskTopBar({
             taskId={taskId ?? null}
             workflowId={workflowId ?? null}
             isArchived={isArchived}
+            onMoveStart={onMoveStart}
+            onMoveError={onMoveError}
           />
         ) : undefined
       }
@@ -124,6 +133,25 @@ const TaskTopBar = memo(function TaskTopBar({
     />
   );
 });
+
+/**
+ * Ancestry crumbs for the open task: its office project (when it has one) and
+ * then its repository, closest to the title. The repository crumb carries no
+ * `href` on purpose: it orients ("this task is in kdlbs/kandev") rather than
+ * navigating, since there is no repository route to land on.
+ *
+ * A multi-repository task names its primary repository only, which is the same
+ * one the rest of the page (branch pickers, Changes) treats as primary.
+ */
+function buildTaskCrumbs(
+  project: { id: string; name: string } | null | undefined,
+  repositoryLabel: string | null | undefined,
+): ParentCrumb[] | undefined {
+  const crumbs: ParentCrumb[] = [];
+  if (project) crumbs.push({ label: project.name, href: `/office/projects/${project.id}` });
+  if (repositoryLabel) crumbs.push({ label: repositoryLabel });
+  return crumbs.length > 0 ? crumbs : undefined;
+}
 
 // IssueTrackerButtons picks the right ticket status button for a task whose
 // title already carries an external issue key. Jira and Linear use the same
@@ -384,6 +412,9 @@ function TopBarRight({
           </Button>
         </TopbarCluster>
       )}
+      <TopbarCluster label={t("task:assignedTo")} className="[&_button]:h-7 [&_button]:text-xs">
+        <TaskAssigneeControl taskId={taskId} workspaceId={workspaceId} isArchived={isArchived} />
+      </TopbarCluster>
       <AttentionStatusGroup
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -410,6 +441,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "remote_docker":
     case "sprites":
     case "ssh":
+    case "k8s":
       return true;
     default:
       return false;

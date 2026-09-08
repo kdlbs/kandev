@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-layout-profiles.md
+spec: docs/specs/ui/requirements/task-layout-profiles.md
 created: 2026-07-28
 status: completed
 ---
@@ -107,5 +107,5 @@ cd apps/web && pnpm run typecheck
 ## Documentation Impact
 
 No public documentation changes are required. The affected internal product
-spec is updated in `docs/specs/ui/task-layout-profiles.md`. This is a local
+spec is updated in `docs/specs/ui/requirements/task-layout-profiles.md`. This is a local
 layout-persistence repair, so no ADR is warranted.

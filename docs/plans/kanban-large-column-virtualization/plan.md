@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/adaptive-kanban.md
+spec: docs/specs/ui/requirements/adaptive-kanban.md
 created: 2026-08-21
 status: complete
 issue: https://github.com/kdlbs/kandev/issues/2893

@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-preserve-resume-token"
 plan: "plan.md"
-spec: "../../specs/agent-resume-runtime-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-resume-runtime-recovery.md"
 ---
 
 # Task 02: Transition resume state before credential issuance

@@ -180,7 +180,7 @@ func TestApplyEngineTransitionRejectsTargetProfileBeforePersistingStep(t *testin
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
-		workflowStore: newWorkflowStore(repo, steps, agentMgr, noopPublisher, log),
+		workflowStore: newWorkflowStore(repo, steps, agentMgr, noopPublisher, log, &operationLedger{}),
 	}
 
 	applied := svc.applyEngineTransition(ctx, "t1", session, engine.HandleResult{
@@ -250,7 +250,7 @@ func TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmi
 	}
 	target := &models.TaskSession{
 		ID: "s-target", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-ssh",
-		ExecutorProfileID: "ep-token", State: models.TaskSessionStateCompleted,
+		ExecutorProfileID: "ep-token", State: models.TaskSessionStateWaitingForInput,
 		StartedAt: now.Add(-time.Minute), UpdatedAt: now,
 	}
 	if err := repo.CreateTaskSession(ctx, current); err != nil {

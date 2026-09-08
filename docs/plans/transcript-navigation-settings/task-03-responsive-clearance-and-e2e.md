@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-settings-ui-and-transcript-control"]
 plan: "plan.md"
-spec: "../../specs/ui/transcript-navigation-settings.md"
+spec: "../../specs/ui/requirements/transcript-navigation-settings.md"
 ---
 
 # Task 03: Responsive Clearance and E2E

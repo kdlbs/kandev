@@ -15,6 +15,15 @@ Review the current changes in the codebase (Go backend + Vite/React SPA monorepo
 
 Start from intent and evidence: read the spec/task first when available, then changed tests before production code. Tests reveal the expected behavior and whether the change is actually verified.
 
+### Architecture discussion gate
+
+For a large architectural change, verify the authenticated actor's repository
+permission before the PR opens. Maintainers and collaborators with `push`,
+`maintain`, or `admin` permission may proceed without a linked issue. For an
+actor without write access, require a linked issue with maintainer discussion;
+if the issue or discussion is missing, report a blocker. Prefer one logical
+change and a small diff because this limits risk and maintainer burden.
+
 ## Available skills
 
 - **`/tdd`** — Recommend when flagging untested logic. The author can use this to add tests.

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-defer-retained-rotation", "02-close-missing-payload"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 03: Update Operator Documentation

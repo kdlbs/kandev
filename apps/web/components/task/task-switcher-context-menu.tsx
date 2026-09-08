@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, isValidElement, useRef, useState } from "react";
+import { cloneElement, isValidElement, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCopy,
@@ -23,6 +23,8 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import {
   TaskPluginLinkMenu,
@@ -37,6 +39,8 @@ import {
 } from "./task-switcher-action-items";
 import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskPluginPrimaryMenuItems } from "./task-switcher-plugin-menu-items";
+import { useTaskSwitcherArchiveConfirmation } from "./task-switcher-archive-confirmation";
+import { TaskPriorityContextMenu } from "./task-priority-context-menu";
 export type { StepDef } from "./task-switcher-types";
 export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
@@ -45,10 +49,10 @@ type ContextMenuProps = TaskLinkHandlers & {
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
-  children: React.ReactElement<{ menuOpen?: boolean }>;
+  children: React.ReactElement<{ menuOpen?: boolean; archiveConfirmation?: ReactNode }>;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
+  onArchiveTask?: (taskId: string, opts?: { cascade?: boolean }) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
@@ -57,6 +61,7 @@ type ContextMenuProps = TaskLinkHandlers & {
   isPinned?: boolean;
   pinnedTaskIds?: string[];
   isDeleting?: boolean;
+  isArchiving?: boolean;
   /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
   selectedTaskIds?: Set<string>;
   onBulkArchive?: (taskIds: string[]) => void;
@@ -154,37 +159,10 @@ function useMenuTouchDragCancel(onOpenChange: (open: boolean) => void) {
   };
 }
 
-export function TaskItemWithContextMenu({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  children,
-  onEditTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  pinnedTaskIds,
-  isDeleting,
-  selectedTaskIds,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-}: ContextMenuProps) {
+// This component coordinates the context menu and drag cancellation. Archive
+// state lives in its focused adapter so unavailable actions stay unavailable.
+export function TaskItemWithContextMenu(props: ContextMenuProps) {
+  const { children, ...menuProps } = props;
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
@@ -193,11 +171,24 @@ export function TaskItemWithContextMenu({
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const archive = useTaskSwitcherArchiveConfirmation({
+    task: menuProps.task,
+    onArchiveTask: menuProps.onArchiveTask,
+    isArchiving: menuProps.isArchiving,
+    closeMenu,
+  });
+  const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
+  const inlineArchiveConfirmation = isFinePointer ? undefined : archiveConfirmation;
+  const portaledArchiveConfirmation = isFinePointer ? archiveConfirmation : undefined;
 
   return (
     <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
       <ContextMenuTrigger asChild>
-        <div {...triggerProps}>{cloneWithMenuOpen(children, contextOpen)}</div>
+        <div ref={archive.archiveAnchorRef} tabIndex={-1} {...triggerProps}>
+          {cloneWithMenuOpen(children, contextOpen, inlineArchiveConfirmation)}
+          {portaledArchiveConfirmation}
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-48"
@@ -214,34 +205,8 @@ export function TaskItemWithContextMenu({
         onClick={(event) => event.stopPropagation()}
       >
         <TaskContextMenuItems
-          task={task}
-          workflows={workflows}
-          stepsByWorkflowId={stepsByWorkflowId}
-          steps={steps}
-          onEditTask={onEditTask}
-          onRenameTask={onRenameTask}
-          onArchiveTask={onArchiveTask}
-          onCreateSubtask={onCreateSubtask}
-          onDeleteTask={onDeleteTask}
-          onDetachTask={onDetachTask}
-          onLinkPullRequest={onLinkPullRequest}
-          onLinkIssue={onLinkIssue}
-          onLinkMergeRequest={onLinkMergeRequest}
-          onLinkJiraTicket={onLinkJiraTicket}
-          onLinkLinearIssue={onLinkLinearIssue}
-          onLinkSentryIssue={onLinkSentryIssue}
-          onMoveToStep={onMoveToStep}
-          onTogglePin={onTogglePin}
-          isPinned={isPinned}
-          pinnedTaskIds={pinnedTaskIds}
-          isDeleting={isDeleting}
-          selectedTaskIds={selectedTaskIds}
-          onBulkArchive={onBulkArchive}
-          onBulkDelete={onBulkDelete}
-          onBulkPin={onBulkPin}
-          onBulkMove={onBulkMove}
-          onClearSelection={onClearSelection}
-          isMixedWorkflowSelection={isMixedWorkflowSelection}
+          {...menuProps}
+          onArchiveTask={archive.requestArchive}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
         />
@@ -293,6 +258,7 @@ function SingleSelectionMenuItems({
   onTogglePin,
   isPinned,
   isDeleting,
+  isArchiving,
   onBulkArchive,
   onBulkMove,
   onClearSelection,
@@ -304,6 +270,7 @@ function SingleSelectionMenuItems({
   ...linkHandlers
 }: TaskContextMenuItemsProps & { actingIds: string[]; actingOnSelection: boolean }) {
   const { t } = useTranslation();
+  const updateTaskPriority = useUpdateTaskPriority();
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
   const onDelete = withSelectionClear(actingOnSelection, onClearSelection, onDeleteTask);
@@ -317,6 +284,13 @@ function SingleSelectionMenuItems({
         onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
       />
       <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      {!task.isArchived && (
+        <TaskPriorityContextMenu
+          currentPriority={task.priority}
+          disabled={isDeleting}
+          onSelect={(priority) => void updateTaskPriority(task.id, priority)}
+        />
+      )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       {!task.isArchived && (
@@ -329,11 +303,17 @@ function SingleSelectionMenuItems({
         taskId={task.id}
         actingIds={actingIds}
         actingOnSelection={actingOnSelection}
-        disabled={isDeleting}
+        disabled={isDeleting || isArchiving}
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
       />
-      {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
+      {!task.isArchived && (
+        <TaskColorMenu
+          taskId={task.id}
+          disabled={isDeleting}
+          automaticColorSource={task.automaticColorSource}
+        />
+      )}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskPluginPrimaryMenuItems task={task} disabled={isDeleting} />
       <TaskPluginLinkMenu
@@ -459,10 +439,11 @@ function BulkSelectionMenuItems({
 }
 
 function cloneWithMenuOpen(
-  children: React.ReactElement<{ menuOpen?: boolean }>,
+  children: React.ReactElement<{ menuOpen?: boolean; archiveConfirmation?: ReactNode }>,
   menuOpen: boolean,
+  archiveConfirmation?: ReactNode,
 ): React.ReactNode {
-  if (isValidElement(children)) return cloneElement(children, { menuOpen });
+  if (isValidElement(children)) return cloneElement(children, { menuOpen, archiveConfirmation });
   return children;
 }
 

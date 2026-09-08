@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-duplication/spec.md
+spec: docs/specs/tasks/requirements/workflow-duplication.md
 created: 2026-08-11
 status: complete
 ---

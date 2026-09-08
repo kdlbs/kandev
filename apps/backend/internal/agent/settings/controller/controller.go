@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
@@ -13,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
@@ -61,26 +61,30 @@ var (
 )
 
 type Controller struct {
-	repo                       store.Repository
-	discovery                  *discovery.Registry
-	agentRegistry              *registry.Registry
-	sessionChecker             SessionChecker
-	watcherDeps                WatcherDependencyChecker
-	routingTierDeps            RoutingTierDependencyChecker
-	automationDeps             AutomationDependencyChecker
-	utilityDeps                UtilityDependencyChecker
-	mcpService                 *mcpconfig.Service
-	modelCache                 *modelfetcher.Cache
-	hostUtility                hostUtilityProvider
-	jobStore                   *JobStore
-	updateJobStore             *AgentUpdateJobStore
-	runtimeUpdater             RuntimeUpdater
-	managedRuntimeSelections   managedruntime.SelectionStore
-	maintenance                *maintenanceCoordinator
-	hub                        JobBroadcaster
-	logger                     *logger.Logger
-	secretStore                secrets.SecretStore
-	dynamicAgentRoutingEnabled bool
+	repo                        store.Repository
+	discovery                   *discovery.Registry
+	agentRegistry               *registry.Registry
+	sessionChecker              SessionChecker
+	watcherDeps                 WatcherDependencyChecker
+	routingTierDeps             RoutingTierDependencyChecker
+	automationDeps              AutomationDependencyChecker
+	utilityDeps                 UtilityDependencyChecker
+	mcpService                  *mcpconfig.Service
+	hostUtility                 hostUtilityProvider
+	jobStore                    *JobStore
+	updateJobStore              *AgentUpdateJobStore
+	runtimeUpdater              RuntimeUpdater
+	managedRuntimeSelections    managedruntime.SelectionStore
+	maintenance                 *maintenanceCoordinator
+	hub                         JobBroadcaster
+	logger                      *logger.Logger
+	secretStore                 secrets.SecretStore
+	runtimeUpdateStatusMu       sync.Mutex
+	runtimeUpdateStatusCache    map[string]runtimeUpdateStatusCacheEntry
+	runtimeUpdateStatusNow      func() time.Time
+	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
+	runtimeUpdateStatusLookup   chan struct{}
+	dynamicAgentRoutingEnabled  bool
 }
 
 // SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the
@@ -245,13 +249,15 @@ type hostUtilityProvider interface {
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
-		repo:           repo,
-		discovery:      discoveryRegistry,
-		agentRegistry:  agentRegistry,
-		sessionChecker: sessionChecker,
-		mcpService:     mcpconfig.NewService(repo),
-		modelCache:     modelfetcher.NewCache(),
-		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
+		repo:                      repo,
+		discovery:                 discoveryRegistry,
+		agentRegistry:             agentRegistry,
+		sessionChecker:            sessionChecker,
+		mcpService:                mcpconfig.NewService(repo),
+		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
+		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
+		runtimeUpdateStatusNow:    time.Now,
+		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
 	}
 }
 
@@ -339,6 +345,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.BroadcastAvailableAgents,
 		c.managedRuntimeSelections,
 	)
+	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

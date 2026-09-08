@@ -1,5 +1,23 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { dwell } from "../../helpers/causal-waits";
+import type { ApiClient } from "../../helpers/api-client";
+
+async function waitForTaskSSHSession(apiClient: ApiClient, executorID: string, taskID: string) {
+  let row: Awaited<ReturnType<ApiClient["listSSHSessions"]>>[number] | undefined;
+  await expect
+    .poll(
+      async () => {
+        row = (await apiClient.listSSHSessions(executorID)).find(
+          (session) => session.task_id === taskID,
+        );
+        return row !== undefined;
+      },
+      { message: "wait for this task's SSH runtime row", timeout: 60_000 },
+    )
+    .toBe(true);
+  return row!;
+}
+
 /**
  * HTTP contract for GET /api/v1/ssh/executors/:id/sessions. Backs the
  * SSHSessionsCard table. Filtered to ssh-runtime ExecutorRunning rows for
@@ -98,20 +116,12 @@ test.describe("ssh sessions-endpoint contract", () => {
         executor_profile_id: seedData.sshExecutorProfileId,
       },
     );
-    await expect
-      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.executor_type ?? null, {
-        timeout: 60_000,
-      })
-      .toBe("ssh");
-
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const row = sessions.find((s) => s.task_id === task.id);
-    expect(row, "expected a session row for the just-launched task").toBeDefined();
-    expect(row!.host).toBe(seedData.sshTarget.host);
-    expect(row!.user).toBe(seedData.sshTarget.user);
-    expect(row!.remote_agentctl_port).toBeGreaterThan(0);
-    expect(row!.local_forward_port).toBeGreaterThan(0);
-    expect(row!.remote_task_dir).toMatch(/\/tasks\/[^/]+$/);
+    const row = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
+    expect(row.host).toBe(seedData.sshTarget.host);
+    expect(row.user).toBe(seedData.sshTarget.user);
+    expect(row.remote_agentctl_port).toBeGreaterThan(0);
+    expect(row.local_forward_port).toBeGreaterThan(0);
+    expect(row.remote_task_dir).toMatch(/\/tasks\/[^/]+$/);
   });
 
   // G4 — unknown executor id returns an empty list, not 404.
@@ -135,15 +145,7 @@ test.describe("ssh sessions-endpoint contract", () => {
         executor_profile_id: seedData.sshExecutorProfileId,
       },
     );
-    await expect
-      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.executor_type ?? null, {
-        timeout: 60_000,
-      })
-      .toBe("ssh");
-
-    const before = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const beforeRow = before.find((s) => s.task_id === task.id);
-    expect(beforeRow).toBeDefined();
+    const beforeRow = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     await dwell(
       2_000,
@@ -151,9 +153,7 @@ test.describe("ssh sessions-endpoint contract", () => {
       "the assertion below is that uptime_seconds grew, so real time has to pass between the two reads; the thing being waited for is the clock, not an app event",
     );
 
-    const after = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const afterRow = after.find((s) => s.task_id === task.id);
-    expect(afterRow).toBeDefined();
-    expect(afterRow!.uptime_seconds).toBeGreaterThanOrEqual(beforeRow!.uptime_seconds);
+    const afterRow = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
+    expect(afterRow.uptime_seconds).toBeGreaterThanOrEqual(beforeRow.uptime_seconds);
   });
 });

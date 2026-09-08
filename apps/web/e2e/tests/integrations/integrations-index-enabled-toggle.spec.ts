@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-// Covers docs/specs/integrations/enable-disable-toggle.md's index-page slider
+// Covers docs/specs/integrations/requirements/enable-disable-toggle.md's index-page slider
 // scenarios: every integration row has a working slider, toggling it never
 // navigates, and the toggle stays in sync with that integration's own
 // settings page (the shared per-workspace `useXEnabled` state).

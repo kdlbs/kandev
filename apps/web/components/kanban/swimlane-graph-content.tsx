@@ -27,6 +27,7 @@ import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export type SwimlaneGraphContentProps = {
   workflowId: string;
@@ -208,7 +209,7 @@ export async function moveTaskAcrossSwimlaneSteps({
         .getState()
         .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
     }
-    const message = error instanceof Error ? error.message : t("task:failedToMoveTask");
+    const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
     onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
   }
 }

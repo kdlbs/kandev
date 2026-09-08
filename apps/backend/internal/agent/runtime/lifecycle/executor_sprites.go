@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	spritesutil "github.com/kandev/kandev/internal/sprites"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type RemoteAuthAgentLister interface {
@@ -29,6 +32,39 @@ type RemoteAuthAgentLister interface {
 type spriteFileUploader struct {
 	sprite  *sprites.Sprite
 	runtime *SpritesExecutor
+}
+
+func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	filesystem := u.sprite.Filesystem()
+	reader, ok := filesystem.(interface {
+		ReadFileContext(context.Context, string) ([]byte, error)
+	})
+	if !ok {
+		return filesystem.ReadFile(path)
+	}
+	data, err := reader.ReadFileContext(ctx, path)
+	if err == nil {
+		return data, err
+	}
+	if isSpritesNotFound(err) {
+		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+	}
+	return data, err
+}
+
+func isSpritesNotFound(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") || strings.Contains(message, "http 404") || strings.Contains(message, "status 404")
 }
 
 func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {
@@ -122,6 +158,9 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if req.WorkspaceReuseRequired && !spritesShouldReconnect(req) {
+		return nil, fmt.Errorf("%w: missing canonical Sprite handle", models.ErrWorkspaceReuseUnsafe)
+	}
 	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
 		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
 	}
@@ -159,6 +198,9 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	sprite, err := r.stepCreateSprite(launchCtx, client, spriteName, reconnect, report)
 	if err != nil {
 		if reconnect && errors.Is(err, spritesutil.ErrSpriteNotFound) {
+			if req.WorkspaceReuseRequired {
+				return nil, fmt.Errorf("%w: existing Sprite workspace is unavailable", models.ErrWorkspaceReuseUnsafe)
+			}
 			oldName := spriteName
 			spriteName = r.fallbackToFreshSandbox(req, progressPlan, report, oldName)
 			reconnect = false
@@ -410,6 +452,9 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 		step.Output = output
 		report(spriteStepRunPrepareScript, step)
 	})
+	if projectSkillDir := spriteProjectSkillDir(req.Metadata); projectSkillDir != "" {
+		r.ensureSpriteGitExclude(ctx, sprite, projectSkillDir)
+	}
 	if err != nil {
 		completeStepError(&step, err.Error())
 		report(spriteStepRunPrepareScript, step)

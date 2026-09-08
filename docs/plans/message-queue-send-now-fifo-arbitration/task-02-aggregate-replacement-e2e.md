@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-fifo-send-now-arbitration"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-send-now.md"
+spec: "../../specs/ui/requirements/message-queue-send-now.md"
 ---
 
 # Task 02: Prove one aggregate replacement prompt

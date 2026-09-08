@@ -5,7 +5,7 @@ status: pending
 wave: 8
 depends_on: ["06-logical-session-integration", "08-dynamic-profile-settings"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 10: Office routing handoff

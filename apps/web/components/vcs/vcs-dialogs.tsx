@@ -53,10 +53,26 @@ export function useVcsDialogs() {
 type VcsDialogsProviderProps = {
   sessionId: string | null;
   baseBranch?: string;
+  pullRequestBaseBranch?: string;
+  pullRequestTargetsByRepository?: Record<string, string>;
   taskTitle?: string;
   displayBranch?: string | null;
   children: ReactNode;
 };
+
+export function resolvePullRequestBaseBranch(
+  selectedRepo: string | undefined,
+  targetsByRepository: Record<string, string> | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  if (!selectedRepo || !targetsByRepository) return fallback;
+  const direct = targetsByRepository[selectedRepo];
+  if (direct) return direct;
+  const selectedBase = selectedRepo.split(" · ")[0];
+  const baseTarget = targetsByRepository[selectedBase];
+  if (baseTarget) return baseTarget;
+  return fallback;
+}
 
 type FileSummary = { count: number; additions: number; deletions: number };
 
@@ -380,14 +396,23 @@ export function pickRepoLabel(
   return resolveDisplayName("") || t("integrations:repository");
 }
 
+// eslint-disable-next-line max-lines-per-function -- Coordinates the shared commit and change-request surfaces.
 function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
   baseBranch: string | undefined,
+  pullRequestBaseBranch: string | undefined,
+  pullRequestTargetsByRepository: Record<string, string> | undefined,
 ) {
   const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
+  const defaultPullRequestBaseBranch = pullRequestBaseBranch ?? baseBranch;
+  const effectivePullRequestBaseBranch = resolvePullRequestBaseBranch(
+    ps.repo,
+    pullRequestTargetsByRepository,
+    defaultPullRequestBaseBranch,
+  );
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
@@ -453,7 +478,7 @@ function useVcsDialogsState(
   }, [cs, gitWithFeedback, commit, t]);
   const handleCreatePR = useCreateChangeRequestHandler({
     dialog: ps,
-    baseBranch,
+    baseBranch: effectivePullRequestBaseBranch,
     createChangeRequest: createPR,
     defaultTerminology: changeRequestTerminology,
     supportsDraft,
@@ -473,6 +498,7 @@ function useVcsDialogsState(
     handleCommit,
     handleCreatePR,
     contextValue,
+    pullRequestBaseBranch: effectivePullRequestBaseBranch,
     repoDisplayName,
     isMultiRepo,
     changeRequestTerminology,
@@ -483,12 +509,20 @@ function useVcsDialogsState(
 export function VcsDialogsProvider({
   sessionId,
   baseBranch,
+  pullRequestBaseBranch,
+  pullRequestTargetsByRepository,
   taskTitle,
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
   const { t } = useTranslation();
-  const state = useVcsDialogsState(sessionId, taskTitle, baseBranch);
+  const state = useVcsDialogsState(
+    sessionId,
+    taskTitle,
+    baseBranch,
+    pullRequestBaseBranch,
+    pullRequestTargetsByRepository,
+  );
   const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
   const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName, t);
   const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName, t);
@@ -531,7 +565,7 @@ export function VcsDialogsProvider({
         onOpenChange={ps.setOpen}
         scopedRepo={effectivePRLabel}
         displayBranch={displayBranch}
-        baseBranch={baseBranch}
+        baseBranch={state.pullRequestBaseBranch}
         title={ps.title}
         onTitleChange={ps.setTitle}
         body={ps.body}

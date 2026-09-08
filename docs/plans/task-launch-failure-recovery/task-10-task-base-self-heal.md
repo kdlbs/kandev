@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-failure-taxonomy-contracts"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 10: Carry task-repository launch identity

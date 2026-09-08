@@ -35,11 +35,14 @@ type PullRequestInput struct {
 	ReviewState           string
 	ChecksState           string
 	MergeableState        string
+	MergeQueueState       string
 	UnresolvedReviewCount int
 	PendingReviewCount    int
 	RequiredReviews       int
 	ChecksTotal           int
 	ChecksPassing         int
+	AutoFixEnabled        bool
+	AutoMergeEnabled      bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from
@@ -112,7 +115,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	for _, git := range input.Git {
 		repository := strings.TrimSpace(git.Repository)
 		if repository == "" {
-			repository = "default"
+			repository = RootRepositoryKey
 		}
 		state.git[repository] = git.Summary
 	}
@@ -137,8 +140,9 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.Details = truncateString(copy.Details, MaxActiveErrorDetailsBytes)
 	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
-	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+	copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}

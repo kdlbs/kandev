@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/port-forwarding-discovery.md"
+spec: "../../specs/ui/requirements/port-forwarding-discovery.md"
 ---
 
 # Task 01: Backend preference contract

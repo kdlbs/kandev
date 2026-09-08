@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/command-panel-sidebar-task-reveal.md
+spec: docs/specs/ui/requirements/command-panel-sidebar-task-reveal.md
 created: 2026-08-05
 status: implemented
 ---

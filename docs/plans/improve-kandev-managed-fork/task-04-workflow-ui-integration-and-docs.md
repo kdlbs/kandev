@@ -5,7 +5,7 @@ status: complete
 wave: 4
 depends_on: ["03-runtime-credentials-and-fork-routing"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 04: Workflow, UI, Integration, and Docs

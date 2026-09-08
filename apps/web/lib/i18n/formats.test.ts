@@ -1,9 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { formatDate, formatNumber, formatRelative, formatRelativeTime } from "./formats";
+import {
+  formatDate,
+  formatNumber,
+  formatRelative,
+  formatRelativeTime,
+  formatSidebarElapsedTime,
+} from "./formats";
 import { activateLocale } from "./index";
 
 const FORMAT_DATE = "2026-07-27T00:00:00Z";
+const FORMAT_NOW = "2026-07-27T12:00:00Z";
 
 beforeAll(async () => {
   // Activate en so the relative-time buckets resolve from the real catalog,
@@ -12,7 +19,7 @@ beforeAll(async () => {
 });
 
 describe("formatRelative (en, timeAgo-compatible)", () => {
-  const now = new Date("2026-07-27T12:00:00Z").getTime();
+  const now = new Date(FORMAT_NOW).getTime();
   const ago = (ms: number) => new Date(now - ms).toISOString();
 
   it("returns empty string for empty or invalid input", () => {
@@ -28,6 +35,54 @@ describe("formatRelative (en, timeAgo-compatible)", () => {
     expect(formatRelative(ago(5 * 60_000), now)).toBe("5m ago");
     expect(formatRelative(ago(3 * 3_600_000), now)).toBe("3h ago");
     expect(formatRelative(ago(2 * 86_400_000), now)).toBe("2d ago");
+  });
+});
+
+describe("formatSidebarElapsedTime", () => {
+  const now = new Date(FORMAT_NOW).getTime();
+  const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString();
+
+  it("returns an empty string for empty or invalid input", () => {
+    expect(formatSidebarElapsedTime("", now)).toBe("");
+    expect(formatSidebarElapsedTime("not-a-date", now)).toBe("");
+  });
+
+  it("clamps future timestamps to zero seconds", () => {
+    expect(formatSidebarElapsedTime(new Date(now + 60_000).toISOString(), now)).toBe("0s");
+  });
+
+  it("uses the compact elapsed-time bucket boundaries", () => {
+    expect(formatSidebarElapsedTime(ago(59), now)).toBe("59s");
+    expect(formatSidebarElapsedTime(ago(60), now)).toBe("1m");
+    expect(formatSidebarElapsedTime(ago(59 * 60 + 59), now)).toBe("59m");
+    expect(formatSidebarElapsedTime(ago(60 * 60), now)).toBe("1h");
+    expect(formatSidebarElapsedTime(ago(24 * 60 * 60 - 1), now)).toBe("23h");
+    expect(formatSidebarElapsedTime(ago(24 * 60 * 60), now)).toBe("1d");
+    expect(formatSidebarElapsedTime(ago(7 * 24 * 60 * 60 - 1), now)).toBe("6d");
+    expect(formatSidebarElapsedTime(ago(7 * 24 * 60 * 60), now)).toBe("1w");
+    expect(formatSidebarElapsedTime(ago(365 * 24 * 60 * 60 - 1), now)).toBe("52w");
+    expect(formatSidebarElapsedTime(ago(365 * 24 * 60 * 60), now)).toBe("1y");
+  });
+
+  it("bounds the displayed years at 99+", () => {
+    expect(formatSidebarElapsedTime(ago(99 * 365 * 24 * 60 * 60), now)).toBe("99y");
+    expect(formatSidebarElapsedTime(ago(100 * 365 * 24 * 60 * 60), now)).toBe("99+y");
+  });
+
+  it.each([
+    ["en", "3w"],
+    ["pt-pt", "3sem"],
+    ["zh-cn", "3周"],
+    ["zh-hk", "3週"],
+    ["zh-tw", "3週"],
+    ["pseudo", "3ŵ"],
+  ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
+    await activateLocale(locale);
+    expect(formatSidebarElapsedTime(ago(3 * 7 * 24 * 60 * 60), now)).toBe(expected);
+  });
+
+  afterAll(async () => {
+    await activateLocale("en");
   });
 });
 
@@ -124,7 +179,7 @@ describe("locale-aware Intl wrappers", () => {
 const THREE_HOURS_AGO = "3 hours ago";
 
 describe("formatRelativeTime (en)", () => {
-  const now = new Date("2026-07-27T12:00:00Z").getTime();
+  const now = new Date(FORMAT_NOW).getTime();
   const secondsAgo = (n: number) => new Date(now - n * 1000);
   const secondsAhead = (n: number) => new Date(now + n * 1000);
 
@@ -214,7 +269,7 @@ describe("formatRelativeTime (en)", () => {
  * locale, so the same call renders Portuguese for a pt-PT user.
  */
 describe("formatRelativeTime (locale awareness)", () => {
-  const now = new Date("2026-07-27T12:00:00Z").getTime();
+  const now = new Date(FORMAT_NOW).getTime();
   const threeHoursAgo = new Date(now - 3 * 60 * 60 * 1000);
 
   afterAll(async () => {

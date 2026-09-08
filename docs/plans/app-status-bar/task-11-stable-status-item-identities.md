@@ -5,14 +5,14 @@ status: done
 wave: 6
 depends_on: []
 plan: docs/plans/app-status-bar/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # Stable status item identities
 
 ## Inputs
 
-[Spec: plugin slots](../../specs/ui/app-status-bar.md#plugin-slots),
+[Spec: plugin slots](../../specs/ui/requirements/app-status-bar.md#plugin-slots),
 [portable-order ADR](../../decisions/2026-07-21-portable-status-bar-order.md),
 and existing owned slot registrations in `lib/plugins/registry.ts`.
 

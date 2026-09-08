@@ -300,6 +300,15 @@ func (s *Service) applyBatchedNumberedWatch(
 	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", w.ID), zap.Error(err))
 	}
+	// A numbered watch found its PR before this fix existed (or before the
+	// discovering session's own group redirect took effect) keeps the
+	// observing member's task_id forever — watches are never re-pointed once
+	// they have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner here, the same way associatePRWithTask does
+	// for the association write, so this loop keeps syncing the owner's
+	// github_task_prs row instead of silently updating nothing.
+	effectiveTaskID := s.reconcileTaskPROwnership(ctx, w.SessionID, w.TaskID, w.RepositoryID, w.PRNumber)
+
 	// Gap-fill: a numbered watch can exist even when its exact task_pr row was
 	// never created. This targeted read is unconditional because the common
 	// existing-row path is cheap, and the missing-row path must repair before
@@ -307,20 +316,23 @@ func (s *Service) applyBatchedNumberedWatch(
 	// creation event; the following SyncTaskPR may publish a second event when
 	// status fields changed. That double event is harmless because clients
 	// re-fetch the task PR state.
-	if existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, w.TaskID, w.RepositoryID, w.PRNumber); err != nil {
+	if existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, effectiveTaskID, w.RepositoryID, w.PRNumber); err != nil {
 		s.logger.Error("failed to load exact task PR",
-			zap.String("task_id", w.TaskID), zap.String("repository_id", w.RepositoryID),
+			zap.String("task_id", effectiveTaskID), zap.String("repository_id", w.RepositoryID),
 			zap.Int("pr_number", w.PRNumber), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	} else if existing == nil && status.PR != nil {
-		if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); assocErr != nil {
+		if _, assocErr := s.associatePRWithTaskForSession(
+			ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+			false, false, TaskPRSourceWatch,
+		); assocErr != nil {
 			s.logger.Error("failed to associate numbered PR with task",
 				zap.String("task_id", w.TaskID), zap.Int("pr_number", w.PRNumber), zap.Error(assocErr))
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 		}
 	}
-	if syncErr := s.SyncTaskPR(ctx, w.TaskID, status); syncErr != nil {
-		s.logger.Error("failed to sync task PR", zap.String("task_id", w.TaskID), zap.Error(syncErr))
+	if syncErr := s.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
+		s.logger.Error("failed to sync task PR", zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
 		// SyncFailed=true so poller skips publishing PR feedback while the
 		// task_pr row is still stale — old applyPRStatus path early-returned
 		// on this error for the same reason.
@@ -330,7 +342,7 @@ func (s *Service) applyBatchedNumberedWatch(
 	// same branch can be detected without manual intervention.
 	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
 		hold, holdErr := s.ShouldHoldTerminalPRWatch(
-			ctx, w.TaskID, w.RepositoryID, w.PRNumber, status.PR.State,
+			ctx, effectiveTaskID, w.RepositoryID, w.PRNumber, status.PR.State,
 		)
 		if holdErr != nil {
 			s.logger.Error("failed to check terminal PR automation", zap.String("id", w.ID), zap.Error(holdErr))
@@ -426,7 +438,10 @@ func (s *Service) applyBatchedSearchingWatch(
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
 	}
-	if _, err := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); err != nil {
+	if _, err := s.associatePRWithTaskForSession(
+		ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+		false, false, TaskPRSourceWatch,
+	); err != nil {
 		s.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}

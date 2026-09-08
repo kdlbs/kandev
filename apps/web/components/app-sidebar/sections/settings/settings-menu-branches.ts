@@ -1,5 +1,4 @@
 import type { ComponentType } from "react";
-
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
@@ -7,7 +6,11 @@ import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integra
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { INTEGRATION_ICONS } from "@/lib/settings/integration-icons";
 import {
-  WORKSPACE_SETTINGS_TABS,
+  executorConnectionSettingsPath,
+  executorProfileSettingsPath,
+} from "@/lib/settings/executor-settings-routes";
+import {
+  getWorkspaceSettingsTabs,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
 import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
@@ -122,6 +125,11 @@ export type BranchExecutor = {
   profiles?: ReadonlyArray<{ id: string; name: string }>;
 };
 
+export type WorkspaceBranchOptions = {
+  pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined;
+  canvasesEnabled?: boolean;
+};
+
 /** The menu rows that grow a branch. */
 export const BRANCHED_SETTINGS_HREFS = [
   WORKSPACES_SETTINGS_HREF,
@@ -210,10 +218,30 @@ export function buildWorkspacesBranch(
    */
   visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
-  pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined,
+  { pluginIntegrationEnabled, canvasesEnabled = false }: WorkspaceBranchOptions = {},
 ): SettingsMenuNode[] {
   return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
+    const workspaceTabs = getWorkspaceSettingsTabs(canvasesEnabled)
+      .filter(({ tab }) => tab !== "overview")
+      .map(({ tab, labelKey, icon }) => ({
+        key: `workspace:${workspace.id}:${tab}`,
+        href: workspaceSettingsHref(workspace.id, tab),
+        label: { key: labelKey },
+        icon,
+        ...(tab === "integrations"
+          ? {
+              children: integrationNodes(
+                workspace.id,
+                integrationsHref,
+                visibleIntegrationSlugsFor?.(workspace.id),
+                integrationContributions,
+                pluginIntegrationEnabled,
+              ),
+              integrationsWorkspaceId: workspace.id,
+            }
+          : {}),
+      }));
     return {
       key: `workspace:${workspace.id}`,
       href: workspaceSettingsHref(workspace.id, "overview"),
@@ -225,26 +253,7 @@ export function buildWorkspacesBranch(
       // Same badge the workspace list and the workspace switcher show, so the
       // menu does not leave you guessing which one commands land in.
       ...(workspace.id === activeWorkspaceId ? { badge: "active" as const } : {}),
-      children: WORKSPACE_SETTINGS_TABS.filter(({ tab }) => tab !== "overview").map(
-        ({ tab, labelKey, icon }) => ({
-          key: `workspace:${workspace.id}:${tab}`,
-          href: workspaceSettingsHref(workspace.id, tab),
-          label: { key: labelKey },
-          icon,
-          ...(tab === "integrations"
-            ? {
-                children: integrationNodes(
-                  workspace.id,
-                  integrationsHref,
-                  visibleIntegrationSlugsFor?.(workspace.id),
-                  integrationContributions,
-                  pluginIntegrationEnabled,
-                ),
-                integrationsWorkspaceId: workspace.id,
-              }
-            : {}),
-        }),
-      ),
+      children: [...workspaceTabs],
     };
   });
 }
@@ -307,25 +316,28 @@ export function buildAgentsBranch(
 /**
  * One node per executor, holding its profiles.
  *
- * Uses the executor-scoped spellings (`/settings/executor/<id>` and
- * `/settings/executor/<id>/profile/<id>`) rather than the flat
- * `/settings/executors/<profileId>` the Executors page links to. Both are live
- * routes for the same profile, but only the scoped pair has an executor
- * breadcrumb — so it is the one whose crumb chain matches the branch the user
- * clicked through.
+ * Most executors use the scoped legacy spellings so their executor breadcrumb
+ * matches the branch. A configured Kubernetes executor only discloses its
+ * profile children: connection, diagnostics, sessions and workload settings
+ * all live on that profile page. Its standalone connection route remains
+ * reachable only when there is no profile to recover through.
  */
 export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): SettingsMenuNode[] {
   return executors.map((executor) => {
-    const executorHref = `/settings/executor/${encodeURIComponent(executor.id)}`;
+    const profiles = executor.profiles ?? [];
+    const executorHref =
+      executor.type === "k8s" && profiles.length > 0
+        ? null
+        : executorConnectionSettingsPath(executor);
     return {
       key: `executor:${executor.id}`,
       href: executorHref,
       label: { text: executor.name },
       icon: getExecutorIcon(executor.type),
       // Same split as agents: the executor ships with kandev, the profiles do not.
-      children: (executor.profiles ?? []).map((profile) => ({
+      children: profiles.map((profile) => ({
         key: `executor:${executor.id}:profile:${profile.id}`,
-        href: `${executorHref}/profile/${profile.id}`,
+        href: executorProfileSettingsPath(executor, profile.id),
         label: { text: profile.name },
         isUserRecord: true,
       })),
@@ -336,7 +348,8 @@ export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): 
 /** True when `pathname` is this node's page or lives underneath it. */
 function nodeOwns(node: SettingsMenuNode, pathname: string): boolean {
   if (node.href && (pathname === node.href || pathname.startsWith(`${node.href}/`))) return true;
-  return (node.ownsPrefixes ?? []).some((prefix) => pathname.startsWith(prefix));
+  if ((node.ownsPrefixes ?? []).some((prefix) => pathname.startsWith(prefix))) return true;
+  return (node.children ?? []).some((child) => nodeOwns(child, pathname));
 }
 
 /**

@@ -3,7 +3,7 @@ import { test, expect } from "../../fixtures/office-fixture";
 /**
  * E2E coverage for the office task approval gate (in_review → done is
  * blocked until every approver has a current "approved" decision). Spec:
- *   docs/specs/office-task-approval-flow/spec.md
+ *   docs/specs/office/requirements/inbox.md
  *
  * Approach:
  *  - Use `officeApi.createAgent` to add an approver to the workspace.

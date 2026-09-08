@@ -188,17 +188,46 @@ func RepositoryProvider(
 	}
 }
 
-// AgentctlProvider returns kandev agentctl-related placeholders.
+// AgentctlProviderOptions configures executor-specific agentctl placeholders.
+type AgentctlProviderOptions struct {
+	BinaryPath string
+	Start      bool
+}
+
+// AgentctlProvider returns the legacy agentctl placeholders used by existing
+// callers.
 func AgentctlProvider(agentctlPort int, workspacePath string) PlaceholderProvider {
+	return agentctlProvider(agentctlPort, workspacePath, "/usr/local/bin/agentctl", "agentctl")
+}
+
+// AgentctlProviderWithOptions returns agentctl placeholders for an
+// executor-visible binary path.
+func AgentctlProviderWithOptions(
+	agentctlPort int,
+	workspacePath string,
+	options AgentctlProviderOptions,
+) PlaceholderProvider {
+	startCommand := ""
+	if options.Start {
+		startCommand = options.BinaryPath
+	}
+	return agentctlProvider(agentctlPort, workspacePath, options.BinaryPath, startCommand)
+}
+
+func agentctlProvider(agentctlPort int, workspacePath, binaryPath, startCommand string) PlaceholderProvider {
 	return func() map[string]string {
 		portStr := fmt.Sprintf("%d", agentctlPort)
+		startScript := ""
+		if startCommand != "" {
+			startScript = fmt.Sprintf(
+				"nohup %s --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
+				shellQuote(startCommand), portStr, shellQuote(workspacePath),
+			)
+		}
 		return map[string]string{
 			"kandev.agentctl.port":    portStr,
-			"kandev.agentctl.install": "chmod +x /usr/local/bin/agentctl",
-			"kandev.agentctl.start": fmt.Sprintf(
-				"nohup agentctl --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
-				portStr, workspacePath,
-			),
+			"kandev.agentctl.install": "chmod +x " + shellQuote(binaryPath),
+			"kandev.agentctl.start":   startScript,
 		}
 	}
 }
@@ -357,7 +386,16 @@ gh config set git_protocol https --host github.com 2>/dev/null || true`
 		lines := []string{
 			"# GitHub token authentication",
 			"# Configure git credential helper for GitHub HTTPS authentication",
-			`git config --global credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
+			// --replace-all is required, not cosmetic. `gh auth setup-git` (run
+			// below, and by the no-token branch above) leaves the key
+			// multi-valued: an empty entry that resets the helper chain plus
+			// gh's own helper. A plain `git config --global <key> <value>`
+			// refuses to overwrite a multi-valued key and exits 5, which aborts
+			// the whole prepare script under `set -euo pipefail`. That makes the
+			// no-token branch poison the with-token branch: on a host whose home
+			// directory persists between runs (SSH, unlike an ephemeral Docker
+			// container) exactly one launch succeeds and every later one fails.
+			`git config --global --replace-all credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
 			"# Configure gh CLI to use HTTPS protocol",
 			"gh config set git_protocol https --host github.com 2>/dev/null || true",
 			"# Register gh as git credential helper (backup method)",

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-explicit-path-contract"]
 plan: "plan.md"
-spec: "../../specs/workspaces/local-repositories.md"
+spec: "../../specs/workspaces/requirements/local-repositories.md"
 ---
 
 # Task 02: Identity-Bound Git Operations

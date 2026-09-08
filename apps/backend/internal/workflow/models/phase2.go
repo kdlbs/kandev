@@ -27,6 +27,19 @@ const (
 	ParticipantRoleRunner ParticipantRole = "runner"
 )
 
+// ParticipantProvenance distinguishes a seat the engine auto-cast via
+// EnsureRoleSeat (on_enter's ensure_participant_seat action) from one a
+// human placed via the manual reviewer/approver registration endpoints.
+// Manual registration uses this to claim an unclaimed, undecided auto seat
+// in place instead of inserting a duplicate seat for the same role — see
+// AddTaskParticipant.
+type ParticipantProvenance string
+
+const (
+	ParticipantProvenanceAuto   ParticipantProvenance = "auto"
+	ParticipantProvenanceManual ParticipantProvenance = "manual"
+)
+
 // StageType classifies a workflow_step's UX role. A semantic hint for the
 // frontend; the engine itself does not branch on it.
 type StageType string
@@ -65,6 +78,18 @@ type WorkflowStepParticipant struct {
 	AgentProfileID   string          `json:"agent_profile_id"`
 	DecisionRequired bool            `json:"decision_required"`
 	Position         int             `json:"position"`
+	// Provenance records whether the engine auto-cast this seat or a human
+	// placed it manually. Rows written before this column existed backfill
+	// to "manual" (see the ADD COLUMN migration) — that default just means
+	// a pre-existing seat is never eligible to be claimed, which is safe:
+	// claiming only ever collapses a *new* auto seat into a manual one.
+	Provenance ParticipantProvenance `json:"provenance,omitempty"`
+	// CreatedAt orders same-role candidates deterministically (the Office
+	// seat caster's CEO listing, and ResolveCurrentRunner's most-recent-
+	// runner fallback tier) on a real, dialect-portable column instead of
+	// SQLite-only rowid. Rows that predate this column backfill to one
+	// constant timestamp so they tie and resolve via a secondary key.
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // WorkflowStepDecision records a participant's verdict on a (task, step) pair.

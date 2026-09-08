@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 )
 
@@ -15,11 +16,11 @@ import (
 // the marketplace HTTP surface stays self-contained.
 func (c *Controller) registerMarketplaceRoutes(api *gin.RouterGroup) {
 	api.GET("/marketplace", c.marketplaceCatalog)
-	api.POST("/marketplace/refresh", c.marketplaceRefresh)
+	api.POST("/marketplace/refresh", authn.RequireAdmin(), c.marketplaceRefresh)
 	api.GET("/marketplace/sources", c.listSources)
-	api.POST("/marketplace/sources", c.addSource)
-	api.PATCH("/marketplace/sources/:sid", c.updateSource)
-	api.DELETE("/marketplace/sources/:sid", c.deleteSource)
+	api.POST("/marketplace/sources", authn.RequireAdmin(), c.addSource)
+	api.PATCH("/marketplace/sources/:sid", authn.RequireAdmin(), c.updateSource)
+	api.DELETE("/marketplace/sources/:sid", authn.RequireAdmin(), c.deleteSource)
 }
 
 // addSourceRequest is the POST /api/plugins/marketplace/sources body.

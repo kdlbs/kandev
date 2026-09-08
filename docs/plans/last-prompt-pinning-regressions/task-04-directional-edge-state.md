@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-transcript-threshold-and-controls", "02-pinned-prompt-overflow", "03-e2e-and-pr-assets"]
 plan: "plan.md"
-spec: "../../specs/last-prompt-pinning-regressions/spec.md"
+spec: "../../specs/ui/requirements/last-prompt-pinning-regressions.md"
 ---
 
 # Task 04: Make the anchored bar and scroll button direction-aware

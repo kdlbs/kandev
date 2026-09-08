@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-capture-tool-catalog"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 02: Build the Responsive Explorer

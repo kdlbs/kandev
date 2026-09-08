@@ -382,7 +382,7 @@ func TestHTTPCreateTask_InvalidExternalIDReturns400(t *testing.T) {
 //
 // Synchronous session prepare (create-sequence step 6) DOES run here, and
 // must: it happens before settlement (step 7) discovers the CreatedIdentityLost
-// outcome, per the settlement-ordering fix (docs/specs/tasks/external-id-idempotency/spec.md,
+// outcome, per the settlement-ordering fix (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Settlement call site (normative, per surface)"). Only the asynchronous
 // start dispatch (step 8) is guaranteed to never fire — that is the actual
 // "no side effects" guarantee the spec makes for this outcome ("no
@@ -522,7 +522,7 @@ func TestHTTPReleaseTaskExternalID_NotFound(t *testing.T) {
 // orderRecordingOrchestrator records whether the task was already settled
 // (external_id_settled_at set) at the moment synchronous session prepare
 // (orchestrator.IntentPrepare) was invoked — a direct, observable proof of
-// create-sequence ordering (docs/specs/tasks/external-id-idempotency/spec.md,
+// create-sequence ordering (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Settlement call site (normative, per surface)"): settlement (step 7) must
 // never precede synchronous session prepare (part of step 6). Only the
 // asynchronous dispatch (step 8, the actual agent-start goroutine) may run

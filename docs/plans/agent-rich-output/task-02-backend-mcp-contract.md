@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-record-contract"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 02: Backend MCP contract

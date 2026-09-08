@@ -17,7 +17,7 @@ async function expandSection(toggle: Locator) {
 }
 
 test.describe("Mobile fork pull-request comparison target", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("shows the same upstream target in the touch branch drawer", async ({
     testPage,

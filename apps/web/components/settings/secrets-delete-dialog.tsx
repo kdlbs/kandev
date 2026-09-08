@@ -1,68 +1,51 @@
 "use client";
 
+import type { RefObject } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
+
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
-type DeleteSecretDialogProps = {
-  target: SecretListItem | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  isBusy: boolean;
+type SecretDeleteConfirmationProps = {
+  secret: SecretListItem;
+  open: boolean;
+  anchorRef: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
 };
 
-/** Renders the confirm-delete dialog for a secret, with cancel and destructive confirm actions. */
-export function DeleteSecretDialog({
-  target,
-  onClose,
+/** Anchors secret deletion confirmation to its row action on fine pointers. */
+export function SecretDeleteConfirmation({
+  secret,
+  open,
+  anchorRef,
+  onOpenChange,
+  onCancel,
   onConfirm,
-  isBusy,
-}: DeleteSecretDialogProps) {
+}: SecretDeleteConfirmationProps) {
   const { t } = useTranslation();
-  // The secret's own name is user data: it is interpolated as a value and never
-  // routed through a catalog key.
-  const name = target?.name ?? t("settings:thisSecret");
+
   return (
-    <Dialog
-      open={Boolean(target)}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("settings:deleteSecret")}</DialogTitle>
-          <DialogDescription>
-            <Trans i18nKey="settings:thisWillPermanentlyRemoveSecret" values={{ name }}>
-              This will permanently remove{" "}
-              <span className="font-medium text-foreground">{name}</span>. This action cannot be
-              undone.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} className="cursor-pointer">
-            {t("settings:cancel")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={onConfirm}
-            disabled={isBusy}
-            className="cursor-pointer"
-          >
-            {t("settings:deleteSecret")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={t("settings:deleteSecret")}
+      description={
+        <Trans i18nKey="settings:thisWillPermanentlyRemoveSecret" values={{ name: secret.name }}>
+          This will permanently remove{" "}
+          <span className="font-medium text-foreground">{secret.name}</span>. This action cannot be
+          undone.
+        </Trans>
+      }
+      cancelLabel={t("settings:cancel")}
+      confirmLabel={t("settings:deleteSecret")}
+      confirmAriaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
+      confirmTestId="secret-delete-confirm"
+      testId="secret-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }

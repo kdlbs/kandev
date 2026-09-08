@@ -3,7 +3,10 @@
 import { useCallback } from "react";
 import { KEY_SEQUENCES } from "@/lib/terminal/key-sequences";
 import { useShellKeySender } from "@/hooks/domains/session/use-shell-key-sender";
-import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
+import {
+  resolveVisualViewportPosition,
+  useVisualViewportOffset,
+} from "@/hooks/use-visual-viewport-offset";
 import { refocusXtermTextarea } from "@/lib/terminal/refocus-xterm";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { KEYS, KeybarButton, ModifierButton } from "./mobile-terminal-keybar-helpers";
@@ -52,7 +55,12 @@ export function MobileTerminalKeybar({
 
   if (!visible || !sessionId) return null;
 
-  const position = resolvePosition({ keyboardOpen, viewportBottom, baseBottomOffset });
+  const position = resolveVisualViewportPosition({
+    keyboardOpen,
+    viewportBottom,
+    barHeight: KEYBAR_HEIGHT_PX,
+    baseBottomOffset,
+  });
 
   return (
     <div
@@ -103,25 +111,4 @@ export function MobileTerminalKeybar({
       </div>
     </div>
   );
-}
-
-function resolvePosition({
-  keyboardOpen,
-  viewportBottom,
-  baseBottomOffset,
-}: {
-  keyboardOpen: boolean;
-  viewportBottom: number;
-  baseBottomOffset: string | undefined;
-}): React.CSSProperties {
-  // iOS Safari drifts fixed elements positioned via `bottom` while the visual
-  // viewport scrolls with the keyboard up. Anchoring via `top` tied to the
-  // visual viewport's bottom edge stays glued to the keyboard.
-  if (keyboardOpen) {
-    return { top: `${viewportBottom - KEYBAR_HEIGHT_PX}px`, bottom: "auto" };
-  }
-  const base = baseBottomOffset
-    ? `calc(${baseBottomOffset} + env(safe-area-inset-bottom, 0px))`
-    : "env(safe-area-inset-bottom, 0px)";
-  return { bottom: base };
 }

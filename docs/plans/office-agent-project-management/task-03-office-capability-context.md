@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-project-runtime-capability", "02-project-cli"]
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 03: Make Office capability instructions truthful

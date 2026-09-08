@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-workspace-content-search.md"
+spec: "../../specs/ui/requirements/task-workspace-content-search.md"
 ---
 
 # Task 01: Reveal And Flash Selected Content Match
@@ -105,7 +105,7 @@ changes.
 
 ## Inputs
 
-- `docs/specs/ui/task-workspace-content-search.md`, especially result selection
+- `docs/specs/ui/requirements/task-workspace-content-search.md`, especially result selection
   and cached-preview scenarios.
 - `plan.md`, especially Root Cause, Frontend, Tests, and Risks.
 - `apps/web/components/editors/monaco/use-monaco-walkthrough-range.ts` for the

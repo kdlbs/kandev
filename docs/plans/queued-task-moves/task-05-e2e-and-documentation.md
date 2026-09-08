@@ -9,7 +9,7 @@ depends_on:
   - "03-kanban-queue-sections"
   - "04-sidebar-queue-position"
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 05: Complete Feature Verification

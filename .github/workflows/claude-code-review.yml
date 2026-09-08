@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Run Claude Code Review (App token, inline comments)
         id: claude-review
@@ -73,9 +74,10 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rebase:*),Bash(git reset:*),Bash(gh pr edit:*),Bash(curl:*),Bash(wget:*)"
 
-  # Mark allowlisted fork PRs with the approval labels used by the review and
-  # preview workflows. The direct allowlist gates remain necessary because
-  # labels written with GITHUB_TOKEN do not start another workflow run.
+  # Mark allowlisted fork PRs with the single approval label used by the
+  # review, preview, and walkthrough workflows. The direct allowlist gates
+  # remain necessary because labels written with GITHUB_TOKEN do not start
+  # another workflow run.
   label-allowlisted-fork:
     if: >
       github.event_name == 'pull_request_target' &&
@@ -92,11 +94,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Add automatic fork approval labels
+      - name: Add automatic fork approval label
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const labels = ['safe-to-review', 'safe-to-test'];
+            const labels = ['safe-to-review'];
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -139,6 +141,7 @@ jobs:
           # claude-code-action only reads files and posts comments.
           ref: refs/pull/${{ github.event.pull_request.number }}/head
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)
         id: claude-review

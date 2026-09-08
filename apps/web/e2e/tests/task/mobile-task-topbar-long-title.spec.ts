@@ -51,6 +51,8 @@ async function readMobileTopbarMetrics(
 }
 
 test.describe("Mobile task topbar long title layout", () => {
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.1, AC-UI-MOBILE-TASK-CHROME-001.2,
+  // AC-UI-MOBILE-TASK-CHROME-001.5
   test("truncates long task titles without pushing mobile actions off-screen", async ({
     testPage,
     apiClient,
@@ -76,7 +78,15 @@ test.describe("Mobile task topbar long title layout", () => {
 
     const header = testPage.locator("header").filter({ hasText: LONG_TASK_TITLE }).first();
     await expect(header).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+    const taskDrawer = testPage.getByTestId("mobile-session-menu");
+    await expect(taskDrawer).toBeVisible();
+    await expect(testPage.getByTestId("layout-preset-trigger")).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-git-actions")).toHaveCount(0);
+
+    const taskDrawerBox = await taskDrawer.boundingBox();
+    expect(taskDrawerBox).not.toBeNull();
+    expect(Math.round(taskDrawerBox!.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(taskDrawerBox!.height)).toBeGreaterThanOrEqual(44);
 
     const metrics = await readMobileTopbarMetrics(testPage, LONG_TASK_TITLE);
     expect(metrics).not.toBeNull();

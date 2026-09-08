@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-attachment-service"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 03: Protocol Surfaces

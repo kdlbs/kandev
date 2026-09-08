@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/desktop-tauri-app/spec.md
+spec: docs/specs/desktop/requirements/desktop-tauri-app.md
 created: 2026-08-19
 status: completed
 ---
@@ -18,9 +18,9 @@ lock learns to say who is holding it.
 Order is bottom-up. A shared process-liveness helper lands first because both
 halves need it, then the two independent behaviors, then the desktop change that
 activates the watchdog. Two specs are amended by this repair:
-[desktop-tauri-app](../../specs/desktop-tauri-app/spec.md) owns the launcher
+[desktop-tauri-app](../../specs/desktop/requirements/desktop-tauri-app.md) owns the launcher
 lifetime guarantee, and
-[port-collision-safety](../../specs/port-collision-safety/spec.md) owns the
+[port-collision-safety](../../specs/executors/requirements/port-collision-safety.md) owns the
 runtime-state ownership contract.
 
 ## Root cause

@@ -4,7 +4,7 @@ title: "Close admission review blockers"
 status: done
 wave: 4
 plan: "plan.md"
-spec: "../../specs/platform/git-subprocess-admission.md"
+spec: "../../specs/platform/requirements/git-subprocess-admission.md"
 depends_on:
   - "01-class-aware-admission"
   - "02-interactive-git-fanout"

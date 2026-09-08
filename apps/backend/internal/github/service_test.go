@@ -762,9 +762,13 @@ type mockEventBus struct {
 	mu          sync.Mutex
 	events      []*bus.Event
 	publishedCh chan struct{}
+	err         error
 }
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	if m.err != nil {
+		return m.err
+	}
 	m.mu.Lock()
 	m.events = append(m.events, event)
 	m.mu.Unlock()

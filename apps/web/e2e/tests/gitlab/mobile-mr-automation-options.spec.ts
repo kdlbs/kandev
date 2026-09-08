@@ -1,6 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedGitLabReview, GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
+import {
+  seedGitLabReview,
+  seedTaskWithLinkedGitLabMRs,
+  GITLAB_HOST,
+  GITLAB_PROJECT,
+} from "../../helpers/gitlab";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -187,5 +192,60 @@ test.describe("mobile GitLab MR automation options", () => {
     await expectTouchTarget(retry, "MR automation retry button");
 
     await assertNoDocumentHorizontalOverflow(testPage, "mobile MR automation load error");
+  });
+
+  test("dropdown renders one attributed automation block per linked MR, independently toggleable (AC1, AC26)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const iidA = 222;
+    const iidB = 223;
+    const taskId = await seedTaskWithLinkedGitLabMRs(
+      apiClient,
+      seedData,
+      "Mobile MR automation independence",
+      [iidA, iidB],
+      "Mobile MR automation independence",
+    );
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const mrButton = testPage.getByTestId("mr-topbar-button");
+    await expect(mrButton).toBeVisible({ timeout: 15_000 });
+    await mrButton.tap();
+    await waitForDropdownSettled(testPage);
+
+    const controlsA = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidA}"]`,
+    );
+    const controlsB = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidB}"]`,
+    );
+    await expect(controlsA).toBeVisible();
+    await expect(controlsB).toBeVisible();
+    await expect(controlsA.getByTestId("mr-automation-scope-label")).toHaveText(
+      `Applies to !${iidA}`,
+    );
+    await expect(controlsB.getByTestId("mr-automation-scope-label")).toHaveText(
+      `Applies to !${iidB}`,
+    );
+
+    const autoFixA = controlsA.getByRole("switch", { name: "Auto-fix CI and address comments" });
+    const autoFixB = controlsB.getByRole("switch", { name: "Auto-fix CI and address comments" });
+    await autoFixA.tap();
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskMRAutomationOptions(taskId);
+        return options.mr_options?.find((o) => o.mr_iid === iidA)?.auto_fix_enabled;
+      })
+      .toBe(true);
+    const options = await apiClient.getTaskMRAutomationOptions(taskId);
+    expect(options.mr_options?.find((o) => o.mr_iid === iidB)?.auto_fix_enabled).toBe(false);
+    await expect(autoFixB).not.toBeChecked();
+
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile MR automation multi-MR dropdown");
   });
 });

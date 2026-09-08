@@ -1,6 +1,6 @@
 # 0032: Configurable Worktree Branch Names
 
-**Status:** accepted
+**Status:** accepted (amended by 2026-08-24-task-snapshotted-branch-policies)
 **Date:** 2026-07-07
 **Area:** backend, frontend
 
@@ -24,6 +24,10 @@ or integration metadata.
 The Changes panel exposes branch rename through the existing
 `worktree.rename_branch` action. Rename is repo-scoped for multi-repo tasks, and
 any persisted branch snapshots must be updated only for the renamed repository.
+
+Repository branch policies and task-level template snapshots extend this
+decision. See
+[Snapshot Repository Branch Policies on Tasks](2026-08-24-task-snapshotted-branch-policies.md).
 
 ## Consequences
 

@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-authoritative-queue-cancellation"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-management.md"
+spec: "../../specs/ui/requirements/message-queue-management.md"
 ---
 
 # Task 03: Expose Removal for Every Visible Queue Row

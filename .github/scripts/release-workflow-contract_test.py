@@ -726,6 +726,26 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', collect)
         self.assertIn('"$DESKTOP_ASSET_VERIFIER" --require-updaters', collect)
 
+    def test_unsigned_macos_warning_includes_launch_recovery_command(self) -> None:
+        warning = step_block("Add unsigned desktop warning to release notes")
+
+        self.assertIn("macos_unsigned=false", warning)
+        self.assertIn("macos_unsigned=true", warning)
+        branch_if = 'if [ "$macos_unsigned" = "true" ]; then'
+        command = "xattr -d com.apple.quarantine /Applications/Kandev.app"
+
+        self.assertIn(branch_if, warning)
+        self.assertIn("verify the checksum", warning)
+        self.assertIn(command, warning)
+        self.assertLess(
+            warning.index("verify the checksum"),
+            warning.index(command),
+        )
+        branch_start = warning.index(branch_if)
+        branch_end = warning.index("\n            fi", branch_start)
+        branch_body = warning[branch_start:branch_end]
+        self.assertIn(command, branch_body)
+
     def test_release_asset_globs_are_disjoint_and_upload_sequentially(self) -> None:
         publish = step_block("Publish release")
         files = re.search(r"\n          files: \|\n((?:            \S+\n)+)", publish)

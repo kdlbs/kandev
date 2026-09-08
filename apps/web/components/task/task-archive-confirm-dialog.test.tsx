@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 const mockGetSubtaskCount = vi.fn();
+const ARCHIVE_CONFIRM_TEST_ID = "archive-confirm";
 
 vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
@@ -76,6 +78,36 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("TaskArchiveConfirmDialog presentation", () => {
+  it("contains long confirmation content in a scrolling body with touch-safe actions", () => {
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="A task with a title that needs to wrap inside a phone confirmation surface"
+        taskId="task-1"
+        executorType="sprites"
+        isInFlight
+        confirmTestId={ARCHIVE_CONFIRM_TEST_ID}
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.className).toContain("max-h-[calc(100dvh-2rem)]");
+    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(dialog.className).toContain("overflow-hidden");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("min-h-0");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("space-y-3");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("overflow-y-auto");
+    expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("min-h-11");
+    expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("w-full");
+    expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).getAttribute("data-variant")).toBe(
+      "default",
+    );
+  });
+});
+
 describe("TaskArchiveConfirmDialog preference", () => {
   it("archives once without rendering a dialog when confirmation is disabled", async () => {
     const onConfirm = vi.fn();
@@ -123,6 +155,73 @@ describe("TaskArchiveConfirmDialog preference", () => {
 
     expect(onConfirm).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toBeTruthy();
+  });
+});
+
+describe("TaskArchiveConfirmDialog classification safety", () => {
+  it("disables archive while descendant classification is pending", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "loading", total: 0 }}
+        confirmTestId={ARCHIVE_CONFIRM_TEST_ID}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirm = screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID);
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("keeps the safe fallback actionable when classification fails", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "error", total: 0 }}
+        confirmTestId={ARCHIVE_CONFIRM_TEST_ID}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID));
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false });
+  });
+});
+
+describe("TaskArchiveConfirmDialog direct outcome", () => {
+  it("states the named archive outcome directly and separates cleanup effects", () => {
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Archive [“"]?My task[”"]?\./i,
+    );
+    expect(screen.getByTestId("task-cleanup-effects").tagName).toBe("UL");
+    expect(screen.getByTestId("task-cleanup-effects").querySelectorAll("li")).toHaveLength(2);
+    expect(screen.getByTestId("task-cleanup-notes").tagName).toBe("DIV");
+    expect(screen.queryByText(/Are you sure/i)).toBeNull();
   });
 });
 
@@ -220,6 +319,22 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
 });
 
 describe("TaskArchiveConfirmDialog still-working guard", () => {
+  it("keeps the in-flight warning visually subordinate to confirmation copy", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
+  });
+
   it("warns when the task is generating", () => {
     renderWithTasks(
       <TaskArchiveConfirmDialog

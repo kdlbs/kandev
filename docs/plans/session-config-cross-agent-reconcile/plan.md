@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/session-config-cross-agent-reconcile/spec.md
+spec: docs/specs/platform/requirements/session-config-cross-agent-reconcile.md
 created: 2026-08-19
 status: draft
 ---

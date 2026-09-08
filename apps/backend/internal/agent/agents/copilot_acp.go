@@ -95,7 +95,7 @@ func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: copilotACPPackage, ACPArgs: []string{"--acp"}}
+	return newManagedNPMRuntimeSpec(copilotACPPackage, "--acp")
 }
 
 func (a *CopilotACP) Runtime() *RuntimeConfig {

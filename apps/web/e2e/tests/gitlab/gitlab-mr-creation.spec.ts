@@ -24,6 +24,9 @@ test.describe("GitLab merge request creation", () => {
       provider_host: backend.baseUrl,
       provider_owner: "platform",
       provider_name: "kandev",
+      // The mock GitLab remote implements push for this test, but not
+      // upload-pack/fetch. Keep the setup offline while exercising MR create.
+      pull_before_worktree: false,
     });
 
     const task = await apiClient.createTaskWithAgent(

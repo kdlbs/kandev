@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["03-project-live-task-activity"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-last-activity-sort.md"
+spec: "../../specs/ui/requirements/sidebar-last-activity-sort.md"
 ---
 
 # Task 04: Add the sidebar activity sort

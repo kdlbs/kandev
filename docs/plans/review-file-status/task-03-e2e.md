@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-review-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/review-file-status.md"
+spec: "../../specs/ui/requirements/review-file-status.md"
 ---
 
 # Task 03: Review status E2E coverage

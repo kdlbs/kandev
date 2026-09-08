@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 
 export type PRCommitsState = {
   commits: PRCommitInfo[];
+  authoritativeCommits: PRCommitInfo[];
   providerHead: string | null;
   providerCommitsComplete: boolean;
   loading: boolean;
@@ -41,6 +42,7 @@ type ResourceEntry = {
   identity: string;
   request: PRCommitsRequest | null;
   snapshot: PRCommitsState;
+  successfulCommits: PRCommitInfo[];
   loaded: boolean;
   promise: Promise<PRCommitsState> | null;
   listeners: Set<() => void>;
@@ -53,6 +55,7 @@ const DEFAULT_RETRY_DELAY_MS = 100;
 const DEFAULT_MAX_ENTRIES = 24;
 const EMPTY_STATE: PRCommitsState = {
   commits: [],
+  authoritativeCommits: [],
   providerHead: null,
   providerCommitsComplete: false,
   loading: false,
@@ -62,6 +65,10 @@ const PENDING_STATE: PRCommitsState = {
   ...EMPTY_STATE,
   loading: true,
 };
+
+function pendingState(commits: PRCommitInfo[] = []): PRCommitsState {
+  return { ...PENDING_STATE, commits };
+}
 
 function identityFor(request: PRCommitsRequest): string {
   return [request.workspaceId, request.owner, request.repo, request.prNumber].join("\0");
@@ -83,8 +90,10 @@ async function requestPRCommits(request: PRCommitsRequest): Promise<PRCommitsRes
 }
 
 function successState(response: PRCommitsResponse | null): PRCommitsState {
+  const commits = response?.commits ?? [];
   return {
-    commits: response?.commits ?? [],
+    commits,
+    authoritativeCommits: commits,
     providerHead: response?.head_sha ?? null,
     providerCommitsComplete: response?.complete === true,
     loading: false,
@@ -92,19 +101,25 @@ function successState(response: PRCommitsResponse | null): PRCommitsState {
   };
 }
 
-function failedState(error: unknown): PRCommitsState {
+function failedState(error: unknown, commits: PRCommitInfo[] = []): PRCommitsState {
   return {
     ...EMPTY_STATE,
+    commits,
     error: errorMessage(error),
   };
 }
 
-function createEntry(request: PRCommitsRequest | null, key: string): ResourceEntry {
+function createEntry(
+  request: PRCommitsRequest | null,
+  key: string,
+  successfulCommits: PRCommitInfo[] = [],
+): ResourceEntry {
   return {
     key,
     identity: request ? identityFor(request) : key,
     request,
-    snapshot: PENDING_STATE,
+    snapshot: pendingState(successfulCommits),
+    successfulCommits,
     loaded: false,
     promise: null,
     listeners: new Set(),
@@ -121,6 +136,7 @@ function createEntry(request: PRCommitsRequest | null, key: string): ResourceEnt
  */
 type PRCommitsResourceStore = {
   entries: Map<string, ResourceEntry>;
+  currentKeyByIdentity: Map<string, string>;
   retryDelayMs: number;
   maxEntries: number;
   usageCounter: number;
@@ -128,6 +144,13 @@ type PRCommitsResourceStore = {
 
 function touch(store: PRCommitsResourceStore, entry: ResourceEntry): void {
   entry.lastUsed = ++store.usageCounter;
+}
+
+function deleteEntry(store: PRCommitsResourceStore, entry: ResourceEntry): void {
+  store.entries.delete(entry.key);
+  if (store.currentKeyByIdentity.get(entry.identity) === entry.key) {
+    store.currentKeyByIdentity.delete(entry.identity);
+  }
 }
 
 function entryFor(
@@ -140,25 +163,32 @@ function entryFor(
     if (request) {
       existing.request = request;
       existing.identity = identityFor(request);
+      store.currentKeyByIdentity.set(existing.identity, key);
     }
     touch(store, existing);
     return existing;
   }
-  const entry = createEntry(request, key);
+  const identity = request ? identityFor(request) : key;
+  const retainedKey = store.currentKeyByIdentity.get(identity);
+  const retainedEntry = retainedKey ? store.entries.get(retainedKey) : undefined;
+  const entry = createEntry(request, key, retainedEntry?.successfulCommits ?? []);
   store.entries.set(key, entry);
+  if (request) store.currentKeyByIdentity.set(identity, key);
   touch(store, entry);
   return entry;
 }
 
 function prune(store: PRCommitsResourceStore, entry: ResourceEntry): void {
-  for (const [key, candidate] of store.entries) {
-    if (
-      key !== entry.key &&
-      candidate.identity === entry.identity &&
-      !candidate.promise &&
-      candidate.listeners.size === 0
-    ) {
-      store.entries.delete(key);
+  if (store.currentKeyByIdentity.get(entry.identity) === entry.key) {
+    for (const candidate of store.entries.values()) {
+      if (
+        candidate !== entry &&
+        candidate.identity === entry.identity &&
+        !candidate.promise &&
+        candidate.listeners.size === 0
+      ) {
+        deleteEntry(store, candidate);
+      }
     }
   }
 
@@ -169,7 +199,7 @@ function prune(store: PRCommitsResourceStore, entry: ResourceEntry): void {
     .sort((left, right) => left.lastUsed - right.lastUsed);
   for (const candidate of candidates) {
     if (store.entries.size <= store.maxEntries) break;
-    store.entries.delete(candidate.key);
+    deleteEntry(store, candidate);
   }
 }
 
@@ -206,6 +236,7 @@ function publish(
 ): void {
   if (!isCurrent(store, entry)) return;
   entry.snapshot = snapshot;
+  if (loaded && !snapshot.error) entry.successfulCommits = snapshot.authoritativeCommits;
   entry.loaded = loaded;
   touch(store, entry);
   notify(entry);
@@ -216,9 +247,16 @@ function publishFailure(
   entry: ResourceEntry,
   error: unknown,
 ): PRCommitsState {
-  const snapshot = failedState(error);
+  const snapshot = failedState(error, entry.successfulCommits);
   publish(store, entry, snapshot, false);
-  if (isCurrent(store, entry) && entry.listeners.size === 0) store.entries.delete(entry.key);
+  if (
+    isCurrent(store, entry) &&
+    entry.listeners.size === 0 &&
+    (store.currentKeyByIdentity.get(entry.identity) !== entry.key ||
+      entry.successfulCommits.length === 0)
+  ) {
+    deleteEntry(store, entry);
+  }
   return snapshot;
 }
 
@@ -229,7 +267,11 @@ async function attempt(
   { response: PRCommitsResponse | null; error: null } | { response: null; error: unknown }
 > {
   try {
-    return { response: await requester(request), error: null };
+    const response = await requester(request);
+    if (response === null) {
+      return { response: null, error: new Error(t("github:failedToFetchPrCommits")) };
+    }
+    return { response, error: null };
   } catch (error) {
     return { response: null, error };
   }
@@ -250,7 +292,9 @@ async function run(
   }
 
   if (isCurrent(store, entry) && !entry.orphaned) await waitBeforeRetry(store, entry);
-  if (!isCurrent(store, entry) || entry.orphaned) return failedState(first.error);
+  if (!isCurrent(store, entry) || entry.orphaned) {
+    return failedState(first.error, entry.successfulCommits);
+  }
 
   const second = await attempt(requester, request);
   if (!second.error) {
@@ -275,7 +319,7 @@ function load(
   if (!force && entry.loaded && !entry.snapshot.error) return Promise.resolve(entry.snapshot);
 
   entry.loaded = false;
-  entry.snapshot = { ...PENDING_STATE };
+  entry.snapshot = pendingState(entry.successfulCommits);
   notify(entry);
   const promise = run(store, requester, entry, request);
   entry.promise = promise;
@@ -290,9 +334,13 @@ function load(
   return promise;
 }
 
-function subscribe(store: PRCommitsResourceStore, key: string, listener: () => void): () => void {
-  if (!key) return () => undefined;
-  const entry = entryFor(store, key);
+function subscribe(
+  store: PRCommitsResourceStore,
+  request: PRCommitsRequest | null,
+  listener: () => void,
+): () => void {
+  if (!request) return () => undefined;
+  const entry = entryFor(store, request.sourceKey, request);
   entry.listeners.add(listener);
   entry.orphaned = false;
   touch(store, entry);
@@ -301,14 +349,23 @@ function subscribe(store: PRCommitsResourceStore, key: string, listener: () => v
     if (entry.listeners.size > 0) return;
     entry.orphaned = Boolean(entry.promise);
     clearRetryWait(entry);
-    if (!entry.promise && entry.snapshot.error) store.entries.delete(entry.key);
+    if (
+      !entry.promise &&
+      entry.snapshot.error &&
+      (store.currentKeyByIdentity.get(entry.identity) !== entry.key ||
+        entry.successfulCommits.length === 0)
+    ) {
+      deleteEntry(store, entry);
+    }
   };
 }
 
-function getSnapshot(store: PRCommitsResourceStore, key: string): PRCommitsState {
-  if (!key) return EMPTY_STATE;
-  const entry = store.entries.get(key);
-  if (!entry) return PENDING_STATE;
+function getSnapshot(
+  store: PRCommitsResourceStore,
+  request: PRCommitsRequest | null,
+): PRCommitsState {
+  if (!request) return EMPTY_STATE;
+  const entry = entryFor(store, request.sourceKey, request);
   // useSyncExternalStore reads during render; touching here keeps actively
   // rendered entries recent for bounded LRU eviction.
   touch(store, entry);
@@ -321,14 +378,16 @@ export function createPRCommitsResource(
 ) {
   const store: PRCommitsResourceStore = {
     entries: new Map(),
+    currentKeyByIdentity: new Map(),
     retryDelayMs: Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS),
     maxEntries: Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES),
     usageCounter: 0,
   };
   return {
-    getSnapshot: (key: string) => getSnapshot(store, key),
+    getSnapshot: (request: PRCommitsRequest | null) => getSnapshot(store, request),
     load: (request: PRCommitsRequest, force = false) => load(store, requester, request, force),
-    subscribe: (key: string, listener: () => void) => subscribe(store, key, listener),
+    subscribe: (request: PRCommitsRequest | null, listener: () => void) =>
+      subscribe(store, request, listener),
   };
 }
 

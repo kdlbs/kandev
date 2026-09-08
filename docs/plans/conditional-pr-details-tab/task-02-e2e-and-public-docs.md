@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-conditional-panel-behavior"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 02: E2E and public documentation
@@ -54,7 +54,7 @@ Sequential. These tests and docs validate the conditional behavior implemented b
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md` Scenarios and Out of scope
+- `docs/specs/ui/requirements/task-layout-profiles.md` Scenarios and Out of scope
 - `docs/plans/conditional-pr-details-tab/plan.md` E2E Tests, Mobile design contract, and Public documentation
 - Existing production-build patterns in `pr-detail-layout.spec.ts`, `layout-profiles.spec.ts`, and `mobile-layout-profiles.spec.ts`
 

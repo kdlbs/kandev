@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 01: Persist Quick Terminal descriptors

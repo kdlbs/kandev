@@ -17,7 +17,7 @@ Persist the full bounded shell output in the existing message metadata, but sepa
 - The frontend fetches that endpoint only while the output disclosure is open. Completed commands require one snapshot request. Expanded running commands use one non-overlapping poll loop with a one-second base interval and a five-second maximum retry interval. A projected transition to terminal aborts the active poll and performs one final snapshot request before stopping, so the expanded transcript cannot remain on a partial running snapshot. Collapse or unmount stops the loop and aborts in-flight work without a final fetch.
 - Persistence, provider normalization, output bounds, and the normal message store remain unchanged. No table or migration is added.
 
-The observable contract is defined in [the ACP shell command output spec](../specs/ui/acp-shell-command-output.md).
+The observable contract is defined in [the ACP shell command output spec](../specs/ui/requirements/acp-shell-command-output.md).
 
 ## Consequences
 
@@ -48,5 +48,5 @@ Rejected because previews still multiply payload cost across boot, pagination, b
 ## References
 
 - [ADR-0036: Normalize ACP shell output at the adapter boundary](0036-normalize-acp-shell-output-at-adapter-boundary.md)
-- [ACP shell command output spec](../specs/ui/acp-shell-command-output.md)
+- [ACP shell command output spec](../specs/ui/requirements/acp-shell-command-output.md)
 - [Implementation plan](../plans/acp-shell-command-output/plan.md)

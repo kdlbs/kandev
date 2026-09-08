@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-hook-status-scoped-delete"
 plan: "plan.md"
-spec: "../../specs/automation-runs-delete-all-by-status/spec.md"
+spec: "../../specs/office/requirements/automation-runs-delete-all-by-status.md"
 ---
 
 # Task 02: Runs table header delete-all

@@ -5,7 +5,7 @@ status: done
 wave: remediation
 depends_on: ["02-toolbar-wiring", "06-resolver-correctness"]
 plan: "plan.md"
-spec: "../../specs/ui/external-vcs-file-links.md"
+spec: "../../specs/ui/requirements/external-vcs-file-links.md"
 ---
 
 # Task 07: Toolbar completeness

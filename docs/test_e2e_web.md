@@ -105,7 +105,8 @@ Each Playwright worker spawns an isolated `kandev` backend that also serves the 
    - `KANDEV_DOCKER_ENABLED=false` — no Docker
    - `KANDEV_WORKTREE_ENABLED=false` — no worktrees
    - `GH_TOKEN` / `GITHUB_TOKEN` stripped — prevents accidental real API calls
-3. Spawns `apps/backend/bin/kandev __backend` and waits for `/health` to return 200
+3. Spawns `apps/backend/bin/kandev __backend` and waits for `/ready` to return 200 (not `/health`,
+   which flips green as soon as the listener is bound, before the mock-harness routes are mounted)
 
 **Frontend:**
 1. Sets `KANDEV_WEB_DIST_DIR` to `apps/web/dist`

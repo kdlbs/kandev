@@ -17,18 +17,21 @@ import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-s
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
-import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { cn } from "@/lib/utils";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
+  currentPage?: TaskListingPage;
   title: string;
   workspaceLabel: string;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
+  taskListingControls?: ReactNode;
 };
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
@@ -72,9 +75,7 @@ function MobileQuickChatButton({
   workspaceId: string;
   onClick: () => void;
 }) {
-  const { t } = useTranslation();
-  const dot = useAppStore((state) => selectQuickChatHasUnseenIdle(state, workspaceId));
-  const quickChatLabel = t(dot ? "sidebar:quickChatUnseen" : "sidebar:quickChat");
+  const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   return (
     <MobileLauncherTarget onClick={onClick} testId="mobile-quick-chat-hit-target">
       <Button
@@ -85,13 +86,7 @@ function MobileQuickChatButton({
       >
         <span className="relative flex">
           <IconMessageCircle className="h-4 w-4" />
-          {dot && (
-            <span
-              aria-hidden="true"
-              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-              data-testid="quick-chat-unseen-dot"
-            />
-          )}
+          <QuickChatActivityIndicator activity={quickChatActivity} />
         </span>
       </Button>
     </MobileLauncherTarget>
@@ -107,20 +102,23 @@ function MobileHeaderActionItems({
   handleOpenQuickChat,
   handleOpenQuickTerminal,
   toggleSearch,
+  taskListingControls,
 }: {
   workspaceId?: string;
   workspaceLabel: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   onSearchChange?: (query: string) => void;
   isSearchOpen: boolean;
   handleOpenQuickChat: () => void;
   handleOpenQuickTerminal: () => void;
   toggleSearch: () => void;
+  taskListingControls?: ReactNode;
 }) {
   const { t } = useTranslation();
 
   return (
     <>
+      {taskListingControls}
       <MainTopBarPluginActions
         workspaceId={workspaceId}
         workspaceLabel={workspaceLabel}
@@ -219,6 +217,7 @@ export function KanbanHeaderMobile({
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
+  taskListingControls,
 }: KanbanHeaderMobileProps) {
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -261,6 +260,7 @@ export function KanbanHeaderMobile({
             handleOpenQuickChat={handleOpenQuickChat}
             handleOpenQuickTerminal={handleOpenQuickTerminal}
             toggleSearch={toggleSearch}
+            taskListingControls={taskListingControls}
             setMenuOpen={setMenuOpen}
           />
         }

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/acp-model-configuration-summary.md"
+spec: "../../specs/ui/requirements/acp-model-configuration-summary.md"
 ---
 
 # Task 01: Render Model-only Agent Tab Titles
@@ -31,7 +31,7 @@ cd apps/web && rtk pnpm e2e:run tests/chat/model-selector-error.spec.ts -- --gre
 - `apps/web/components/task/session-tab-title.test.ts`
 - `apps/web/e2e/tests/chat/model-selector-error.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-model-selector.spec.ts` (PR evidence capture only)
-- `docs/specs/ui/acp-model-configuration-summary.md`
+- `docs/specs/ui/requirements/acp-model-configuration-summary.md`
 - `docs/plans/agent-tab-model-only/plan.md`
 - `docs/plans/agent-tab-model-only/task-01-render-model-only-title.md`
 

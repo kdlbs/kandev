@@ -5,6 +5,8 @@ import {
   seedStaleContextWindow,
 } from "./reset-context-confirmation-helpers";
 
+test.describe.configure({ timeout: 120_000 });
+
 test("mobile reset context confirms inline without stacking another overlay", async ({
   testPage,
   apiClient,

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["04-make-gitlab-lifecycle-evaluation-lean"]
 plan: "plan.md"
-spec: "../../specs/integrations/provider-aware-review-automation.md"
+spec: "../../specs/integrations/requirements/provider-aware-review-automation.md"
 ---
 
 # Task 05: Bound automation follow-up contexts

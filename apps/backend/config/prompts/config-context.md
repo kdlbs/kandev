@@ -39,6 +39,13 @@ MCP CONFIG TOOLS:
 - get_mcp_config_kandev: Get MCP server config for a profile. Required: profile_id.
 - update_mcp_config_kandev: Update MCP config for a profile. Required: profile_id. Optional: enabled, servers.
 
+SAVED PROMPT TOOLS:
+- list_shared_prompts_kandev: List saved prompt summaries without content.
+- get_shared_prompt_kandev: Read one saved prompt by exact name. Required: name.
+Saved prompt names are case-sensitive. Surrounding whitespace is ignored. Use
+the list result to discover names before reading a prompt. These tools are
+read-only and do not create, update, delete, or expand saved prompts.
+
 TASK TOOLS:
 - list_tasks_kandev: List all tasks in a workflow. Required: workflow_id.
 - move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id.

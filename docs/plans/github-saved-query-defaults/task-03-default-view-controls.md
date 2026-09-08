@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-apply-default-selection"]
 plan: "plan.md"
-spec: "../../specs/ui/github-saved-query-defaults.md"
+spec: "../../specs/ui/requirements/github-saved-query-defaults.md"
 ---
 
 # Task 03: Expose Default-View Controls

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 01: Negotiate steer capability instead of matching agent names

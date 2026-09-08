@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/clarification-active-lifecycle/spec.md
+spec: docs/specs/tasks/requirements/clarification-active-lifecycle.md
 created: 2026-08-14
 status: completed
 ---

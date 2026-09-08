@@ -43,7 +43,7 @@ func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, deb
 	env := stripAppliedProfileEnvironment(os.Environ())
 	env = upsertEnv(env, "KANDEV_SERVER_PORT", fmt.Sprint(ports.BackendPort))
 	env = upsertEnv(env, "KANDEV_AGENT_STANDALONE_PORT", fmt.Sprint(ports.AgentctlPort))
-	if cfg == nil || cfg.SourceFor("database.path") != config.SourceConfiguration || strings.TrimSpace(cfg.Database.Path) == "" {
+	if cfg != nil && cfg.SourceFor("database.path") == config.SourceEnvironment && strings.TrimSpace(cfg.Database.Path) != "" {
 		env = upsertEnv(env, "KANDEV_DATABASE_PATH", resolveDatabasePathForConfig(cfg))
 	}
 	if configPath := configFileForChild(cfg); configPath != "" {

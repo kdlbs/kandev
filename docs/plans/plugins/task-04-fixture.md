@@ -14,7 +14,7 @@ Standalone Go HTTP server implementing the plugin contract, for Go integration
 tests and Playwright e2e.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → event delivery headers/HMAC, tool
+- Spec `docs/specs/plugins/requirements/plugins.md` → event delivery headers/HMAC, tool
   invocation, webhook proxy, UI page contract.
 - Must be self-contained: only stdlib + `crypto/hmac`,`crypto/sha256`. NO imports
   from `internal/plugins` (proves the contract is decoupled).

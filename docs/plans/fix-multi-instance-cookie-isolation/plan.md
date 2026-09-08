@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/fix-multi-instance-cookie-isolation/spec.md
+spec: docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md
 created: 2026-08-17
 status: pending
 ---
@@ -102,7 +102,7 @@ re-login, bug stays dead during migration).
   `apps/backend/internal/auth/store/models.go`): wording that pins the
   literal `kandev_session` cookie name becomes "the session cookie (name
   derived from the request host)".
-- Already amended with this package: `docs/specs/auth/spec.md`,
+- Already amended with this package: `docs/specs/auth/requirements/auth.md`,
   `docs/decisions/0023-active-workspace-cookie.md`,
   `docs/public/plugins-authoring.md`.
 

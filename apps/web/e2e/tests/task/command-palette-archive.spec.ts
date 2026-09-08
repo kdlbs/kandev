@@ -51,7 +51,11 @@ test.describe("Command palette archive", () => {
       .getByRole("option")
       .filter({ has: testPage.getByText("Archive task", { exact: true }) });
     await expect(option).toBeVisible();
-    await option.click();
+    // Matching commands rank above the task rows a query also fuzzy-matches, so
+    // the exact command is what Enter runs without any arrow-key navigation.
+    await expect(option).toHaveAttribute("aria-selected", "true");
+    await expect(dialog.getByRole("option").first()).toContainText("Archive task");
+    await testPage.keyboard.press("Enter");
 
     // The shared confirmation dialog names the task being archived.
     const confirm = testPage.getByRole("alertdialog");

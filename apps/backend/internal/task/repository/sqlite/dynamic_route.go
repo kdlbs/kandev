@@ -17,6 +17,7 @@ import (
 
 var _ dynamicruntime.Persistence = (*Repository)(nil)
 var _ dynamicruntime.ContinuationPersistence = (*Repository)(nil)
+var _ dynamicruntime.GenerationStatusClaimer = (*Repository)(nil)
 
 func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.RouteState) error {
 	if isTransientRouteSession(state.SessionID) {
@@ -76,6 +77,34 @@ func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int
 			state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt, state.SessionID,
 			expectedGeneration)
 	}
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// ClaimRouteStateFrom updates a route generation only while both its
+// generation and status still match the caller's observation. Same-generation
+// transitions use this narrower fence so a late recovery callback cannot
+// overwrite a route that became active (or vice versa).
+func (r *Repository) ClaimRouteStateFrom(
+	ctx context.Context,
+	expectedGeneration int64,
+	expectedStatus string,
+	state dynamicruntime.RouteState,
+) (bool, error) {
+	if isTransientRouteSession(state.SessionID) {
+		return true, nil
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE dynamic_route_states
+		SET logical_profile_id = ?, execution_profile_id = ?,
+			route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
+		WHERE session_id = ? AND route_generation = ? AND state = ?
+	`), state.LogicalProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt,
+		state.SessionID, expectedGeneration, expectedStatus)
 	if err != nil {
 		return false, err
 	}
@@ -198,6 +227,40 @@ func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicrunti
 		FROM dynamic_route_states
 		WHERE state IN (?, ?) ORDER BY updated_at ASC
 	`), string("retry_wait"), string("waiting_for_reset"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	states := make([]dynamicruntime.RouteState, 0)
+	for rows.Next() {
+		var state dynamicruntime.RouteState
+		if err := rows.Scan(
+			&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
+			&state.Generation, &state.ProfileVersion, &state.Status,
+			&state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
+
+// ListStartingRouteStates returns every route whose durable status is still
+// "starting". Startup reconciliation is the only caller: a healthy route also
+// passes through "starting" en route to "active", so listing this status is
+// only a safe orphan signal once the caller has confirmed there is no live
+// session backing the row (see Service.reconcileOrphanedDynamicStartingRoutes).
+func (r *Repository) ListStartingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
+		FROM dynamic_route_states
+		WHERE state = ? ORDER BY updated_at ASC
+	`), "starting")
 	if err != nil {
 		return nil, err
 	}

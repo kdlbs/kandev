@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 01: Backend settings field
@@ -32,7 +32,7 @@ mirroring `ShowTranscriptAutoScrollControl` at every call site.
 - **Dependencies:** None.
 - **Parallelism:** `parallel-safe` (disjoint from Task 02's frontend-only files).
 - **Inputs:** Spec Data model / API surface sections
-  (`docs/specs/ui/agent-todo-list-panel.md`); plan's Backend section
+  (`docs/specs/ui/requirements/agent-todo-list-panel.md`); plan's Backend section
   (`plan.md`); existing `ShowTranscriptAutoScrollControl` call sites as the
   exact pattern.
 

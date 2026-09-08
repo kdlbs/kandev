@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -23,6 +24,11 @@ const (
 
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
+	if req.AuthorType != createdByAgent {
+		if err := s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt); err != nil {
+			return nil, err
+		}
+	}
 	messageID := uuid.New().String()
 	session, err := s.getSessionWithRetry(
 		ctx,
@@ -81,7 +87,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		TaskID:        taskID,
 		TurnID:        turnID,
 		AuthorType:    authorType,
-		AuthorID:      req.AuthorID,
+		AuthorID:      s.resolveAuthorID(ctx, authorType, req.AuthorID),
 		Content:       req.Content,
 		Type:          messageType,
 		Metadata:      req.Metadata,
@@ -352,17 +358,19 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		return nil, false, err
 	}
 	limit := req.Limit
-	if limit <= 0 && (req.Before != "" || req.After != "") {
+	if limit <= 0 && (req.Before != "" || req.After != "" || req.Around != "" || req.AuthorType != "") {
 		limit = DefaultMessagesPageSize
 	}
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
 	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
-		Limit:  limit,
-		Before: req.Before,
-		After:  req.After,
-		Sort:   req.Sort,
+		Limit:      limit,
+		Before:     req.Before,
+		After:      req.After,
+		Sort:       req.Sort,
+		AuthorType: req.AuthorType,
+		Around:     req.Around,
 	})
 }
 
@@ -673,7 +681,13 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 
 // UpdatePermissionMessage updates a permission request message's status.
 // It includes retry logic to handle race conditions.
-func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+//
+// The lookup is qualified by the full (task, session, request, pending)
+// identity rather than pending_id alone: a provider may reuse a pending_id
+// for a later, unrelated request once the original is resolved, and a
+// delayed event about the old request must not be able to expire the new
+// one's message.
+func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -682,7 +696,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
 		if err == nil {
 			break
 		}
@@ -694,6 +708,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		if attempt < maxRetries-1 {
 			s.logger.Debug("permission message not found, retrying",
 				zap.String("session_id", sessionID),
+				zap.String("request_id", requestID),
 				zap.String("pending_id", pendingID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -745,6 +760,49 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// ClaimPermissionResolution durably serializes the first resolver before any
+// option is delivered to the live agent process.
+func (s *Service) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	result, err := s.messages.ClaimPermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to claim permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.Audit.RequestID),
+			zap.String("pending_id", request.Audit.PendingID),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionClaimed && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+// FinalizePermissionResolution records the outcome for the exact durable
+// claim. Only successful writes publish the existing message update event.
+func (s *Service) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	result, err := s.messages.FinalizePermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to finalize permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("result", string(request.Result)),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionFinalized && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+func (s *Service) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return s.messages.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // UpdateClarificationMessageForQuestion updates a single clarification message
@@ -897,4 +955,22 @@ func firstRestoredClarification(messages []*models.Message) *models.Message {
 		}
 	}
 	return nil
+}
+
+// resolveAuthorID stamps a human message with the *authenticated* caller
+// rather than whatever author_id the browser sent.
+//
+// Attribution is the whole reason a team uses accounts instead of a shared
+// login, so it cannot be client-supplied: any user could otherwise post as a
+// colleague. Agent messages keep the caller-supplied ID, which names an agent
+// execution rather than a person, and an unauthenticated (internal or
+// auth-disabled) caller keeps today's behavior.
+func (s *Service) resolveAuthorID(ctx context.Context, authorType models.MessageAuthorType, requested string) string {
+	if authorType != models.MessageAuthorUser {
+		return requested
+	}
+	if userID, scoped := callerScope(ctx); scoped {
+		return userID
+	}
+	return requested
 }

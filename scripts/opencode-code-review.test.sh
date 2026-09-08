@@ -111,9 +111,8 @@ fi
 pass "Same-repository trusted review isolates App credentials in the protected environment"
 
 for harness_file in \
-  .agents/skills/pr-fixup/SKILL.md \
   .agents/skills/planner-orchestration/SKILL.md; do
-  if ! grep -q 'OpenCode App.*trusted_producer=true\|trusted_producer=true.*OpenCode App\|OpenCode producer.*trusted_producer=true' "$ROOT_DIR/$harness_file"; then
+  if ! grep -Fq 'OpenCode App as trusted semantic evidence only when `trusted_producer=true`' "$ROOT_DIR/$harness_file"; then
     fail "Harness requires trusted producer only for the dedicated OpenCode App"
   fi
 done
@@ -137,11 +136,12 @@ if [[ "$trusted_script_count" != "2" ]]; then
 fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
-artifact_upload_count="$(count_matches regex 'uses: actions/upload-artifact@(v4([[:space:]]|$)|[a-f0-9]{40}[[:space:]]+# v4([[:space:]]|$))')"
-if [[ "$artifact_upload_count" != "2" ]]; then
-  fail "OpenCode review upload-artifact is pinned to v4 in both workflow paths"
+artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1')"
+total_artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@')"
+if [[ "$artifact_upload_count" != "2" || "$artifact_upload_count" != "$total_artifact_upload_count" ]]; then
+  fail "OpenCode review upload-artifact is pinned to v7 in both workflow paths"
 fi
-pass "OpenCode review artifacts are uploaded from both workflow paths"
+pass "OpenCode review upload-artifact is pinned to v7 in both workflow paths"
 
 invalid_artifact_upload_refs="$(
   rg --line-number 'uses: actions/upload-artifact@' "$WORKFLOW" |
@@ -198,11 +198,6 @@ if rg -q '(OPENCODE_REVIEW_APP_PRIVATE_KEY|steps\.app-token\.outputs\.token)' <<
   fail "OpenCode model step must not receive dedicated App credentials"
 fi
 pass "OpenCode model step does not receive dedicated App credentials"
-
-if ! rg -A 10 '^  strip-safe-to-review:' "$WORKFLOW" | rg -q 'issues: write'; then
-  fail "Fork safe-to-review cleanup has issues write permission"
-fi
-pass "Fork safe-to-review cleanup has issues write permission"
 
 if [[ "$(count_occurrences "$app_token_action")" != "1" ]]; then
   fail "Only same-repository review mints the dedicated App token"

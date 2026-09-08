@@ -172,7 +172,9 @@ test.describe("mobile PR CI chip drawer", () => {
     await expect(
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
-    await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
+    ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();

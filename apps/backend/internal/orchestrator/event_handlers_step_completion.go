@@ -160,6 +160,7 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("deferring workflow step completion signal while cancellation is in progress",
 			zap.String("task_id", taskID),
@@ -167,9 +168,23 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		return
 	}
 
+	s.reconcileStepCompletionSignalLocked(ctx, taskID, sessionID, stepID)
+}
+
+// reconcileStepCompletionSignalLocked re-checks a pending step-completion
+// signal against the task's current state and, if still valid, drives the
+// transition. Callers must already hold sessionID's cancelInFlight guard —
+// this is the case for onStepCompletionSignaled's bus subscriber; for the
+// turn-failure settle point in handleRecoverableFailureLocked, which gives
+// the ADR 0015 reconciler a second chance when the turn never reached a
+// successful processOnTurnCompleteViaEngine call; and for the stuck-session
+// watchdog, which gives it that same second chance when a turn never
+// reaches turn-end or a failure event at all.
+func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskID, sessionID, stepID string) {
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("onStepCompletionSignaled: failed to load session",
+		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load session",
 			zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}
@@ -182,12 +197,12 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("onStepCompletionSignaled: failed to load task",
+		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load task",
 			zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
 	if task.WorkflowStepID != stepID {
-		s.logger.Debug("onStepCompletionSignaled: signal stale (step changed)",
+		s.logger.Debug("reconcileStepCompletionSignalLocked: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
 		// Only clear the bag when its current contents are themselves
 		// stale (matching THIS subscriber's stepID). Re-load the session

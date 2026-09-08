@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-step-contract-and-template", "02-configuration-surfaces"]
 plan: "plan.md"
-spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cancelled-turn-completion.md"
 ---
 
 # Task 05: Cancelled turn public documentation

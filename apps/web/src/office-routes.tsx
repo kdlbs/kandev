@@ -48,6 +48,7 @@ import {
 import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { Trans, useTranslation } from "react-i18next";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 type RouteRenderer = () => React.ReactNode;
 
@@ -62,7 +63,11 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
   "/office/workspace/routing": () => <ProviderRoutingPage />,
-  "/office/workspace/settings": () => <SettingsPage />,
+  "/office/workspace/settings": () => (
+    <SettingsSaveProvider placement="content">
+      <SettingsPage />
+    </SettingsSaveProvider>
+  ),
   "/office/workspace/settings/sync": () => <SyncPage />,
   "/office/workspace/org": () => <OrgPage />,
 };
@@ -103,7 +108,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex h-full min-h-0 flex-col">
         <OfficeShell routePath={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
         </OfficeShell>

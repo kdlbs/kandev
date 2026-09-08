@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Render agent-supplied walkthrough JSON with trusted pull-request identity."""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+SKILL_DIR = Path(__file__).resolve().parents[1]
+TRUSTED_DIR = Path(".pr-walkthrough")
+DRAFT_PATH = TRUSTED_DIR / "draft.json"
+OUTPUT_DIR = Path("docs/pr-walkthrough")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def trusted_identity() -> dict[str, object]:
+    number_text = required_env("PR_NUMBER")
+    if not number_text.isdigit() or int(number_text) < 1:
+        raise ValueError("PR_NUMBER must be a positive integer")
+    number = int(number_text)
+    repo = required_env("PR_REPO")
+    if not REPO_RE.fullmatch(repo):
+        raise ValueError("PR_REPO must be an owner/repository slug")
+    expected_url = f"https://github.com/{repo}/pull/{number}"
+    url = required_env("PR_URL").rstrip("/")
+    if url != expected_url:
+        raise ValueError(f"PR_URL must be {expected_url}")
+    return {
+        "number": number,
+        "title": required_env("PR_TITLE"),
+        "url": url,
+        "files_url": f"{url}/files",
+        "repo": repo,
+        "base": required_env("PR_BASE"),
+        "head": required_env("PR_HEAD"),
+    }
+
+
+def bind_trusted_metadata(data: object) -> dict[str, object]:
+    if not isinstance(data, dict):
+        raise ValueError("walkthrough JSON must be an object")
+    pr = data.get("pr")
+    if not isinstance(pr, dict):
+        pr = {}
+        data["pr"] = pr
+    pr.update(trusted_identity())
+    changes = data.get("changes")
+    if isinstance(changes, list):
+        for change in changes:
+            if isinstance(change, dict):
+                change.pop("file_url", None)
+    return data
+
+
+def load_draft() -> object:
+    if not DRAFT_PATH.is_file():
+        raise ValueError(f"fixed draft is missing: {DRAFT_PATH}")
+    try:
+        return json.loads(DRAFT_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"fixed draft is not valid JSON: {DRAFT_PATH}") from exc
+
+
+def render(data: dict[str, object]) -> tuple[Path, Path]:
+    build_script = SKILL_DIR / "references" / "build.py"
+    shell = SKILL_DIR / "references" / "shell.html"
+    if not build_script.is_file() or not shell.is_file():
+        raise ValueError("trusted walkthrough renderer assets are missing")
+
+    number = int(data["pr"]["number"])
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = OUTPUT_DIR / f"pr-{number}.json"
+    html_path = OUTPUT_DIR / f"pr-{number}.html"
+
+    with tempfile.TemporaryDirectory(prefix=".render-", dir=OUTPUT_DIR) as temp_name:
+        temp_dir = Path(temp_name)
+        temp_json = temp_dir / json_path.name
+        temp_html = temp_dir / html_path.name
+        temp_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(build_script), str(temp_json), str(temp_html)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "renderer failed"
+            raise ValueError(message)
+        if not temp_html.is_file() or temp_html.stat().st_size == 0:
+            raise ValueError("renderer did not produce non-empty HTML")
+        temp_html.replace(html_path)
+        temp_json.replace(json_path)
+    return json_path, html_path
+
+
+def main() -> int:
+    try:
+        if len(sys.argv) != 1:
+            raise ValueError("renderer does not accept command arguments")
+        data = load_draft()
+        bound = bind_trusted_metadata(data)
+        json_path, html_path = render(bound)
+    except (OSError, ValueError) as exc:
+        print(f"walkthrough render failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"rendered {json_path} and {html_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

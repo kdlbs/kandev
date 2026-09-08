@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-general-target-coverage"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 05: Dynamic, integration, system, and account target coverage

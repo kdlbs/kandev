@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-orchestrator-trigger-dispatch"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-completion-trigger.md"
+spec: "../../specs/tasks/requirements/subtask-completion-trigger.md"
 ---
 
 # Task 04: E2E verification
@@ -38,7 +38,7 @@ make typecheck test lint
 
 ## Inputs
 
-- Spec: `docs/specs/tasks/subtask-completion-trigger.md`, `Scenarios`.
+- Spec: `docs/specs/tasks/requirements/subtask-completion-trigger.md`, `Scenarios`.
 - Existing E2E patterns: `apps/web/e2e/tests/task/subtask.spec.ts`,
   `apps/web/e2e/helpers/api-client.ts`, and mock-agent MCP script examples.
 

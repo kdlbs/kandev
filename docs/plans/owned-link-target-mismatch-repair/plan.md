@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/attach-workspace-sources.md
+spec: docs/specs/tasks/system-design/attach-workspace-sources.md
 created: 2026-08-04
 status: completed
 ---
@@ -136,7 +136,7 @@ and `materializeWorktreeSources` (`:569-574`) append an entry to the `created` s
 `rollbackHostWorkspaceMaterialization` (`:229-244`) `os.Remove`s every `created` entry (`:231-233`) on
 a later failure (rescan/persist/adopt at `:134,:139,:145`). So a failed submission **deletes** a link
 that existed before the attachment instead of restoring its prior target — violating the spec's
-atomicity guarantee (`docs/specs/tasks/attach-workspace-sources.md:40-43`,`:51`,`:62`). The two
+atomicity guarantee (`docs/specs/tasks/system-design/attach-workspace-sources.md:40-43`,`:51`,`:62`). The two
 reconcile call sites ignore the return values, so the rollback bug is confined to the two
 `materialize*` sites.
 

@@ -12,13 +12,28 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth/authn"
 )
+
+// newTestRouter mirrors the production wiring in internal/system: a read group
+// plus an admin group guarded by authn.RequireAdmin. The identity is an admin
+// (as the synthetic single-user identity is when auth is disabled), so these
+// handler tests exercise behavior rather than the role guard, which
+// internal/system's route tests own.
+func newTestRouter(handler *Handler) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
+		c.Next()
+	})
+	read := router.Group("/api/v1/system")
+	RegisterRoutes(read, read.Group("", authn.RequireAdmin()), handler)
+	return router
+}
 
 func TestPatchSettingsHidesInternalSaveFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	group := router.Group("/api/v1/system")
-	RegisterRoutes(group, NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		Settings: failingSettingsManager{err: errors.New("database credentials leaked")},
 	}))
 	body, err := json.Marshal(map[string]any{"settings": DefaultSettings()})
@@ -43,8 +58,7 @@ func TestPatchSettingsHidesInternalSaveFailure(t *testing.T) {
 func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	analyzedAt := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		Settings: staticSettingsManager{}, Runs: staticRunLister{},
 		Overview: staticCachedOverview{snapshot: OverviewSnapshot{
 			Summary: Summary{Workspaces: map[string]any{"bytes": 42}}, AnalyzedAt: analyzedAt,
@@ -71,10 +85,48 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestGetStorageReturnsBeforeColdOverviewScanCompletes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := newProgressiveOverview()
+	cache := NewOverviewCache(provider)
+	router := newTestRouter(NewHandler(HandlerConfig{
+		Settings: staticSettingsManager{}, Runs: staticRunLister{}, Overview: cache,
+	}))
+
+	responseCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage", nil))
+		responseCh <- response
+	}()
+	<-provider.started
+
+	var response *httptest.ResponseRecorder
+	select {
+	case response = <-responseCh:
+	case <-time.After(100 * time.Millisecond):
+		close(provider.release)
+		t.Fatal("storage overview request waited for the cold scan")
+	}
+	close(provider.release)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Summary  *Summary             `json:"summary"`
+		Analysis StorageAnalysisState `json:"analysis"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Summary != nil || body.Analysis.State != AnalysisStateScanning {
+		t.Fatalf("cold response = %#v, want scanning state without summary", body)
+	}
+}
+
 func TestGetStorageDiskReturnsIndependentCapacityResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{}))
+	router := newTestRouter(NewHandler(HandlerConfig{}))
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
@@ -95,8 +147,7 @@ func TestGetStorageDiskReturnsIndependentCapacityResponse(t *testing.T) {
 
 func TestGetStorageDiskReturnsMeasuredFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		DiskPath: "/data",
 		DiskCapacity: func(context.Context, string) (DiskCapacity, error) {
 			return DiskCapacity{
@@ -126,8 +177,7 @@ func TestGetStorageDiskReturnsMeasuredFields(t *testing.T) {
 func TestGetStorageDiskLogsReaderErrorsAndReturnsUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var loggedMessage string
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		DiskPath: "/data",
 		DiskCapacity: func(context.Context, string) (DiskCapacity, error) {
 			return DiskCapacity{}, errors.New("statfs failed")
@@ -164,8 +214,7 @@ func TestGetStorageSettingsReturnsPolicyWithoutOverviewScan(t *testing.T) {
 		HostGlobalDockerCleanup:  true,
 	}
 	overview := &recordingOverviewReader{capabilities: capabilities}
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		Settings: staticSettingsManager{settings: settings},
 		Overview: overview,
 	}))
@@ -205,8 +254,7 @@ func TestGetStorageSettingsHidesInternalLoadFailure(t *testing.T) {
 	internalErr := errors.New("database credentials leaked")
 	var loggedMessage string
 	var loggedErr error
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+	router := newTestRouter(NewHandler(HandlerConfig{
 		Settings: failingSettingsManager{getErr: internalErr},
 		LogError: func(message string, err error) {
 			loggedMessage, loggedErr = message, err
@@ -231,8 +279,7 @@ func TestGetStorageSettingsHidesInternalLoadFailure(t *testing.T) {
 func TestDeleteQuarantineBulkValidatesConfirmation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mutations := &recordingMutations{}
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{Mutations: mutations}))
+	router := newTestRouter(NewHandler(HandlerConfig{Mutations: mutations}))
 
 	for _, test := range []struct {
 		body string

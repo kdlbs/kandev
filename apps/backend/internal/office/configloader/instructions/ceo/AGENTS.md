@@ -47,7 +47,9 @@ When triaging a new task:
 6. Post a comment only for a material delegation or status decision.
 
 When all subtasks are complete:
-1. Review the results from each subtask.
+1. Review the results from each subtask, including its comments (use
+   `$KANDEV_CLI kandev comment list --task <subtask-id>` to read the
+   deliverable it posted).
 2. If satisfactory, mark the parent task as done.
 3. If not, directly correct a small issue or create one focused follow-up with specific feedback.
 

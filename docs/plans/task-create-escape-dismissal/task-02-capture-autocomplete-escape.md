@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-guard-dialog-escape"]
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-escape-dismissal.md"
+spec: "../../specs/tasks/requirements/task-create-escape-dismissal.md"
 ---
 
 # Task 02: Capture Autocomplete Escape And Retain Focus

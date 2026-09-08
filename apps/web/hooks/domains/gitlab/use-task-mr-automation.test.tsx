@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStore } from "@/components/state-provider";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { TaskMRAutomationOptions, TaskMRAutomationOptionsForMR } from "@/lib/types/gitlab";
 
 const api = vi.hoisted(() => ({
   getTaskMRAutomation: vi.fn(),
@@ -15,6 +15,25 @@ import { useTaskMRAutomationOptions } from "./use-task-mr-automation";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
+}
+
+function defaultMROption(
+  overrides: Partial<TaskMRAutomationOptionsForMR> = {},
+): TaskMRAutomationOptionsForMR {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    project_path: "group/project",
+    mr_iid: 7,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
 }
 
 function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
@@ -31,6 +50,7 @@ function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     review_reviewer_username: "",
     updated_at: "2026-01-01T00:00:00Z",
     mr_states: [],
+    mr_options: [defaultMROption()],
     ...overrides,
   };
 }
@@ -94,6 +114,30 @@ describe("useTaskMRAutomationOptions fetching", () => {
     });
     expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
   });
+
+  it("issues one fetch when several instances mount together for the same task", async () => {
+    // The switches are per-MR, so a task with N linked MRs mounts N copies of
+    // MRAutomationControls — each with its own useTaskMRAutomationOptions.
+    // They all read the same store slot, so they must not each fire a GET.
+    const pending = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation.mockReturnValue(pending.promise);
+    const { result } = renderHook(
+      () => {
+        useTaskMRAutomationOptions("task-1");
+        useTaskMRAutomationOptions("task-1");
+        return useTaskMRAutomationOptions("task-1");
+      },
+      { wrapper },
+    );
+
+    await waitFor(() => expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      pending.resolve(baseOptions({ prompt_on_merged: true }));
+      await pending.promise;
+    });
+    await waitFor(() => expect(result.current.options?.prompt_on_merged).toBe(true));
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useTaskMRAutomationOptions optimistic updates", () => {
@@ -108,32 +152,44 @@ describe("useTaskMRAutomationOptions optimistic updates", () => {
       void result.current.update({ prompt_on_merged: true });
     });
 
-    // Optimistic reflect happens synchronously within the update call.
-    await waitFor(() => expect(result.current.options?.prompt_on_merged).toBe(true));
+    // Optimistic reflect happens synchronously within the update call, into
+    // the targeted MR's entry in mr_options (the per-MR source of truth) —
+    // not the task-level aggregate, which is server-computed.
+    await waitFor(() =>
+      expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true),
+    );
     expect(result.current.saving).toBe(true);
 
     await act(async () => {
-      update.resolve(baseOptions({ prompt_on_merged: true }));
+      update.resolve(baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: true })] }));
     });
 
     await waitFor(() => expect(result.current.saving).toBe(false));
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
     expect(result.current.error).toBeNull();
   });
 
   it("reverts the optimistic update and surfaces an error on failure (AC27)", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
-    api.updateTaskMRAutomation.mockRejectedValue(new Error(NETWORK_DOWN_ERROR));
+    const update = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation.mockImplementation(() => update.promise);
     const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
+    let pending: Promise<unknown>;
+    act(() => {
+      pending = result.current.update({ prompt_on_closed: true });
+    });
+    await waitFor(() =>
+      expect(result.current.options?.mr_options?.[0]?.prompt_on_closed).toBe(true),
+    );
+
     await act(async () => {
-      await expect(result.current.update({ prompt_on_closed: true })).rejects.toThrow(
-        NETWORK_DOWN_ERROR,
-      );
+      update.reject(new Error(NETWORK_DOWN_ERROR));
+      await expect(pending!).rejects.toThrow(NETWORK_DOWN_ERROR);
     });
 
-    expect(result.current.options?.prompt_on_closed).toBe(false);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_closed).toBe(false);
     expect(result.current.error).toBe(NETWORK_DOWN_ERROR);
     expect(result.current.saving).toBe(false);
   });
@@ -198,6 +254,89 @@ describe("useTaskMRAutomationOptions races", () => {
       refresh.resolve(baseOptions({ prompt_on_merged: false }));
     });
     expect(result.current.options?.prompt_on_merged).toBe(true);
+  });
+
+  // A task with N linked MRs mounts N MRAutomationControls, each with its own
+  // useTaskMRAutomationOptions("task-1") instance. All instances read/write
+  // the same store slot, so their save-ordering guards must also be shared —
+  // otherwise an older instance's private counter never learns about a
+  // newer instance's save and treats its own stale response as current.
+  it("shares update ordering across multiple mounted instances for the same task, so an older instance's stale response cannot clobber a newer one's committed result", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const { result } = renderHook(
+      () => ({
+        a: useTaskMRAutomationOptions("task-1"),
+        b: useTaskMRAutomationOptions("task-1"),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.a.options).not.toBeNull());
+
+    const updateA = deferred<TaskMRAutomationOptions>();
+    const updateB = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation
+      .mockImplementationOnce(() => updateA.promise)
+      .mockImplementationOnce(() => updateB.promise);
+
+    // Instance A (e.g. !1's block) starts a save...
+    act(() => {
+      void result.current.a.update({ auto_fix_prompt_override: "from A" });
+    });
+    // ...then instance B (e.g. !2's block) starts a later save for the same
+    // task before A's resolves.
+    act(() => {
+      void result.current.b.update({ auto_fix_prompt_override: "from B" });
+    });
+
+    // B's later, authoritative response lands first...
+    await act(async () => {
+      updateB.resolve(baseOptions({ auto_fix_prompt_override: "from B" }));
+    });
+    expect(result.current.a.options?.auto_fix_prompt_override).toBe("from B");
+
+    // ...then A's now-stale response resolves after. It must not win.
+    await act(async () => {
+      updateA.resolve(baseOptions({ auto_fix_prompt_override: "from A" }));
+    });
+    expect(result.current.a.options?.auto_fix_prompt_override).toBe("from B");
+    expect(result.current.b.options?.auto_fix_prompt_override).toBe("from B");
+  });
+});
+
+describe("useTaskMRAutomationOptions revision ordering", () => {
+  it("commits a higher-revision response even when its request started before a lower-revision response", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions({ automation_revision: 1 }));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    const olderRequest = deferred<TaskMRAutomationOptions>();
+    const newerRequest = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation
+      .mockImplementationOnce(() => olderRequest.promise)
+      .mockImplementationOnce(() => newerRequest.promise);
+
+    act(() => {
+      void result.current.update({ auto_fix_prompt_override: "older request" });
+      void result.current.update({ auto_fix_prompt_override: "newer request" });
+    });
+
+    await act(async () => {
+      newerRequest.resolve(
+        baseOptions({ automation_revision: 2, auto_fix_prompt_override: "revision two" }),
+      );
+    });
+    expect(result.current.options?.automation_revision).toBe(2);
+
+    // The first request can commit later when the database transaction that
+    // owns it receives the next revision. Request-start order is not server
+    // revision order, so the higher revision must still win.
+    await act(async () => {
+      olderRequest.resolve(
+        baseOptions({ automation_revision: 3, auto_fix_prompt_override: "revision three" }),
+      );
+    });
+    expect(result.current.options?.automation_revision).toBe(3);
+    expect(result.current.options?.auto_fix_prompt_override).toBe("revision three");
   });
 });
 
@@ -420,13 +559,15 @@ describe("useTaskMRAutomationOptions refresh/save interaction", () => {
     // The refresh's pre-patch response resolves while the save is still
     // pending — it must not flip the optimistic switch back off.
     await act(async () => {
-      refreshCall.resolve(baseOptions({ prompt_on_merged: false }));
+      refreshCall.resolve(
+        baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: false })] }),
+      );
     });
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
 
     await act(async () => {
-      update.resolve(baseOptions({ prompt_on_merged: true }));
+      update.resolve(baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: true })] }));
     });
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
   });
 });

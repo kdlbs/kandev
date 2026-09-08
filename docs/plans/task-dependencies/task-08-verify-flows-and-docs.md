@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["04-failed-predecessor-halt", "06-kanban-dependency-ui"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 08: Verify Browser Flows and Documentation
@@ -91,7 +91,7 @@ of `main`.
 - `docs/public/tasks-and-workflows.md`
 - `docs/public/workflow-tips.md`
 - `docs/features.md`
-- `docs/specs/task-dependencies/spec.md`
+- `docs/specs/tasks/system-design/task-dependencies.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/task-dependencies/plan.md`
 

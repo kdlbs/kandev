@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/lib/i18n";
+import { StateProvider } from "@/components/state-provider";
 import { RepositoryCard } from "./repository-card";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -66,23 +67,26 @@ function script(id: string): RepositoryScript {
 
 function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
   return render(
-    <ToastProvider>
-      <SettingsSaveProvider>
-        <RepositoryCard
-          repository={repo}
-          savedRepository={repo}
-          isRepositoryDirty={false}
-          areScriptsDirty={false}
-          autoOpen={autoOpen}
-          onUpdate={vi.fn()}
-          onAddScript={vi.fn()}
-          onUpdateScript={vi.fn()}
-          onDeleteScript={vi.fn()}
-          onSave={vi.fn()}
-          onDelete={vi.fn()}
-        />
-      </SettingsSaveProvider>
-    </ToastProvider>,
+    <StateProvider>
+      <ToastProvider>
+        <SettingsSaveProvider>
+          <RepositoryCard
+            repository={repo}
+            workspaceId="workspace-1"
+            savedRepository={repo}
+            isRepositoryDirty={false}
+            areScriptsDirty={false}
+            autoOpen={autoOpen}
+            onUpdate={vi.fn()}
+            onAddScript={vi.fn()}
+            onUpdateScript={vi.fn()}
+            onDeleteScript={vi.fn()}
+            onSave={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </SettingsSaveProvider>
+      </ToastProvider>
+    </StateProvider>,
   );
 }
 

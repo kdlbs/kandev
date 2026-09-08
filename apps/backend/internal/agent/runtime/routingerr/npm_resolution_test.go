@@ -70,3 +70,41 @@ func TestManagedRuntimeNpmResolutionSanitizesDetails(t *testing.T) {
 		t.Fatalf("raw excerpt contains an unsanitized secret: %q", classified.RawExcerpt)
 	}
 }
+
+func TestManagedRuntimeNpmResolutionMatchesExactPackage(t *testing.T) {
+	const packageSpec = "@kandev/agent@1.2.3"
+	tests := []struct {
+		name  string
+		input string
+		match bool
+	}{
+		{
+			name: "exact selected package",
+			input: "npm error code ETARGET\n" +
+				"npm error notarget No matching version found for @kandev/agent@1.2.3.",
+			match: true,
+		},
+		{
+			name: "transitive dependency",
+			input: "npm error code ETARGET\n" +
+				"npm error notarget No matching version found for dependency@9.9.9.",
+		},
+		{
+			name: "nearby version is not exact",
+			input: "npm error code ETARGET\n" +
+				"npm error notarget No matching version found for @kandev/agent@1.2.30.",
+		},
+		{
+			name:  "diagnostic without ETARGET code",
+			input: "npm error notarget No matching version found for @kandev/agent@1.2.3.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ManagedRuntimeNpmResolutionMatchesPackage(tt.input, packageSpec); got != tt.match {
+				t.Fatalf("ManagedRuntimeNpmResolutionMatchesPackage() = %v, want %v", got, tt.match)
+			}
+		})
+	}
+}

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/setup-launch-timeout.md
+spec: docs/specs/platform/requirements/setup-launch-timeout.md
 created: 2026-08-12
 status: completed
 ---

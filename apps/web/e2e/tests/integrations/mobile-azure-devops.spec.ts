@@ -173,9 +173,64 @@ test("mobile board opens a focused column editor without horizontal overflow", a
     organizationUrl: "https://dev.azure.com/acme",
     pat: "azure-test-pat",
   });
+  const savedViewsSeed = await testPage.request.put(
+    `/api/v1/azure-devops/views?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    {
+      data: {
+        views: [
+          {
+            id: "mobile-security-queue",
+            kind: "work_item",
+            label: "Mobile security queue",
+            projectId: "project-1",
+            wiql: "SELECT [System.Id] FROM WorkItems",
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        ],
+      },
+    },
+  );
+  expect(savedViewsSeed.ok()).toBe(true);
   await testPage.goto("/azure-devops");
 
   await expect(testPage.getByTestId("azure-devops-board")).toBeVisible();
+  const savedViewsMenu = testPage.getByTestId("azure-devops-saved-views-menu");
+  await savedViewsMenu.tap();
+  const deleteSavedView = testPage.getByRole("menuitem", {
+    name: "Delete Mobile security queue saved query",
+  });
+  await expect
+    .poll(async () => (await deleteSavedView.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(44);
+  await expect
+    .poll(async () => (await deleteSavedView.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual(44);
+  await deleteSavedView.tap();
+  const deleteConfirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+  await expect(deleteConfirmation).toHaveAccessibleName("Delete Mobile security queue?");
+  await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(0);
+  for (const action of await deleteConfirmation.getByRole("button").all()) {
+    const box = await action.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
+  await expect(deleteSavedView).toBeVisible();
+
+  await deleteSavedView.tap();
+  const deleteSavedViewResponse = testPage.waitForResponse(
+    (response) =>
+      response.ok() &&
+      response.request().method() === "PUT" &&
+      response.url().includes("/api/v1/azure-devops/views"),
+  );
+  await testPage
+    .getByTestId("saved-task-view-delete-confirmation")
+    .getByRole("button", { name: "Delete Mobile security queue" })
+    .tap();
+  await deleteSavedViewResponse;
+  await expect(deleteSavedView).toHaveCount(0);
+  await testPage.keyboard.press("Escape");
+  await expect(testPage.getByRole("menu")).toBeHidden();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
   await prCapture.screenshot("board-mobile", {
     caption: "Azure DevOps focused mobile board column",
@@ -254,7 +309,9 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await testPage.getByTestId("azure-watch-editor-close").click();
   await workItemWatch.getByRole("button", { name: "Run now" }).click();
   await expect(testPage.getByText(/\d+ new match/)).toBeVisible();
-  await testPage.once("dialog", (dialog) => dialog.accept());
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
+  const resetDialog = testPage.getByTestId("reset-watch-dialog");
+  await expect(resetDialog).toBeVisible();
+  await resetDialog.getByTestId("reset-watch-dialog-confirm").tap();
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
 });

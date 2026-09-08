@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-system-api-wiring"]
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 06: Host sleep documentation
@@ -19,7 +19,7 @@ spec: "../../specs/platform/task-sleep-inhibition.md"
 ## Verification
 
 ```bash
-rg -n "sleep|Task Actions|Kubernetes|logind" docs/public/operations.md docs/specs/platform/task-sleep-inhibition.md
+rg -n "sleep|Task Actions|Kubernetes|logind" docs/public/operations.md docs/specs/platform/requirements/task-sleep-inhibition.md
 ```
 
 ```bash

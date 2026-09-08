@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-frontend-preference-state"]
 plan: "plan.md"
-spec: "../../specs/ui/port-forwarding-discovery.md"
+spec: "../../specs/ui/requirements/port-forwarding-discovery.md"
 ---
 
 # Task 03: Desktop and mobile surfaces

@@ -5,7 +5,7 @@ status: in_progress
 wave: 6
 depends_on: ["05-acp-conductor"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 06: Logical session integration

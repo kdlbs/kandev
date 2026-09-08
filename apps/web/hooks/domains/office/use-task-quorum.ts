@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { getTaskQuorum } from "@/lib/api/domains/office-extended-api";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { t } from "@/lib/i18n";
@@ -19,13 +20,6 @@ export function useTaskQuorum(
 ): UseTaskQuorumResult {
   const quorum = useAppStore((s) => (taskId ? s.office.taskQuorum.byTaskId[taskId] : undefined));
   const setTaskQuorum = useAppStore((s) => s.setTaskQuorum);
-  // office.task.decision_recorded (lib/ws/handlers/office.ts) bumps this
-  // counter for `task:${taskId}` — recording a decision changes the guard's
-  // approve/reject count, so the cached snapshot must be invalidated even
-  // though taskId itself hasn't changed.
-  const decisionRefetchTrigger = useAppStore((s) =>
-    taskId ? s.office.refetchTriggers[`task:${taskId}`] : undefined,
-  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fetchedScope, setFetchedScope] = useState<string | null>(null);
@@ -58,10 +52,13 @@ export function useTaskQuorum(
     void refresh();
   }, [taskId, workspaceId, fetchedScope, refresh]);
 
-  useEffect(() => {
-    if (!taskId || !workspaceId || decisionRefetchTrigger === undefined) return;
-    void refresh();
-  }, [taskId, workspaceId, decisionRefetchTrigger, refresh]);
+  // office.task.decision_recorded (lib/ws/handlers/office.ts) fires
+  // `task:${taskId}` — recording a decision changes the guard's
+  // approve/reject count, so the cached snapshot must be invalidated even
+  // though taskId itself hasn't changed.
+  useOfficeRefetch(taskId ? `task:${taskId}` : "", () => {
+    if (taskId && workspaceId) void refresh();
+  });
 
   return { quorum, isLoading, error, refresh };
 }

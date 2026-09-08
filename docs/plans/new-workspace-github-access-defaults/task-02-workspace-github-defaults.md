@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-default-behavior-regressions"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 02: Workspace GitHub defaults

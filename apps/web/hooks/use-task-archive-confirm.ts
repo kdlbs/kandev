@@ -5,7 +5,11 @@ import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
-export type ArchiveConfirmTarget = { title: string; executorType?: string | null };
+export type ArchiveConfirmTarget = {
+  id: string;
+  title: string;
+  executorType?: string | null;
+};
 
 /**
  * Archive flow shared by every task-scoped archive entry point (the terminal-state
@@ -28,6 +32,7 @@ export function useTaskArchiveConfirm(taskId: string | null) {
     const state = store.getState();
     const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
     setTarget({
+      id: taskId,
       title: task?.title ?? t("task:thisTask"),
       executorType: task?.primaryExecutorType,
     });
@@ -37,10 +42,11 @@ export function useTaskArchiveConfirm(taskId: string | null) {
 
   const confirmArchive = useCallback(
     async ({ cascade }: { cascade: boolean }) => {
-      if (!taskId) return;
+      const requestedTaskId = target?.id ?? taskId;
+      if (!requestedTaskId) return;
       setIsPending(true);
       try {
-        await archiveAndSwitch(taskId, { cascade });
+        await archiveAndSwitch(requestedTaskId, { cascade });
       } catch (error) {
         // The toast is deliberately generic; keep the rejection reason in the
         // console so a failed archive is diagnosable from a user's devtools.
@@ -50,7 +56,7 @@ export function useTaskArchiveConfirm(taskId: string | null) {
         setIsPending(false);
       }
     },
-    [archiveAndSwitch, t, taskId, toast],
+    [archiveAndSwitch, t, target?.id, taskId, toast],
   );
 
   return { target, requestArchive, closeConfirm, confirmArchive, isPending };

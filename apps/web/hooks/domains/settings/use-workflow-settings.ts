@@ -209,7 +209,6 @@ function mergeDisplayedWorkflowFromStore(
     next.agent_profile_id = serverAgentProfileId;
     changed = true;
   }
-
   return changed ? next : displayed;
 }
 

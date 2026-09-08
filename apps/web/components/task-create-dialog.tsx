@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -52,6 +53,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onTaskNameChange,
     onRowRepositoryChange,
     onRowBranchChange,
+    onRowPolicyChange,
     onToggleRemote,
     onToggleFreshBranch,
     repositories,
@@ -73,6 +75,10 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={
+          isLocalExecutor && freshBranchAvailable ? () => onToggleFreshBranch(true) : undefined
+        }
         onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
@@ -102,6 +108,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
+        launchPreview={props.launchPreview}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
@@ -131,7 +138,9 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       onAgentProfileChange={props.onAgentProfileChange}
       onExecutorProfileChange={props.onExecutorProfileChange}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
     />
   );
@@ -182,6 +191,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
       <TaskCreateAdvancedSettings
@@ -189,8 +199,16 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
       />
+      {props.isEditMode && (
+        <TaskEditDialogDependencies
+          state={props.editDependencies}
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
     </div>
   );
 }

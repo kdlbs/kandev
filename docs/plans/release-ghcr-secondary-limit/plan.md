@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/release-ghcr-secondary-limit/spec.md
+spec: docs/specs/release/requirements/release-ghcr-secondary-limit.md
 created: 2026-08-12
 status: complete
 ---

@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -411,7 +412,15 @@ func TestSchedulerTick_StartTaskError_TriggersRetry(t *testing.T) {
 	}
 }
 
-func TestSchedulerTick_NoTaskStarter_FinishesWithoutError(t *testing.T) {
+// TestSchedulerTick_NoTaskStarter_FailsRunLoudly is the WO-35 regression
+// test for the missing-task-starter wiring fault: before the fix, an
+// unwired scheduler reported every run as "finished" with no session and
+// no error_message (return true from the old launchOrLog), which is
+// indistinguishable in the UI/run history from real success. A task
+// starter this Service was constructed without is a permanent capability
+// gap for the process lifetime, so the run must fail immediately with a
+// diagnostic message instead of retrying or reporting success.
+func TestSchedulerTick_NoTaskStarter_FailsRunLoudly(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	// Intentionally do NOT call SetTaskStarter.
@@ -436,12 +445,79 @@ func TestSchedulerTick_NoTaskStarter_FinishesWithoutError(t *testing.T) {
 
 	service.RunSchedulerTick(svc, ctx)
 
-	// Run should be consumed (finished), queue empty.
+	// The run must not be silently claimable again as "queued" work.
 	next, err := svc.ClaimNextRun(ctx)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if next != nil {
 		t.Error("expected queue to be empty after tick with no task starter")
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q (an un-launched run must not report success)",
+			runs[0].Status, service.RunStatusFailed)
+	}
+	if runs[0].ErrorMessage == "" {
+		t.Error("expected a non-empty error_message explaining why the run could not launch")
+	}
+}
+
+// TestSchedulerTick_NoTaskStarter_UpdatesFailureAccounting proves that the
+// missing-starter path uses HandleAgentFailure. It increments the counter and
+// pauses the agent at the configured threshold instead of only failing runs.
+func TestSchedulerTick_NoTaskStarter_UpdatesFailureAccounting(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	threshold := 2
+	agent := &models.AgentInstance{
+		ID:                 "noop-worker-accounting",
+		WorkspaceID:        "ws-1",
+		Name:               "noop-worker-accounting",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+		FailureThreshold:   &threshold,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-noop-accounting', 'ws-1', 'NoOp Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	for i := 0; i < threshold; i++ {
+		idempotencyKey := fmt.Sprintf("task-noop-accounting-%d", i)
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+			`{"task_id":"task-noop-accounting"}`, idempotencyKey); err != nil {
+			t.Fatalf("queue failure %d: %v", i, err)
+		}
+		service.RunSchedulerTick(svc, ctx)
+		got, err := svc.GetAgentInstance(ctx, agent.ID)
+		if err != nil {
+			t.Fatalf("get agent after failure %d: %v", i, err)
+		}
+		wantFailures := i + 1
+		if got.ConsecutiveFailures != wantFailures {
+			t.Fatalf("consecutive_failures after failure %d = %d, want %d",
+				i, got.ConsecutiveFailures, wantFailures)
+		}
+	}
+
+	got, err := svc.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get final agent: %v", err)
+	}
+	if got.Status != models.AgentStatusPaused {
+		t.Fatalf("agent status = %q, want paused at threshold %d", got.Status, threshold)
+	}
+	if !strings.HasPrefix(got.PauseReason, "Auto-paused:") {
+		t.Fatalf("pause_reason = %q, want an auto-pause reason", got.PauseReason)
 	}
 }

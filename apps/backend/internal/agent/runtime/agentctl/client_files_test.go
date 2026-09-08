@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"mime"
 	"net/http"
 	"strings"
@@ -209,11 +210,26 @@ func TestRequestFileContent_AppendsEscapedRepoSubpath(t *testing.T) {
 }
 
 func TestRequestFileContent_SurfacesResponseErrorField(t *testing.T) {
-	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{"error":"file not found"}`))
+	srv, _ := captureServer(t, jsonResponder(http.StatusNotFound, `{"error":"file not found"}`))
 
 	_, err := newHTTPOnlyClient(srv.URL).RequestFileContent(context.Background(), "gone.go", "")
 	if err == nil || !strings.Contains(err.Error(), "file content error: file not found") {
 		t.Fatalf("error = %v, want wrapped file content error", err)
+	}
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("error = %v, want ErrFileNotFound", err)
+	}
+}
+
+func TestRequestFileContent_DoesNotClassifyNonNotFoundStatus(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusBadRequest, `{"error":"file not found: permission denied"}`))
+
+	_, err := newHTTPOnlyClient(srv.URL).RequestFileContent(context.Background(), "private.go", "")
+	if err == nil {
+		t.Fatal("RequestFileContent returned nil error for error-bearing body")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("error = %v, want non-not-found error", err)
 	}
 }
 

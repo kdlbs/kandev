@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: responsive/layout](../../specs/ui/app-status-bar.md#responsive-and-layout-contract); mobile UI language; task 03 provider trigger.
+[Spec: responsive/layout](../../specs/ui/requirements/app-status-bar.md#responsive-and-layout-contract); mobile UI language; task 03 provider trigger.
 
 ## Files
 

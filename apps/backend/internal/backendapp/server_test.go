@@ -39,45 +39,56 @@ func TestDesktopHealthTokenTrimsEnv(t *testing.T) {
 	}
 }
 
-func TestHealthHandlerEchoesConfiguredToken(t *testing.T) {
+// TestHealthHandlerAlwaysOkRegardlessOfReadiness is the regression test for
+// R1-1: /health is a liveness probe and must answer 200 (with the desktop
+// health token echoed, when configured) whether or not the `ready` flag has
+// flipped. Gating it on readiness would bring back the crash loop docs/specs/
+// startup-listener-before-recovery/spec.md exists to fix.
+func TestHealthHandlerAlwaysOkRegardlessOfReadiness(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv(desktopHealthTokenEnv, "route-health-token")
-	ready.Store(true)
-	t.Cleanup(func() { ready.Store(false) })
 
-	router := gin.New()
-	router.GET("/health", healthHandler(routeParams{}))
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/health", nil)
-	router.ServeHTTP(response, request)
+	for _, readyState := range []bool{false, true} {
+		ready.Store(readyState)
+		t.Cleanup(func() { ready.Store(false) })
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("health status = %d, want %d", response.Code, http.StatusOK)
-	}
-	if got := response.Header().Get(desktopHealthTokenHeader); got != "route-health-token" {
-		t.Fatalf("health token header = %q, want route-health-token", got)
+		router := gin.New()
+		router.GET("/health", healthHandler(routeParams{}))
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/health", nil)
+		router.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			t.Fatalf("ready=%v: health status = %d, want %d", readyState, response.Code, http.StatusOK)
+		}
+		if got := response.Header().Get(desktopHealthTokenHeader); got != "route-health-token" {
+			t.Fatalf("ready=%v: health token header = %q, want route-health-token", readyState, got)
+		}
 	}
 }
 
-func TestServerProbeAddr(t *testing.T) {
-	tests := []struct {
-		name       string
-		listenAddr string
-		want       string
-	}{
-		{name: "port-only address probes loopback", listenAddr: ":38429", want: "127.0.0.1:38429"},
-		{name: "wildcard ipv4 probes loopback", listenAddr: "0.0.0.0:38429", want: "127.0.0.1:38429"},
-		{name: "wildcard ipv6 probes ipv6 loopback", listenAddr: "[::]:38429", want: "[::1]:38429"},
-		{name: "loopback address probes itself", listenAddr: "127.0.0.1:38429", want: "127.0.0.1:38429"},
-		{name: "ipv6 loopback probes itself", listenAddr: "[::1]:38429", want: "[::1]:38429"},
+// TestReadyHandlerGatesOnReadyFlag is the regression test for the task-02
+// requirement that readiness (unlike liveness) reports not-ready during a
+// blocked startup and ready once startup completes.
+func TestReadyHandlerGatesOnReadyFlag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ready.Store(false)
+	t.Cleanup(func() { ready.Store(false) })
+
+	router := gin.New()
+	router.GET("/ready", readyHandler(routeParams{}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not-ready status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := serverProbeAddr(tt.listenAddr); got != tt.want {
-				t.Fatalf("serverProbeAddr(%q) = %q, want %q", tt.listenAddr, got, tt.want)
-			}
-		})
+	ready.Store(true)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want %d", response.Code, http.StatusOK)
 	}
 }
 

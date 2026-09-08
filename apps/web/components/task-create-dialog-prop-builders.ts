@@ -11,6 +11,10 @@
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import type { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
+import {
+  resolveTaskCreateLaunchPreview,
+  type TaskCreateLaunchPreview,
+} from "@/components/task-create-dialog-launch-preview";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
@@ -25,12 +29,29 @@ export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked
   return isCreateMode && !repoLocked;
 }
 
+export function resolveDialogLaunchPreview(
+  isCreateMode: boolean,
+  effectiveWorkflowId: string | null,
+  fetchedSteps: DialogFormState["fetchedSteps"],
+  snapshots: DialogFormBodyProps["snapshots"],
+  hasDescription: boolean,
+): TaskCreateLaunchPreview | null {
+  if (!isCreateMode) return null;
+  return resolveTaskCreateLaunchPreview({
+    effectiveWorkflowId,
+    fetchedSteps,
+    snapshotSteps: effectiveWorkflowId ? snapshots[effectiveWorkflowId]?.steps : undefined,
+    launchIntent: hasDescription ? "start-agent" : "plan-mode",
+  });
+}
+
 export function buildDialogFormBodyProps(
   setup: ReturnType<typeof useTaskCreateDialogSetup>,
   props: TaskCreateDialogProps,
 ): DialogFormBodyProps {
   const { fs, computed, handlers } = setup;
   const repoLocked = !!props.lockedFields?.repository;
+  const effectiveWorkflowId = computed.effectiveWorkflowId ?? null;
   return {
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
@@ -40,6 +61,7 @@ export function buildDialogFormBodyProps(
     onTaskNameChange: handlers.handleTaskNameChange,
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
     onRowBranchChange: handlers.handleRowBranchChange,
+    onRowPolicyChange: handlers.handleRowPolicyChange,
     initialDescription: fs.currentDefaults.description,
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
@@ -50,10 +72,19 @@ export function buildDialogFormBodyProps(
     agentProfilesLoading: computed.agentProfilesLoading,
     executorsLoading: computed.executorsLoading,
     isCreatingSession: fs.isCreatingSession,
+    isCreatingTask: fs.isCreatingTask,
     workflows: setup.workflows,
     snapshots: setup.snapshots,
-    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
+    effectiveWorkflowId,
+    launchPreview: resolveDialogLaunchPreview(
+      setup.isCreateMode,
+      effectiveWorkflowId,
+      fs.fetchedSteps,
+      setup.snapshots,
+      fs.hasDescription,
+    ),
     fs,
+    editDependencies: setup.editDependencies,
     handleKeyDown: setup.handleKeyDown,
     onAgentProfileChange: handlers.handleAgentProfileChange,
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
@@ -80,7 +111,9 @@ export function buildDialogFormBodyProps(
     // applying a set writes fs.repositories just as they would.
     repositorySets: repoLocked ? undefined : setup.repositorySets,
     isLocalExecutor: computed.isLocalExecutor,
-    noCompatibleAgent: computed.noCompatibleAgent,
+    agentCompatState: computed.agentCompatState,
+    selectedAgentProfileName: computed.selectedAgentProfileName,
+    effectiveWorkflowName: resolveWorkflowName(setup.workflows, computed.effectiveWorkflowId),
     executorProfileName: computed.selectedExecutorProfileName,
     extraFormSlot: props.extraFormSlot,
     aboveDescriptionSlot: props.aboveDescriptionSlot,
@@ -88,6 +121,15 @@ export function buildDialogFormBodyProps(
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
   };
+}
+
+/** Name of the effective workflow, for copy that has to name it. */
+export function resolveWorkflowName(
+  workflows: ReadonlyArray<{ id: string; name: string }>,
+  effectiveWorkflowId: string | null | undefined,
+): string | null {
+  if (!effectiveWorkflowId) return null;
+  return workflows.find((workflow) => workflow.id === effectiveWorkflowId)?.name ?? null;
 }
 
 export function buildDialogFooterProps(
@@ -113,11 +155,14 @@ export function buildDialogFooterProps(
     effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
     executorHint: computed.executorHint,
     noCompatibleAgent: computed.noCompatibleAgent,
+    agentCompatState: computed.agentCompatState,
+    selectedAgentProfileName: computed.selectedAgentProfileName,
     executorProfileName: computed.selectedExecutorProfileName,
     onCancel: submitHandlers.handleCancel,
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
     submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
+    editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

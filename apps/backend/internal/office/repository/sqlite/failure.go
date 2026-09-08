@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -20,6 +22,144 @@ func (r *Repository) GetRun(
 		return nil, err
 	}
 	return &req, nil
+}
+
+// AgentPauseRecovery is the task snapshot captured when an agent enters
+// auto-pause. The failed run identifies the failure streak entry that made
+// the task eligible for recovery.
+type AgentPauseRecovery struct {
+	AgentID     string `db:"agent_id"`
+	TaskID      string `db:"task_id"`
+	FailedRunID string `db:"failed_run_id"`
+}
+
+// ReplaceAgentPauseRecoveries replaces the active recovery snapshot for an
+// agent with its newest failed runs. The limit is the consecutive-failure
+// count, so older failures from a previous streak are not selected.
+func (r *Repository) ReplaceAgentPauseRecoveries(
+	ctx context.Context, agentID string, limit int,
+) error {
+	snapshot, err := r.pauseRecoverySnapshot(ctx, agentID, limit)
+	if err != nil {
+		return err
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM office_agent_pause_recoveries WHERE agent_id = ?
+	`), agentID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, recovery := range snapshot {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO office_agent_pause_recoveries
+				(agent_id, task_id, failed_run_id, captured_at)
+			VALUES (?, ?, ?, ?)
+		`), recovery.AgentID, recovery.TaskID, recovery.FailedRunID, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) pauseRecoverySnapshot(
+	ctx context.Context, agentID string, limit int,
+) ([]AgentPauseRecovery, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT id AS failed_run_id, COALESCE(%s, '') AS task_id
+		FROM runs
+		WHERE agent_profile_id = ? AND status = 'failed'
+		ORDER BY COALESCE(finished_at, requested_at) DESC,
+		         requested_at DESC, id DESC
+		LIMIT ?
+	`, taskIDExpr)), agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	seenTasks := make(map[string]struct{}, limit)
+	var snapshot []AgentPauseRecovery
+	for rows.Next() {
+		var row AgentPauseRecovery
+		if err := rows.StructScan(&row); err != nil {
+			return nil, err
+		}
+		if row.TaskID == "" {
+			continue
+		}
+		if _, seen := seenTasks[row.TaskID]; seen {
+			continue
+		}
+		seenTasks[row.TaskID] = struct{}{}
+		row.AgentID = agentID
+		snapshot = append(snapshot, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+// ListAgentPauseRecoveries returns the active task snapshot for an agent.
+func (r *Repository) ListAgentPauseRecoveries(
+	ctx context.Context, agentID string,
+) ([]AgentPauseRecovery, error) {
+	var rows []AgentPauseRecovery
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT agent_id, task_id, failed_run_id
+		FROM office_agent_pause_recoveries
+		WHERE agent_id = ?
+		ORDER BY captured_at ASC, task_id ASC
+	`), agentID)
+	if rows == nil {
+		rows = []AgentPauseRecovery{}
+	}
+	return rows, err
+}
+
+// DeleteAgentPauseRecovery removes one completed or obsolete snapshot row.
+func (r *Repository) DeleteAgentPauseRecovery(
+	ctx context.Context, agentID, taskID string,
+) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM office_agent_pause_recoveries
+		WHERE agent_id = ? AND task_id = ?
+	`), agentID, taskID)
+	return err
+}
+
+// GetLatestRunForAgentTask returns the newest run for an agent/task pair.
+// It includes non-failed states so recovery can discard a snapshot when a
+// newer run already succeeded or is already queued.
+func (r *Repository) GetLatestRunForAgentTask(
+	ctx context.Context, agentID, taskID string,
+) (*models.Run, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
+	var run models.Run
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT * FROM runs
+		WHERE agent_profile_id = ? AND %s = ?
+		ORDER BY COALESCE(finished_at, requested_at) DESC,
+		         requested_at DESC, id DESC
+		LIMIT 1
+	`, taskIDExpr)), agentID, taskID).StructScan(&run)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 // DefaultAgentFailureThreshold is the workspace-level default applied
@@ -338,10 +478,42 @@ func (r *Repository) ListAutoPausedAgentsForInbox(
 	return out, rows.Err()
 }
 
-// ListFailedRunsForAgent returns the runs for an agent whose
-// status is `failed` and that haven't been dismissed by the user.
-// Used by the FailureService when computing which prior per-task
-// inbox entries to auto-dismiss on auto-pause.
+// HasPriorTasklessFailedRun reports whether the same continuation scope for
+// an agent already has a failed run with no task_id in its payload, other
+// than excludeRunID. Used to cap inbox noise from routines that are taskless
+// by design (the pre-installed "Coordinator heartbeat" fires every 5 minutes,
+// WO-35). Agent-scoped callers also match legacy rows with an empty scope.
+func (r *Repository) HasPriorTasklessFailedRun(
+	ctx context.Context, agentID, continuationScope, excludeRunID string,
+) (bool, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
+	if continuationScope == "" {
+		continuationScope = "agent:" + agentID
+	}
+	scopeClause := "continuation_scope = ?"
+	if continuationScope == "agent:"+agentID {
+		// Rows created before continuation_scope was introduced have an
+		// empty value. Treat those rows as agent-scoped legacy failures.
+		scopeClause = "(continuation_scope = ? OR continuation_scope = '')"
+	}
+	var found int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT 1 FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'failed'
+		  AND id != ?
+		  AND COALESCE(%s, '') = ''
+		  AND %s
+		LIMIT 1
+	`, taskIDExpr, scopeClause)), agentID, excludeRunID, continuationScope).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ListFailedRunsForAgent returns all failed runs for an agent. The assignee
+// change handler uses this list to dismiss obsolete per-task inbox entries.
 func (r *Repository) ListFailedRunsForAgent(
 	ctx context.Context, agentID string,
 ) ([]string, error) {

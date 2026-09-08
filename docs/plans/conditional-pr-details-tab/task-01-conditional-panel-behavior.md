@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Conditional panel behavior
@@ -55,7 +55,7 @@ Sequential. The preset and synchronization changes share behavior and tests.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md` What, Persistence guarantees, and Scenarios
+- `docs/specs/ui/requirements/task-layout-profiles.md` What, Persistence guarantees, and Scenarios
 - `docs/plans/conditional-pr-details-tab/plan.md` Frontend and Tests
 - Pre-regression conditional behavior in parent of commit `f8c363f72`, adapted so explicit layouts provide placement without overriding review-driven visibility
 

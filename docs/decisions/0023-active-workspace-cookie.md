@@ -22,7 +22,7 @@ client `OfficeRoutes` in `src/office-routes.tsx`) read the **office family**
 `office-active-workspace_<port>`), as one candidate among general, office,
 and settings. The backend generic reader previously consulted the legacy
 office name; that candidate is removed to match the frontend generic reader.
-See `docs/specs/fix-multi-instance-cookie-isolation/spec.md`.
+See `docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md`.
 
 **Amended 2026-08-17:** the cookie names are port-scoped when the instance is
 served on a non-default port (`kandev-active-workspace_<port>` /
@@ -34,7 +34,7 @@ ignore port in their scope, so multiple instances on one host (same IP,
 different ports) otherwise overwrite each other's active-workspace selection.
 The legacy unprefixed names remain readable as a validated fallback; new
 writes use only the scoped names. See
-`docs/specs/fix-multi-instance-cookie-isolation/spec.md`.
+`docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md`.
 
 The cookie stores only the workspace ID. Broader preferences and filters should not move into cookies by default: durable user settings stay in backend user/workspace settings, shareable route state stays in URL params, and purely local view state may stay in localStorage. Add another cookie only when Go must know that value before serving the SPA shell.
 

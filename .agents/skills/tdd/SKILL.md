@@ -50,6 +50,10 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+When a work order names an `AC-*` acceptance criterion, keep the mapping visible
+in the test name or a nearby `@covers AC-...` comment. Do not copy the complete
+requirement into the test.
+
 For failure-path tests, inject the error at the boundary the production code claims to handle and exercise the real downstream call chain; do not short-circuit by mocking the handler under test.
 
 ### Cross-layer contracts

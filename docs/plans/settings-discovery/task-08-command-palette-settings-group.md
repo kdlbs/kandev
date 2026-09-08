@@ -5,7 +5,7 @@ status: completed
 wave: 8
 depends_on: ["07-capitalized-dynamic-labels"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 08: Separate Cmd+K Settings section

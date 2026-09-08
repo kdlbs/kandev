@@ -14,7 +14,7 @@ Reconcile the spec with the native-JS-plugin model actually built and run the fu
 gate across backend + web + e2e.
 
 ## Inputs
-- `docs/specs/plugins/spec.md` (draft) and `PLUGIN-API.md`.
+- `docs/specs/plugins/requirements/plugins.md` (draft) and `PLUGIN-API.md`.
 
 ## Acceptance
 1. Spec edits:

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/mock-agent-slow-duration/spec.md"
+spec: "../../specs/agents/requirements/mock-agent-slow-duration.md"
 ---
 
 # Task 01: Support unitless slow durations
@@ -50,7 +50,7 @@ one focused change.
 
 ## Inputs
 
-- `docs/specs/mock-agent-slow-duration/spec.md`
+- `docs/specs/agents/requirements/mock-agent-slow-duration.md`
 - `docs/plans/mock-agent-slow-duration/plan.md`
 - Existing command-duration parser coverage in
   `apps/backend/cmd/mock-agent/background_test.go`

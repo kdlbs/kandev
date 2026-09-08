@@ -1,6 +1,6 @@
 # task-04: Backend workspace guards (read-only Improve Kandev workspace)
 
-Spec: `docs/specs/improve-kandev/spec.md` — "Dedicated workspace immutability"
+Spec: `docs/specs/workspaces/requirements/improve-kandev.md` — "Dedicated workspace immutability"
 Plan: `docs/plans/improve-kandev-workspace/plan.md` — Phase 2, Wave 4.
 
 ## Goal

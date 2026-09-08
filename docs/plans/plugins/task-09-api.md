@@ -15,7 +15,7 @@ gating, state/secrets APIs, webhook/UI proxy routes, tool-listing, and wire the
 whole package into backendapp.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "API surface" (all endpoints), "Permissions",
+- Spec `docs/specs/plugins/requirements/plugins.md` → "API surface" (all endpoints), "Permissions",
   "Security".
 - Routing precedent: `internal/jira/handlers.go` `RegisterRoutes(router, dispatcher,
   svc, log)` → `router.Group("/api/...")`. Wiring precedent:

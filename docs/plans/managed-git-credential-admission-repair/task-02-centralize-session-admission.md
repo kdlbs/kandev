@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-harden-repository-identity"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 02: Centralize Session Credential Admission

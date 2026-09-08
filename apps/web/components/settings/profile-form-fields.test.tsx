@@ -150,6 +150,20 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.textContent).toContain("claude-gone");
   });
 
+  it("names a unique advertised variation while preserving the saved model", () => {
+    renderForm(formData({ model: "opus" }), {
+      ...modelConfig,
+      available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    });
+
+    const advisory = screen.getByTestId("profile-model-variation-advisory");
+    expect(advisory.textContent).toContain("opus[1m]");
+    expect(advisory.textContent).toContain("opus");
+    expect(
+      screen.getByRole("button", { name: profileStartModelSettingsLabel }).textContent,
+    ).toContain("opus");
+  });
+
   it("shows the agent fallback row when auto-fallback is off", () => {
     renderForm(formData({ auto_fallback: false }));
     expandFallbackSettings();
@@ -198,6 +212,25 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
 });
 
 describe("ProfileFormFields model options", () => {
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
+  it("keeps the model and mode fields balanced when modes are available", () => {
+    renderForm(formData({ mode: "default" }), {
+      ...modelConfig,
+      available_modes: [{ id: "default", name: "Default" }],
+      current_mode_id: "default",
+    });
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("flex-1");
+    expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",

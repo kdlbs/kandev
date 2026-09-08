@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["05-updates-channel-ui"]
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 06: Desktop and mobile E2E

@@ -427,6 +427,33 @@ describe("pluginRegistry — task filters", () => {
   });
 });
 
+describe("pluginRegistry — task-list facets", () => {
+  afterEach(() => cleanup("plugin-a", "plugin-b"));
+
+  it("namespaces facet identities and revokes them with their plugin", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const getValues = () => [{ value: "bug", label: "Bug", color: "#f00" }];
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues });
+
+    expect(pluginRegistry.getTaskListFacets()).toEqual([
+      { pluginId: "plugin-a", id: "tags", label: "Tag", getValues },
+    ]);
+    pluginRegistry.unregisterPlugin("plugin-a");
+    expect(pluginRegistry.getTaskListFacets()).toEqual([]);
+  });
+
+  it("rejects unsafe and duplicate plugin-local facet ids", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "Not safe", label: "Tag", getValues: () => [] }),
+    ).toThrow("URL-safe");
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] });
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] }),
+    ).toThrow("already registered");
+  });
+});
+
 describe("pluginRegistry — route options and plugin names", () => {
   afterEach(() => {
     cleanup("plugin-a");

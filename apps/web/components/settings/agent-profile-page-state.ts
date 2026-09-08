@@ -22,7 +22,7 @@ import {
   toAgentProfileOption,
   type AgentProfileOption,
 } from "@/lib/state/slices/settings/types";
-import { ApiError } from "@/lib/api/client";
+import { ApiError, isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 export type SaveStatus = "idle" | "loading" | "success" | "error";
@@ -164,11 +164,13 @@ export function useProfileSave({
         );
       }
       setSaveStatus("error");
-      toast({
-        title: translate("agents:failedToSaveProfile"),
-        description: errorMessage(error),
-        variant: "error",
-      });
+      if (!isHandledApiError(error)) {
+        toast({
+          title: translate("agents:failedToSaveProfile"),
+          description: errorMessage(error),
+          variant: "error",
+        });
+      }
       throw error;
     }
   };
@@ -222,7 +224,7 @@ export function useProfileDelete(
         automations: result.automations,
         utilityAgents: result.utilityAgents,
       });
-    } else {
+    } else if (!result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
         description: result.message,
@@ -244,7 +246,7 @@ export function useProfileDelete(
         automations: result.automations,
         utilityAgents: result.utilityAgents,
       });
-    } else if (result.status === "error") {
+    } else if (result.status === "error" && !result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
         description: result.message,

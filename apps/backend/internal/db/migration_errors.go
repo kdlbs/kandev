@@ -8,11 +8,17 @@ import (
 )
 
 const (
-	postgresDuplicateColumn = "42701"
-	postgresDuplicateTable  = "42P07"
-	postgresDuplicateObject = "42710"
-	postgresUndefinedTable  = "42P01"
-	sqliteAlreadyExistsText = " already exists"
+	postgresDuplicateColumn      = "42701"
+	postgresDuplicateTable       = "42P07"
+	postgresDuplicateObject      = "42710"
+	postgresUndefinedTable       = "42P01"
+	postgresForeignKeyViolation  = "23503"
+	postgresSerializationFailure = "40001"
+	postgresDeadlockDetected     = "40P01"
+	sqliteAlreadyExistsText      = " already exists"
+	sqliteForeignKeyViolationMsg = "FOREIGN KEY constraint failed"
+	sqliteBusyText               = "database is locked"
+	sqliteLockedText             = "database table is locked"
 )
 
 // IsDuplicateColumnError reports whether err means an ADD COLUMN migration has
@@ -71,4 +77,38 @@ func IsMissingTableError(err error) bool {
 		return pgErr.Code == postgresUndefinedTable
 	}
 	return strings.Contains(err.Error(), "no such table")
+}
+
+// IsForeignKeyViolation reports whether err means a write failed because it
+// referenced a row that does not exist (or no longer exists) in a
+// foreign-keyed table.
+func IsForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == postgresForeignKeyViolation
+	}
+	return strings.Contains(err.Error(), sqliteForeignKeyViolationMsg)
+}
+
+// IsTransientError reports whether err means a write failed for a reason
+// that is expected to clear on retry: a serialization failure or deadlock on
+// PostgreSQL, or the single-writer connection being busy/locked on SQLite.
+func IsTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case postgresSerializationFailure, postgresDeadlockDetected:
+			return true
+		default:
+			return false
+		}
+	}
+	s := err.Error()
+	return strings.Contains(s, sqliteBusyText) || strings.Contains(s, sqliteLockedText)
 }

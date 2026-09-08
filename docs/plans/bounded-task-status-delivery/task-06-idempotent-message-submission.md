@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["04-stabilize-session-transport", "05-consume-task-summaries"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 06: Make Message Submission Idempotent

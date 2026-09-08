@@ -69,6 +69,7 @@ function ViewModeToggles({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            data-testid="task-view-board"
             variant={viewMode === "board" ? "secondary" : "ghost"}
             size="icon-sm"
             className="cursor-pointer"

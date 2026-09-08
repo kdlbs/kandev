@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: What](../../specs/ui/app-status-bar.md#what); current `TopbarMetrics`; canonical connection types; existing system-metrics subscription hook.
+[Spec: What](../../specs/ui/requirements/app-status-bar.md#what); current `TopbarMetrics`; canonical connection types; existing system-metrics subscription hook.
 
 ## Files
 

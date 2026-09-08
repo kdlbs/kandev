@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 01: Initialization Stage Disclosure

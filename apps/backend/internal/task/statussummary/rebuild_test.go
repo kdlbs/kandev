@@ -86,6 +86,44 @@ func TestBuildFromAuthoritativeAggregatesDurableSources(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestBuildFromAuthoritativeAggregatesAutomationOnlyForOpenPullRequests(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{
+			{Key: "repo-a#1", State: prStateOpen, Number: 1, AutoFixEnabled: true},
+			{Key: "repo-a#2", State: prStateOpen, Number: 2, AutoMergeEnabled: true},
+			{Key: "repo-a#3", State: prStateMerged, Number: 3, AutoFixEnabled: true, AutoMergeEnabled: true},
+			{Key: "repo-a#4", State: prStateClosed, Number: 4, AutoFixEnabled: true, AutoMergeEnabled: true},
+		},
+	})
+
+	if got.PullRequest == nil {
+		t.Fatal("pull request summary is nil")
+	}
+	if !got.PullRequest.AutoFixEnabled || !got.PullRequest.AutoMergeEnabled {
+		t.Fatalf("automation flags = %+v, want both active flags", got.PullRequest)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestBuildFromAuthoritativeOmitsAutomationForTerminalPullRequests(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{
+			{Key: "repo-a#3", State: prStateMerged, Number: 3, AutoFixEnabled: true},
+			{Key: "repo-a#4", State: prStateClosed, Number: 4, AutoMergeEnabled: true},
+		},
+	})
+
+	if got.PullRequest == nil {
+		t.Fatal("pull request summary is nil")
+	}
+	if got.PullRequest.AutoFixEnabled || got.PullRequest.AutoMergeEnabled {
+		t.Fatalf("terminal automation flags = %+v, want both false", got.PullRequest)
+	}
+}
+
 func TestDeriveForegroundActivityPrefersGeneratingOverBackground(t *testing.T) {
 	got := deriveForegroundActivity([]string{activityBackground, activityGenerating})
 	if got != activityGenerating {

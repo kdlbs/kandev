@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-queued-prompt-count.md
+spec: docs/specs/ui/requirements/sidebar-queued-prompt-count.md
 created: 2026-08-11
 status: draft
 ---
@@ -76,7 +76,7 @@ frontend zeroing hack.
 - `apps/backend/internal/orchestrator/task_operations.go` (`DeleteSession`)
 - `apps/backend/internal/task/statussummary/projector_queued_test.go` (existing)
 - New/extended unit tests beside the above packages
-- Spec already amended: `docs/specs/ui/sidebar-queued-prompt-count.md`
+- Spec already amended: `docs/specs/ui/requirements/sidebar-queued-prompt-count.md`
 
 ## Validation Commands
 

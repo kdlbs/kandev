@@ -173,6 +173,31 @@ export function buildPromptHistoryEntries(
   return entries.reverse();
 }
 
+/**
+ * Return a completed user prompt turn's wall-clock duration in whole seconds.
+ * This shares only the panel's timestamp parsing, flooring, and clamp
+ * arithmetic; unlike prompt history, it does not bound the duration by the
+ * next prompt.
+ */
+export function messageTurnDurationSeconds(message: Message, turn: Turn | null): number | null {
+  if (
+    message.author_type !== "user" ||
+    !message.turn_id ||
+    turn === null ||
+    turn.id !== message.turn_id ||
+    turn.session_id !== message.session_id
+  ) {
+    return null;
+  }
+
+  const createdAt = epochNanoseconds(message.created_at);
+  const completedAt = epochNanoseconds(turn.completed_at);
+  if (createdAt === null || completedAt === null) return null;
+
+  const durationNs = completedAt - createdAt;
+  return Number(durationNs < BigInt(0) ? BigInt(0) : durationNs / BigInt(1_000_000_000));
+}
+
 /** Format a duration in seconds as a compact `h m s` string using the given unit labels, omitting empty hour/minute parts. */
 export function formatPromptDuration(seconds: number, units: PromptDurationUnits): string {
   const totalSeconds = Math.max(0, Math.floor(seconds));

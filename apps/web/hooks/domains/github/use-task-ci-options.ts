@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
   getTaskCIAutomationOptions,
+  retryTaskCIAutoMerge,
   updateTaskCIAutomationOptions,
 } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
@@ -16,6 +17,7 @@ function errorMessage(error: unknown): string {
 export function useTaskCIAutomationOptions(taskId: string | null) {
   const refreshRequestRef = useRef<Record<string, number>>({});
   const updateRequestRef = useRef<Record<string, number>>({});
+  const retryRequestRef = useRef<Record<string, number>>({});
   const options = useAppStore((state) =>
     taskId ? (state.taskCIAutomation.byTaskId[taskId] ?? null) : null,
   );
@@ -86,6 +88,29 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
 
   const resetPrompt = useCallback(() => update({ auto_fix_prompt_override: null }), [update]);
 
+  const retryMerge = useCallback(
+    async (repositoryId: string, prNumber: number): Promise<{ accepted: boolean } | null> => {
+      if (!taskId) return null;
+      const requestId = (retryRequestRef.current[taskId] ?? 0) + 1;
+      retryRequestRef.current[taskId] = requestId;
+      setSaving(taskId, true);
+      setError(taskId, null);
+      try {
+        return await retryTaskCIAutoMerge(taskId, repositoryId, prNumber, { cache: "no-store" });
+      } catch (err) {
+        if (retryRequestRef.current[taskId] === requestId) {
+          setError(taskId, errorMessage(err));
+        }
+        throw err;
+      } finally {
+        if (retryRequestRef.current[taskId] === requestId) {
+          setSaving(taskId, false);
+        }
+      }
+    },
+    [setError, setSaving, taskId],
+  );
+
   useEffect(() => {
     if (!taskId || options || loading || error) return;
     void refresh().catch(() => {
@@ -93,5 +118,5 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
     });
   }, [error, loading, options, refresh, taskId]);
 
-  return { options, loading, saving, error, refresh, update, resetPrompt };
+  return { options, loading, saving, error, refresh, update, resetPrompt, retryMerge };
 }

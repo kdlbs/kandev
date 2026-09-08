@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-auto-merge.md"
+spec: "../../specs/ui/requirements/message-queue-auto-merge.md"
 ---
 
 # Task 01: Build automatic tail merge

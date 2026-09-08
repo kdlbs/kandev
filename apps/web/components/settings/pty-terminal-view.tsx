@@ -18,6 +18,10 @@ import { openExternalLink } from "@/lib/desktop/external-links";
 import { clearBufferReader, exposeBufferReader } from "@/components/task/terminal-buffer-reader";
 import { pendingPtyStarts, type PendingPtyStart } from "./pty-terminal-lifecycle";
 import { FONT } from "@/lib/theme/colors";
+import {
+  getFixedDarkTerminalTheme,
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+} from "@/lib/theme/terminal-theme";
 
 export type PtySessionStatus = "connecting" | "running" | "exited" | "error";
 
@@ -56,7 +60,8 @@ function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAd
     cursorBlink: true,
     fontFamily: FONT.mono,
     fontSize: FONT.size,
-    theme: { background: "#0b0b0c" },
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    theme: getFixedDarkTerminalTheme(),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);

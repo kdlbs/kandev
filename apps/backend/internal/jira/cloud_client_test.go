@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -394,6 +395,140 @@ func TestCloudClient_ServerMode_SearchTickets_StartAtPagination(t *testing.T) {
 	if len(res.Tickets) != 2 || res.Tickets[0].Key != "P-51" {
 		t.Errorf("tickets: %+v", res.Tickets)
 	}
+}
+
+func TestCloudClient_SearchTicketsForWatch_RequestsAndConvertsDescription(t *testing.T) {
+	tests := []struct {
+		name         string
+		newClient    func(*httptest.Server) *CloudClient
+		path         string
+		responseBody string
+		want         string
+	}{
+		{
+			name:      "cloud ADF",
+			newClient: func(ts *httptest.Server) *CloudClient { return clientTo(ts, AuthMethodAPIToken, "tok") },
+			path:      "/rest/api/3/search/jql",
+			responseBody: `{
+				"issues": [{"key":"C-1","fields": {
+					"summary":"cloud issue",
+					"description":{"type":"doc","content":[
+						{"type":"paragraph","content":[{"type":"text","text":"first"}]},
+						{"type":"paragraph","content":[{"type":"text","text":"second"}]}
+					]},
+					"status":{},"project":{},"issuetype":{}
+				}}],
+				"isLast":true
+			}`,
+			want: "first\n\nsecond",
+		},
+		{
+			name:      "server plain string",
+			newClient: func(ts *httptest.Server) *CloudClient { return serverClient(ts, AuthMethodPAT, "tok") },
+			path:      "/rest/api/2/search",
+			responseBody: `{
+				"startAt":0,"maxResults":50,"total":1,
+				"issues": [{"key":"S-1","fields": {
+					"summary":"server issue","description":"plain description",
+					"status":{},"project":{},"issuetype":{}
+				}}]
+			}`,
+			want: "plain description",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fields []string
+			ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tt.path)
+				}
+				var request struct {
+					Fields []string `json:"fields"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				fields = request.Fields
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.responseBody))
+			})
+
+			result, err := tt.newClient(ts).SearchTicketsForWatch(
+				context.Background(), "project = P", "", 50,
+			)
+			if err != nil {
+				t.Fatalf("search: %v", err)
+			}
+			if len(result.Tickets) != 1 {
+				t.Fatalf("tickets = %d, want 1", len(result.Tickets))
+			}
+			if result.Tickets[0].Description != tt.want {
+				t.Errorf("description = %q, want %q", result.Tickets[0].Description, tt.want)
+			}
+			if !containsString(fields, "description") {
+				t.Errorf("watcher fields = %v, want description", fields)
+			}
+		})
+	}
+}
+
+func TestCloudClient_SearchTickets_KeepsDescriptionOutOfCompactFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		newClient func(*httptest.Server) *CloudClient
+		path      string
+		response  string
+	}{
+		{
+			name:      "cloud",
+			newClient: func(ts *httptest.Server) *CloudClient { return clientTo(ts, AuthMethodAPIToken, "tok") },
+			path:      "/rest/api/3/search/jql",
+			response:  `{"issues":[],"isLast":true}`,
+		},
+		{
+			name:      "server",
+			newClient: func(ts *httptest.Server) *CloudClient { return serverClient(ts, AuthMethodPAT, "tok") },
+			path:      "/rest/api/2/search",
+			response:  `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fields []string
+			ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tt.path)
+				}
+				var request struct {
+					Fields []string `json:"fields"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				fields = request.Fields
+				_, _ = w.Write([]byte(tt.response))
+			})
+
+			if _, err := tt.newClient(ts).SearchTickets(context.Background(), "project = P", "", 50); err != nil {
+				t.Fatalf("search: %v", err)
+			}
+			if containsString(fields, "description") {
+				t.Errorf("compact fields = %v, must not include description", fields)
+			}
+		})
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCloudClient_SearchTickets_PreservesImmutableIssueID(t *testing.T) {

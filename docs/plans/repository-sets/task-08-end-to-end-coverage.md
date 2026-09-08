@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["05-apply-set-in-picker", "06-save-selection-as-set", "07-settings-management"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 08: End-To-End Coverage For Repository Sets

@@ -7,7 +7,11 @@ import { extractKandevArgs, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
 import { normalizeToolCallStatus } from "./tool-status";
-import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
+import {
+  parsePermission,
+  resolvePermissionAvailability,
+  usePermissionResponseHandlers,
+} from "./use-permission-handlers";
 import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
 
@@ -56,11 +60,17 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const renderer = getKandevRenderer(kandevToolStemOf(comment));
   const { permissionMetadata, permissionStatus, isPermissionPending } =
     parsePermission(permissionMessage);
-  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
-    usePermissionResponseHandlers({
-      permissionMetadata,
-      permissionMessage,
-    });
+  const {
+    isResponding,
+    isUnavailable,
+    handleApprove,
+    handleAllowAlways,
+    hasAllowAlways,
+    handleReject,
+  } = usePermissionResponseHandlers({
+    permissionMetadata,
+    permissionMessage,
+  });
   if (!renderer) return null;
 
   // The ACP normalizer stores MCP tool args/result inside the Generic payload:
@@ -74,7 +84,11 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const result = extractMcpResult(rawResult);
   const status = normalizeToolCallStatus(meta?.status);
 
-  const permissionUI = derivePermissionUI(permissionStatus, isPermissionPending);
+  const {
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
+  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
+  const permissionUI = derivePermissionUI(effectivePermissionStatus, effectivePermissionPending);
 
   // Each renderer is a stable function-pointer pulled from the static
   // registry, so invoking it like a function (rather than via JSX) is safe
@@ -85,7 +99,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
     </KandevPermissionUIProvider>
   );
 
-  if (!isPermissionPending) return rendered;
+  if (!effectivePermissionPending) return rendered;
 
   return (
     <>

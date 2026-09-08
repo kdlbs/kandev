@@ -8,17 +8,23 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type RepositoryDiscoveryConfig struct {
 	Roots             []string
 	MaxDepth          int
 	TaskWorktreeRoots []string
+	DesktopRuntime    bool
 }
 
 const (
@@ -47,8 +53,15 @@ type Branch struct {
 }
 
 type RepositoryDiscoveryResult struct {
-	Roots        []string
-	Repositories []LocalRepository
+	Roots                    []string
+	Repositories             []LocalRepository
+	DesktopRuntime           bool
+	RootStates               []models.DesktopDiscoveryRoot
+	ScanTime                 *time.Time
+	Refreshing               bool
+	Cached                   bool
+	HomeConfirmationRequired bool
+	FailedRoots              []string
 }
 
 type RepositoryPathValidation struct {
@@ -76,48 +89,22 @@ const sourceTypeLocal = "local"
 const sourceTypeProvider = "provider"
 
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
-	roots := s.discoveryRoots()
-	if root != "" {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			return RepositoryDiscoveryResult{}, fmt.Errorf("invalid root path: %w", err)
-		}
-		if !isPathAllowed(absRoot, roots) {
-			return RepositoryDiscoveryResult{}, ErrPathNotAllowed
-		}
-		roots = []string{absRoot}
-	}
+	return s.RefreshLocalRepositoryDiscovery(ctx, root)
+}
 
-	repos := make([]LocalRepository, 0)
-	seen := make(map[string]struct{})
-	for _, scanRoot := range roots {
-		select {
-		case <-ctx.Done():
-			return RepositoryDiscoveryResult{}, ctx.Err()
-		default:
-		}
-		found, err := scanRootForRepos(ctx, scanRoot, s.discoveryMaxDepth())
-		if err != nil {
-			return RepositoryDiscoveryResult{}, err
-		}
-		for _, repo := range found {
-			if _, ok := seen[repo.Path]; ok {
-				continue
-			}
-			seen[repo.Path] = struct{}{}
-			repos = append(repos, repo)
-		}
-	}
-
-	return RepositoryDiscoveryResult{
-		Roots:        roots,
-		Repositories: repos,
-	}, nil
+// DiscoverLocalRepositoriesForWorkspace applies the workspace visibility
+// check before using the legacy discovery endpoint.
+func (s *Service) DiscoverLocalRepositoriesForWorkspace(
+	ctx context.Context,
+	workspaceID, root string,
+) (RepositoryDiscoveryResult, error) {
+	return s.refreshLocalRepositoryDiscovery(ctx, workspaceID, root, discoveryTriggerManualRefresh)
 }
 
 func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) (RepositoryPathValidation, error) {
 	absPath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.validation", path, "user_select", err)
 		return RepositoryPathValidation{}, fmt.Errorf("invalid path: %w", err)
 	}
 	result := RepositoryPathValidation{Path: absPath, Allowed: true}
@@ -133,6 +120,9 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	// codeql[go/path-injection] Intentional read-only diagnostics for the local path selected by the user.
 	info, statErr := os.Stat(absPath)
 	result.Exists = statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		s.logFilesystemFailure("repository.discovery.validation", absPath, "user_select", statErr)
+	}
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
 		result.Message = "Path does not exist"
@@ -200,7 +190,55 @@ func validateExplicitGitMetadata(repoPath string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New(".git metadata must be a directory or linked-worktree pointer")
 	}
-	return validateLinkedWorktreeMetadata(repoPath, gitPath)
+	return validateGitFileMetadata(repoPath, gitPath)
+}
+
+func validateGitFileMetadata(repoPath, gitPath string) error {
+	linkedWorktreeErr := validateLinkedWorktreeMetadata(repoPath, gitPath)
+	if linkedWorktreeErr == nil {
+		return nil
+	}
+	submoduleErr := validateSubmoduleMetadata(repoPath)
+	if submoduleErr == nil {
+		return nil
+	}
+	return errors.Join(linkedWorktreeErr, submoduleErr)
+}
+
+func validateSubmoduleMetadata(repoPath string) error {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return err
+	}
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return err
+	}
+	canonicalRepoPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(filepath.Join(canonicalGitDir, "commondir")); err == nil {
+		return errors.New("submodule metadata must not redirect its common directory")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	config, err := os.ReadFile(filepath.Join(canonicalGitDir, "config"))
+	if err != nil {
+		return err
+	}
+	worktree, err := parseGitConfigCoreWorktree(string(config))
+	if err != nil {
+		return err
+	}
+	resolvedWorktree, err := resolveMetadataPathValue(worktree, canonicalGitDir)
+	if err != nil {
+		return err
+	}
+	if !sameCanonicalPath(resolvedWorktree, canonicalRepoPath) {
+		return errors.New("submodule metadata does not point back to the selected repository")
+	}
+	return nil
 }
 
 func validateStandaloneGitMetadata(gitPath string) error {
@@ -257,10 +295,207 @@ func readMetadataPath(path, relativeTo string) (string, error) {
 	if metadataPath == "" {
 		return "", errors.New("metadata path is empty")
 	}
-	if !filepath.IsAbs(metadataPath) {
-		metadataPath = filepath.Join(relativeTo, metadataPath)
+	return resolveMetadataPathValue(metadataPath, relativeTo)
+}
+
+func resolveMetadataPathValue(value, relativeTo string) (string, error) {
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(relativeTo, value)
 	}
-	return filepath.EvalSymlinks(filepath.Clean(metadataPath))
+	return filepath.EvalSymlinks(filepath.Clean(value))
+}
+
+func parseGitConfigCoreWorktree(config string) (string, error) {
+	section := ""
+	var worktree string
+	var foundWorktree bool
+	for _, rawLine := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if parsedSection, ok := parseGitConfigSection(line); ok {
+			if err := rejectGitConfigAlternateSection(parsedSection); err != nil {
+				return "", err
+			}
+			section = parsedSection
+			continue
+		}
+		switch {
+		case strings.EqualFold(section, "extensions"):
+			if err := rejectGitConfigWorktreeConfig(line); err != nil {
+				return "", err
+			}
+		case strings.EqualFold(section, "core"):
+			parsedWorktree, found, err := parseGitConfigWorktreeLine(line)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				worktree = parsedWorktree
+				foundWorktree = true
+			}
+		}
+	}
+	if !foundWorktree {
+		return "", errors.New("core.worktree is missing")
+	}
+	if worktree == "" {
+		return "", errors.New("core.worktree is empty")
+	}
+	return worktree, nil
+}
+
+func rejectGitConfigAlternateSection(section string) error {
+	sectionName := strings.ToLower(section)
+	if separator := strings.IndexAny(sectionName, " \t"); separator >= 0 {
+		sectionName = sectionName[:separator]
+	}
+	if sectionName == "include" || sectionName == "includeif" {
+		return errors.New("git config includes are not allowed")
+	}
+	return nil
+}
+
+func rejectGitConfigWorktreeConfig(line string) error {
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		if strings.EqualFold(strings.TrimSpace(line), "worktreeConfig") {
+			return errors.New("git worktree configuration is not allowed")
+		}
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(key), "worktreeConfig") {
+		return nil
+	}
+	enabled, err := parseGitConfigBoolean(value)
+	if err != nil {
+		return fmt.Errorf("parse extensions.worktreeConfig: %w", err)
+	}
+	if enabled {
+		return errors.New("git worktree configuration is not allowed")
+	}
+	return nil
+}
+
+func parseGitConfigWorktreeLine(line string) (string, bool, error) {
+	key, value, found := strings.Cut(line, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
+		return "", false, nil
+	}
+	parsedWorktree, err := parseGitConfigValue(value)
+	if err != nil {
+		return "", false, fmt.Errorf("parse core.worktree: %w", err)
+	}
+	return parsedWorktree, true, nil
+}
+
+func parseGitConfigSection(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[") {
+		return "", false
+	}
+	inQuote := false
+	escaped := false
+	for index := 1; index < len(line); index++ {
+		character := line[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if character == '\\' && inQuote {
+			escaped = true
+			continue
+		}
+		if character == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if character != ']' || inQuote {
+			continue
+		}
+		remainder := strings.TrimSpace(line[index+1:])
+		if remainder != "" && remainder[0] != '#' && remainder[0] != ';' {
+			return "", false
+		}
+		return strings.TrimSpace(line[1:index]), true
+	}
+	return "", false
+}
+
+func parseGitConfigBoolean(value string) (bool, error) {
+	parsed, err := parseGitConfigValue(value)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(parsed) {
+	case "true", "yes", "on", "1":
+		return true, nil
+	case "false", "no", "off", "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q", parsed)
+	}
+}
+
+func parseGitConfigValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	var parsed strings.Builder
+	for len(value) > 0 {
+		if value[0] == '"' {
+			end, err := gitConfigQuotedValueEnd(value)
+			if err != nil {
+				return "", err
+			}
+			unquoted, err := strconv.Unquote(value[:end+1])
+			if err != nil {
+				return "", err
+			}
+			parsed.WriteString(unquoted)
+			value = value[end+1:]
+			continue
+		}
+		quoteIndex := strings.IndexByte(value, '"')
+		commentIndex := gitConfigCommentStart(value)
+		if commentIndex >= 0 && (quoteIndex < 0 || commentIndex < quoteIndex) {
+			parsed.WriteString(value[:commentIndex])
+			return strings.TrimSpace(parsed.String()), nil
+		}
+		if quoteIndex >= 0 {
+			parsed.WriteString(value[:quoteIndex])
+			value = value[quoteIndex:]
+			continue
+		}
+		parsed.WriteString(value)
+		break
+	}
+	return strings.TrimSpace(parsed.String()), nil
+}
+
+func gitConfigCommentStart(value string) int {
+	for index, character := range value {
+		if character == '#' || character == ';' {
+			return index
+		}
+	}
+	return -1
+}
+
+func gitConfigQuotedValueEnd(value string) (int, error) {
+	escaped := false
+	for index := 1; index < len(value); index++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value[index] == '\\' {
+			escaped = true
+			continue
+		}
+		if value[index] == '"' {
+			return index, nil
+		}
+	}
+	return 0, errors.New("unterminated quoted Git config value")
 }
 
 func sameCanonicalPath(left, right string) bool {
@@ -399,6 +634,19 @@ func (s *Service) resolveRepositoryLocalPath(ctx context.Context, repoID string)
 	return resolved, nil
 }
 
+// ResolveRepositoryLocalPath is the exported form of
+// resolveRepositoryLocalPath. It is the narrow, read-only,
+// single-method checkout-resolution port docs/specs/task-delivery-ledger/
+// spec.md, "Which checkout" describes: repository ID in, a validated
+// absolute checkout path or error out, with no sentinel empty path on
+// rejection. internal/delivery's ancestry check depends on this method
+// through a local interface rather than importing this package, so it
+// inherits the existing canonicalization and containment checks instead
+// of duplicating them.
+func (s *Service) ResolveRepositoryLocalPath(ctx context.Context, repoID string) (string, error) {
+	return s.resolveRepositoryLocalPath(ctx, repoID)
+}
+
 // RepositoryCurrentBranch returns the current branch for a saved repository,
 // resolving its exact path grant by repository ID.
 func (s *Service) RepositoryCurrentBranch(ctx context.Context, repoID string) (string, error) {
@@ -459,8 +707,19 @@ func (s *Service) discoveryRoots() []string {
 	var roots []string
 	if len(s.discoveryConfig.Roots) > 0 {
 		roots = append(roots, s.discoveryConfig.Roots...)
-	} else if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, home)
+	} else if !s.discoveryConfig.DesktopRuntime {
+		if home, err := os.UserHomeDir(); err == nil {
+			roots = append(roots, home)
+		}
+	}
+	if s.discoveryConfig.DesktopRuntime && s.desktopRootStore != nil {
+		if saved, err := s.desktopRootStore.ListDesktopDiscoveryRoots(context.Background()); err == nil {
+			for _, root := range saved {
+				if root != nil {
+					roots = append(roots, root.Path)
+				}
+			}
+		}
 	}
 	// The orchestrator clones provider-backed repos into a configurable base
 	// path. When that base path sits outside HOME (e.g. /data/repos in a
@@ -505,12 +764,18 @@ func normalizeRoots(roots []string) []string {
 }
 
 func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRepository, error) {
+	if _, err := os.Stat(root); err != nil {
+		return nil, err
+	}
 	repos := make([]LocalRepository, 0)
+	home, _ := os.UserHomeDir()
 	walker := &repoWalker{
 		root:        root,
 		maxDepth:    maxDepth,
 		libraryRoot: filepath.Join(root, "Library"),
 		cacheRoot:   filepath.Join(root, ".cache"),
+		homeRoot:    home,
+		goos:        runtime.GOOS,
 		ctx:         ctx,
 	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -538,13 +803,18 @@ type repoWalker struct {
 	maxDepth    int
 	libraryRoot string
 	cacheRoot   string
+	homeRoot    string
+	goos        string
 	ctx         context.Context
 }
 
 // visit is the WalkDir callback. Returns a non-nil *LocalRepository when a git repo is found.
 func (w *repoWalker) visit(path string, d fs.DirEntry, err error) (*LocalRepository, error) {
 	if err != nil {
-		return nil, nil //nolint:nilerr // skip entries that cannot be accessed
+		if path == w.root || fsdiagnostics.IsAccessDenied(err) {
+			return nil, err
+		}
+		return nil, nil //nolint:nilerr // skip non-permission entries that cannot be accessed
 	}
 	if w.ctx.Err() != nil {
 		return nil, w.ctx.Err()
@@ -588,6 +858,9 @@ func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
 		return nil
 	}
 	name := d.Name()
+	if shouldSkipMacOSHomeChild(w.root, path, w.homeRoot, w.goos) {
+		return fs.SkipDir
+	}
 	if (name == "Library" || name == ".cache") && filepath.Dir(path) == w.root {
 		return fs.SkipDir
 	}
@@ -598,6 +871,19 @@ func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
 		return fs.SkipDir
 	}
 	return nil
+}
+
+func shouldSkipMacOSHomeChild(root, path, home, goos string) bool {
+	if goos != "darwin" || home == "" || !sameCanonicalPath(root, home) {
+		return false
+	}
+	if !sameCanonicalPath(filepath.Dir(path), root) {
+		return false
+	}
+	name := filepath.Base(path)
+	return strings.EqualFold(name, "Desktop") ||
+		strings.EqualFold(name, "Documents") ||
+		strings.EqualFold(name, "Downloads")
 }
 
 // makeRepo builds a LocalRepository from a .git entry path.

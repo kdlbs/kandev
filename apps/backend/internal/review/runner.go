@@ -66,6 +66,12 @@ type Store interface {
 	FailRun(ctx context.Context, runID, code, message string, durationMs int) (*models.TaskReviewRun, error)
 	CancelRun(ctx context.Context, runID string) (*models.TaskReviewRun, error)
 	PublishFindings(ctx context.Context, req taskservice.PublishFindingsRequest) (*models.TaskReviewRun, []*models.TaskReviewFinding, error)
+	// FindRunByEntryID returns the run already created for a step-transition
+	// ledger entry, or nil when none exists yet. Backs the durable dedup for
+	// AC-OFFICE-STEP-ENTRY-001.10: a redelivery of the same entry (after
+	// completion, or after a restart) must rejoin the existing run instead of
+	// launching a second one.
+	FindRunByEntryID(ctx context.Context, entryID string) (*models.TaskReviewRun, error)
 }
 
 // RunRequest describes a review pass to start.
@@ -76,6 +82,10 @@ type RunRequest struct {
 	AgentProfileID string
 	Trigger        models.ReviewRunTrigger
 	WorkflowStepID string
+	// EntryID is the step-transition ledger row identifier of the step entry
+	// that requested this run, when triggered by the run_code_review
+	// step-entry action. Empty for manual/MCP-triggered runs.
+	EntryID string
 }
 
 // Runner orchestrates review passes.
@@ -219,6 +229,20 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		return existing, nil, nil
 	}
 
+	// A redelivered step entry must rejoin the run it already created — even a
+	// completed one — rather than start a duplicate. The ActiveRun check above
+	// only catches a still-pending/running pass, so a redelivery after
+	// completion needs its own check keyed on entry identity.
+	if req.EntryID != "" {
+		existing, err := r.store.FindRunByEntryID(ctx, req.EntryID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if existing != nil {
+			return existing, nil, nil
+		}
+	}
+
 	sessionID, err := r.resolveSessionID(ctx, req)
 	if err != nil {
 		return nil, nil, err
@@ -247,6 +271,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		WorkflowStepID: req.WorkflowStepID,
 		AgentID:        identity.AgentID,
 		Model:          identity.Model,
+		EntryID:        req.EntryID,
 	})
 	if err != nil {
 		return nil, nil, err

@@ -59,7 +59,11 @@ export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent
+        data-testid="system-health-issues-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-[480px]"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-amber-500" />
@@ -69,15 +73,22 @@ export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesD
             {t("system:issuesNeedAttention", { count: issues.length })}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 pt-2">
+        <div
+          data-testid="system-health-issues-body"
+          className="min-h-0 min-w-0 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain pt-2"
+        >
           {issues.map((issue) => (
-            <div key={issue.id} className="rounded-lg border p-3 space-y-2">
+            <div
+              key={issue.id}
+              data-testid={`system-health-issue-${issue.id}`}
+              className="rounded-lg border p-3 space-y-2"
+            >
               <div className="font-medium text-sm">{issue.title}</div>
               <div className="text-muted-foreground text-xs">{issue.message}</div>
               <Button
                 variant="outline"
                 size="sm"
-                className="cursor-pointer h-7 text-xs"
+                className="min-h-11 cursor-pointer h-7 text-xs sm:min-h-0"
                 onClick={() => {
                   onOpenChange(false);
                   router.push(resolveUrl(issue.fix_url));

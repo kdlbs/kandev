@@ -48,6 +48,7 @@ import {
 type SetterCalls = {
   resumptionStates: ResumptionState[];
   errors: (string | null)[];
+  notices: (string | null)[];
   worktreePaths: (string | null)[];
   worktreeBranches: (string | null)[];
   taskSessionStates: string[];
@@ -57,6 +58,7 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
   const calls: SetterCalls = {
     resumptionStates: [],
     errors: [],
+    notices: [],
     worktreePaths: [],
     worktreeBranches: [],
     taskSessionStates: [],
@@ -67,6 +69,9 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
     },
     setError: (e: string | null) => {
       calls.errors.push(e);
+    },
+    setNotice: (notice: string | null) => {
+      calls.notices.push(notice);
     },
     setWorktreePath: (p: string | null) => {
       calls.worktreePaths.push(p);
@@ -120,7 +125,12 @@ describe("resumeWithSilentFallback", () => {
   it("falls back to restore_workspace silently when resume returns success=false", async () => {
     // 1st call: resume fails. 2nd call: restore_workspace succeeds.
     mockRequest
-      .mockResolvedValueOnce({ success: false, task_id: TASK_ID, state: FAILED_STATE })
+      .mockResolvedValueOnce({
+        success: false,
+        task_id: TASK_ID,
+        state: FAILED_STATE,
+        error: "Resume transport failed",
+      })
       .mockResolvedValueOnce({
         success: true,
         task_id: TASK_ID,
@@ -148,6 +158,9 @@ describe("resumeWithSilentFallback", () => {
     // Final state is "resumed" (from successful restore), no error surfaced.
     expect(calls.resumptionStates.at(-1)).toBe("resumed");
     expect(calls.errors.filter((e) => typeof e === "string")).toHaveLength(0);
+    expect(calls.notices.at(-1)).toBe(
+      "Resume failed: Resume transport failed. The workspace was restored in read-only mode.",
+    );
   });
 
   it("falls back to restore_workspace silently when resume throws", async () => {
@@ -168,8 +181,18 @@ describe("resumeWithSilentFallback", () => {
 
   it("surfaces an error only when BOTH resume and restore_workspace fail", async () => {
     mockRequest
-      .mockResolvedValueOnce({ success: false, task_id: TASK_ID, state: FAILED_STATE })
-      .mockResolvedValueOnce({ success: false, task_id: TASK_ID, state: FAILED_STATE });
+      .mockResolvedValueOnce({
+        success: false,
+        task_id: TASK_ID,
+        state: FAILED_STATE,
+        error: "Resume transport failed",
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        task_id: TASK_ID,
+        state: FAILED_STATE,
+        error: "Workspace restore failed",
+      });
     const { setters, calls } = createSetters();
 
     await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
@@ -177,7 +200,7 @@ describe("resumeWithSilentFallback", () => {
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe(
-      "Failed to resume session - workspace restore also unavailable",
+      "Resume failed: Resume transport failed. Workspace restore failed: Workspace restore failed.",
     );
   });
 
@@ -192,7 +215,7 @@ describe("resumeWithSilentFallback", () => {
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe(
-      "Failed to resume session - workspace restore also unavailable",
+      "Resume failed: ws closed. Workspace restore failed: still closed.",
     );
   });
 
@@ -296,6 +319,47 @@ describe("useSessionResumption", () => {
       task_id: TASK_ID,
       session_id: SESSION_ID,
     });
+  });
+
+  it("clears stale feedback when an external recovery makes the live session active", async () => {
+    mockPreventAutoStart = true;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        updated_at: STARTED_AT,
+        state: FAILED_STATE,
+      },
+    };
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: FAILED_STATE,
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      updated_at: STARTED_AT,
+    });
+
+    const { result, rerender } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+    await waitFor(() => expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true));
+
+    mockRequest.mockResolvedValueOnce({
+      success: false,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: FAILED_STATE,
+      error: "Stale automatic recovery failure",
+    });
+    await act(async () => {
+      await result.current.resumeSession();
+    });
+    expect(result.current.error).toBe("Stale automatic recovery failure");
+
+    mockSessionItems.s1.state = "RUNNING";
+    rerender();
+
+    await waitFor(() => expect(result.current.error).toBeNull());
+    expect(result.current.notice).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-owned-loop-lifecycles", "02-office-task-scoping"]
 plan: "plan.md"
-spec: "../../specs/tasks/run-scheduling.md"
+spec: "../../specs/tasks/requirements/run-scheduling.md"
 ---
 
 # Task 03: Separate Office recovery maintenance

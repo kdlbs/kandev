@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-catalog-and-search", "02-tree-and-target-navigation"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 03: Search-only settings commands

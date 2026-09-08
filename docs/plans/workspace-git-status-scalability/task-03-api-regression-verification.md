@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - "02-coalesce-fresh-status"
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 03: API regression verification

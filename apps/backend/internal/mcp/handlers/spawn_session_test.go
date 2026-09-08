@@ -225,6 +225,39 @@ func TestHandleSpawnSession_LaunchFailure(t *testing.T) {
 	assert.Empty(t, orch.renameCalls, "no rename after a failed launch")
 }
 
+func TestHandleSpawnSession_WorkspacePreparingReturnsRecoverableConflict(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = models.ErrWorkspacePreparing
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "workspace_preparing", payload.Details["reason"])
+	assert.Equal(t, true, payload.Details["recoverable"])
+	assert.Empty(t, orch.renameCalls)
+}
+
+func TestHandleSpawnSession_WorkspaceUnsafeReturnsRecoverableConflict(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = models.ErrWorkspaceReuseUnsafe
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "workspace_reuse_unsafe", payload.Details["reason"])
+	assert.Empty(t, orch.renameCalls)
+}
+
 // A rename failure after a successful launch must not fail the spawn — the
 // session is already running; the label is best-effort.
 func TestHandleSpawnSession_RenameFailure_DoesNotFailSpawn(t *testing.T) {

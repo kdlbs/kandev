@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -20,11 +21,15 @@ import type {
 } from "@/hooks/domains/settings/use-workflow-sync";
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
 import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 
 const WORKFLOW_EXPORT_FORMAT = "kandev_workflow";
 const WORKFLOW_EXPORT_EXTENSIONS = ".yml/.yaml/.json";
 const SYNC_PROVIDERS: RemoteRepositoryProvider[] = ["github", "gitlab"];
+const REMOVE_TEST_ID = "workflow-sync-remove";
+const REMOVE_CONFIRMATION_TEST_ID = "workflow-sync-remove-confirmation";
+const REMOVE_CONFIRM_TEST_ID = "workflow-sync-remove-confirm";
 
 type ProviderFieldProps = {
   provider: WorkflowSyncProvider;
@@ -224,6 +229,87 @@ function isSaveDisabled(sync: WorkflowSyncController, intervalInvalid: boolean):
   return sync.saving || sync.loading || sync.urlInvalid || intervalInvalid || targetMissing;
 }
 
+type WorkflowSyncRemovalActionsProps = {
+  hasConfig: boolean;
+  confirming: boolean;
+  saving: boolean;
+  onRequest: () => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+};
+
+function WorkflowSyncRemovalActions({
+  hasConfig,
+  confirming,
+  saving,
+  onRequest,
+  onCancel,
+  onConfirm,
+}: WorkflowSyncRemovalActionsProps) {
+  const { t } = useTranslation();
+  if (!hasConfig) return null;
+
+  const removeLabel = t("workflows:remove");
+  if (confirming) {
+    return (
+      <InlineConfirmActions
+        density="touch"
+        testId={REMOVE_CONFIRMATION_TEST_ID}
+        ariaLabel={removeLabel}
+        description={t("workflows:removeSyncConfirm")}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={removeLabel}
+        confirmAriaLabel={removeLabel}
+        confirmTestId={REMOVE_CONFIRM_TEST_ID}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="destructive"
+      onClick={onRequest}
+      disabled={saving}
+      className="sm:mr-auto cursor-pointer"
+      data-testid={REMOVE_TEST_ID}
+    >
+      {removeLabel}
+    </Button>
+  );
+}
+
+function useClearWorkflowSyncRemovalConfirmation(
+  open: boolean,
+  sync: WorkflowSyncController,
+  setRemoveConfirming: Dispatch<SetStateAction<boolean>>,
+) {
+  // Clear a pending confirmation when the dialog closes or when its configured
+  // target changes. Status-only refreshes leave target fields unchanged, so
+  // they do not interrupt an action the user is already confirming.
+  useEffect(() => {
+    setRemoveConfirming(false);
+  }, [
+    open,
+    sync.config?.workspace_id,
+    sync.config?.provider,
+    sync.config?.repo_owner,
+    sync.config?.repo_name,
+    sync.config?.project_path,
+    sync.config?.branch,
+    sync.config?.path,
+    sync.form.provider,
+    sync.form.repo_owner,
+    sync.form.repo_name,
+    sync.form.project_path,
+    sync.form.branch,
+    sync.form.path,
+    setRemoveConfirming,
+  ]);
+}
+
 type WorkflowSyncDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -235,6 +321,7 @@ type WorkflowSyncDialogProps = {
 // error surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
   const { t } = useTranslation();
+  const [removeConfirming, setRemoveConfirming] = useState(false);
   const hasConfig = !!sync.config;
   const switchingProvider = hasConfig && sync.config?.provider !== sync.form.provider;
   const intervalInvalid =
@@ -243,16 +330,37 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const disableSave = isSaveDisabled(sync, intervalInvalid);
   const resolved = resolvedTarget(t, sync.form);
 
+  useClearWorkflowSyncRemovalConfirmation(open, sync, setRemoveConfirming);
+
   const handleSave = async () => {
     if (await sync.handleSave()) onOpenChange(false);
   };
   const handleRemove = async () => {
-    if (await sync.handleDelete()) onOpenChange(false);
+    if (await sync.handleDelete()) {
+      onOpenChange(false);
+      return;
+    }
+    // InlineConfirmActions restores its own shell when this callback rejects.
+    // Keep parent confirmation state mounted so the existing failure toast and
+    // retry path remain inside this dialog.
+    return Promise.reject();
+  };
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) setRemoveConfirming(false);
+    onOpenChange(nextOpen);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="workflow-sync-dialog">
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+      <DialogContent
+        className="sm:max-w-lg"
+        data-testid="workflow-sync-dialog"
+        onEscapeKeyDown={(event) => {
+          if (!removeConfirming) return;
+          event.preventDefault();
+          setRemoveConfirming(false);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("workflows:syncTitle")}</DialogTitle>
           <DialogDescription>{t("workflows:syncDescription")}</DialogDescription>
@@ -284,22 +392,18 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
           </p>
         </div>
         <DialogFooter>
-          {hasConfig && (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleRemove}
-              disabled={sync.saving}
-              className="sm:mr-auto cursor-pointer"
-              data-testid="workflow-sync-remove"
-            >
-              {t("workflows:remove")}
-            </Button>
-          )}
+          <WorkflowSyncRemovalActions
+            hasConfig={hasConfig}
+            confirming={removeConfirming}
+            saving={sync.saving}
+            onRequest={() => setRemoveConfirming(true)}
+            onCancel={() => setRemoveConfirming(false)}
+            onConfirm={handleRemove}
+          />
           <Button
             type="button"
             onClick={handleSave}
-            disabled={disableSave}
+            disabled={disableSave || removeConfirming}
             className="cursor-pointer"
             data-testid="workflow-sync-save"
             data-dialog-default-action

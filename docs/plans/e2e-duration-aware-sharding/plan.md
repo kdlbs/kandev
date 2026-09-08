@@ -1,5 +1,5 @@
 ---
-spec: ../../specs/e2e-duration-aware-sharding/spec.md
+spec: ../../specs/platform/requirements/e2e-duration-aware-sharding.md
 created: 2026-08-10
 status: in_progress
 ---

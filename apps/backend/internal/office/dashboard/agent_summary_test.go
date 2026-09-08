@@ -24,7 +24,26 @@ const summaryFixtureAgent = "agent-A"
 // sane values so callers only specify the fields under test. Distinct
 // from run_detail_test.go's seedRun helper, which writes via the repo
 // (this one writes raw SQL so we control claimed_at + finished_at).
+//
+// A status='finished' row is seeded with outcome='processed', so
+// existing callers that only cared about status keep reading as
+// succeeded under the outcome-aware bucketing (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome"). Tests that need
+// to exercise skipped/unclassified use seedSummaryRunWithOutcome.
 func seedSummaryRun(t *testing.T, db *sqlx.DB, runID, agentID, status, taskID string, requestedAt time.Time) {
+	t.Helper()
+	outcome := ""
+	if status == "finished" {
+		outcome = "processed"
+	}
+	seedSummaryRunWithOutcome(t, db, runID, agentID, status, outcome, taskID, requestedAt)
+}
+
+// seedSummaryRunWithOutcome is seedSummaryRun plus an explicit outcome
+// value. outcome == "" writes SQL NULL.
+func seedSummaryRunWithOutcome(
+	t *testing.T, db *sqlx.DB, runID, agentID, status, outcome, taskID string, requestedAt time.Time,
+) {
 	t.Helper()
 	payload := `{"task_id":"` + taskID + `"}`
 	// Give the run a synthetic 1h duration: claimed_at = requested_at,
@@ -33,12 +52,16 @@ func seedSummaryRun(t *testing.T, db *sqlx.DB, runID, agentID, status, taskID st
 	// seeded a few minutes after the run's start need that window to
 	// be open enough to include them.
 	finishedAt := requestedAt.Add(1 * time.Hour)
+	var outcomeArg interface{}
+	if outcome != "" {
+		outcomeArg = outcome
+	}
 	_, err := db.Exec(`
 		INSERT INTO runs
-			(id, agent_profile_id, reason, payload, status, coalesced_count,
+			(id, agent_profile_id, reason, payload, status, outcome, coalesced_count,
 			 retry_count, requested_at, claimed_at, finished_at)
-		VALUES (?, ?, 'task_assigned', ?, ?, 1, 0, ?, ?, ?)
-	`, runID, agentID, payload, status, requestedAt.UTC().Format(time.RFC3339),
+		VALUES (?, ?, 'task_assigned', ?, ?, ?, 1, 0, ?, ?, ?)
+	`, runID, agentID, payload, status, outcomeArg, requestedAt.UTC().Format(time.RFC3339),
 		requestedAt.UTC().Format(time.RFC3339), finishedAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatalf("seed run %s: %v", runID, err)
@@ -220,6 +243,56 @@ func TestGetAgentSummary_RunActivityBuckets(t *testing.T) {
 	}
 	if sr := srByDate[d1Key]; sr.Succeeded != 1 || sr.Total != 2 {
 		t.Errorf("success rate yesterday %#v, want 1/2", sr)
+	}
+}
+
+// TestGetAgentSummary_RunActivityBuckets_SkippedAndUnclassified covers
+// docs/specs/task-delivery-ledger/spec.md, "Scenarios § Office run
+// outcome": a day with one processed, one budget_blocked (skipped) and
+// one pre-activation NULL-outcome (unclassified) finished run reports all
+// three fields and total stays the sum of all five buckets; a day made
+// entirely of pre-activation runs reports succeeded=0, unclassified=N and
+// total=N, so a reader can tell the day predates the mechanism without
+// consulting kandev_meta.
+func TestGetAgentSummary_RunActivityBuckets_SkippedAndUnclassified(t *testing.T) {
+	deps := newTestDeps(t)
+	now := time.Now().UTC()
+	d0 := now
+	d1 := now.AddDate(0, 0, -1)
+
+	seedSummaryRunWithOutcome(t, deps.db, "r-proc", summaryFixtureAgent, "finished", "processed", "t1", d0)
+	seedSummaryRunWithOutcome(t, deps.db, "r-skip", summaryFixtureAgent, "finished", "budget_blocked", "t1", d0)
+	seedSummaryRunWithOutcome(t, deps.db, "r-null", summaryFixtureAgent, "finished", "", "t1", d0)
+
+	seedSummaryRunWithOutcome(t, deps.db, "r-y1", summaryFixtureAgent, "finished", "", "t2", d1)
+	seedSummaryRunWithOutcome(t, deps.db, "r-y2", summaryFixtureAgent, "finished", "", "t2", d1)
+	seedSummaryRunWithOutcome(t, deps.db, "r-y3", summaryFixtureAgent, "finished", "", "t2", d1)
+
+	resp := fetchAgentSummary(t, deps, summaryFixtureAgent, 14)
+
+	activityByDate := map[string]dashboard.AgentRunActivityDay{}
+	for _, b := range resp.RunActivity {
+		activityByDate[b.Date] = b
+	}
+	rateByDate := map[string]dashboard.AgentSuccessRateDay{}
+	for _, sr := range resp.SuccessRate {
+		rateByDate[sr.Date] = sr
+	}
+	d0Key, d1Key := d0.Format("2006-01-02"), d1.Format("2006-01-02")
+
+	if got := activityByDate[d0Key]; got.Succeeded != 1 || got.Skipped != 1 || got.Unclassified != 1 || got.Total != 3 {
+		t.Errorf("today activity = %#v, want succeeded=1 skipped=1 unclassified=1 total=3", got)
+	}
+	if got := rateByDate[d0Key]; got.Succeeded != 1 || got.Unclassified != 1 || got.Total != 3 {
+		t.Errorf("today success rate = %#v, want succeeded=1 unclassified=1 total=3", got)
+	}
+
+	if got := activityByDate[d1Key]; got.Succeeded != 0 || got.Skipped != 0 || got.Unclassified != 3 || got.Failed != 0 || got.Other != 0 || got.Total != 3 {
+		t.Errorf("all-pre-activation day activity = %#v, want succeeded=0 unclassified=3 total=3", got)
+	}
+	if got := rateByDate[d1Key]; got.Succeeded != 0 || got.Unclassified != 3 || got.Total != 3 {
+		t.Errorf("all-pre-activation day success rate = %#v, want succeeded=0 unclassified=3 total=3 "+
+			"(reader can tell this day predates the mechanism from the response alone)", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -215,6 +216,174 @@ func TestGetGitStatus_UntrackedFileWithSpaces(t *testing.T) {
 	}
 	if fileInfo.Diff == "" {
 		t.Error("expected non-empty synthetic Diff for untracked file with spaces")
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+func TestGetGitStatus_ExcludesUntrackedNodeModules(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	dependencyFiles := []string{
+		"node_modules/root-package/index.js",
+		"packages/app/node_modules/nested-package/index.js",
+	}
+	for _, filePath := range dependencyFiles {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, filePath)), 0o755); err != nil {
+			t.Fatalf("failed to create dependency directory for %s: %v", filePath, err)
+		}
+		writeFile(t, repoDir, filePath, "dependency content\n")
+	}
+	const sourcePath = "src/untracked-source.ts"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, sourcePath)), 0o755); err != nil {
+		t.Fatalf("failed to create source directory: %v", err)
+	}
+	writeFile(t, repoDir, sourcePath, "export const source = true;\n")
+
+	status, err := wt.getGitStatus(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get git status: %v", err)
+	}
+
+	if len(status.Untracked) != 1 || status.Untracked[0] != sourcePath {
+		t.Fatalf("untracked paths = %v, want only %q", status.Untracked, sourcePath)
+	}
+	if len(status.Files) != 1 {
+		t.Fatalf("status files = %v, want only the ordinary source file", mapKeys(status.Files))
+	}
+	for filePath := range status.Files {
+		if strings.Contains(filePath, "node_modules") {
+			t.Fatalf("dependency path %q entered the status snapshot", filePath)
+		}
+	}
+	fileInfo, ok := status.Files[sourcePath]
+	if !ok {
+		t.Fatalf("ordinary untracked source %q is missing from status", sourcePath)
+	}
+	if fileInfo.Status != "untracked" {
+		t.Errorf("source status = %q, want untracked", fileInfo.Status)
+	}
+	if fileInfo.Diff == "" {
+		t.Error("ordinary untracked source did not receive a synthetic diff")
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+func TestGetGitStatus_PreservesTrackedNodeModules(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	const trackedPath = "node_modules/checked-in-package/index.js"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, trackedPath)), 0o755); err != nil {
+		t.Fatalf("failed to create tracked dependency directory: %v", err)
+	}
+	writeFile(t, repoDir, trackedPath, "const version = 1;\n")
+	runGit(t, repoDir, "add", "-f", trackedPath)
+	runGit(t, repoDir, "commit", "-m", "Track dependency fixture")
+	writeFile(t, repoDir, trackedPath, "const version = 2;\n")
+
+	status, err := wt.getGitStatus(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get git status: %v", err)
+	}
+
+	fileInfo, ok := status.Files[trackedPath]
+	if !ok {
+		t.Fatalf("tracked dependency path %q is missing from status; got %v", trackedPath, mapKeys(status.Files))
+	}
+	if fileInfo.Status != "modified" || fileInfo.Staged {
+		t.Fatalf("tracked dependency status = %#v, want unstaged modified", fileInfo)
+	}
+	if fileInfo.Diff == "" {
+		t.Error("tracked dependency did not receive a diff")
+	}
+}
+
+func TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions(t *testing.T) {
+	tests := []struct {
+		name           string
+		path           string
+		setup          func(t *testing.T, repoDir, path string)
+		betweenQueries func(t *testing.T, repoDir, path string)
+		wantUntracked  []string
+		wantFile       *types.FileInfo
+	}{
+		{
+			name: "untracked to staged",
+			path: "staged-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "staged after the first query\n")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "add", path)
+			},
+			wantUntracked: []string{"staged-between-status-queries.txt"},
+			wantFile: &types.FileInfo{
+				Path:   "staged-between-status-queries.txt",
+				Status: fileStatusUntracked,
+			},
+		},
+		{
+			name: "tracked to untracked",
+			path: "removed-from-index-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "tracked before the first query\n")
+				runGit(t, repoDir, "add", path)
+				runGit(t, repoDir, "commit", "-m", "Track transition fixture")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "rm", "--cached", path)
+			},
+			wantUntracked: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+
+			wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+			t.Cleanup(wt.Stop)
+			tt.setup(t, repoDir, tt.path)
+			wt.gitStatusBetweenQueries = func() {
+				tt.betweenQueries(t, repoDir, tt.path)
+			}
+
+			update := types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
+			if err := wt.parseGitStatusOutput(context.Background(), &update); err != nil {
+				t.Fatalf("parseGitStatusOutput failed: %v", err)
+			}
+
+			if len(update.Untracked) != len(tt.wantUntracked) {
+				t.Fatalf("untracked paths = %v, want %v", update.Untracked, tt.wantUntracked)
+			}
+			for i, wantPath := range tt.wantUntracked {
+				if update.Untracked[i] != wantPath {
+					t.Fatalf("untracked path %d = %q, want %q", i, update.Untracked[i], wantPath)
+				}
+			}
+
+			if tt.wantFile == nil {
+				if len(update.Files) != 0 {
+					t.Fatalf("status files = %v, want no entries from the stable pre-removal view", mapKeys(update.Files))
+				}
+				return
+			}
+			fileInfo, ok := update.Files[tt.wantFile.Path]
+			if !ok {
+				t.Fatalf("stable transition view omitted %q", tt.wantFile.Path)
+			}
+			if fileInfo.Status != tt.wantFile.Status || fileInfo.Staged != tt.wantFile.Staged {
+				t.Fatalf("file status = %#v, want %#v", fileInfo, *tt.wantFile)
+			}
+		})
 	}
 }
 

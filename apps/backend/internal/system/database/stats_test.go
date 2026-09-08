@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -260,6 +261,47 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 	if stats.LastBackupAt != nil {
 		t.Errorf("LastBackupAt = %v, want nil (no backups yet)", *stats.LastBackupAt)
 	}
+	payload := statsPayload(t, stats)
+	wantBackupDir := filepath.Join(dataDir, "backups")
+	if got := payload["backup_directory"]; got != wantBackupDir {
+		t.Errorf("backup_directory = %v, want %q", got, wantBackupDir)
+	}
+}
+
+func TestStats_ReturnsConfiguredSQLiteBackupDirectory(t *testing.T) {
+	svc, _, _, dataDir := newTestService(t)
+	svc.databasePath = filepath.Join(dataDir, "nested", "custom.db")
+
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	want := filepath.Join(dataDir, "nested", "backups")
+	if got := statsPayload(t, stats)["backup_directory"]; got != want {
+		t.Errorf("backup_directory = %v, want %q", got, want)
+	}
+}
+
+func TestStats_ResolvesRelativeSQLiteBackupDirectory(t *testing.T) {
+	relativeDatabasePath := filepath.Join("state", "kandev.db")
+	want, err := filepath.Abs(filepath.Join(filepath.Dir(relativeDatabasePath), "backups"))
+	if err != nil {
+		t.Fatalf("resolve expected backup directory: %v", err)
+	}
+
+	svc := NewService(nil, relativeDatabasePath, ResetDirs{}, nil, nil)
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	if stats.BackupDirectory != want {
+		t.Errorf("BackupDirectory = %q, want %q", stats.BackupDirectory, want)
+	}
+	if !filepath.IsAbs(stats.BackupDirectory) {
+		t.Errorf("BackupDirectory = %q, want an absolute path", stats.BackupDirectory)
+	}
 }
 
 func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
@@ -287,6 +329,9 @@ func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	}
 	if stats.LastBackupAt != nil {
 		t.Errorf("LastBackupAt = %v, want nil for postgres", *stats.LastBackupAt)
+	}
+	if got := statsPayload(t, stats)["backup_directory"]; got != "" {
+		t.Errorf("backup_directory = %v, want empty for postgres", got)
 	}
 }
 
@@ -334,7 +379,20 @@ func TestHandleStats_Returns200JSON(t *testing.T) {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) {
+	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) || !contains(body, `"backup_directory"`) {
 		t.Errorf("body missing fields: %s", body)
 	}
+}
+
+func statsPayload(t *testing.T, stats Stats) map[string]interface{} {
+	t.Helper()
+	raw, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("marshal stats: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal stats: %v", err)
+	}
+	return payload
 }

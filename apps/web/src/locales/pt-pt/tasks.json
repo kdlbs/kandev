@@ -23,6 +23,7 @@
   "groupByRepository": "Repositório",
   "groupByState": "Estado",
   "groupByWorkflow": "Fluxo de trabalho",
+  "ungrouped": "Sem grupo",
   "loading": "A carregar...",
   "loadingTasks": "A carregar as tarefas...",
   "noRepository": "Sem repositório",

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,12 +17,24 @@ type fakeDispatcher struct {
 	resp *ws.Message
 	err  error
 
-	calls []*ws.Message
+	calls                    []*ws.Message
+	trustedExternalTransport bool
 }
 
-func (f *fakeDispatcher) Dispatch(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+func (f *fakeDispatcher) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	f.calls = append(f.calls, msg)
+	f.trustedExternalTransport = mcporigin.IsTrustedExternalTransport(ctx)
 	return f.resp, f.err
+}
+
+func TestExternalDispatcherBackendClientAttestsTransport(t *testing.T) {
+	respMsg, err := ws.NewResponse("ignored", "test.action", map[string]bool{"ok": true})
+	require.NoError(t, err)
+	d := &fakeDispatcher{resp: respMsg}
+	client := NewExternalDispatcherBackendClient(d, newTestLogger(t))
+
+	require.NoError(t, client.RequestPayload(context.Background(), "test.action", nil, nil))
+	assert.True(t, d.trustedExternalTransport)
 }
 
 func TestDispatcherBackendClient_RoundTrip(t *testing.T) {
@@ -44,6 +57,7 @@ func TestDispatcherBackendClient_RoundTrip(t *testing.T) {
 	require.Len(t, d.calls, 1)
 	assert.Equal(t, "test.action", d.calls[0].Action)
 	assert.NotEmpty(t, d.calls[0].ID)
+	assert.False(t, d.trustedExternalTransport)
 }
 
 func TestDispatcherBackendClient_ErrorResponse(t *testing.T) {

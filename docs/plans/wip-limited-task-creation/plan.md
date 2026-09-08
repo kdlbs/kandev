@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/wip-limit-pull-system.md
+spec: docs/specs/tasks/system-design/wip-limit-pull-system.md
 created: 2026-07-27
 status: complete
 ---

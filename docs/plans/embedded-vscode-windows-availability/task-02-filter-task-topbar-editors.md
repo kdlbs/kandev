@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-expose-backend-host-os"]
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-windows-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-windows-availability.md"
 ---
 
 # Task 02: Filter task-topbar editors

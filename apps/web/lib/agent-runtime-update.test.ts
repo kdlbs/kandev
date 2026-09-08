@@ -5,19 +5,20 @@ import {
   canApproveAgentRuntimeUpdate,
   latestRuntimeVersions,
   resolveRuntimeActiveVersion,
+  resolveRuntimeEffectiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   runtimeOperationLabelKey,
 } from "./agent-runtime-update";
 
 describe("latestRuntimeVersions", () => {
-  it("limits the selector to the ten newest options", () => {
+  it("preserves the complete backend projection", () => {
     const versions = Array.from({ length: 12 }, (_, index) => ({
       version: `1.0.${12 - index}`,
       latest: index === 0,
     }));
 
-    expect(latestRuntimeVersions(versions)).toEqual(versions.slice(0, 10));
+    expect(latestRuntimeVersions(versions)).toEqual(versions);
   });
 });
 
@@ -81,6 +82,30 @@ describe("resolveRuntimeActiveVersion", () => {
         job({ status: "failed", active_version: "0.62.0" }),
       ),
     ).toBe("0.62.0");
+  });
+
+  it("clears the preview selection after a successful default reset", () => {
+    expect(
+      resolveRuntimeActiveVersion(
+        preview({ active_version: "0.62.0" }),
+        job({
+          status: "succeeded",
+          operation: "use_default",
+          active_version: undefined,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("resolveRuntimeEffectiveVersion", () => {
+  it("prefers the terminal job effective version", () => {
+    expect(
+      resolveRuntimeEffectiveVersion(
+        preview({ effective_version: "0.62.0" }),
+        job({ status: "succeeded", effective_version: "0.64.0" }),
+      ),
+    ).toBe("0.64.0");
   });
 });
 

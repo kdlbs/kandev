@@ -4,7 +4,7 @@ import { test, expect } from "../../fixtures/office-fixture";
  * E2E coverage for the office task session lifecycle (per-(task, agent)
  * persistent sessions, RUNNING ↔ IDLE state cycling, COMPLETED only on
  * participation removal). Spec:
- *   docs/specs/office-task-session-lifecycle/spec.md
+ *   docs/specs/office/requirements/tasks.md
  *
  * Harness limitations:
  *  - The /api/v1/_test/task-sessions route only INSERTS new rows; it does

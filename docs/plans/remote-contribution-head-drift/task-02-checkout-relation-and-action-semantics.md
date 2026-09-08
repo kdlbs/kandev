@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-upstream-status-contract"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 02: Classify Checkout Drift and Git Actions

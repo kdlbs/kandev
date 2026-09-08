@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // mockSecretStore implements secrets.SecretStore for testing resolveTokenFromMetadata.
@@ -79,6 +81,17 @@ func TestSpritesShouldReconnectWhenSpriteNameMetadataExists(t *testing.T) {
 
 	if !spritesShouldReconnect(req) {
 		t.Fatal("expected sprite_name metadata to trigger reconnect")
+	}
+}
+
+func TestSpritesCreateInstance_ReuseRequiredWithoutHandleFailsClosed(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+
+	_, err := r.CreateInstance(context.Background(), &ExecutorCreateRequest{
+		WorkspaceReuseRequired: true,
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("CreateInstance() error = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
 }
 

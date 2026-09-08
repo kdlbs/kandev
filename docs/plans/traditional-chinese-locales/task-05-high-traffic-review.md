@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - "03-generate-web-catalogs"
 plan: "plan.md"
-spec: "../../specs/platform/traditional-chinese-locales.md"
+spec: "../../specs/platform/requirements/traditional-chinese-locales.md"
 ---
 
 # Task 05: Human review high-traffic Traditional namespaces

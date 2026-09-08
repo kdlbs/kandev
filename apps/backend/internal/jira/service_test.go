@@ -60,6 +60,7 @@ type fakeClient struct {
 	listProjects  func() ([]JiraProject, error)
 	listStatuses  func(projectKey string) ([]JiraStatus, error)
 	searchFn      func(jql string) (*SearchResult, error)
+	watchSearchFn func(jql string) (*SearchResult, error)
 	transitionLog []string // "key:id"
 }
 
@@ -102,6 +103,13 @@ func (c *fakeClient) SearchTickets(_ context.Context, jql, _ string, _ int) (*Se
 		return c.searchFn(jql)
 	}
 	return &SearchResult{}, nil
+}
+
+func (c *fakeClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	if c.watchSearchFn != nil {
+		return c.watchSearchFn(jql)
+	}
+	return c.SearchTickets(ctx, jql, pageToken, maxResults)
 }
 
 type svcFixture struct {

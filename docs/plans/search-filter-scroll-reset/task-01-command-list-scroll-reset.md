@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/search-filter-scroll-reset.md"
+spec: "../../specs/ui/requirements/search-filter-scroll-reset.md"
 ---
 
 # Task 01: Reset CommandList scroll on query change
@@ -52,7 +52,7 @@ Sequential. Single-file behavior change plus its focused test.
 
 ## Inputs
 
-- Spec: `docs/specs/ui/search-filter-scroll-reset.md` (`What`, all `Scenarios`,
+- Spec: `docs/specs/ui/requirements/search-filter-scroll-reset.md` (`What`, all `Scenarios`,
   `Failure modes`).
 - Plan: `plan.md` (`Root cause`, `Frontend`, `Tests`).
 - `cmdk@1.1.1` API: `useCommandState((state) => state.search)` (exported alias of

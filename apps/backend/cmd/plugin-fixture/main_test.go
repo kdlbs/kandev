@@ -154,6 +154,29 @@ func TestHandleAction_ReturnsAuthenticatedConnectionStatus(t *testing.T) {
 	require.JSONEq(t, `{"connected":true,"workspace_id":"workspace-42"}`, string(resp.Body))
 }
 
+func TestHandleAction_InspectsFixtureRepository(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: repositoryInspectActionKey,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+		Body:      []byte(`{"url":"https://bitbucket.example.test/projects/TEAM/repos/fixture"}`),
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"repository":{"provider_id":"fixture-source-control","provider_host":"bitbucket.example.test","provider_scope":"","provider_repository_id":"fixture-repository","owner_or_project":"TEAM","name":"fixture","clone_url":"https://bitbucket.example.test/scm/TEAM/fixture.git","default_branch":"main"}}`, string(resp.Body))
+}
+
+func TestHandleAction_ListsFixtureRepositoryBranches(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: repositoryBranchesActionKey,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"branches":[{"name":"main","is_default":true},{"name":"feature/provider-contract"}]}`, string(resp.Body))
+}
+
 func TestHandleAction_CreatesPluginOwnedWatchTask(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 	host := &fakeHost{createdTaskID: "watch-task-42"}
@@ -363,6 +386,9 @@ func (fakeHostTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.
 }
 func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) { return nil, nil }
 func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	return nil, nil
+}
+func (fakeHostTaskReader) Move(context.Context, pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
 	return nil, nil
 }
 

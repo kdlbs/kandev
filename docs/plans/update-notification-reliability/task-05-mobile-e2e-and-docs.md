@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-frontend-provider-delivery"]
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 05: Prove Mobile Provider Settings and Update the Public Contract

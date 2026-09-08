@@ -41,6 +41,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -85,7 +87,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -102,7 +104,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }
@@ -205,6 +207,7 @@ func buildTaskDTOsWithSessionInfo(
 	svc *service.Service,
 	log *logger.Logger,
 	activityProvider dto.ForegroundActivityProvider,
+	taskParkedProvider dto.TaskParkedProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -277,17 +280,20 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount,
 			si.reviewStatus,
 			si.executorID,
+			si.executorProfileID,
 			si.executorType,
 			si.executorName,
 			si.agentName,
+			si.agentProfileID,
 			si.workingDirectory,
 			si.sessionState,
-			pendingActionPtr(si.sessionID, pendingActionsBySession),
+			dto.PendingActionPtr(si.sessionID, pendingActionsBySession),
 		)
-		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
+		dto.EnrichTaskParkedProjection(&taskDTO, taskParkedProvider)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -308,14 +314,16 @@ func buildTaskDTOsWithSessionInfo(
 }
 
 type sessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     models.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      models.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -336,6 +344,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		val := info.ExecutorID
 		si.executorID = &val
 	}
+	if info.ExecutorProfileID != "" {
+		val := info.ExecutorProfileID
+		si.executorProfileID = &val
+	}
 	if info.ExecutorSnapshot != nil {
 		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
 			si.executorType = &t
@@ -348,6 +360,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
 			si.agentName = &name
 		}
+	}
+	if info.AgentProfileID != "" {
+		id := info.AgentProfileID
+		si.agentProfileID = &id
 	}
 	if info.RepositorySnapshot != nil {
 		if path, ok := info.RepositorySnapshot["path"].(string); ok && path != "" {
@@ -365,7 +381,7 @@ func pendingActionsForInputCapableSessions(
 	sessionIDs := make([]string, 0)
 	for _, sessions := range sessionsByTask {
 		for _, session := range sessions {
-			if isInputCapableSession(session) {
+			if dto.IsInputCapableSession(session) {
 				sessionIDs = append(sessionIDs, session.ID)
 			}
 		}
@@ -378,27 +394,6 @@ func pendingActionsForInputCapableSessions(
 
 func isInputCapableSession(session *models.TaskSession) bool {
 	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
-}
-
-func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
-	var clarification bool
-	for _, session := range sessions {
-		if !isInputCapableSession(session) {
-			continue
-		}
-		switch actions[session.ID] {
-		case models.TaskPendingActionPermission:
-			value := string(models.TaskPendingActionPermission)
-			return &value
-		case models.TaskPendingActionClarification:
-			clarification = true
-		}
-	}
-	if clarification {
-		value := string(models.TaskPendingActionClarification)
-		return &value
-	}
-	return nil
 }
 
 func pendingActionPtr(
@@ -430,6 +425,7 @@ func pendingActionRevisionPtr(
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
 		ctx,
 		[]string{session.ID},
@@ -447,7 +443,7 @@ func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskS
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -456,7 +452,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -714,6 +710,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
@@ -721,6 +718,8 @@ type httpTaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -768,7 +767,7 @@ type httpCreateTaskRequest struct {
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
 	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md).
+	// (docs/specs/tasks/requirements/external-id-idempotency.md).
 	ExternalID string   `json:"external_id,omitempty"`
 	Labels     []string `json:"labels,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
@@ -783,9 +782,10 @@ type createTaskResponse struct {
 	dto.TaskDTO
 	TaskSessionID    string `json:"session_id,omitempty"`
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string `json:"agent_profile_id,omitempty"`
 	// Deduplicated and CreationComplete are required booleans (not
 	// presence-only markers) on every create-idempotency outcome, per
-	// docs/specs/tasks/external-id-idempotency/spec.md. Deduplicated is true
+	// docs/specs/tasks/requirements/external-id-idempotency.md. Deduplicated is true
 	// for both Found outcomes. CreationComplete is false only for
 	// Found-unsettled — every other outcome (including CreatedIdentityLost)
 	// carries true, because the field means only "this task's required
@@ -948,27 +948,30 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:        body.WorkspaceID,
-		WorkflowID:         body.WorkflowID,
-		WorkflowStepID:     body.WorkflowStepID,
-		Title:              title,
-		Description:        description,
-		AutoTitle:          body.AutoTitle,
-		Autopilot:          body.Autopilot,
-		Priority:           body.Priority,
-		State:              body.State,
-		Repositories:       convertToServiceRepos(repos),
-		Position:           body.Position,
-		Metadata:           metadata,
-		DeferredLaunch:     deferredLaunch,
-		PlanMode:           body.PlanMode,
-		ParentID:           body.ParentID,
-		WorkspacePath:      body.WorkspacePath,
-		BlockedBy:          body.BlockedBy,
-		StartWhenUnblocked: body.StartWhenUnblocked,
-		ProjectID:          body.ProjectID,
-		Labels:             labels,
-		ExternalID:         body.ExternalID,
+		WorkspaceID:                 body.WorkspaceID,
+		WorkflowID:                  body.WorkflowID,
+		WorkflowStepID:              body.WorkflowStepID,
+		Title:                       title,
+		Description:                 description,
+		AutoTitle:                   body.AutoTitle,
+		Autopilot:                   body.Autopilot,
+		Priority:                    body.Priority,
+		State:                       body.State,
+		Repositories:                convertToServiceRepos(repos),
+		Position:                    body.Position,
+		Metadata:                    metadata,
+		DeferredLaunch:              deferredLaunch,
+		RecordAgentProfileRecentUse: true,
+		PlanMode:                    body.PlanMode,
+		StartAgent:                  body.StartAgent,
+		ParentID:                    body.ParentID,
+		WorkspacePath:               body.WorkspacePath,
+		BlockedBy:                   body.BlockedBy,
+		StartWhenUnblocked:          body.StartWhenUnblocked,
+		ProjectID:                   body.ProjectID,
+		Labels:                      labels,
+		ExternalID:                  body.ExternalID,
+		WorkspacePolicy:             &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -1004,21 +1007,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
 		}
 		return
-	}
-
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(c.Request.Context(), task.ID, body.ParentID, wsPolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to attach workspace policy: " + attachErr.Error(),
-			})
-			return
-		}
 	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
@@ -1073,7 +1061,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	h.dispatchTaskSession(taskDTO.ID, taskDTO.Description, body, dispatch)
+	h.dispatchTaskSession(c.Request.Context(), taskDTO.ID, taskDTO.Description, body, dispatch)
 	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
@@ -1103,7 +1091,7 @@ type lookupTaskResponse struct {
 }
 
 // httpGetTaskByExternalID is the REST lookup route
-// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — lookup"): a
+// (docs/specs/tasks/system-design/external-id-idempotency.md, "REST — lookup"): a
 // side-effect-free way to ask what holds an identity without risking a
 // create. Returns the task whether settled or not, including archived tasks.
 func (h *TaskHandlers) httpGetTaskByExternalID(c *gin.Context) {
@@ -1119,7 +1107,7 @@ func (h *TaskHandlers) httpGetTaskByExternalID(c *gin.Context) {
 }
 
 // httpReleaseTaskExternalID is the REST release route
-// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — release"): an
+// (docs/specs/tasks/system-design/external-id-idempotency.md, "REST — release"): an
 // operator action for an identity a human has determined is abandoned. Frees
 // the identity without deleting or otherwise modifying the task. MUST NOT be
 // called automatically in response to creation_complete:false — see "The one
@@ -1217,7 +1205,7 @@ func (h *TaskHandlers) commitFreshBranch(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task repository"})
 		return false
 	}
-	if !h.applyFreshBranch(c, title, inputs, repos, task.Repositories) {
+	if !h.applyFreshBranch(c, title, task, inputs, repos, task.Repositories) {
 		h.rollbackFreshBranchTask(c.Request.Context(), taskID)
 		return false
 	}
@@ -1257,6 +1245,7 @@ func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID strin
 func (h *TaskHandlers) applyFreshBranch(
 	c *gin.Context,
 	taskTitle string,
+	task *models.Task,
 	inputs []httpTaskRepositoryInput,
 	repos []dto.TaskRepositoryInput,
 	persisted []*models.TaskRepository,
@@ -1276,7 +1265,7 @@ func (h *TaskHandlers) applyFreshBranch(
 			// User didn't pick one — fall back to the repo's checked-out branch.
 			baseBranch, _ = h.service.RepositoryCurrentBranch(ctx, repositoryID)
 		}
-		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
+		newBranch := resolveFreshBranchNameForTask(raw.NewBranchName, taskTitle, task, persisted[i])
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
 			RepositoryID:        repositoryID,
 			BaseBranch:          baseBranch,
@@ -1290,6 +1279,7 @@ func (h *TaskHandlers) applyFreshBranch(
 		}
 		repos[i].BaseBranch = newBranch
 		repos[i].CheckoutBranch = ""
+		repos[i].PreserveBaseBranch = true
 	}
 	return true
 }
@@ -1304,6 +1294,25 @@ func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
 		return name
 	}
 	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+}
+
+func resolveFreshBranchNameForTask(rawNewBranch, taskTitle string, task *models.Task, taskRepository *models.TaskRepository) string {
+	if name := strings.TrimSpace(rawNewBranch); name != "" {
+		return name
+	}
+	if task != nil && taskRepository != nil && taskRepository.BranchPolicyBranchTemplate != "" {
+		branch, err := worktree.RenderTaskBranchName(worktree.BranchNameTemplateInput{
+			Template: taskRepository.BranchPolicyBranchTemplate,
+			TaskID:   task.ID,
+			Title:    taskTitle,
+			Ticket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
+			Suffix:   worktree.SmallSuffix(3),
+		})
+		if err == nil {
+			return branch
+		}
+	}
+	return resolveFreshBranchName("", taskTitle)
 }
 
 func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
@@ -1352,6 +1361,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -1359,6 +1369,8 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			GitHubURL:      r.GitHubURL,
 			RemoteURL:      r.RemoteURL,
 			Provider:       r.Provider,
+			ProviderHost:   r.ProviderHost,
+			ProviderScope:  r.ProviderScope,
 			ProviderRepoID: r.ProviderRepoID,
 			ProviderOwner:  r.ProviderOwner,
 			ProviderName:   r.ProviderName,
@@ -1396,7 +1408,7 @@ type startAgentDispatch struct {
 // step (part of step 6, "required synchronous post-create work") — it MUST
 // run, and be allowed to fail, before settlement (step 7). Only the
 // resulting agent launch is asynchronous dispatch (step 8), which must run
-// after settlement (docs/specs/tasks/external-id-idempotency/spec.md,
+// after settlement (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Settlement call site (normative, per surface)": "the helper must expose
 // preparation and dispatch separately so settlement can sit between them").
 // A prior shape settled before calling this at all, which satisfied "no
@@ -1441,6 +1453,7 @@ func (h *TaskHandlers) prepareTaskSession(
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
 			response.TaskSessionID = resp.SessionID
+			response.AgentProfileID = firstNonEmpty(resp.AgentProfileID, body.AgentProfileID)
 		}
 		return nil
 	}
@@ -1480,6 +1493,9 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
+	// The follow-up start resolves workflow and dynamic-profile overrides. Do
+	// not expose the requested profile as effective in this response; the async
+	// launch records the profile returned by the successful start.
 	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
 		h.logger.Warn("failed to mark task scheduling after preparing start session",
 			zap.Error(updateErr),
@@ -1494,7 +1510,12 @@ func (h *TaskHandlers) prepareStartAgentSession(
 // dispatchTaskSession launches the agent asynchronously (create-sequence
 // step 8). Callers MUST only invoke this after settlement has succeeded —
 // dispatch is nil whenever there was nothing prepared to dispatch.
-func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body httpCreateTaskRequest, dispatch *startAgentDispatch) {
+func (h *TaskHandlers) dispatchTaskSession(
+	ctx context.Context,
+	taskID, description string,
+	body httpCreateTaskRequest,
+	dispatch *startAgentDispatch,
+) {
 	if dispatch == nil {
 		return
 	}
@@ -1502,7 +1523,7 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
@@ -1518,11 +1539,31 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
 			return
 		}
+		if launchResp == nil || !launchResp.Success {
+			h.logger.Warn("agent start returned no successful launch response",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
 		h.logger.Info("agent started for task (async)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", launchResp.SessionID),
 			zap.String("execution_id", launchResp.AgentExecutionID))
+		h.recordSuccessfulTaskCreateProfile(startCtx, launchResp.AgentProfileID)
 	}()
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	if _, err := h.agentProfileRecentUseRecorder.RecordAgentProfileRecentUse(
+		ctx,
+		usermodels.AgentProfileRecentUseTaskCreate,
+		profileID,
+	); err != nil {
+		h.logger.Warn("failed to record agent profile recent use after successful task launch",
+			zap.String("profile_id", profileID), zap.Error(err))
+	}
 }
 
 type httpUpdateTaskRequest struct {
@@ -1535,6 +1576,8 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 type httpUpdateTaskPortForwardingRequest struct {
@@ -1579,6 +1622,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,
@@ -1586,6 +1630,8 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				GitHubURL:      r.GitHubURL,
 				RemoteURL:      r.RemoteURL,
 				Provider:       r.Provider,
+				ProviderHost:   r.ProviderHost,
+				ProviderScope:  r.ProviderScope,
 				ProviderRepoID: r.ProviderRepoID,
 				ProviderOwner:  r.ProviderOwner,
 				ProviderName:   r.ProviderName,
@@ -1606,14 +1652,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	}
 
 	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     body.Priority,
-		State:        body.State,
-		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
-		Position:     body.Position,
-		Metadata:     body.Metadata,
-		ParentID:     body.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       body.Priority,
+		State:          body.State,
+		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Position:       body.Position,
+		Metadata:       body.Metadata,
+		ParentID:       body.ParentID,
+		AssigneeUserID: body.AssigneeUserID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")
@@ -1724,18 +1771,25 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
+			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
+				DiscardWorktreeChanges: discardWorktreeChanges,
+			},
+		); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 		return
 	}
-	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
+		DiscardWorktreeChanges: discardWorktreeChanges,
+	}); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1770,6 +1824,10 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 // unless the client explicitly opts in via ?cascade=true.
 func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+func discardWorktreeChangesQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
 }
 
 // httpTaskSubtaskCount returns the count of direct, non-archived,
@@ -1849,6 +1907,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
 	DefaultBranch     string                         `json:"default_branch,omitempty"`
@@ -1885,8 +1944,9 @@ func (body *httpStartQuickChatRequest) validateRepositories() error {
 
 // httpStartQuickChatResponse is returned when a quick chat session is created.
 type httpStartQuickChatResponse struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
 }
 
 // quickChatParams holds resolved parameters for creating a quick chat session.
@@ -1990,6 +2050,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		WorkspaceID:  workspaceID,
 		Title:        params.title,
 		Description:  body.Prompt,
+		AutoTitle:    body.AutoTitle,
 		Repositories: params.repos,
 		IsEphemeral:  true,
 		Metadata:     params.metadata,
@@ -2034,8 +2095,9 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: resp.SessionID,
+		TaskID:         task.ID,
+		SessionID:      resp.SessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, params.agentProfileID),
 	})
 }
 
@@ -2081,6 +2143,7 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		})
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)
@@ -2188,8 +2251,9 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: sessionID,
+		TaskID:         task.ID,
+		SessionID:      sessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, agentProfileID),
 	})
 }
 

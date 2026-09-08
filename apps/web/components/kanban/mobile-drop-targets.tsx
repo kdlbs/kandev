@@ -18,6 +18,7 @@ function MobileDropTarget({ step, isCurrentStep }: MobileDropTargetProps) {
   return (
     <div
       ref={setNodeRef}
+      data-testid={`mobile-drop-target-${step.id}`}
       className={cn(
         "flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 transition-all",
         (() => {

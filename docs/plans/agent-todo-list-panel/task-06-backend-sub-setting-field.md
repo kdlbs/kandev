@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 06: Backend sub-setting field
@@ -44,7 +44,7 @@ it while the master preference is off.
 - **Parallelism:** `sequential` (Iteration 2 runs sequentially in the primary
   conversation).
 - **Inputs:** Spec Data model / API surface sections
-  (`docs/specs/ui/agent-todo-list-panel.md`); plan's "Iteration 2 additions"
+  (`docs/specs/ui/requirements/agent-todo-list-panel.md`); plan's "Iteration 2 additions"
   Backend section (`plan.md`); Task 01's diff as the exact pattern (add the
   new field beside `ShowTodoListPanel` at every one of its call sites).
 

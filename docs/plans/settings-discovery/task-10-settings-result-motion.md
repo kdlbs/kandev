@@ -6,7 +6,7 @@ created: 2026-08-05
 wave: 10
 depends_on: ["09-compact-settings-search"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 10: Subtle Settings result motion

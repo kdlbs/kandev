@@ -258,3 +258,71 @@ func checkInt64(t *testing.T, field string, got, want int64) {
 		t.Errorf("%s = %d, want %d", field, got, want)
 	}
 }
+
+// TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin pins the WS gateway's
+// run.subscribe authorization lookup (WO-02): the run's owning workspace
+// comes from its agent profile, the same join idiom ListRuns uses.
+func TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted pins the
+// deliberate choice of a raw join over GetAgentInstance: GetAgentInstance
+// filters deleted_at IS NULL, which would make a run under a soft-deleted
+// agent profile permanently unresolvable (and so permanently deniable) to
+// its own owner.
+func TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	if _, err := writer.Exec(`UPDATE agent_profiles SET deleted_at = ? WHERE id = 'a1'`, time.Now().UTC()); err != nil {
+		t.Fatalf("soft-delete agent profile: %v", err)
+	}
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id after soft delete: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_UnknownRunReturnsNoRows pins the sentinel the
+// gateway's subscribe hook denies on.
+func TestGetRunWorkspaceID_UnknownRunReturnsNoRows(t *testing.T) {
+	repo := newTestRepo(t)
+	if _, err := repo.GetRunWorkspaceID(context.Background(), "nope"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile pins the
+// WO-02 round-2 fix: an ordinary (non-Office) agent profile has
+// workspace_id=” (schema default, no backfill), and the join returns that
+// empty string as-is rather than an error. The gateway's subscribe hook (not
+// this repository) is responsible for denying on an empty result.
+func TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "")
+}

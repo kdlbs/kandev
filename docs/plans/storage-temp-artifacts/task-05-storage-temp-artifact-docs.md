@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-storage-temp-artifact-e2e"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 05: Temporary-artifact operations documentation
@@ -34,7 +34,7 @@ git diff --check
 ## Files likely touched
 
 - `docs/public/operations.md`
-- `docs/specs/system-page/storage-maintenance.md` (only if implementation reveals wording drift)
+- `docs/specs/system-page/requirements/storage-maintenance.md` (only if implementation reveals wording drift)
 - `docs/plans/storage-temp-artifacts/plan.md`
 - `docs/plans/storage-temp-artifacts/task-*.md`
 

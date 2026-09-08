@@ -33,9 +33,19 @@ export type GitHubAppRegistrationsState = {
   byWorkspaceId: Record<string, GitHubAppRegistrationsEntry>;
 };
 
+export type TaskPRScope = {
+  workspaceId: string | null;
+  workspaceContextGeneration: number;
+};
+
 export type TaskPRsState = {
   /** Each task may have multiple PRs (one per repository for multi-repo tasks). */
   byTaskId: Record<string, TaskPR[]>;
+  /** Scope metadata is optional for backward-compatible boot payloads. */
+  workspaceId?: string | null;
+  workspaceContextGeneration?: number;
+  /** Association tombstones prevent stale HTTP responses from resurrecting a deletion. */
+  deletedAssociationIdsByTaskId?: Record<string, Record<string, true>>;
 };
 
 export type TaskIssuesState = {
@@ -116,11 +126,11 @@ export type GitHubSliceActions = {
   ) => void;
   setGitHubAppRegistrationsLoading: (workspaceId: string, loading: boolean) => void;
   resetGitHubAppRegistrations: (workspaceId: string) => void;
-  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
-  removeTaskPR: (taskId: string, associationId: string) => void;
+  setTaskPRs: (prs: Record<string, TaskPR[]>, scope?: TaskPRScope) => void;
+  removeTaskPR: (taskId: string, associationId: string, scope?: TaskPRScope) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;
-  setTaskPR: (taskId: string, pr: TaskPR) => void;
+  setTaskPR: (taskId: string, pr: TaskPR, scope?: TaskPRScope) => void;
   setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
   setPRWatches: (watches: PRWatch[]) => void;
   setPRWatchesLoading: (loading: boolean) => void;

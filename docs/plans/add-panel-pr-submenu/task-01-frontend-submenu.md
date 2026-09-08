@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/add-panel-pr-submenu.md"
+spec: "../../specs/ui/requirements/add-panel-pr-submenu.md"
 ---
 
 # Task 01: Frontend PR submenu
@@ -30,7 +30,7 @@ spec: "../../specs/ui/add-panel-pr-submenu.md"
 - **Dependencies:** None.
 - **Parallelism:** sequential.
 - **Inputs:**
-  - Spec `What`/`Scenarios`: docs/specs/ui/add-panel-pr-submenu.md
+  - Spec `What`/`Scenarios`: docs/specs/ui/requirements/add-panel-pr-submenu.md
   - Plan Frontend + Tests sections: docs/plans/add-panel-pr-submenu/plan.md
   - Existing sub-menu pattern: `apps/web/components/task/handoff-profile-menu-items.tsx`
     (`DropdownMenuSub`/`SubTrigger`/`SubContent` usage)

@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["05-isolated-ui-leaks"]
 plan: "plan.md"
-spec: "../../specs/i18n-second-audit-gaps/spec.md"
+spec: "../../specs/platform/requirements/i18n-second-audit-gaps.md"
 ---
 
 # Task 06: Demo Pages And Final Audit

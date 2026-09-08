@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/agent-runtime-availability.md"
+spec: "../../specs/platform/requirements/agent-runtime-availability.md"
 ---
 
 # Task 01: Snapshot mutable ACP event payloads

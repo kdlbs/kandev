@@ -13,10 +13,12 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -75,14 +77,32 @@ type Service struct {
 	// insertion one atomic catalog mutation across different plugin IDs.
 	agentToolInstallMu sync.Mutex
 
-	pluginsDir       string
-	store            store.Store
-	registry         *Registry
-	state            *state.Store
-	userState        *state.UserStore
-	userStateCleanup userStateCleanupStore
-	eventBus         bus.EventBus
-	log              *logger.Logger
+	// extractingMu guards extractingPaths and, crucially, is held across the
+	// pkgtar extraction that registers into it: a version directory must never
+	// be observable on disk before it is marked in flight, or a concurrent
+	// prune could delete it in that gap. See extractPackage.
+	extractingMu sync.Mutex
+	// extractingPaths counts, per version directory, the installs that have
+	// extracted it but have not yet finished. Install extracts before it can
+	// know the plugin id (and therefore before it can take that id's lifecycle
+	// lock), so this is what tells a prune running under the lock that a
+	// directory belongs to an install still waiting for it.
+	extractingPaths map[string]int
+
+	pluginsDir        string
+	store             store.Store
+	registry          *Registry
+	state             *state.Store
+	userState         *state.UserStore
+	instances         *instances.Store
+	instanceState     *state.InstanceStore
+	webArtifacts      *webapp.ArtifactStore
+	webRuntime        *webapp.Runtime
+	eventHub          *webapp.EventHub
+	eventSubscription bus.Subscription
+	userStateCleanup  userStateCleanupStore
+	eventBus          bus.EventBus
+	log               *logger.Logger
 
 	deliverer                Deliverer
 	agentToolCatalogListener AgentToolCatalogListener
@@ -110,7 +130,11 @@ type Service struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
-	taskWriter       taskWriter
+	interactionData  interactionDataSource
+	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
+	// outlive the late SetTaskPRSource wiring.
+	taskPRs    taskPRSource
+	taskWriter taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
@@ -122,6 +146,12 @@ type Service struct {
 	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
 	messenger   taskMessenger
 	taskStarter taskStarter
+
+	// Interaction response path wired late via SetInteractionResponder (ADR
+	// 0052), for the same reason as messenger/taskStarter: the orchestrator
+	// and the clarification handler are constructed after boot-active plugins
+	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
+	interactionResponder interactionResponder
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -173,6 +203,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		lifecycleLocks:      newKeyedMutex(),
 		dispatchLocks:       newKeyedRWMutex(),
 		agentToolGeneration: uuid.NewString(),
+		eventHub:            webapp.NewEventHub(),
 	}
 }
 
@@ -363,6 +394,83 @@ func (s *Service) UserState() *state.UserStore {
 	return s.userState
 }
 
+// SetWebAppStorage wires the durable instance metadata and immutable static
+// artifact stores used by isolated web applications. Native plugin lifecycle
+// remains independent of these stores.
+func (s *Service) SetWebAppStorage(instanceStore *instances.Store, artifactStore *webapp.ArtifactStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instances = instanceStore
+	s.webArtifacts = artifactStore
+}
+
+// SetInstanceState wires revisioned state owned by isolated web-app
+// instances. It is separate from plugin_state, which belongs to a managed
+// plugin process and has no instance identity.
+func (s *Service) SetInstanceState(instanceState *state.InstanceStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instanceState = instanceState
+}
+
+func (s *Service) InstanceState() *state.InstanceStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceState
+}
+
+// Instances returns the scoped web-application instance store.
+func (s *Service) Instances() *instances.Store {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instances
+}
+
+// WebArtifacts returns immutable static web-application artifact storage.
+func (s *Service) WebArtifacts() *webapp.ArtifactStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webArtifacts
+}
+
+// SetWebRuntime attaches the capability-bound static web-app runtime. The
+// backend registers its route only when the canvas release gate is enabled.
+func (s *Service) SetWebRuntime(runtime *webapp.Runtime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webRuntime = runtime
+	if runtime != nil {
+		runtime.SetProtocolHandler(s.handleWebAppProtocol)
+	}
+}
+
+func (s *Service) WebRuntime() *webapp.Runtime {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webRuntime
+}
+
+// SetWebAppEventHub replaces the in-process public event transport. It is
+// primarily useful for deterministic tests; production creates the hub in
+// NewService and forwards the shared Kandev event bus into it.
+func (s *Service) SetWebAppEventHub(hub *webapp.EventHub) {
+	s.mu.Lock()
+	previous := s.eventHub
+	s.eventHub = hub
+	s.mu.Unlock()
+	if previous != nil && previous != hub {
+		previous.Close()
+	}
+}
+
+// WebAppEventHub returns the bounded SSE transport for capability-bound web
+// applications.
+func (s *Service) WebAppEventHub() *webapp.EventHub {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.eventHub
+}
+
 // SetSecrets wires the secret vault Provide was constructed with.
 func (s *Service) SetSecrets(v SecretVault) {
 	s.secrets = v
@@ -389,6 +497,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	interactions interactionDataSource,
 	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
@@ -397,7 +506,47 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.interactionData = interactions
 	s.taskWriter = taskWrites
+}
+
+// SetInteractionResponder wires the interaction write path (ADR 0052): the
+// adapter that answers permissions through the orchestrator and clarification
+// bundles through the clarification handler. Wired LATE for the same reason as
+// SetWriteDeps — both first-party services are constructed after
+// StartActivePlugins has spawned boot-active plugins — so hosts read it live
+// via interactionResponderDep rather than snapshotting it. A nil responder
+// leaves the write RPCs returning Unimplemented; the reads are unaffected.
+// SetTaskPRSource wires the optional pull-request lookup behind
+// Task.PullRequests. It is separate from SetDataSources because GitHub is an
+// optional service; nil leaves tasks with no PullRequests rather than failing
+// the read.
+func (s *Service) SetTaskPRSource(src taskPRSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskPRs = src
+}
+
+// taskPRSourceDep returns the currently wired pull-request source. Hosts call
+// this accessor at read time so late wiring reaches already-running plugins.
+func (s *Service) taskPRSourceDep() taskPRSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskPRs
+}
+
+func (s *Service) SetInteractionResponder(responder interactionResponder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interactionResponder = responder
+}
+
+// interactionResponderDep returns the currently-wired interaction responder,
+// guarded by s.mu against the SetInteractionResponder write.
+func (s *Service) interactionResponderDep() interactionResponder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interactionResponder
 }
 
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
@@ -468,6 +617,18 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.authLogin
+}
+
+// sessionCookieName returns the name of Kandev's own session cookie via the
+// wired auth bridge, or "" when no bridge is wired (auth disabled entirely,
+// so no session cookie is ever minted). Used by the webhook relay to strip
+// that cookie before forwarding headers to a plugin subprocess.
+func (s *Service) sessionCookieName() string {
+	bridge := s.authLoginBridge()
+	if bridge == nil {
+		return ""
+	}
+	return bridge.SessionCookieName()
 }
 
 // SetKandevVersion wires the currently running kandev build version,
@@ -575,9 +736,12 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentProfiles:       s.agentProfiles,
 		sessionCodeStats:    s.sessionCodeStats,
 		messageData:         s.messageData,
+		interactionData:     s.interactionData,
+		taskPRsDep:          s.taskPRSourceDep,
 		taskWriter:          s.taskWriter,
 		utilityDeps:         s.utilityAgentDeps,
 		writeDeps:           s.writeDependencies,
+		interactionDeps:     s.interactionResponderDep,
 	}
 }
 

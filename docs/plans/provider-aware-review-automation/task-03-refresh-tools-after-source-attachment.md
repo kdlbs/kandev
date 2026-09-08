@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-scope-task-mcp-tools-by-provider", "02-propagate-providers-through-agent-launch"]
 plan: "plan.md"
-spec: "../../specs/integrations/provider-aware-review-automation.md"
+spec: "../../specs/integrations/requirements/provider-aware-review-automation.md"
 ---
 
 # Task 03: Refresh tools after source attachment

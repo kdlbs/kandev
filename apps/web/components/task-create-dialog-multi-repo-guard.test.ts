@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getMultiRepoExecutorDisabledReason } from "./task-create-dialog-multi-repo-guard";
 
 describe("getMultiRepoExecutorDisabledReason", () => {
-  it.each(["worktree", "local_docker", "ssh", "sprites"])(
+  it.each(["worktree", "local_docker", "ssh", "sprites", "k8s"])(
     "allows multi-repository tasks on %s",
     (executorType) => {
       expect(getMultiRepoExecutorDisabledReason(executorType)).toBeNull();

@@ -38,6 +38,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
       provider_host: "https://github.com",
       provider_owner: "testorg",
       provider_name: "testrepo",
+      pull_before_worktree: false,
     });
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");

@@ -2,12 +2,16 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -15,13 +19,38 @@ import (
 // (SessionManager.SendPromptSteerWithDispatchCallback). The invariant under test:
 // a steer reuses the *active dispatched* prompt generation and never serializes
 // behind it — so the operator's input reaches the still-generating turn — while
-// a steer with no live turn (idle, pre-dispatch, or already-completed) degrades
-// to an ordinary prompt delivered in submission order.
+// a steer with no live turn (idle, pre-dispatch, or already-completed) returns a
+// no-dispatch result for ordinary admission to handle in submission order.
 
 type capturedPrompt struct {
 	text       string
 	generation uint64
 	steer      bool
+}
+
+type blockingAttachmentReader struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingAttachmentReader) OpenClaimed(context.Context, string, string, string) (io.ReadCloser, string, string, int64, error) {
+	return &blockingAttachmentReadCloser{reader: r, data: strings.NewReader("attachment bytes")}, "bundle.zip", "application/zip", 16, nil
+}
+
+type blockingAttachmentReadCloser struct {
+	reader *blockingAttachmentReader
+	data   *strings.Reader
+}
+
+func (r *blockingAttachmentReadCloser) Read(p []byte) (int, error) {
+	r.reader.once.Do(func() { close(r.reader.started) })
+	<-r.reader.release
+	return r.data.Read(p)
+}
+
+func (r *blockingAttachmentReadCloser) Close() error {
+	return nil
 }
 
 // promptProbe captures every agent.prompt frame the mock receives so a test can
@@ -83,6 +112,7 @@ type steerHarness struct {
 	mgr   *Manager
 	exec  *AgentExecution
 	probe *promptProbe
+	mock  *mockAgentServer
 	ctx   context.Context
 }
 
@@ -106,10 +136,15 @@ func newSteerHarness(t *testing.T) *steerHarness {
 
 	exec := createTestExecution("exec-steer", "task-steer", "session-steer")
 	exec.agentctl = client
+	// Attachment materialization is addressed to the ACP session and refuses to
+	// run without one, so every steer harness carries a session identity and a
+	// reader even when the test under it sends no attachments.
+	exec.ACPSessionID = "acp-session-steer"
+	mgr.sessionManager.SetAttachmentReader(testAttachmentReader{})
 	if err := mgr.executionStore.Add(exec); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
-	return &steerHarness{mgr: mgr, exec: exec, probe: probe, ctx: ctx}
+	return &steerHarness{mgr: mgr, exec: exec, probe: probe, mock: mock, ctx: ctx}
 }
 
 // startForegroundTurn dispatches an ordinary prompt and blocks it in flight
@@ -206,9 +241,9 @@ func TestSendPromptSteer_ReusesActiveGenerationWithoutBlocking(t *testing.T) {
 	}
 }
 
-// TestSendPromptSteer_FallsBackWhenNoTurnInFlight proves an idle steer-capable
-// session degrades to an ordinary prompt (a new generation, steer=false).
-func TestSendPromptSteer_FallsBackWhenNoTurnInFlight(t *testing.T) {
+// TestSendPromptSteer_ReturnsNotDispatchedWhenNoTurnInFlight proves an idle
+// steer-capable session leaves ordinary prompt admission to the orchestrator.
+func TestSendPromptSteer_ReturnsNotDispatchedWhenNoTurnInFlight(t *testing.T) {
 	h := newSteerHarness(t)
 
 	if got := h.mgr.executionStore.ActivePromptGeneration(h.exec.ID); got != 0 {
@@ -218,25 +253,20 @@ func TestSendPromptSteer_FallsBackWhenNoTurnInFlight(t *testing.T) {
 	res, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
 		h.ctx, h.exec, "no turn yet", false, nil, true, nil,
 	)
-	if err != nil {
-		t.Fatalf("steer fallback errored: %v", err)
+	if !errors.Is(err, ErrSteerNotDispatched) {
+		t.Fatalf("steer result = %+v, error = %v, want ErrSteerNotDispatched", res, err)
 	}
-	if res == nil || res.StopReason != PromptStopReasonDispatched {
-		t.Fatalf("steer fallback result = %+v, want dispatched", res)
-	}
-	sp := h.probe.next(t)
-	if sp.steer {
-		t.Fatal("fallback prompt must not carry steer=true")
-	}
-	if sp.generation != 1 {
-		t.Fatalf("fallback generation = %d, want 1 (a fresh ordinary prompt)", sp.generation)
+	select {
+	case frame := <-h.probe.ch:
+		t.Fatalf("idle steer dispatched a prompt outside ordinary admission: %+v", frame)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
-// TestSendPromptSteer_FallsBackAfterPredecessorCompleted proves a steer that
-// arrives after the foreground turn already finished does not attach to that
-// dead generation; it runs as a fresh ordinary prompt.
-func TestSendPromptSteer_FallsBackAfterPredecessorCompleted(t *testing.T) {
+// TestSendPromptSteer_ReturnsNotDispatchedAfterPredecessorCompleted proves a
+// steer that arrives after the foreground turn already finished does not attach
+// to that dead generation or dispatch around ordinary admission.
+func TestSendPromptSteer_ReturnsNotDispatchedAfterPredecessorCompleted(t *testing.T) {
 	h := newSteerHarness(t)
 	firstDone := h.startForegroundTurn(t, 1)
 
@@ -257,33 +287,26 @@ func TestSendPromptSteer_FallsBackAfterPredecessorCompleted(t *testing.T) {
 	res, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
 		h.ctx, h.exec, "after done", false, nil, true, nil,
 	)
-	if err != nil {
-		t.Fatalf("steer-after-completion errored: %v", err)
+	if !errors.Is(err, ErrSteerNotDispatched) {
+		t.Fatalf("steer result = %+v, error = %v, want ErrSteerNotDispatched", res, err)
 	}
-	if res == nil || res.StopReason != PromptStopReasonDispatched {
-		t.Fatalf("steer-after-completion result = %+v, want dispatched", res)
-	}
-	sp := h.probe.next(t)
-	if sp.steer {
-		t.Fatal("post-completion steer must fall back to an ordinary prompt (steer=false)")
-	}
-	if sp.generation != 2 {
-		t.Fatalf("post-completion fallback generation = %d, want 2", sp.generation)
+	select {
+	case frame := <-h.probe.ch:
+		t.Fatalf("post-completion steer dispatched around ordinary admission: %+v", frame)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
 // TestSendPromptSteer_DoesNotOvertakeAdmittedButUndispatchedTurn proves the
 // pre-dispatch race is closed with a real predecessor: while a genuine prompt is
 // pinned in the admitted-but-undispatched window (generation begun, prompt not
-// yet sent), a racing steer must not bind to it or overtake it. The steer falls
-// back to an ordinary prompt that serializes behind the predecessor, so the wire
-// order is predecessor-then-steer, both ordinary, with no steer frame at all.
+// yet sent), a racing steer must not bind to it or overtake it. The lifecycle
+// path returns without sending; the orchestrator owns the ordinary fallback.
 func TestSendPromptSteer_DoesNotOvertakeAdmittedButUndispatchedTurn(t *testing.T) {
 	h := newSteerHarness(t)
 
 	// Pin the first (predecessor) sendPrompt in the window between BeginPrompt and
-	// dispatch. Only the first call blocks; the steer's own fallback sendPrompt
-	// (the second) runs unhindered.
+	// dispatch.
 	var once sync.Once
 	predecessorPinned := make(chan struct{})
 	releasePredecessor := make(chan struct{})
@@ -302,15 +325,13 @@ func TestSendPromptSteer_DoesNotOvertakeAdmittedButUndispatchedTurn(t *testing.T
 	<-predecessorPinned // generation 1 admitted, not yet dispatched, promptMu held
 
 	// The steer arrives now. activePromptGeneration is 0 (gen 1 not marked
-	// dispatched), so it must fall back — and the fallback then blocks on promptMu
-	// behind the pinned predecessor.
-	steerDone := make(chan struct{})
-	go func() {
-		_, _ = h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
-			h.ctx, h.exec, "racing steer", false, nil, true, nil,
-		)
-		close(steerDone)
-	}()
+	// dispatched), so it returns without sending a frame.
+	_, steerErr := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
+		h.ctx, h.exec, "racing steer", false, nil, true, nil,
+	)
+	if !errors.Is(steerErr, ErrSteerNotDispatched) {
+		t.Fatalf("steer error = %v, want ErrSteerNotDispatched", steerErr)
+	}
 
 	// No frame of any kind can reach the agent while the predecessor is pinned:
 	// the predecessor hasn't dispatched and the steer is blocked behind it.
@@ -331,21 +352,17 @@ func TestSendPromptSteer_DoesNotOvertakeAdmittedButUndispatchedTurn(t *testing.T
 		t.Fatalf("first frame = %+v, want ordinary generation 1 (predecessor)", first)
 	}
 
-	// The predecessor left a pending dispatched prompt, so the steer's fallback
-	// waits for generation 1 to complete before it dispatches — driving that
-	// completion lets it proceed, in order.
+	// The predecessor left a pending dispatched prompt. No successor was sent by
+	// this lifecycle call; the orchestrator must decide when to admit it.
 	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
 		Type:             streams.EventTypeComplete,
 		PromptGeneration: 1,
 		Data:             map[string]any{"stop_reason": "end_turn"},
 	})
-	<-steerDone
-
-	// The steer fell back to an ordinary generation 2 — never a steer frame, and
-	// strictly after the predecessor.
-	second := h.probe.next(t)
-	if second.steer || second.generation != 2 {
-		t.Fatalf("second frame = %+v, want ordinary generation 2 (steer fell back, in order)", second)
+	select {
+	case frame := <-h.probe.ch:
+		t.Fatalf("lifecycle sent a successor frame without ordinary admission: %+v", frame)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -466,4 +483,171 @@ func TestSendPromptSteer_NilAgentctlClientErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when the execution has no agentctl client")
 	}
+}
+
+// claimedAttachment is the bounded descriptor shape the prompt and queue
+// protocols carry. Its bytes live in backend storage until materialization
+// streams them to agentctl.
+func claimedAttachment() []v1.MessageAttachment {
+	return []v1.MessageAttachment{
+		{AttachmentID: "attachment-steer", Type: "resource", Name: "bundle.zip", SizeBytes: 16},
+	}
+}
+
+// TestSendPromptSteer_MaterializesAttachmentsBeforeDispatch is the core
+// regression: a steer folded into a still-generating turn must stream its
+// claimed bytes to agentctl before the prompt frame goes out. Without that, the
+// agent receives a reference to a file that was never written into the session
+// and the attachment silently reads as empty.
+func TestSendPromptSteer_MaterializesAttachmentsBeforeDispatch(t *testing.T) {
+	h := newSteerHarness(t)
+	done := h.startForegroundTurn(t, 1)
+
+	result, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
+		h.ctx, h.exec, "look at this file", false, claimedAttachment(), false, nil,
+	)
+	if err != nil {
+		t.Fatalf("steer with attachment: %v", err)
+	}
+	if result.StopReason != PromptStopReasonDispatched {
+		t.Fatalf("stop reason = %q, want %q", result.StopReason, PromptStopReasonDispatched)
+	}
+
+	steered := h.probe.next(t)
+	if !steered.steer {
+		t.Fatalf("frame was not a steer: %+v", steered)
+	}
+
+	uploads := h.mock.materializedUploads()
+	if len(uploads) != 1 {
+		t.Fatalf("materialized uploads = %d, want 1", len(uploads))
+	}
+	if uploads[0].attachmentID != "attachment-steer" {
+		t.Errorf("attachment_id = %q", uploads[0].attachmentID)
+	}
+	if uploads[0].sessionID != "acp-session-steer" {
+		t.Errorf("session_id = %q", uploads[0].sessionID)
+	}
+	if uploads[0].body != "attachment bytes" {
+		t.Errorf("uploaded body = %q", uploads[0].body)
+	}
+
+	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	<-done
+}
+
+// TestSendPromptSteer_DoesNotFallbackOutsideAdmission proves that a turn which
+// ends while attachment bytes are materializing does not dispatch a low-level
+// ordinary prompt after the steer has lost its generation. The caller must
+// return a no-dispatch result so the orchestrator can re-enter normal prompt
+// admission and preserve ordering with concurrent messages.
+func TestSendPromptSteer_DoesNotFallbackOutsideAdmission(t *testing.T) {
+	h := newSteerHarness(t)
+	done := h.startForegroundTurn(t, 1)
+	reader := &blockingAttachmentReader{started: make(chan struct{}), release: make(chan struct{})}
+	h.mgr.sessionManager.SetAttachmentReader(reader)
+
+	steerDone := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
+			h.ctx, h.exec, "racing attachment", false, claimedAttachment(), true, nil,
+		)
+		steerDone <- struct {
+			result *PromptResult
+			err    error
+		}{result: result, err: err}
+	}()
+	<-reader.started
+
+	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("predecessor turn returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("predecessor turn did not settle while attachment materialized")
+	}
+
+	close(reader.release)
+	select {
+	case call := <-steerDone:
+		if !errors.Is(call.err, ErrSteerNotDispatched) {
+			t.Fatalf("steer result = %+v, error = %v, want ErrSteerNotDispatched", call.result, call.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("steer did not return after attachment materialization")
+	}
+	select {
+	case frame := <-h.probe.ch:
+		t.Fatalf("steer sent a fallback prompt outside orchestrator admission: %+v", frame)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestSendPrompt_MaterializesAttachmentsExactlyOnce covers the ordinary route.
+// It materializes a claimed descriptor once before dispatching the prompt.
+func TestSendPrompt_MaterializesAttachmentsExactlyOnce(t *testing.T) {
+	h := newSteerHarness(t)
+
+	if _, err := h.mgr.sessionManager.SendPrompt(
+		h.ctx, h.exec, "ordinary prompt", false, claimedAttachment(), true,
+	); err != nil {
+		t.Fatalf("ordinary prompt: %v", err)
+	}
+
+	dispatched := h.probe.next(t)
+	if dispatched.steer {
+		t.Fatalf("ordinary frame should not be a steer: %+v", dispatched)
+	}
+	if uploads := h.mock.materializedUploads(); len(uploads) != 1 {
+		t.Fatalf("materialized uploads = %d, want exactly 1", len(uploads))
+	}
+}
+
+// TestSendPromptSteer_MaterializationFailureDoesNotDispatch pins the failure
+// contract. A steer that cannot resolve its bytes must surface an error rather
+// than deliver a dangling reference, and must not fall through to an ordinary
+// prompt carrying the same unresolved descriptor.
+func TestSendPromptSteer_MaterializationFailureDoesNotDispatch(t *testing.T) {
+	h := newSteerHarness(t)
+	done := h.startForegroundTurn(t, 1)
+	h.mock.setFailMaterialize(true)
+
+	_, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
+		h.ctx, h.exec, "look at this file", false, claimedAttachment(), false, nil,
+	)
+	if err == nil {
+		t.Fatal("steer with failing materialization returned no error")
+	}
+	if !errors.Is(err, ErrSteerAttachmentMaterialization) {
+		t.Fatalf("error = %v, want ErrSteerAttachmentMaterialization", err)
+	}
+	if !strings.Contains(err.Error(), "materialize attachment") {
+		t.Fatalf("error = %v, want a materialization error", err)
+	}
+
+	select {
+	case frame := <-h.probe.ch:
+		t.Fatalf("a prompt frame dispatched despite the failure: %+v", frame)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	<-done
 }

@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 01: Correct Entity-Reference Trigger Lifecycle
@@ -49,7 +49,7 @@ Sequential. The input gate, dismissal state, and browser regression form one TDD
 
 ## Inputs
 
-- Behavioral contract: `docs/specs/ui/entity-reference-composer.md`.
+- Behavioral contract: `docs/specs/ui/requirements/entity-reference-composer.md`.
 - Root-cause trace and frontend design: `plan.md`.
 - TipTap lifecycle code: `apps/web/components/task/chat/tiptap-entity-reference-suggestion.ts`.
 - Editor input path: `apps/web/components/task/chat/use-tiptap-editor.ts`.

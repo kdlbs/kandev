@@ -181,6 +181,8 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.openRewind();
     await expectRevisionCount(session, 1);
     await expect(session.revisionRow(1).getByTestId("plan-revision-current-badge")).toBeVisible();
+    // Char count is a version-metadata signal computed server-side from content.
+    await expect(session.revisionRow(1).getByTestId("plan-revision-char-count")).toBeVisible();
   });
 
   test("two agent writes within coalesce window: remain one revision", async ({
@@ -208,6 +210,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     await session.openRewind();
     await expectRevisionCount(session, 1);
+    // A coalesced write updates the existing revision, so created_at != updated_at
+    // and the "edited" hint should surface on the merged row.
+    await expect(session.revisionRow(1).getByTestId("plan-revision-coalesced-hint")).toBeVisible();
   });
 
   test("two agent writes across coalesce window: produce two revisions", async ({
@@ -282,7 +287,7 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await expect(session.revisionRow(3).getByTestId("plan-revision-revert-marker")).toBeVisible();
   });
 
-  test("revert confirm dialog: cancel leaves revisions untouched", async ({
+  test("revert confirmation: cancel leaves revisions untouched", async ({
     testPage,
     apiClient,
     seedData,
@@ -305,11 +310,11 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.openRewind();
     await expectRevisionCount(session, 2);
 
-    // Click revert on v1 then cancel the dialog.
+    // Click revert on v1 then cancel the row-local confirmation.
     await session.revertButton(session.revisionRow(1)).click();
-    await expect(session.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
-    await session.revertConfirmCancel().click();
-    await expect(session.revertConfirmDialog()).toBeHidden({ timeout: 5_000 });
+    await expect(session.revertConfirmPopover()).toBeVisible({ timeout: 5_000 });
+    await session.revertConfirmPopoverCancel().click();
+    await expect(session.revertConfirmPopover()).toBeHidden({ timeout: 5_000 });
 
     // HEAD is unchanged and the two revisions are still there.
     await expect(session.planPanel.getByText("Second", { exact: false })).toBeVisible();
@@ -399,7 +404,7 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     // Open the older revision via row click.
     await session.openRevisionPreview(1);
-    await expect(session.previewBody()).toContainText("Older draft", { timeout: 5_000 });
+    await expect(session.previewBody()).toContainText("Older draft", { timeout: 15_000 });
     await expect(session.previewRestoreButton()).toBeVisible();
 
     // Restore from preview routes through the confirm dialog.

@@ -20,6 +20,48 @@ func NpxExecutionCacheKey(packageSpec string) string {
 	return hex.EncodeToString(digest[:])[:npxExecutionKeyLength]
 }
 
+// ValidateExactPackageSpec accepts only a package name followed by a stable
+// version. Cache repair must not accept a path or an unversioned npm selector.
+func ValidateExactPackageSpec(packageSpec string) error {
+	if strings.TrimSpace(packageSpec) != packageSpec || packageSpec == "" {
+		return errors.New("managed runtime package spec is not exact")
+	}
+	if strings.ContainsAny(packageSpec, "\x00\r\n\\") || strings.Contains(packageSpec, "..") {
+		return errors.New("managed runtime package spec is invalid")
+	}
+	separator := strings.LastIndexByte(packageSpec, '@')
+	if separator <= 0 || separator == len(packageSpec)-1 {
+		return errors.New("managed runtime package spec must include a version")
+	}
+	if err := validateManagedPackageName(packageSpec[:separator]); err != nil {
+		return err
+	}
+	if _, err := ParseStableVersion(packageSpec[separator+1:]); err != nil {
+		return fmt.Errorf("managed runtime package spec version: %w", err)
+	}
+	return nil
+}
+
+func validateManagedPackageName(packageName string) error {
+	if filepath.IsAbs(packageName) || strings.Contains(packageName, ":") || strings.HasSuffix(packageName, "/") {
+		return errors.New("managed runtime package spec is path-like")
+	}
+	if !strings.HasPrefix(packageName, "@") {
+		if strings.ContainsAny(packageName, "@/") {
+			return errors.New("managed runtime package spec is path-like")
+		}
+		return nil
+	}
+	if strings.Contains(packageName[1:], "@") {
+		return errors.New("managed runtime package spec has an invalid scope")
+	}
+	parts := strings.Split(packageName, "/")
+	if len(parts) != 2 || parts[0] == "@" || parts[1] == "" {
+		return errors.New("managed runtime package spec has an invalid scope")
+	}
+	return nil
+}
+
 // RemoveNpxExecutionTree removes only the _npx tree derived from packageSpec.
 // It refuses broad roots and symlinked paths so a cache repair cannot escape
 // the exact trusted execution key.

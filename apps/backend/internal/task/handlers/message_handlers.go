@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -57,6 +58,7 @@ type MessageHandlers struct {
 	service             *service.Service
 	orchestrator        OrchestratorService
 	cancellationPending dto.CancellationPendingProvider
+	parkedProjection    dto.ParkedProvider
 	logger              *logger.Logger
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
@@ -91,6 +93,9 @@ func NewMessageHandlers(
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		handlers.cancellationPending = cancellation
 	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		handlers.parkedProjection = parked
+	}
 	return handlers
 }
 
@@ -104,6 +109,96 @@ func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *model
 		return titleOwner, nil
 	}
 	return claimer.ClaimTaskTitleSession(ctx, taskID, sessionID)
+}
+
+func (h *MessageHandlers) resolveMessageTaskAndTitleOwner(
+	ctx context.Context,
+	msg *ws.Message,
+	task *models.Task,
+	taskID string,
+	sessionID string,
+	configMode bool,
+	startCreatedSession bool,
+	hasMessageContent bool,
+) (*models.Task, bool, *ws.Message) {
+	if !startCreatedSession && (configMode || !hasMessageContent) {
+		return task, false, nil
+	}
+	if configMode {
+		return task, false, nil
+	}
+	if startCreatedSession {
+		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, taskID, sessionID)
+		if claimErr != nil {
+			h.logger.Error("failed to claim first-turn task title",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(claimErr))
+			wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
+			return nil, false, wsErr
+		}
+		return task, titleOwner, nil
+	}
+	if !service.IsRestorableQuickChatTask(task) {
+		return task, false, nil
+	}
+	return task, models.IsAgentTitleOwner(task.Metadata, sessionID), nil
+}
+
+func (h *MessageHandlers) injectMessageContext(
+	ctx context.Context,
+	req wsAddMessageRequest,
+	sessionResp *dto.GetTaskSessionResponse,
+	task *models.Task,
+	configMode bool,
+	startCreatedSession bool,
+	titleOwner bool,
+	content string,
+	trustedPromptContext string,
+) string {
+	requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
+	referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
+	var pullRequestTargetContext string
+	content, pullRequestTargetContext = sysprompt.InjectPullRequestTargetContext(
+		content, h.taskPullRequestTargets(ctx, task),
+	)
+	if task.IsFromOffice {
+		return sysprompt.InjectOfficeContextWithOptions(
+			req.TaskID, req.TaskSessionID, content, requiresSignal,
+			referenceContext, trustedPromptContext, pullRequestTargetContext,
+		)
+	}
+	if sessionResp.Session.IsPassthrough {
+		if !startCreatedSession && titleOwner {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + content
+		}
+		return content
+	}
+	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
+		RequiresCompletionSignal:       requiresSignal,
+		IncludeCoordinatorTaskControls: !configMode,
+		IncludeTaskTitleTool:           !configMode && titleOwner,
+		Autopilot:                      task.Autopilot,
+		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
+		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
+}
+
+func (h *MessageHandlers) prepareDirectPrompt(
+	ctx context.Context,
+	content string,
+	isPassthrough bool,
+) (string, string) {
+	if h.orchestrator == nil || isPassthrough {
+		return content, ""
+	}
+	preparer, ok := h.orchestrator.(orchestrator.DirectPromptPreparer)
+	if !ok {
+		// Keep test and compatibility doubles that do not provide the optional
+		// seam functional. The production wrapper always implements it.
+		return content, ""
+	}
+	return preparer.PrepareDirectPrompt(ctx, content, isPassthrough)
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -167,38 +262,74 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 }
 
 type listMessagesParams struct {
-	before    string
-	after     string
-	sort      string
-	limit     int
-	paginated bool
+	before     string
+	after      string
+	around     string
+	sort       string
+	authorType string
+	limit      int
+	paginated  bool
 }
 
+const (
+	messageSortAsc  = "asc"
+	messageSortDesc = "desc"
+)
+
+// parseListMessageParams validates message-list query parameters and selects pagination mode.
 func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesParams, bool) {
 	before := c.Query("before")
 	after := c.Query("after")
+	around, aroundProvided := c.GetQuery("around")
 	sort := strings.ToLower(strings.TrimSpace(c.Query("sort")))
-	limitProvided := strings.TrimSpace(c.Query("limit")) != ""
+	authorType, authorTypeProvided := c.GetQuery("author_type")
+	authorType = strings.TrimSpace(authorType)
+	rawLimit, limitProvided := c.GetQuery("limit")
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
 		return listMessagesParams{}, false
 	}
-	if sort != "" && sort != "asc" && sort != "desc" {
+	if aroundProvided && strings.TrimSpace(around) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "around must not be empty"})
+		return listMessagesParams{}, false
+	}
+	if around != "" && (before != "" || after != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before, after or around can be set"})
+		return listMessagesParams{}, false
+	}
+	if authorTypeProvided && authorType != string(models.MessageAuthorUser) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": `author_type must be "user"`})
+		return listMessagesParams{}, false
+	}
+	if around != "" && authorType != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "author_type cannot be combined with around"})
+		return listMessagesParams{}, false
+	}
+	if around != "" && sort != "" && sort != messageSortDesc {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be desc with around"})
+		return listMessagesParams{}, false
+	}
+	if sort != "" && sort != messageSortAsc && sort != messageSortDesc {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
 		return listMessagesParams{}, false
 	}
 	limit := 0
-	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
-		if parsed, err := strconv.Atoi(rawLimit); err == nil {
-			limit = parsed
+	if limitProvided {
+		parsed, err := strconv.Atoi(strings.TrimSpace(rawLimit))
+		if err != nil || parsed <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+			return listMessagesParams{}, false
 		}
+		limit = parsed
 	}
 	return listMessagesParams{
-		before:    before,
-		after:     after,
-		sort:      sort,
-		limit:     limit,
-		paginated: limitProvided || before != "" || after != "" || sort != "",
+		before:     before,
+		after:      after,
+		around:     around,
+		sort:       sort,
+		authorType: authorType,
+		limit:      limit,
+		paginated:  limitProvided || before != "" || after != "" || aroundProvided || sort != "" || authorTypeProvided,
 	}, true
 }
 
@@ -218,6 +349,7 @@ func (h *MessageHandlers) fetchMessages(
 	return dto.ListMessagesResponse{Messages: result, Total: len(result)}, nil
 }
 
+// fetchMessagesPaginated loads a filtered or around-window message page.
 func (h *MessageHandlers) fetchMessagesPaginated(
 	ctx context.Context,
 	sessionID string,
@@ -228,10 +360,15 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 		Limit:         params.limit,
 		Before:        params.before,
 		After:         params.after,
+		Around:        params.around,
 		Sort:          params.sort,
+		AuthorType:    params.authorType,
 	})
 	if err != nil {
 		return dto.ListMessagesResponse{}, err
+	}
+	if params.around != "" {
+		hasMore = false
 	}
 	result := messagesToAPI(messages)
 	cursor := ""
@@ -266,6 +403,10 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 	}
 	resp, err := h.fetchMessages(c.Request.Context(), sessionID, params)
 	if err != nil {
+		if errors.Is(err, taskrepo.ErrMessageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
 		h.logger.Error("failed to list messages", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
 		return
@@ -359,7 +500,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
-	if err := h.ensureTaskInProgress(ctx, req.TaskID); err != nil {
+	task, err := h.ensureTaskInProgress(ctx, req.TaskID)
+	if err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
@@ -415,8 +557,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences)
 
-	// First message on a CREATED session is the kanban "type in chat to start
-	// the agent" path. Wrap with the Kandev MCP system block before persisting
+	// The first prompt on a new or eager Quick Chat session is the kanban "type
+	// in chat to start the agent" path. Wrap with the Kandev MCP system block before persisting
 	// so the DB row matches what the agent receives (and "Show formatted"
 	// reveals it). The orchestrator's wrap in StartCreatedSession is
 	// mode-aware and canonicalizing, so passing the wrapped content through
@@ -430,33 +572,31 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	if startCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
-		task, err := h.service.GetTask(ctx, req.TaskID)
-		if err != nil {
-			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
-		}
-		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
-		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, req.TaskID, req.TaskSessionID)
-		if claimErr != nil {
-			h.logger.Error("failed to claim first-turn task title", zap.String("task_id", req.TaskID), zap.String("session_id", req.TaskSessionID), zap.Error(claimErr))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
-		}
-		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
-		if task.IsFromOffice {
-			storedContent = sysprompt.InjectOfficeContext(req.TaskID, req.TaskSessionID, storedContent, referenceContext)
-		} else {
-			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       requiresSignal,
-				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && titleOwner,
-				Autopilot:                      task.Autopilot,
-				IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
-				IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-			}, referenceContext)
-		}
+	storedContent, trustedPromptContext := h.prepareDirectPrompt(
+		ctx, req.Content, sessionResp.Session.IsPassthrough,
+	)
+	// Resolve browser prompt definitions before appending the server-owned
+	// entity block. The prompt sanitizer removes untrusted browser blocks and
+	// must not consume the opening tag of this trusted context.
+	storedContent = orchestrator.AppendEntityReferenceContext(storedContent, req.EntityReferences)
+	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+	titleOwner := false
+	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
+	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
+		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
+	)
+	if wsErr != nil {
+		return wsErr, nil
+	}
+	if (startCreatedSession || titleOwner) && hasMessageContent {
+		// The first prompt on a new or eager Quick Chat session is the kanban
+		// "type in chat to start the agent" path. Wrap with the Kandev MCP
+		// system block before persisting so the DB row matches what the agent
+		// receives (and "Show formatted" reveals it).
+		storedContent = h.injectMessageContext(
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
+			trustedPromptContext,
+		)
 	}
 	req.Content = storedContent
 	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
@@ -472,7 +612,6 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		Metadata:      meta.ToMap(),
 	}
 	var message *models.Message
-	var err error
 	if req.ClientMessageID != "" {
 		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
 	} else {
@@ -513,7 +652,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
 	if h.orchestrator != nil && !turnStartResult.Queued {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
+		h.dispatchPromptAsync(
+			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
+		)
 	}
 
 	return response, nil
@@ -571,6 +712,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if reloaded.State != models.TaskSessionStateCompleted {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -588,6 +730,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	}
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
@@ -608,8 +751,13 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	}
 }
 
+const maxMessageContentBytes = 1 << 20
+
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
+	if len(req.Content) > maxMessageContentBytes {
+		return "content is too long"
+	}
 	if req.TaskSessionID == "" {
 		return "session_id is required"
 	}
@@ -640,6 +788,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in
@@ -669,14 +818,15 @@ func (h *MessageHandlers) logBlockedRunningSession(sessionID string, state model
 }
 
 // ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
-// Returns an error only when the task cannot be fetched.
-func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) error {
+// The fetched task is returned so message context injection can reuse the same
+// snapshot instead of issuing another repository lookup.
+func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) (*models.Task, error) {
 	task, err := h.service.GetTask(ctx, taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if task.State != v1.TaskStateReview {
-		return nil
+		return task, nil
 	}
 	if _, err := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
@@ -686,14 +836,20 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 		h.logger.Info("task transitioned from REVIEW to IN_PROGRESS",
 			zap.String("task_id", taskID))
 	}
-	return nil
+	return task, nil
 }
 
 // dispatchPromptAsync forwards the message to the agent as a prompt in a
 // background goroutine. The caller (wsAddMessage) is responsible for running
 // on_turn_start synchronously BEFORE wrapping the prompt, so this function
 // only handles the agent-facing dispatch.
-func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession, steer bool) {
+func (h *MessageHandlers) dispatchPromptAsync(
+	ctx context.Context,
+	req wsAddMessageRequest,
+	agentProfileID string,
+	isCreatedSession, steer bool,
+	trustedPromptContext string,
+) {
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
 	content := req.Content
@@ -709,6 +865,7 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
+			trustedPromptContext,
 		)
 	}()
 }
@@ -747,7 +904,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// agentProfileID/references/startCreated are irrelevant: a steer only
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
-		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false)
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "")
 		return
 	}
 	if !isAgentReportedError(err) {
@@ -765,13 +922,23 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	startCreated bool,
+	trustedPromptContext string,
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(
-			ctx, taskID, sessionID, agentProfileID,
-			content, true, planMode, false, attachments, references,
-		); err != nil {
+		var err error
+		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
+			_, err = starter.StartCreatedSessionWithPromptContext(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references, trustedPromptContext,
+			)
+		} else {
+			err = h.orchestrator.StartCreatedSession(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references,
+			)
+		}
+		if err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -1063,6 +1230,7 @@ func (h *MessageHandlers) wsSearchMessages(ctx context.Context, msg *ws.Message)
 	return ws.NewResponse(msg.ID, msg.Action, dto.SearchMessagesResponse{Hits: hits, Total: len(hits)})
 }
 
+// wsListMessages handles a WebSocket request for a message page.
 func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsListMessagesRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -1074,7 +1242,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	if req.Before != "" && req.After != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "only one of before or after can be set", nil)
 	}
-	if req.Sort != "" && req.Sort != "asc" && req.Sort != "desc" {
+	if req.Sort != "" && req.Sort != messageSortAsc && req.Sort != messageSortDesc {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
 	}
 

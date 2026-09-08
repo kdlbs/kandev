@@ -7,10 +7,9 @@
 // Every write routes through the same first-party layer the REST/MCP API uses,
 // never a repository — that is how task.* events fire and how a message reaches
 // the agent through the orchestrator's real delivery path (queue when the
-// session is running, resume/start it otherwise). The service types can't be
-// referenced here without an import cycle (see SetDataSources' doc), so task
-// writes go through a narrow taskWriter interface and message delivery through a
-// narrow taskMessenger interface, both satisfied by backendapp adapters.
+// session is running, resume/start it otherwise). Task writes and message
+// delivery go through narrow taskWriter and taskMessenger interfaces,
+// satisfied by backendapp adapters.
 package plugins
 
 import (
@@ -49,6 +48,12 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	Priority       string
+	// StartAgent reports that the caller will launch an agent for this task
+	// right after creation. The adapter maps it onto CreateTaskRequest so step
+	// resolution sends the task to the first step that runs agents rather than
+	// to the workflow's parking start step.
+	StartAgent bool
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -70,6 +75,36 @@ type TaskUpdateInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
+}
+
+// TaskMoveInput is the plugins-local task-move request a taskWriter adapter
+// translates into internal/task/service.MoveTaskWithOptions. Unlike
+// TaskUpdateInput's WorkflowStepID (rejected on the plugin path), Move
+// transitions a task through the same path the board's own move uses.
+// WorkflowID nil means inherit the task's current workflow; a pointer to ""
+// is rejected before reaching the adapter (see taskReader.Move). Source is
+// the "plugin:<id>" provenance the host stamps as the ADR 0015 actor id (a
+// plugin cannot set it).
+type TaskMoveInput struct {
+	TaskID         string
+	WorkflowStepID string
+	WorkflowID     *string
+	Position       int32
+	Source         string
+}
+
+// TaskMoveResult is the outcome of a plugin-initiated move. Transitioned and
+// FromStepID mirror internal/task/service.MoveTaskResult's write-transaction
+// sourced fields — they must come from the result, not be re-derived from
+// Task, because a step-changing move's post-commit refresh replaces Task with
+// a plain read that carries neither transient field (see
+// taskmodels.Task.FromStepID's doc). QueuedForStepID is read directly off the
+// returned Task since it is a persisted field, unaffected by that refresh.
+type TaskMoveResult struct {
+	Task         *taskmodels.Task
+	Transitioned bool
+	FromStepID   string
 }
 
 // PluginMessageResult is the outcome of delivering a message to a task session,
@@ -79,14 +114,16 @@ type PluginMessageResult struct {
 	Status    string
 }
 
-// taskWriter is the narrow slice of the task service the CreateTask/UpdateTask
-// RPCs need, adapted by backendapp to avoid an internal/task/service import
-// cycle. Both methods return the persisted *taskmodels.Task so the reader can
-// map it to the wire DTO.
+// taskWriter is the narrow slice of the task service the
+// CreateTask/UpdateTask/MoveTask RPCs need, adapted by backendapp to avoid an
+// internal/task/service import cycle. Create/Update return the persisted
+// *taskmodels.Task so the reader can map it to the wire DTO; Move returns the
+// richer TaskMoveResult (see its doc for why).
 type taskWriter interface {
 	CreateTask(ctx context.Context, in TaskCreateInput) (*taskmodels.Task, error)
 	UpdateTask(ctx context.Context, in TaskUpdateInput) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
+	MoveTask(ctx context.Context, in TaskMoveInput) (*TaskMoveResult, error)
 }
 
 // taskMessenger delivers a prompt to a task session through the orchestrator's
@@ -141,6 +178,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
+	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
+	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
 	if err != nil {
 		return nil, err
@@ -173,6 +213,8 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Launch:         launch,
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
+		Priority:       in.Priority,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err
@@ -194,12 +236,21 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
+	if in.WorkflowStepID != nil {
+		return nil, invalidArgument(
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps",
+		)
+	}
+	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
+	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
+		Priority:       in.Priority,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -207,8 +258,56 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(updated)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(updated)}
+	r.host.attachPullRequests(ctx, items)
+	return &items[0], nil
+}
+
+func (r taskReader) Move(ctx context.Context, in pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
+	if !r.host.capabilities.CanWrite(resourceTasks) {
+		return nil, permissionDenied(apiWriteCapability(resourceTasks))
+	}
+	if r.host.taskWriter == nil {
+		return r.host.UnimplementedHostData.Tasks().Move(ctx, in)
+	}
+	if in.TaskID == "" {
+		return nil, invalidArgument("task_id is required")
+	}
+	if in.WorkflowStepID == "" {
+		return nil, invalidArgument("workflow_step_id is required")
+	}
+	if in.WorkflowID != nil && *in.WorkflowID == "" {
+		return nil, invalidArgument("workflow_id must not be empty when present")
+	}
+	if in.Position < 0 {
+		return nil, invalidArgument("position must not be negative")
+	}
+	result, err := r.host.taskWriter.MoveTask(ctx, TaskMoveInput{
+		TaskID:         in.TaskID,
+		WorkflowStepID: in.WorkflowStepID,
+		WorkflowID:     in.WorkflowID,
+		Position:       in.Position,
+		Source:         r.host.pluginSource(),
+	})
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, taskNotFound(in.TaskID)
+		}
+		return nil, err
+	}
+	var queuedForStepID *string
+	if result.Task.QueuedForStepID != "" {
+		q := result.Task.QueuedForStepID
+		queuedForStepID = &q
+	}
+	items := []pluginsdk.Task{taskModelToDTO(result.Task)}
+	r.host.attachPullRequests(ctx, items)
+	return &pluginsdk.MoveTaskOutcome{
+		Task:            &items[0],
+		Transitioned:    result.Transitioned,
+		QueuedForStepID: queuedForStepID,
+		FromStepID:      result.FromStepID,
+	}, nil
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands
@@ -440,7 +539,9 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	if err != nil {
 		return nil, err
 	}
-	return tasksToDTOs(tasks), nil
+	dtos := tasksToDTOs(tasks)
+	m.host.attachPullRequests(ctx, dtos)
+	return dtos, nil
 }
 
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {

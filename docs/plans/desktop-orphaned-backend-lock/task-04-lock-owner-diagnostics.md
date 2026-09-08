@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-proclive-shared-helper"]
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 parallelism: parallel-safe
 ---
 
@@ -22,7 +22,7 @@ Both depend on task 01.
 **Read the boundary before writing code.** ADR
 [2026-08-09-exclusive-runtime-state-ownership](../../decisions/2026-08-09-exclusive-runtime-state-ownership.md)
 rejected "Use a PID file" as an ownership mechanism, and
-`docs/specs/port-collision-safety/spec.md` lists PID identity matching as out of
+`docs/specs/executors/requirements/port-collision-safety.md` lists PID identity matching as out of
 scope. This task stays inside that boundary: the `flock` remains the sole
 ownership proof, and the recorded PID is text in an error message. If you find
 yourself reading owner metadata to decide whether a lock is held, stale, or
@@ -31,7 +31,7 @@ takeable, stop. That is the rejected design.
 ## Inputs
 
 - Plan sections "Lock owner metadata" and "Ownership-lock owner diagnostics".
-- Spec: `docs/specs/port-collision-safety/spec.md`, the "Exclusive runtime-state
+- Spec: `docs/specs/executors/requirements/port-collision-safety.md`, the "Exclusive runtime-state
   ownership" paragraphs on advisory owner metadata, its narrowed out-of-scope
   bullet, and scenarios 6 to 8 under "Concurrent backend startup".
 - Current code: `apps/backend/internal/backendapp/ownershiplock/lock.go`,

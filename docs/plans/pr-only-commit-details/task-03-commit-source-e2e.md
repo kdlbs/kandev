@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-github-commit-detail", "02-source-aware-commit-ui"]
 plan: "plan.md"
-spec: "../../specs/pr-only-commit-details/spec.md"
+spec: "../../specs/ui/requirements/pr-only-commit-details.md"
 ---
 
 # Task 03: Commit-source E2E coverage

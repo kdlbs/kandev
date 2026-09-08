@@ -628,6 +628,13 @@ func TestSubscriptionChecksDenyForeignTopics(t *testing.T) {
 				}
 				return nil
 			},
+			Run: func(ctx context.Context, runID string) error {
+				identity, _ := authn.IdentityFromContext(ctx)
+				if runID == "run-b" && identity.UserID != "user-b" {
+					return denied
+				}
+				return nil
+			},
 		},
 	})
 	clientA := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
@@ -649,12 +656,126 @@ func TestSubscriptionChecksDenyForeignTopics(t *testing.T) {
 		t.Fatal("denied session subscription must not register")
 	}
 
+	clientA.handleRunSubscribe(subscribe(ws.ActionRunSubscribe, map[string]interface{}{"run_id": "run-b"}))
+	assertErrorResponse(t, clientA, "run subscribe")
+	if len(hub.getSubscribersLocked(hub.runSubscribers, "run-b")) != 0 {
+		t.Fatal("denied run subscription must not register")
+	}
+
 	// Own topics still work.
 	clientA.handleSubscribe(subscribe(ws.ActionTaskSubscribe, map[string]interface{}{"task_id": "task-a"}))
 	assertSuccessResponse(t, clientA, "own task subscribe")
 	if len(hub.getSubscribersLocked(hub.taskSubscribers, "task-a")) != 1 {
 		t.Fatal("allowed task subscription must register")
 	}
+
+	clientA.handleRunSubscribe(subscribe(ws.ActionRunSubscribe, map[string]interface{}{"run_id": "run-a"}))
+	assertSuccessResponse(t, clientA, "own run subscribe")
+	if len(hub.getSubscribersLocked(hub.runSubscribers, "run-a")) != 1 {
+		t.Fatal("allowed run subscription must register")
+	}
+}
+
+// TestRunSubscribeDeniesEmptyWorkspaceResolution pins WO-02 round 2's
+// FINDING R1-1 fix at the gateway wiring level: a Run hook denial for a run
+// that resolves to an empty workspace (the runSubscriptionCheck case, an
+// ordinary non-Office agent profile) must refuse the subscribe request and
+// leave it unregistered in hub.runSubscribers — the same contract already
+// pinned for a foreign-owned run by TestSubscriptionChecksDenyForeignTopics,
+// exercised here for the empty-workspace input specifically.
+func TestRunSubscribeDeniesEmptyWorkspaceResolution(t *testing.T) {
+	hub := newAccessTestHub(t)
+	errEmptyWorkspace := errors.New("workspace not found")
+	hub.setAuthPolicy(AuthPolicy{
+		Subscriptions: SubscriptionAccessPolicy{
+			Run: func(_ context.Context, runID string) error {
+				if runID == "run-unscoped" {
+					return errEmptyWorkspace
+				}
+				return nil
+			},
+		},
+	})
+	client := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+
+	subscribe := func(runID string) *ws.Message {
+		raw, _ := json.Marshal(map[string]interface{}{"run_id": runID})
+		return &ws.Message{ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionRunSubscribe, Payload: raw}
+	}
+
+	client.handleRunSubscribe(subscribe("run-unscoped"))
+	assertErrorResponse(t, client, "run subscribe with empty-workspace resolution")
+	if len(hub.getSubscribersLocked(hub.runSubscribers, "run-unscoped")) != 0 {
+		t.Fatal("denied run subscription (empty workspace) must not register")
+	}
+}
+
+// TestRunSubscribeNoExistenceLeak pins the no-existence-leak property: an
+// unknown run id and a foreign run id must be byte-identical on the wire.
+// handleRunSubscribe maps every hook error to one fixed (code, message)
+// pair rather than forwarding err.Error(), so a caller cannot distinguish
+// "you don't own this" from "this doesn't exist" by probing.
+func TestRunSubscribeNoExistenceLeak(t *testing.T) {
+	hub := newAccessTestHub(t)
+	errUnknown := errors.New("sql: no rows in result set")
+	errForeign := errors.New("run belongs to another workspace")
+	hub.setAuthPolicy(AuthPolicy{
+		Subscriptions: SubscriptionAccessPolicy{
+			Run: func(_ context.Context, runID string) error {
+				if runID == "run-unknown" {
+					return errUnknown
+				}
+				return errForeign
+			},
+		},
+	})
+	client := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+
+	subscribe := func(id, runID string) *ws.Message {
+		raw, _ := json.Marshal(map[string]interface{}{"run_id": runID})
+		return &ws.Message{ID: id, Type: ws.MessageTypeRequest, Action: ws.ActionRunSubscribe, Payload: raw}
+	}
+
+	client.handleRunSubscribe(subscribe("1", "run-unknown"))
+	unknownFrame := readErrorFrame(t, client, "unknown run")
+
+	client.handleRunSubscribe(subscribe("2", "run-foreign"))
+	foreignFrame := readErrorFrame(t, client, "foreign run")
+
+	if unknownFrame.code != foreignFrame.code || unknownFrame.message != foreignFrame.message {
+		t.Fatalf("unknown run response (%q, %q) must match foreign run response (%q, %q)",
+			unknownFrame.code, unknownFrame.message, foreignFrame.code, foreignFrame.message)
+	}
+}
+
+type errorFrame struct {
+	code    string
+	message string
+}
+
+// readErrorFrame reads one frame off the client's queues and requires it to
+// be an error, decoding the (code, message) payload for comparison.
+func readErrorFrame(t *testing.T, client *Client, label string) errorFrame {
+	t.Helper()
+	var raw []byte
+	select {
+	case raw = <-client.controlSend:
+	case raw = <-client.send:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s: no response frame", label)
+	}
+	var msg ws.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("%s: bad frame: %v", label, err)
+	}
+	if msg.Type != ws.MessageTypeError {
+		t.Fatalf("%s: got %s frame, want error", label, msg.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("%s: bad error payload: %v", label, err)
+	}
+	return errorFrame{code: payload.Code, message: payload.Message}
 }
 
 func TestUserSubscribeScopedToOwnUser(t *testing.T) {

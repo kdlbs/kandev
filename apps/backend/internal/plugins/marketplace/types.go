@@ -6,7 +6,7 @@
 // The marketplace is a discovery layer only — it never installs, spawns, or
 // mutates a plugin. Installing a catalog entry reuses the existing
 // POST /api/plugins/install pipeline with the entry's package_url. See
-// docs/specs/plugins/marketplace.md.
+// docs/specs/plugins/requirements/marketplace.md.
 package marketplace
 
 import "time"
@@ -20,7 +20,7 @@ const (
 )
 
 // InstallState is the derived state of a catalog entry relative to what is
-// installed locally (docs/specs/plugins/marketplace.md → "State machine").
+// installed locally (docs/specs/plugins/requirements/marketplace.md → "State machine").
 type InstallState string
 
 const (

@@ -429,7 +429,7 @@ func TestUpdateAgentInstance_PersistsEveryMutableField(t *testing.T) {
 	agent.Name = "After"
 	agent.Role = settingsmodels.AgentRole("engineer")
 	agent.Icon = "🛠"
-	agent.Status = settingsmodels.AgentStatus("working")
+	agent.Status = settingsmodels.AgentStatusPaused
 	agent.ReportsTo = "agent-boss"
 	agent.Permissions = `{"approve_budget":true}`
 	agent.BudgetMonthlyCents = 5150
@@ -506,6 +506,46 @@ func TestUpdateAgentInstance_NormalisesEmptyJSONAndStatus(t *testing.T) {
 	}
 	if got.FailureThreshold != nil {
 		t.Errorf("FailureThreshold = %d, want nil after clearing the override", *got.FailureThreshold)
+	}
+}
+
+func TestUpdateAgentInstance_DoesNotOverwriteWorkingOwner(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	agent := fullAgentInstance("u-working", "ws-1", "Working")
+	agent.Status = settingsmodels.AgentStatusIdle
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+
+	snapshot, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if _, err := repo.MarkAgentWorking(ctx, agent.ID, "run-working"); err != nil {
+		t.Fatalf("MarkAgentWorking: %v", err)
+	}
+
+	snapshot.Name = "Renamed while working"
+	if err := repo.UpdateAgentInstance(ctx, snapshot); err != nil {
+		t.Fatalf("UpdateAgentInstance: %v", err)
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance after update: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatusWorking {
+		t.Fatalf("Status = %q, want working", got.Status)
+	}
+	var owner string
+	if err := repo.ReaderDB().GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, agent.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "run-working" {
+		t.Fatalf("working_run_id = %q, want run-working", owner)
 	}
 }
 
@@ -602,6 +642,100 @@ func TestUpdateAgentStatusFields(t *testing.T) {
 	// Unrelated columns survive.
 	if got.Icon != "🤖" {
 		t.Errorf("Icon = %q, want it untouched", got.Icon)
+	}
+}
+
+func TestUpdateAgentStatusFieldsIfCurrent_DoesNotOverwriteNewStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-cas", "ws-1", "CAS")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "Auto-paused: test"); err != nil {
+		t.Fatalf("pause agent: %v", err)
+	}
+
+	changed, err := repo.UpdateAgentStatusFieldsIfCurrent(
+		ctx, agent.ID, "paused", "idle", "",
+	)
+	if err != nil {
+		t.Fatalf("compare-and-set paused: %v", err)
+	}
+	if !changed {
+		t.Fatal("compare-and-set paused = false, want true")
+	}
+
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "stopped", "manual stop"); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+	changed, err = repo.UpdateAgentStatusFieldsIfCurrent(
+		ctx, agent.ID, "paused", "idle", "",
+	)
+	if err != nil {
+		t.Fatalf("stale compare-and-set: %v", err)
+	}
+	if changed {
+		t.Fatal("stale compare-and-set = true, want false")
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("stopped") || got.PauseReason != "manual stop" {
+		t.Fatalf("status/reason = %q/%q, want stopped/manual stop", got.Status, got.PauseReason)
+	}
+}
+
+func TestClearAgentPauseReasonIfCurrent_PreservesStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-clear-reason", "ws-1", "Clear reason")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "stopped", "Auto-paused: stale"); err != nil {
+		t.Fatalf("set stale pause: %v", err)
+	}
+
+	changed, err := repo.ClearAgentPauseReasonIfCurrent(ctx, agent.ID, "stopped")
+	if err != nil {
+		t.Fatalf("clear reason: %v", err)
+	}
+	if !changed {
+		t.Fatal("clear reason = false, want true")
+	}
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("stopped") || got.PauseReason != "" {
+		t.Fatalf("status/reason = %q/%q, want stopped/empty", got.Status, got.PauseReason)
+	}
+}
+
+func TestUpdateAgentStatusFields_ClearsWorkingOwner(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-working", "ws-1", "Status")
+	agent.Status = settingsmodels.AgentStatusIdle
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if _, err := repo.MarkAgentWorking(ctx, agent.ID, "run-status"); err != nil {
+		t.Fatalf("MarkAgentWorking: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "manual pause"); err != nil {
+		t.Fatalf("UpdateAgentStatusFields: %v", err)
+	}
+	var owner string
+	if err := repo.ReaderDB().GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, agent.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "" {
+		t.Fatalf("working_run_id = %q, want empty after pause", owner)
 	}
 }
 
@@ -705,6 +839,91 @@ func TestAgentInstanceExistsByName(t *testing.T) {
 	}
 	if exists {
 		t.Error("soft-deleted agent still reserves its name")
+	}
+}
+
+// TestAgentProfileExists_ResolvesShallowKanbanProfile guards
+// REQ-OFFICE-REVIEW-SEATS-004.3's quorum-guard resolution: a seat's
+// agent_profile_id can come from the casting resolution's runner fallback,
+// and a task's runner is not guaranteed to be an Office agent
+// (workspace_id != ”). AgentProfileExists must resolve a shallow Kanban
+// profile (workspace_id = ”) rather than treat it as deleted, unlike
+// agentInstanceFilter-scoped reads elsewhere in this file.
+func TestAgentProfileExists_ResolvesShallowKanbanProfile(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, err := repo.ExecRaw(ctx,
+		`INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"cli-kanban", "cli-kanban", now, now); err != nil {
+		t.Fatalf("seed agents row: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx,
+		`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, '', '', ?, ?)`,
+		"kanban-runner", "cli-kanban", "Kanban Runner", "Kanban Runner", now, now); err != nil {
+		t.Fatalf("seed shallow kanban profile: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "kanban-runner")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if !exists {
+		t.Error("AgentProfileExists = false for a live shallow Kanban profile, want true")
+	}
+
+	unknown, err := repo.AgentProfileExists(ctx, "does-not-exist")
+	if err != nil {
+		t.Fatalf("AgentProfileExists (unknown id): %v", err)
+	}
+	if unknown {
+		t.Error("AgentProfileExists = true for an unknown id, want false")
+	}
+}
+
+// TestAgentProfileExists_FalseForSoftDeletedOfficeAgent proves the migrated
+// AgentProfileExists still honors the soft-delete boundary Office agents
+// rely on, matching the previous AgentInstanceExists behavior.
+func TestAgentProfileExists_FalseForSoftDeletedOfficeAgent(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateAgentInstance(ctx, fullAgentInstance("office-agent", "ws-1", "Office Agent")); err != nil {
+		t.Fatalf("create office-agent: %v", err)
+	}
+	if err := repo.DeleteAgentInstance(ctx, "office-agent"); err != nil {
+		t.Fatalf("DeleteAgentInstance: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "office-agent")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if exists {
+		t.Error("AgentProfileExists = true for a soft-deleted Office agent, want false")
+	}
+}
+
+// TestAgentProfileExists_TrueForActiveOfficeAgent covers the third case
+// requested alongside the shallow-Kanban and soft-deleted cases above: a
+// live, non-deleted Office agent (workspace_id != ”) must resolve true,
+// same as it did under the pre-migration AgentInstanceExists name.
+func TestAgentProfileExists_TrueForActiveOfficeAgent(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateAgentInstance(ctx, fullAgentInstance("office-agent-active", "ws-1", "Office Agent")); err != nil {
+		t.Fatalf("create office-agent-active: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "office-agent-active")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if !exists {
+		t.Error("AgentProfileExists = false for a live Office agent, want true")
 	}
 }
 

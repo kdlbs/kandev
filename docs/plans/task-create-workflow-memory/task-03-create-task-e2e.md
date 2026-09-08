@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-workflow-memory", "02-frontend-workflow-resolution"]
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-workflow-memory.md"
+spec: "../../specs/tasks/requirements/task-create-workflow-memory.md"
 ---
 
 # Task 03: Prove Workflow Memory Through Create Task

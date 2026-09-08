@@ -39,7 +39,7 @@ malformed and unrelated records are excluded. Other agents retain their
 existing stderr behavior. Raw OpenCode lines are never persisted, included in
 browser payloads, or exposed through a general API for reading agent logs. The
 observable behavior is specified in
-[`docs/specs/agent-stall-recovery/spec.md`](../specs/agent-stall-recovery/spec.md).
+[`docs/specs/agents/requirements/agent-stall-recovery.md`](../specs/agents/requirements/agent-stall-recovery.md).
 
 ## Consequences
 

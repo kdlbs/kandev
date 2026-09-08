@@ -21,7 +21,11 @@ import (
 type mockGitLabMRAutomationService struct {
 	mu sync.Mutex
 
-	options           *gitlab.TaskMRAutomationResponse
+	options *gitlab.TaskMRAutomationResponse
+	// optionsByMRIID, when set, returns per-MR evaluation options keyed by MR
+	// IID — the shape the real service produces now that the five switches
+	// are per linked MR. See optionsForMR.
+	optionsByMRIID    map[int]*gitlab.TaskMRAutomationResponse
 	optionsErr        error
 	checkpoint        *gitlab.TaskMRLifecycleState
 	checkpointErr     error
@@ -97,7 +101,7 @@ func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(ctx context.
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRAutomationEvaluation(
-	ctx context.Context, _ string, _ string, _ string, _ int,
+	ctx context.Context, _ string, _ string, _ string, mrIID int,
 ) (*gitlab.TaskMRAutomationEvaluation, error) {
 	m.evaluationCalls.Add(1)
 	if m.optionsErr != nil {
@@ -112,11 +116,25 @@ func (m *mockGitLabMRAutomationService) GetTaskMRAutomationEvaluation(
 	if m.checkpointErr != nil {
 		return nil, m.checkpointErr
 	}
-	options := m.options
-	if options == nil {
-		options = &gitlab.TaskMRAutomationResponse{}
-	}
+	options := m.optionsForMR(mrIID)
 	return &gitlab.TaskMRAutomationEvaluation{Options: options, Checkpoint: m.checkpoint}, nil
+}
+
+// optionsForMR models the real service's per-MR resolution: the switches live
+// per linked MR, so the evaluation snapshot for one MR carries that MR's own
+// values. optionsByMRIID left nil keeps the single-options behaviour every
+// other test in this package relies on.
+func (m *mockGitLabMRAutomationService) optionsForMR(mrIID int) *gitlab.TaskMRAutomationResponse {
+	if m.optionsByMRIID != nil {
+		if options, ok := m.optionsByMRIID[mrIID]; ok {
+			return options
+		}
+		return &gitlab.TaskMRAutomationResponse{}
+	}
+	if m.options == nil {
+		return &gitlab.TaskMRAutomationResponse{}
+	}
+	return m.options
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRLifecycleState(context.Context, string, string, string, int) (*gitlab.TaskMRLifecycleState, error) {

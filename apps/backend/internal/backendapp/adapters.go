@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -24,8 +25,197 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
+
+// canvasAgentCtlClient is the small agentctl surface shared by canvas
+// authoring and browser-initiated canvas editing. The concrete runtime client
+// stays behind this adapter so higher-level services do not couple to the
+// lifecycle or agentctl implementation packages.
+type canvasAgentCtlClient interface {
+	CreateFile(context.Context, string, string) (*streams.FileCreateResponse, error)
+	ApplyFileDiff(context.Context, string, string, string, string, *string) (*streams.FileUpdateResponse, error)
+	DeleteFile(context.Context, string, string) (*streams.FileDeleteResponse, error)
+	RenameFile(context.Context, string, string, string) (*streams.FileRenameResponse, error)
+	StreamCanvasSource(context.Context, string) (io.ReadCloser, error)
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasCopyFilesResult struct {
+	Warnings []string
+	Present  bool
+}
+
+type canvasEditAgentCtl interface {
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasAgentExecution struct {
+	TaskID    string
+	SessionID string
+	client    canvasAgentCtlClient
+}
+
+func (e *canvasAgentExecution) GetAgentCtlClient() canvasAgentCtlClient {
+	if e == nil {
+		return nil
+	}
+	return e.client
+}
+
+type canvasExecutionResolver interface {
+	ResolveCanvasExecution(string) (*canvasAgentExecution, error)
+}
+
+type canvasEditExecutionResolver interface {
+	ResolveAgentCtl(string) (canvasEditAgentCtl, error)
+}
+
+// lifecycleCanvasExecutionResolver is the approved low-level adapter from
+// the lifecycle manager to the canvas services. Keep direct runtime imports
+// here, at the boundary, instead of spreading them through feature code.
+type lifecycleCanvasExecutionResolver struct {
+	manager *lifecycle.Manager
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveCanvasExecution(executionID string) (*canvasAgentExecution, error) {
+	if r.manager == nil || executionID == "" {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	execution, ok := r.manager.GetExecution(executionID)
+	if !ok || execution == nil {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
+		return nil, errors.New("agent execution is unavailable")
+	}
+	release()
+	return &canvasAgentExecution{
+		TaskID: execution.TaskID, SessionID: execution.SessionID,
+		client: canvasAgentCtlAdapter{acquire: execution.AcquireAgentCtlClient},
+	}, nil
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveAgentCtl(executionID string) (canvasEditAgentCtl, error) {
+	execution, err := r.ResolveCanvasExecution(executionID)
+	if err != nil {
+		return nil, err
+	}
+	return execution.GetAgentCtlClient(), nil
+}
+
+type canvasAgentCtlAdapter struct {
+	client  *client.Client
+	acquire func() (*client.Client, func())
+}
+
+func (a canvasAgentCtlAdapter) acquireClient() (*client.Client, func(), error) {
+	if a.acquire != nil {
+		client, release := a.acquire()
+		if client == nil {
+			release()
+			return nil, func() {}, errors.New("agentctl client is unavailable")
+		}
+		return client, release, nil
+	}
+	if a.client == nil {
+		return nil, func() {}, errors.New("agentctl client is unavailable")
+	}
+	return a.client, func() {}, nil
+}
+
+func (a canvasAgentCtlAdapter) CreateFile(ctx context.Context, path, repo string) (*streams.FileCreateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.CreateFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.ApplyFileDiff(ctx, path, diff, originalHash, repo, desiredContent)
+}
+
+func (a canvasAgentCtlAdapter) DeleteFile(ctx context.Context, path, repo string) (*streams.FileDeleteResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.DeleteFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) RenameFile(ctx context.Context, oldPath, newPath, repo string) (*streams.FileRenameResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.RenameFile(ctx, oldPath, newPath, repo)
+}
+
+func (a canvasAgentCtlAdapter) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.StreamCanvasSource(ctx, root)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if stream == nil {
+		release()
+		return nil, errors.New("agentctl returned an empty source stream")
+	}
+	return &canvasSourceReadCloser{ReadCloser: stream, release: release}, nil
+}
+
+func (a canvasAgentCtlAdapter) CopyFiles(ctx context.Context, repo string, entries []copyfiles.Entry) (canvasCopyFilesResult, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return canvasCopyFilesResult{}, err
+	}
+	defer release()
+	response, err := client.CopyFiles(ctx, repo, entries)
+	if response == nil {
+		return canvasCopyFilesResult{}, err
+	}
+	return canvasCopyFilesResult{Warnings: append([]string(nil), response.Warnings...), Present: true}, err
+}
+
+type canvasSourceReadCloser struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *canvasSourceReadCloser) releaseClient() {
+	r.once.Do(r.release)
+}
+
+func (r *canvasSourceReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil {
+		r.releaseClient()
+	}
+	return n, err
+}
+
+func (r *canvasSourceReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.releaseClient()
+	return err
+}
 
 // taskGetterRepo is the minimal interface needed by the scheduler adapter.
 type taskGetterRepo interface {
@@ -103,10 +293,24 @@ type lifecycleAdapter struct {
 // guard and the reset-failure reconcile permanently inert against a defunct
 // or dead-wrong ACP session id. Pin the exact shape here so drift is a build
 // error, not a silently-dead production guard.
+//
+// OwnsPromptActivity and GetPromptActivityForSession are pinned for the same
+// reason: the stuck-signal watchdog (internal/orchestrator/stuck_signal_watchdog.go)
+// and handleAgentStalled (internal/orchestrator/event_handlers_stall.go) both
+// select their activity guards by asserting the agent manager to narrow
+// unexported interfaces shaped like these two methods. Before this pin
+// existed, lifecycleAdapter forwarded neither method, so both assertions
+// failed silently in production: the watchdog's inactivity gate never
+// engaged (WO-38 review), and handleAgentStalled's ActivityEpoch check
+// always bailed out whenever a payload carried a nonzero epoch.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
 	GetACPSessionIDForSession(sessionID string) (string, bool)
+	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
+	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
+	PreparePassthroughRunning(sessionID string) (func(), error)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -209,6 +413,8 @@ func buildLifecycleLaunchRequest(
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
+		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
+		AllowBranchReplacement:        req.AllowBranchReplacement,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
@@ -251,6 +457,9 @@ func buildLifecycleLaunchRequest(
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
 		PullBeforeWorktree:            req.PullBeforeWorktree,
 		RemoteSyncHandled:             req.RemoteSyncHandled,
+		RefreshRepository:             req.RefreshRepository,
+		RefreshRepositoryWithState:    req.RefreshRepositoryWithState,
+		RemoteRefState:                req.RemoteRefState,
 		TaskDirName:                   req.TaskDirName,
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
@@ -295,29 +504,33 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
-			TaskRepositoryID:        r.TaskRepositoryID,
-			RepositoryID:            r.RepositoryID,
-			RepositoryPath:          r.RepositoryPath,
-			RepositoryURL:           r.RepositoryURL,
-			RepoName:                r.RepoName,
-			BaseBranch:              r.BaseBranch,
-			DefaultBranch:           r.DefaultBranch,
-			CheckoutBranch:          r.CheckoutBranch,
-			PRNumber:                r.PRNumber,
-			RemoteContribution:      r.RemoteContribution,
-			ContributionDestination: r.ContributionDestination,
-			ComparisonTarget:        r.ComparisonTarget,
-			WorktreeID:              r.WorktreeID,
-			WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
-			WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
-			WorktreeBranchTicket:    r.WorktreeBranchTicket,
-			PullBeforeWorktree:      r.PullBeforeWorktree,
-			RemoteSyncHandled:       r.RemoteSyncHandled,
-			RepoSetupScript:         r.RepoSetupScript,
-			RepoCleanupScript:       r.RepoCleanupScript,
-			CopyFiles:               r.CopyFiles,
-			BranchSlug:              r.BranchSlug,
-			BranchIdentitySlug:      r.BranchIdentitySlug,
+			TaskRepositoryID:           r.TaskRepositoryID,
+			RepositoryID:               r.RepositoryID,
+			RepositoryPath:             r.RepositoryPath,
+			RepositoryURL:              r.RepositoryURL,
+			RepoName:                   r.RepoName,
+			BaseBranch:                 r.BaseBranch,
+			DefaultBranch:              r.DefaultBranch,
+			CheckoutBranch:             r.CheckoutBranch,
+			PRNumber:                   r.PRNumber,
+			RemoteContribution:         r.RemoteContribution,
+			ContributionDestination:    r.ContributionDestination,
+			ComparisonTarget:           r.ComparisonTarget,
+			WorktreeID:                 r.WorktreeID,
+			AllowBranchReplacement:     r.AllowBranchReplacement,
+			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:       r.WorktreeBranchTicket,
+			PullBeforeWorktree:         r.PullBeforeWorktree,
+			RemoteSyncHandled:          r.RemoteSyncHandled,
+			RefreshRepository:          r.RefreshRepository,
+			RefreshRepositoryWithState: r.RefreshRepositoryWithState,
+			RemoteRefState:             r.RemoteRefState,
+			RepoSetupScript:            r.RepoSetupScript,
+			RepoCleanupScript:          r.RepoCleanupScript,
+			CopyFiles:                  r.CopyFiles,
+			BranchSlug:                 r.BranchSlug,
+			BranchIdentitySlug:         r.BranchIdentitySlug,
 		})
 	}
 	return specs
@@ -474,6 +687,18 @@ func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, se
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
+	return a.mgr.OwnsPromptActivity(sessionID, executionID, generation, activityEpoch)
+}
+
+func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
+	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
+	return a.mgr.CancelAgentForPrompt(ctx, sessionID, executionID, generation, activityEpoch)
+}
+
 // GetACPSessionIDForSession forwards to the lifecycle manager so
 // orchestrator.Service.currentACPSessionID observes the live execution's
 // actual ACP session identity in production, not just in tests against
@@ -574,6 +799,24 @@ func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, s
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
 }
 
+func (a *lifecycleAdapter) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	return a.mgr.ListPendingPermissionsBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	return a.mgr.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+}
+
+func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (a *lifecycleAdapter) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return a.mgr.ProbeBackgroundWorkloadsBySessionID(ctx, sessionID)
+}
+
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
@@ -613,10 +856,15 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
+	return a.mgr.PreparePassthroughRunning(sessionID)
+}
+
 func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {
 		lcRecords[i] = lifecycle.RemoteStatusPollRecord{
+			TaskID:           r.TaskID,
 			SessionID:        r.SessionID,
 			Runtime:          r.Runtime,
 			AgentExecutionID: r.AgentExecutionID,
@@ -693,7 +941,8 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -706,7 +955,8 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -722,7 +972,8 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -735,7 +986,8 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	if !ok {
 		return nil, nil
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -771,6 +1023,28 @@ func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, s
 	return err
 }
 
+// PrepareDirectPrompt forwards the backend-owned direct-message preparation
+// seam used by the WebSocket message handler.
+func (w *orchestratorWrapper) PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string) {
+	return w.svc.PrepareDirectPrompt(ctx, prompt, isPassthrough)
+}
+
+// StartCreatedSessionWithPromptContext forwards direct-message startup while
+// preserving the trusted saved-prompt context through the second canonicalizer.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContext(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
+}
+
 type githubTaskIssueStoreAdapter struct {
 	svc *taskservice.Service
 }
@@ -801,6 +1075,43 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, tas
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}
 	return task, nil
+}
+
+func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
+	ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+) error {
+	taskRepos, err := a.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	taskRepo, err := selectTaskRepositoryForPR(taskRepos, repositoryID, headBranch)
+	if err != nil {
+		return err
+	}
+	_, err = a.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
+	})
+	return err
+}
+
+func selectTaskRepositoryForPR(
+	taskRepos []*models.TaskRepository, repositoryID, headBranch string,
+) (*models.TaskRepository, error) {
+	matches := make([]*models.TaskRepository, 0, 1)
+	for _, taskRepo := range taskRepos {
+		if taskRepo != nil && taskRepo.RepositoryID == repositoryID {
+			matches = append(matches, taskRepo)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	for _, taskRepo := range matches {
+		if taskRepo.CheckoutBranch == headBranch {
+			return taskRepo, nil
+		}
+	}
+	return nil, fmt.Errorf("task repository for repository %q and branch %q not found", repositoryID, headBranch)
 }
 
 func wrapGitHubTaskIssueStoreError(err error) error {
@@ -982,8 +1293,9 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -1007,8 +1319,20 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 }
 
 // UpdatePermissionMessage updates a permission message's status
-func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *messageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // CreateClarificationRequestMessages emits one chat message per question in a
@@ -1087,9 +1411,19 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 	}
 }
 
-// UpdateClarificationMessage updates a clarification message's status and answer
-// for a specific (pending_id, question_id) pair within the session.
+// UpdateClarificationMessage updates a clarification message's status and
+// answer.
+//
+// A nil answer must be forwarded as an untyped nil, not as a nil
+// *clarification.Answer boxed into the service method's interface{}
+// parameter (COR-001): a typed nil pointer boxed into an interface produces
+// a non-nil interface value, so the service's own `answer != nil` check
+// would fire and write a literal "response": null into every rejected or
+// cancelled clarification message's metadata.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, nil)
+	}
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 

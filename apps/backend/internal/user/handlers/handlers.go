@@ -38,6 +38,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/user", h.httpGetUser)
 	api.GET("/user/settings", h.httpGetUserSettings)
 	api.PATCH("/user/settings", h.httpUpdateUserSettings)
+	api.GET("/user/agent-profile-recent-use", h.httpGetAgentProfileRecentUse)
+	api.PUT("/user/agent-profile-recent-use/:context", h.httpRecordAgentProfileRecentUse)
 }
 
 func (h *Handlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -63,6 +65,49 @@ func (h *Handlers) httpGetUserSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpGetAgentProfileRecentUse(c *gin.Context) {
+	records, err := h.controller.GetAgentProfileRecentUse(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to get agent profile recent use", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get agent profile recent use"})
+		return
+	}
+	c.JSON(http.StatusOK, records)
+}
+
+const maxRecordAgentProfileRecentUseBodyBytes = 4 * 1024
+
+func (h *Handlers) httpRecordAgentProfileRecentUse(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRecordAgentProfileRecentUseBodyBytes)
+	var req dto.RecordAgentProfileRecentUseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	record, err := h.controller.RecordAgentProfileRecentUse(
+		c.Request.Context(),
+		c.Param("context"),
+		req,
+	)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrValidation) {
+			status = http.StatusBadRequest
+		} else if errors.Is(err, service.ErrAgentProfileRecentUseConflict) {
+			status = http.StatusConflict
+		}
+		h.logger.Error("failed to record agent profile recent use", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to record agent profile recent use"})
+		return
+	}
+	c.JSON(http.StatusOK, record)
 }
 
 // maxUpdateUserSettingsBodyBytes bounds the update-settings request body via

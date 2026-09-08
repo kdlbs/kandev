@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-dedup-recovery-tests"]
 plan: "plan.md"
-spec: "../../specs/automations-pr-merged-trigger/spec.md"
+spec: "../../specs/office/requirements/automations-pr-merged-trigger.md"
 ---
 
 # Task 04: Finish Mobile and Tooling Details

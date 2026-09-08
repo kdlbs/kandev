@@ -89,18 +89,81 @@ describe("command search", () => {
     expect(findFirstMatchingCommand([first, selected], "shared", selected.id)).toBe(selected);
   });
 
+  it("returns no command when nothing matches", () => {
+    expect(findFirstMatchingCommand([command("home", "Go Home")], "terminal")).toBeUndefined();
+  });
+});
+
+describe("selectCommandSearchResult", () => {
   it("preserves a matching command when task results lead the palette", () => {
     const first = command("first", SHARED_TERM, [], 0);
     const selected = command("selected", SHARED_TERM, [], 10);
     const taskValue = "__task:task-1 Shared task";
 
-    expect(selectCommandSearchResult([first, selected], "shared", [taskValue], selected.id)).toBe(
-      selected.id,
-    );
+    expect(
+      selectCommandSearchResult({
+        commands: [first, selected],
+        search: "shared",
+        taskResultValues: [taskValue],
+        preferredValue: selected.id,
+        commandsLeadResults: false,
+      }),
+    ).toBe(selected.id);
   });
 
-  it("returns no command when nothing matches", () => {
-    expect(findFirstMatchingCommand([command("home", "Go Home")], "terminal")).toBeUndefined();
+  it("highlights the best command match when a query puts commands first", () => {
+    const archive = command("task-archive", "Archive task", ["archive"], 0);
+    const taskValue = "__task:task-1 Close every remaining archive item";
+
+    expect(
+      selectCommandSearchResult({
+        commands: [archive],
+        search: "archive",
+        taskResultValues: [taskValue],
+        commandsLeadResults: true,
+      }),
+    ).toBe(archive.id);
+  });
+
+  it("falls back to the first task when a query matches no command", () => {
+    const taskValue = "__task:task-1 Shared task";
+
+    expect(
+      selectCommandSearchResult({
+        commands: [command("unrelated", "Go Home")],
+        search: "shared",
+        taskResultValues: [taskValue],
+        commandsLeadResults: true,
+      }),
+    ).toBe(taskValue);
+  });
+
+  it("leads with the active task list while nothing is typed", () => {
+    const taskValue = "__task:task-1 Shared task";
+
+    expect(
+      selectCommandSearchResult({
+        commands: [command("first", SHARED_TERM, [], 0)],
+        search: "",
+        taskResultValues: [taskValue],
+        commandsLeadResults: false,
+      }),
+    ).toBe(taskValue);
+  });
+
+  it("keeps a task the user highlighted below the command matches", () => {
+    const archive = command("task-archive", "Archive task", ["archive"], 0);
+    const taskValue = "__task:task-1 Archive audit";
+
+    expect(
+      selectCommandSearchResult({
+        commands: [archive],
+        search: "archive",
+        taskResultValues: [taskValue],
+        preferredValue: taskValue,
+        commandsLeadResults: true,
+      }),
+    ).toBe(taskValue);
   });
 });
 

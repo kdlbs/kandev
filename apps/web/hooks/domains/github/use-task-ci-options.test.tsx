@@ -6,11 +6,13 @@ import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const apiMocks = vi.hoisted(() => ({
   getOptionsMock: vi.fn(),
+  retryMergeMock: vi.fn(),
   updateOptionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   getTaskCIAutomationOptions: apiMocks.getOptionsMock,
+  retryTaskCIAutoMerge: apiMocks.retryMergeMock,
   updateTaskCIAutomationOptions: apiMocks.updateOptionsMock,
 }));
 
@@ -37,6 +39,7 @@ function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAu
 
 beforeEach(() => {
   apiMocks.getOptionsMock.mockReset();
+  apiMocks.retryMergeMock.mockReset();
   apiMocks.updateOptionsMock.mockReset();
 });
 
@@ -76,6 +79,24 @@ describe("useTaskCIAutomationOptions", () => {
       { cache: "no-store" },
     );
     expect(result.current.options?.auto_fix_prompt_override).toBeNull();
+    expect(result.current.saving).toBe(false);
+  });
+
+  it("requests an explicit merge retry without treating acceptance as provider success", async () => {
+    apiMocks.getOptionsMock.mockResolvedValue(makeOptions());
+    apiMocks.retryMergeMock.mockResolvedValue({ accepted: true });
+
+    const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    await act(async () => {
+      await result.current.retryMerge("repo-1", 42);
+    });
+
+    expect(apiMocks.retryMergeMock).toHaveBeenCalledWith("task-1", "repo-1", 42, {
+      cache: "no-store",
+    });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
     expect(result.current.saving).toBe(false);
   });
 

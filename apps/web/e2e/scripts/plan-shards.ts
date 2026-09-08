@@ -16,6 +16,7 @@ export const NORMAL_SHARD_COUNT = 14;
 export const CONTAINER_SHARD_COUNT = 6;
 export const DEFAULT_NORMAL_TEST_SECONDS = 10;
 export const DEFAULT_CONTAINER_TEST_SECONDS = 20;
+export const DEFAULT_KUBERNETES_TEST_SECONDS = 180;
 export const CHANGED_FILE_MULTIPLIER = 1.25;
 export const DOMINANT_UNIT_SHARE = 0.5;
 
@@ -178,7 +179,10 @@ function catalogChecksum(units: CatalogUnit[]): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function fallbackSeconds(cohort: Cohort): number {
+function fallbackSeconds(cohort: Cohort, file: string): number {
+  if (cohort === "containers" && normalizeReportPath(file).startsWith("tests/kubernetes/")) {
+    return DEFAULT_KUBERNETES_TEST_SECONDS;
+  }
   return cohort === "containers" ? DEFAULT_CONTAINER_TEST_SECONDS : DEFAULT_NORMAL_TEST_SECONDS;
 }
 
@@ -213,7 +217,7 @@ function estimateUnit(
     return {
       ...unit,
       id,
-      estimatedSeconds: unit.testCount * fallbackSeconds(cohort),
+      estimatedSeconds: unit.testCount * fallbackSeconds(cohort, unit.file),
       classification: "unknown",
     };
   }
@@ -222,7 +226,7 @@ function estimateUnit(
   const warm = entries.some((entry) => entry.fileHash !== unit.fileHash);
   const estimate =
     entries.reduce((total, entry) => total + Math.max(0, entry.p75Seconds), 0) +
-    missingTestCount * fallbackSeconds(cohort);
+    missingTestCount * fallbackSeconds(cohort, unit.file);
   return {
     ...unit,
     id,

@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["06-message-queue-configuration-lock"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 07: Public configuration reference
@@ -39,8 +39,8 @@ specs and engineering guidance with the implemented behavior.
 - `docs/public/configuration.md`
 - `docs/public/cli.md`
 - `docs/public/run-as-a-service.md`
-- `docs/specs/auth/trusted-proxies.md`
-- `docs/specs/platform/setup-launch-timeout.md`
+- `docs/specs/auth/requirements/trusted-proxies.md`
+- `docs/specs/platform/requirements/setup-launch-timeout.md`
 - `AGENTS.md`
 - `apps/backend/AGENTS.md`
 - Any generated public navigation metadata required by the docs system
@@ -107,7 +107,7 @@ Files changed:
 - `docs/public/configuration.md`
 - `docs/public/cli.md`
 - `docs/public/run-as-a-service.md`
-- `docs/specs/auth/trusted-proxies.md`
-- `docs/specs/platform/setup-launch-timeout.md`
+- `docs/specs/auth/requirements/trusted-proxies.md`
+- `docs/specs/platform/requirements/setup-launch-timeout.md`
 - `AGENTS.md`
 - `apps/backend/AGENTS.md`

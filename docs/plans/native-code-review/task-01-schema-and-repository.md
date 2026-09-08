@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 01: Review run/finding schema, models, and repository

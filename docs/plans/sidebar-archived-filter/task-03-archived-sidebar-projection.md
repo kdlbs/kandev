@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-archived-only-query", "02-restore-archived-filter"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-archived-filter.md"
+spec: "../../specs/ui/requirements/sidebar-archived-filter.md"
 ---
 
 # Task 03: Build archived sidebar projection

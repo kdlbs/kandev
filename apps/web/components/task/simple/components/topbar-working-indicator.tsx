@@ -1,6 +1,7 @@
 "use client";
 
 import { IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import { useActiveSessionRef } from "./active-session-ref-context";
@@ -38,7 +39,9 @@ export function TopbarWorkingIndicator({ taskId }: TopbarWorkingIndicatorProps) 
       aria-label={t("task:scrollToActiveSession")}
       data-testid="topbar-working-indicator"
     >
-      <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+      <CompositorSpin className="h-3.5 w-3.5">
+        <IconLoader2 className="size-full" />
+      </CompositorSpin>
       <span data-testid="topbar-working-active">{t("task:working3")}</span>
     </button>
   );

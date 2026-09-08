@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/auth/trusted-proxies.md"
+spec: "../../specs/auth/requirements/trusted-proxies.md"
 ---
 
 # Task 01: Backend trusted-proxies parser and wiring

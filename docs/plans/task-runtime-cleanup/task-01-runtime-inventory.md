@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 01: Runtime Inventory
@@ -36,7 +36,7 @@ None.
 
 ## Inputs
 
-- Spec: `docs/specs/tasks/runtime-cleanup.md`
+- Spec: `docs/specs/tasks/system-design/runtime-cleanup.md`
 - ADR: `docs/decisions/0025-runtime-cleanup-uses-executors-running.md`
 - Existing repository patterns in `apps/backend/internal/task/repository/sqlite/executor.go`
 

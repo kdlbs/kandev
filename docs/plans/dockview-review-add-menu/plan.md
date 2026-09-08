@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-layout-profiles.md
+spec: docs/specs/ui/requirements/task-layout-profiles.md
 created: 2026-08-14
 status: completed
 ---
@@ -17,9 +17,9 @@ than relocating them. When a review is missing, selecting it from a group's `+`
 menu creates it in that invoking group.
 
 The durable behavior is recorded in
-[`task-layout-profiles.md`](../../specs/ui/task-layout-profiles.md), with the
+[`task-layout-profiles.md`](../../specs/ui/requirements/task-layout-profiles.md), with the
 GitHub list and submenu details amended in
-[`add-panel-pr-submenu.md`](../../specs/ui/add-panel-pr-submenu.md).
+[`add-panel-pr-submenu.md`](../../specs/ui/requirements/add-panel-pr-submenu.md).
 
 ## Confirmed Root Cause
 

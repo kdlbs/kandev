@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -38,8 +38,8 @@ const mocks = vi.hoisted(() => {
         "session-1": {
           currentModeId: "full-access",
           availableModes: [
-            { id: "full-access", name: "Full access" },
             { id: "read-only", name: "Read only" },
+            { id: "full-access", name: "Full access" },
           ],
         },
       },
@@ -155,5 +155,22 @@ describe("task selector trigger styling", () => {
     );
 
     expect(screen.getByTestId("session-mode-selector").className).toContain("max-w-mode");
+  });
+
+  it("puts the current mode first with a persistent selected surface", () => {
+    render(
+      <TooltipProvider>
+        <ModeSelector sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByTestId("session-mode-selector");
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+
+    const modes = screen.getAllByRole("menuitem");
+    expect(modes.map((mode) => mode.textContent?.trim())).toEqual(["Full access", "Read only"]);
+    expect(modes[0].className).toContain("bg-card");
+    expect(modes[0].className).toContain("border-primary/50");
   });
 });

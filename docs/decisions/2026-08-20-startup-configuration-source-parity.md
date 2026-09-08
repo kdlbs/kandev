@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-08-20
 - **Area:** backend, agentctl, frontend, cli, security, operations
-- **Spec:** [Startup configuration parity](../specs/platform/startup-configuration-parity.md)
+- **Spec:** [Startup configuration parity](../specs/platform/requirements/startup-configuration-parity.md)
 
 ## Context
 

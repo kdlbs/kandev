@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/clarification-submit-feedback.md
+spec: docs/specs/ui/requirements/clarification-submit-feedback.md
 created: 2026-08-20
 status: done
 ---

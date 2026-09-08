@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import { ApiError, INTERIM_SETTINGS_INTERLOCK_ERROR_CODE } from "@/lib/api/client";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
 
 function deferred<T>() {
@@ -121,6 +122,35 @@ describe("useAgentUpdateDialogState", () => {
   });
 });
 
+describe("useAgentUpdateDialogState handled failures", () => {
+  it("closes without exposing a handled stale-page approval error", async () => {
+    const staleError = new ApiError("interim settings interlock required", 403, {
+      error_code: INTERIM_SETTINGS_INTERLOCK_ERROR_CODE,
+    });
+    staleError.handled = true;
+    const onUpdate = vi.fn().mockRejectedValue(staleError);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate,
+      }),
+    );
+
+    act(() => result.current.handleOpenChange(true));
+    await waitFor(() => expect(result.current.preview).toEqual(FIRST_PREVIEW));
+    await act(async () => {
+      await result.current.approve();
+    });
+
+    expect(result.current.open).toBe(false);
+    expect(result.current.approveError).toBeNull();
+    expect(result.current.activeJob).toBeUndefined();
+    expect(result.current.starting).toBe(false);
+    expect(onUpdate).toHaveBeenCalledOnce();
+  });
+});
+
 describe("useAgentUpdateDialogState target selection", () => {
   it("keeps the current preview while a selected target is loading", async () => {
     const selectedTargetPreview = deferred<AgentUpdatePreview>();
@@ -193,7 +223,9 @@ describe("useAgentUpdateDialogState target selection", () => {
     expect(result.current.selectedTarget).toBe("0.60.0");
     expect(result.current.preview?.target_version).toBe("0.60.0");
   });
+});
 
+describe("useAgentUpdateDialogState approval", () => {
   it("approves the selected exact target", async () => {
     const onUpdate = vi.fn().mockResolvedValue({
       job_id: "job-1",
@@ -222,6 +254,42 @@ describe("useAgentUpdateDialogState target selection", () => {
       await result.current.approve();
     });
     expect(onUpdate).toHaveBeenLastCalledWith(AGENT_NAME, "0.61.0");
+  });
+
+  it("previews and approves the Kandev default through structural arguments", async () => {
+    const defaultPreview: AgentUpdatePreview = {
+      ...FIRST_PREVIEW,
+      default_version: "0.61.0",
+      active_version: "0.62.0",
+      effective_version: "0.62.0",
+      target_version: "0.61.0",
+      operation: "use_default",
+    };
+    const onPreview = vi.fn().mockResolvedValue(defaultPreview);
+    const onUpdate = vi.fn().mockResolvedValue({
+      job_id: "job-2",
+      agent_name: AGENT_NAME,
+      status: "queued",
+      started_at: "2026-01-01T00:00:00.000Z",
+    } satisfies AgentUpdateJob);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview,
+        onUpdate,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    act(() => result.current.selectDefault());
+    await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(AGENT_NAME, undefined, true));
+    expect(result.current.selectedUseDefault).toBe(true);
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(onUpdate).toHaveBeenLastCalledWith(AGENT_NAME, "0.61.0", true);
   });
 });
 

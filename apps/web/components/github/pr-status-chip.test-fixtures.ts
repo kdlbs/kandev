@@ -3,6 +3,7 @@ import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 export function makeTestPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/entity-reference-composer.md
+spec: docs/specs/ui/requirements/entity-reference-composer.md
 decision: docs/decisions/2026-07-21-work-item-reference-search.md
 created: 2026-07-21
 status: implemented

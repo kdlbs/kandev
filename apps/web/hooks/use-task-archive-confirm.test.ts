@@ -39,6 +39,7 @@ describe("useTaskArchiveConfirm", () => {
     act(() => result.current.requestArchive());
 
     expect(result.current.target).toEqual({
+      id: "task-A",
       title: "Ship the palette",
       executorType: "docker",
     });
@@ -72,6 +73,25 @@ describe("useTaskArchiveConfirm", () => {
     expect(mocks.archiveAndSwitch).toHaveBeenCalledWith("task-A", { cascade: true });
     expect(mocks.toast).not.toHaveBeenCalled();
     expect(result.current.isPending).toBe(false);
+  });
+
+  it("archives the requested task when the active task changes before confirmation", async () => {
+    mocks.state.kanban.tasks = [
+      { id: "task-A", title: "Task A", primaryExecutorType: "docker" },
+      { id: "task-B", title: "Task B", primaryExecutorType: "local" },
+    ];
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string }) => useTaskArchiveConfirm(taskId),
+      { initialProps: { taskId: "task-A" } },
+    );
+
+    act(() => result.current.requestArchive());
+    rerender({ taskId: "task-B" });
+    await act(async () => {
+      await result.current.confirmArchive({ cascade: false });
+    });
+
+    expect(mocks.archiveAndSwitch).toHaveBeenCalledWith("task-A", { cascade: false });
   });
 
   it("toasts, logs the cause, and clears pending when archiving fails", async () => {

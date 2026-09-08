@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -131,6 +132,32 @@ func TestResolveNonExistentPath(t *testing.T) {
 			t.Error("expected error for permission-denied path, got nil")
 		}
 	})
+}
+
+func TestReadFileContent_PermissionErrorIsNotMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not block filesystem checks on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test: root bypasses filesystem permission checks")
+	}
+
+	restrictedDir := t.TempDir()
+	if err := os.Chmod(restrictedDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0o755) })
+
+	_, _, _, err := readFileContent(filepath.Join(restrictedDir, "missing.txt"))
+	if err == nil {
+		t.Fatal("expected permission error, got nil")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("error = %v, want permission error, not ErrFileNotFound", err)
+	}
+	if strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("error = %v, want no missing-file classification", err)
+	}
 }
 
 func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {

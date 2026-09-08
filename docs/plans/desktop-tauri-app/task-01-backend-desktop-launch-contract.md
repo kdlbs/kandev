@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 01: Backend Desktop Launch Contract

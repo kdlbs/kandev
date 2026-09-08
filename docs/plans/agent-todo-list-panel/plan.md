@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/agent-todo-list-panel.md
+spec: docs/specs/ui/requirements/agent-todo-list-panel.md
 created: 2026-08-03
 status: draft
 ---
@@ -31,7 +31,7 @@ sub-option is hidden (inhibited, not disabled) while the master preference is
 off, and its value is preserved independently so it reappears in its saved
 state. Order: backend field first, then frontend settings plumbing + UI,
 then the conditional-pin sync behavior, then E2E. Spec amendment:
-`docs/specs/ui/agent-todo-list-panel.md` (What / Data model / API surface /
+`docs/specs/ui/requirements/agent-todo-list-panel.md` (What / Data model / API surface /
 Scenarios / Out of scope).
 
 ---
@@ -299,7 +299,7 @@ Scenarios / Out of scope).
   session id, and an empty `messageTodos` fallback array when the panel has
   no local access to the chat's persisted-message data (matching the
   Files/Changes/Plan "show an empty state when there's no applicable content"
-  convention from `docs/specs/ui/task-layout-profiles.md`).
+  convention from `docs/specs/ui/requirements/task-layout-profiles.md`).
 
 ### Visibility-sync hook
 
@@ -514,7 +514,7 @@ and 08 depends on 07's frontend state plumbing.
 
 ## Out of scope
 
-- Everything listed in `docs/specs/ui/agent-todo-list-panel.md`'s Out of
+- Everything listed in `docs/specs/ui/requirements/agent-todo-list-panel.md`'s Out of
   scope section (no backend todo-data changes, no removal of `TodoIndicator`/
   `TodoMessage`, no content-driven auto-show by default, no closed-for-session
   suppression, no unseen-update badge, no mobile/tablet layout changes, no

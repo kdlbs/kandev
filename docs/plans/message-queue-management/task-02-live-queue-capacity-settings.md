@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-authoritative-queue-cancellation"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-management.md"
+spec: "../../specs/ui/requirements/message-queue-management.md"
 ---
 
 # Task 02: Add Live Install-Wide Queue Capacity Settings

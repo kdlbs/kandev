@@ -81,6 +81,14 @@ prepared lifecycle barrier is active. The barrier transaction commits before
 the cleanup worker takes repository or filesystem locks, preserving the existing
 Git lock order and avoiding a database/Git lock inversion.
 
+Additional sessions are attach-only consumers of this same ownership graph.
+Before their session row is committed, the launcher must bind the ready
+canonical environment and validate every repository/branch slot. It must not
+interpret a sibling execution ID as workspace identity or authorize a second
+physical owner. A creating environment returns a recoverable preparation
+conflict; absent or inconsistent inventory fails closed and requires an
+explicit repair path rather than implicit re-materialization.
+
 ## Consequences
 
 - A task can have zero sessions without losing its workspace, Git registration,

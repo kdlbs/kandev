@@ -116,7 +116,7 @@ func (s *Service) evaluateDependentAfterPredecessorChange(
 			zap.String("task_id", task.ID))
 		return
 	}
-	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskDependenciesResolved)
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskDependenciesResolved, 0)
 }
 
 // publishDependenciesResolved announces that a task's last unresolved
@@ -185,6 +185,6 @@ func (s *Service) reconcileDependencyLaunchesOnStartup(ctx context.Context) {
 		}
 		s.logger.Info("startup: launching task whose dependencies resolved while down",
 			zap.String("task_id", candidate.TaskID))
-		s.autoStartTaskForStep(ctx, candidate.TaskID, candidate.WorkflowStepID, "startup.dependencies_resolved")
+		s.autoStartTaskForStep(ctx, candidate.TaskID, candidate.WorkflowStepID, "startup.dependencies_resolved", 0)
 	}
 }

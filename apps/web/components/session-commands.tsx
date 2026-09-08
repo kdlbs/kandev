@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -31,7 +31,7 @@ import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
-import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
@@ -195,6 +195,8 @@ type TaskCommandOptions = {
   openNewAgent: () => void;
   openSubtask: () => void;
   requestArchive: () => void;
+  archiveConfirmation?: ReactNode;
+  onArchiveConfirmationDismiss?: () => void;
 };
 
 export function buildTaskCommands({
@@ -204,6 +206,8 @@ export function buildTaskCommands({
   openNewAgent,
   openSubtask,
   requestArchive,
+  archiveConfirmation,
+  onArchiveConfirmationDismiss,
 }: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
   const items: CommandItem[] = [
@@ -234,6 +238,9 @@ export function buildTaskCommands({
       icon: <IconArchive className="size-3.5" />,
       keywords: searchKeywords(t, "common:commandArchiveTaskKeywords"),
       action: requestArchive,
+      keepOpen: true,
+      confirmation: archiveConfirmation,
+      onConfirmationDismiss: onArchiveConfirmationDismiss,
     });
   }
   return items;
@@ -308,7 +315,6 @@ type SessionCommandDialogsProps = {
   activeTaskId: string;
   activeTaskTitle: string;
   dialogs: ReturnType<typeof useCommandDialogState>;
-  archive: ReturnType<typeof useTaskArchiveConfirm>;
 };
 
 /** Dialogs the task-scoped palette commands open. */
@@ -316,7 +322,6 @@ function SessionCommandDialogs({
   activeTaskId,
   activeTaskTitle,
   dialogs,
-  archive,
 }: SessionCommandDialogsProps) {
   return (
     <>
@@ -331,12 +336,29 @@ function SessionCommandDialogs({
         parentTaskId={activeTaskId}
         parentTaskTitle={activeTaskTitle}
       />
-      <TaskArchiveConfirmFlow
-        taskId={activeTaskId}
-        archive={archive}
-        confirmTestId="palette-archive-confirm"
-      />
     </>
+  );
+}
+
+function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchiveConfirm>) {
+  const archiveAnchorRef = useRef<HTMLElement>(null);
+  if (archive.target === null) return undefined;
+
+  return (
+    <TaskArchiveConfirmation
+      open
+      inline
+      anchorRef={archiveAnchorRef}
+      taskId={archive.target.id}
+      taskTitle={archive.target.title}
+      executorType={archive.target.executorType}
+      isArchiving={archive.isPending}
+      onOpenChange={(open) => {
+        if (!open) archive.closeConfirm();
+      }}
+      onConfirm={archive.confirmArchive}
+      confirmTestId="palette-archive-confirm"
+    />
   );
 }
 
@@ -378,6 +400,7 @@ export function SessionCommands({
 
   const archive = useTaskArchiveConfirm(activeTaskId);
   const { requestArchive } = archive;
+  const archiveConfirmation = useArchiveCommandConfirmation(archive);
 
   // Session-scoped commands need a live session; task-scoped ones only need the
   // task, so they stay available while a session is still being ensured.
@@ -408,6 +431,8 @@ export function SessionCommands({
         openNewAgent,
         openSubtask,
         requestArchive,
+        archiveConfirmation,
+        onArchiveConfirmationDismiss: archive.closeConfirm,
       }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
@@ -429,6 +454,8 @@ export function SessionCommands({
     openNewAgent,
     openSubtask,
     requestArchive,
+    archiveConfirmation,
+    archive.closeConfirm,
   ]);
 
   useRegisterCommands(commands);
@@ -440,7 +467,6 @@ export function SessionCommands({
       activeTaskId={activeTaskId}
       activeTaskTitle={activeTaskTitle}
       dialogs={dialogs}
-      archive={archive}
     />
   );
 }

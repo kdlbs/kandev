@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/task-dependencies/create-dialog-advanced-settings.md"
+spec: "../../specs/tasks/requirements/task-dependencies-create-dialog-advanced-settings.md"
 ---
 
 # Task 01: Add the advanced settings disclosure
@@ -82,7 +82,7 @@ selectors used by Task 02.
 
 ## Inputs
 
-- Spec: `docs/specs/task-dependencies/create-dialog-advanced-settings.md`
+- Spec: `docs/specs/tasks/requirements/task-dependencies-create-dialog-advanced-settings.md`
 - Plan: `docs/plans/task-create-advanced-settings/plan.md`
 - Existing dependency behavior in
   `apps/web/components/task-create-dialog-dependencies.tsx`

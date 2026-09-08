@@ -32,6 +32,65 @@ func rawClear() **json.RawMessage {
 	return ptr((*json.RawMessage)(nil))
 }
 
+func TestApplySidebarTaskColorAutomationReplacesRulesAndValidates(t *testing.T) {
+	current := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "old",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	replacement := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "new",
+			Enabled:   false,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionRepository, Value: nil},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "cyan"},
+		}},
+	}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: current}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &replacement,
+	}); err != nil {
+		t.Fatalf("apply automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, replacement)
+	}
+
+	invalid := models.SidebarTaskColorAutomation{
+		Enabled: replacement.Enabled,
+		Rules:   append([]models.SidebarTaskColorRule(nil), replacement.Rules...),
+	}
+	invalid.Rules[0].Enabled = true
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &invalid,
+	}); err == nil {
+		t.Fatal("expected incomplete enabled rule to be rejected")
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("rejected automatic colors changed settings to %#v", settings.SidebarTaskColorAutomation)
+	}
+}
+
+func TestApplySidebarTaskColorAutomationOmissionPreservesRules(t *testing.T) {
+	want := models.SidebarTaskColorAutomation{Enabled: true, Rules: []models.SidebarTaskColorRule{{
+		ID:        "keep",
+		Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+		Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "blue"},
+	}}}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: want}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{}); err != nil {
+		t.Fatalf("apply omitted automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, want) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, want)
+	}
+}
+
 // TestApplyBasicSettingsTasksListShowDetails verifies applyBasicSettings preserves TasksListShowDetails when omitted and applies explicit values.
 func TestApplyBasicSettingsTasksListShowDetails(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
@@ -74,6 +133,61 @@ func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing
 	}
 	if !settings.SystemMetricsDisplay.Simplified {
 		t.Fatal("simplified = false, want existing value preserved when omitted")
+	}
+}
+
+func TestApplyBasicSettingsQuickChatTabOrderValidation(t *testing.T) {
+	tooManyWorkspaces := make(map[string][]string, 201)
+	for index := 0; index < 201; index++ {
+		tooManyWorkspaces[fmt.Sprintf("workspace-%d", index)] = []string{"conversation:one"}
+	}
+	tooManyReferences := make([]string, 201)
+	for index := range tooManyReferences {
+		tooManyReferences[index] = fmt.Sprintf("conversation:%d", index)
+	}
+	tooManyBytes := map[string][]string{
+		"workspace-1": {strings.Repeat("x", maxUserPreferenceBlobBytes)},
+	}
+
+	tests := []struct {
+		name    string
+		order   map[string][]string
+		wantErr string
+	}{
+		{
+			name:    "rejects too many workspaces",
+			order:   tooManyWorkspaces,
+			wantErr: "quick_chat_tab_order_by_workspace: max 200 workspaces allowed",
+		},
+		{
+			name: "rejects too many references in one workspace",
+			order: map[string][]string{
+				"workspace-1": tooManyReferences,
+			},
+			wantErr: "quick_chat_tab_order_by_workspace[workspace-1]: max 200 tab references allowed",
+		},
+		{
+			name:    "rejects an oversized serialized order",
+			order:   tooManyBytes,
+			wantErr: "quick_chat_tab_order_by_workspace: max 65536 bytes allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				QuickChatTabOrderByWorkspace: map[string][]string{"existing": {"conversation:keep"}},
+			}
+			err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+				QuickChatTabOrderByWorkspace: ptr(tt.order),
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(settings.QuickChatTabOrderByWorkspace, map[string][]string{"existing": {"conversation:keep"}}) {
+				t.Fatalf("rejected update changed settings to %#v", settings.QuickChatTabOrderByWorkspace)
+			}
+		})
 	}
 }
 
@@ -1055,6 +1169,75 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 
 			if !reflect.DeepEqual(settings.KanbanHiddenStepIDs, *tt.req.KanbanHiddenStepIDs) {
 				t.Fatalf("expected %v, got %v", *tt.req.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs)
+			}
+		})
+	}
+}
+
+func TestApplyWorkspaceAndTaskListPreferencesAutoHideWorkflowIDs(t *testing.T) {
+	makeWorkflowIDs := func(n int) []string {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("wf-%d", i)
+		}
+		return ids
+	}
+	duplicateWorkflowIDs := make([]string, maxWorkflowIDsWithAutoHideEmptySteps+1)
+	for i := range duplicateWorkflowIDs {
+		duplicateWorkflowIDs[i] = "wf-duplicate"
+	}
+
+	tests := []struct {
+		name    string
+		value   []string
+		want    []string
+		wantErr string
+	}{
+		{name: "empty list clears the preference", value: []string{}, want: []string{}},
+		{
+			name:  "normalizes duplicate workflow ids",
+			value: []string{"wf-b", "wf-a", "wf-b"},
+			want:  []string{"wf-a", "wf-b"},
+		},
+		{
+			name:  "applies the count limit after deduplication",
+			value: duplicateWorkflowIDs,
+			want:  []string{"wf-duplicate"},
+		},
+		{
+			name:    "rejects too many workflow ids",
+			value:   makeWorkflowIDs(maxWorkflowIDsWithAutoHideEmptySteps + 1),
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed", maxWorkflowIDsWithAutoHideEmptySteps),
+		},
+		{
+			name:    "rejects an oversized preference",
+			value:   []string{strings.Repeat("x", maxUserPreferenceBlobBytes+1)},
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed", maxUserPreferenceBlobBytes),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				WorkflowIDsWithAutoHideEmptySteps: []string{"wf-existing"},
+			}
+			err := applyWorkspaceAndTaskListPreferences(settings, &UpdateUserSettingsRequest{
+				WorkflowIDsWithAutoHideEmptySteps: &tt.value,
+			})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+				}
+				if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, []string{"wf-existing"}) {
+					t.Fatalf("rejected update changed settings to %#v", settings.WorkflowIDsWithAutoHideEmptySteps)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, tt.want) {
+				t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, tt.want)
 			}
 		})
 	}

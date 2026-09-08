@@ -1,5 +1,5 @@
 // Package review turns a task's working diff into anchored, advisory code-review
-// findings. See docs/specs/native-code-review/spec.md.
+// findings. See docs/specs/agents/requirements/native-code-review.md.
 //
 // The package owns run orchestration only: persistence and event publication
 // live in internal/task/service (ReviewService), and the inference call is made

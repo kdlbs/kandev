@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-durable-task-cleanup", "02-storage-persistence"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 04: Workspace quarantine and unarchive

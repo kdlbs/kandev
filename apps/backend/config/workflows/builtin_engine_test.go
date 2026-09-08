@@ -80,20 +80,29 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 	}
 	reviewSpec := engine.CompileStep(stepFromDefinition(*review))
 	enterActions := reviewSpec.Events[engine.TriggerOnEnter]
-	if len(enterActions) != 2 {
-		t.Fatalf("Review.on_enter compiled to %d actions, want 2", len(enterActions))
+	if len(enterActions) != 3 {
+		t.Fatalf("Review.on_enter compiled to %d actions, want 3", len(enterActions))
 	}
 	if enterActions[0].Kind != engine.ActionClearDecisions {
 		t.Errorf("Review.on_enter[0].Kind = %q, want clear_decisions", enterActions[0].Kind)
 	}
-	if enterActions[1].Kind != engine.ActionQueueRunForEachParticipant {
-		t.Errorf("Review.on_enter[1].Kind = %q, want queue_run_for_each_participant", enterActions[1].Kind)
+	if enterActions[1].Kind != engine.ActionEnsureParticipantSeat {
+		t.Errorf("Review.on_enter[1].Kind = %q, want ensure_participant_seat", enterActions[1].Kind)
 	}
-	if enterActions[1].QueueRunForEachParticipant == nil {
-		t.Fatal("Review.on_enter[1].QueueRunForEachParticipant is nil")
+	if enterActions[1].EnsureParticipantSeat == nil {
+		t.Fatal("Review.on_enter[1].EnsureParticipantSeat is nil")
 	}
-	if enterActions[1].QueueRunForEachParticipant.Role != "reviewer" {
-		t.Errorf("Review.on_enter[1] role = %q, want reviewer", enterActions[1].QueueRunForEachParticipant.Role)
+	if enterActions[1].EnsureParticipantSeat.Role != "reviewer" {
+		t.Errorf("Review.on_enter[1] role = %q, want reviewer", enterActions[1].EnsureParticipantSeat.Role)
+	}
+	if enterActions[2].Kind != engine.ActionQueueRunForEachParticipant {
+		t.Errorf("Review.on_enter[2].Kind = %q, want queue_run_for_each_participant", enterActions[2].Kind)
+	}
+	if enterActions[2].QueueRunForEachParticipant == nil {
+		t.Fatal("Review.on_enter[2].QueueRunForEachParticipant is nil")
+	}
+	if enterActions[2].QueueRunForEachParticipant.Role != "reviewer" {
+		t.Errorf("Review.on_enter[2] role = %q, want reviewer", enterActions[2].QueueRunForEachParticipant.Role)
 	}
 
 	completeActions := reviewSpec.Events[engine.TriggerOnTurnComplete]
@@ -104,6 +113,43 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 		if action.Guard == nil || action.Guard.WaitForQuorum == nil {
 			t.Errorf("Review.on_turn_complete[%d] missing wait_for_quorum guard", i)
 		}
+	}
+}
+
+// TestOfficeDefault_OnAgentErrorEscalatesFromEveryAgentLaunchingStep verifies
+// that every agent-launching step in office-default (Work, Review, Approval,
+// Done) compiles on_agent_error to a single queue_run action targeting the
+// CEO agent. Before this fix only Work declared the block, so a reviewer or
+// approver session failure left Engine.HandleTrigger with zero actions
+// (ActionCount == 0) and no escalation ever reached the coordinator.
+func TestOfficeDefault_OnAgentErrorEscalatesFromEveryAgentLaunchingStep(t *testing.T) {
+	tmpl := loadTemplateForTest(t, "office-default")
+
+	for _, stepName := range []string{"Work", "Review", "Approval", "Done"} {
+		t.Run(stepName, func(t *testing.T) {
+			def := findStep(tmpl.Steps, stepName)
+			if def == nil {
+				t.Fatalf("step %q not present in template", stepName)
+			}
+			spec := engine.CompileStep(stepFromDefinition(*def))
+			actions := spec.Events[engine.TriggerOnAgentError]
+			if len(actions) != 1 {
+				t.Fatalf("%s.on_agent_error compiled to %d actions, want 1", stepName, len(actions))
+			}
+			action := actions[0]
+			if action.Kind != engine.ActionQueueRun {
+				t.Errorf("%s.on_agent_error[0].Kind = %q, want queue_run", stepName, action.Kind)
+			}
+			if action.QueueRun == nil {
+				t.Fatalf("%s.on_agent_error[0].QueueRun is nil", stepName)
+			}
+			if action.QueueRun.Target != engine.TargetWorkspaceCEO {
+				t.Errorf("%s.on_agent_error[0] target = %q, want %q", stepName, action.QueueRun.Target, engine.TargetWorkspaceCEO)
+			}
+			if action.QueueRun.Reason != "agent_error" {
+				t.Errorf("%s.on_agent_error[0] reason = %q, want %q", stepName, action.QueueRun.Reason, "agent_error")
+			}
+		})
 	}
 }
 

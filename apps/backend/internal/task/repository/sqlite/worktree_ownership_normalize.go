@@ -41,11 +41,12 @@ type worktreeCutover struct {
 }
 
 type legacyEnv struct {
-	id, taskID, repositoryID, executorType, executorID, executorProfileID string
-	controlPort                                                           int
-	status, worktreeID, worktreePath, worktreeBranch, workspacePath       string
-	containerID, sandboxID, taskDirName                                   string
-	createdAt, updatedAt                                                  time.Time
+	id, taskID, repositoryID, executorType, executorID, executorProfileID           string
+	controlPort                                                                     int
+	status, worktreeID, worktreePath, worktreeBranch, workspacePath                 string
+	containerID, containerBootstrapNonceSecretID, containerControlAuthTokenSecretID string
+	sandboxID, taskDirName                                                          string
+	createdAt, updatedAt                                                            time.Time
 }
 
 type legacySession struct {
@@ -96,13 +97,15 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 		SELECT id, task_id, %s, executor_type, executor_id,
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
-			COALESCE(container_id, ''), COALESCE(sandbox_id, ''),
+			COALESCE(container_id, ''), %s, %s, COALESCE(sandbox_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		legacyEnvColumnExpr(columns, "repository_id"),
 		legacyEnvColumnExpr(columns, "worktree_id"),
 		legacyEnvColumnExpr(columns, "worktree_path"),
-		legacyEnvColumnExpr(columns, "worktree_branch")))
+		legacyEnvColumnExpr(columns, "worktree_branch"),
+		legacyEnvColumnExpr(columns, "container_bootstrap_nonce_secret_id"),
+		legacyEnvColumnExpr(columns, "container_control_auth_token_secret_id")))
 	if err != nil {
 		return fmt.Errorf("cutover: read legacy environments: %w", err)
 	}
@@ -112,7 +115,8 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 		if err := rows.Scan(&env.id, &env.taskID, &env.repositoryID, &env.executorType,
 			&env.executorID, &env.executorProfileID, &env.controlPort, &env.status,
 			&env.worktreeID, &env.worktreePath, &env.worktreeBranch, &env.workspacePath,
-			&env.containerID, &env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
+			&env.containerID, &env.containerBootstrapNonceSecretID, &env.containerControlAuthTokenSecretID,
+			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment: %w", err)
 		}
 		c.envs[env.id] = env
@@ -560,11 +564,50 @@ func (c *worktreeCutover) mergeSessionWorktrees() {
 			continue // another physical worktree owns this repository slot
 		}
 		targets := c.targetsForTask(c.sessionOwnerTaskID(wt.sessionID))
-		if err := targets.mergeSessionWorktree(wt, c.isSupersededSessionWorktree(wt)); err != nil {
+		historical := c.isSupersededSessionWorktree(wt)
+		if historical && !isLegacyDeletedWorktree(wt) {
+			if winner := c.demotionWinnerForSessionWorktree(wt, targets); winner != "" {
+				c.demoteSessionWorktree(wt, winner)
+				continue
+			}
+		}
+		if err := targets.mergeSessionWorktree(wt, historical); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf(
 				"session %s worktree %s: %v", wt.sessionID, wt.worktreeID, err))
 		}
 	}
+}
+
+// demotionWinnerForSessionWorktree returns the active target that explains why
+// a historical session row is not an ownership source.
+func (c *worktreeCutover) demotionWinnerForSessionWorktree(
+	wt legacySessionWorktree, targets *taskWorktreeTargets,
+) string {
+	if targets.targetForWorktree(wt.worktreeID) != nil {
+		return ""
+	}
+	if target, ok := targets.byKey[envRepoKey(wt.repositoryID, wt.branchSlug)]; ok &&
+		target.worktreeID != "" && target.status != worktreeRepoStatusDeleted && target.deletedAt == nil {
+		return target.worktreeID
+	}
+	session, ok := c.sessions[wt.sessionID]
+	if !ok || !isLegacyHistoricalSession(session.state) {
+		return ""
+	}
+	ownerTaskID := c.sessionOwnerTaskID(wt.sessionID)
+	envID, ok := c.taskEnvIDs[ownerTaskID]
+	if !ok {
+		return ""
+	}
+	env, ok := c.envs[envID]
+	if !ok || env.taskID != ownerTaskID || env.repositoryID != wt.repositoryID || env.worktreeID == "" {
+		return ""
+	}
+	replacement := targets.activeTargetForWorktree(env.worktreeID)
+	if replacement == nil || replacement.worktreeID == wt.worktreeID {
+		return ""
+	}
+	return replacement.worktreeID
 }
 
 func isLegacyDeletedWorktree(wt legacySessionWorktree) bool {
@@ -701,7 +744,7 @@ func (c *worktreeCutover) linkSessions() {
 // longer an ownership source. Rows demoted by the slot election, repository
 // rows, and the surviving flat environment take precedence for the same
 // physical identity regardless of session state. Historical rows with no
-// authoritative replacement remain eligible for backfill.
+// active authoritative replacement remain eligible for backfill.
 func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) bool {
 	cacheKey := sessionWorktreeKey(wt.sessionID, wt.worktreeID)
 	if c.demotedWorktrees[cacheKey] {
@@ -727,7 +770,8 @@ func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) 
 				if !ok || env.taskID != ownerTaskID || row.worktreeID == "" {
 					continue
 				}
-				if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
+				if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug &&
+					row.status != worktreeRepoStatusDeleted && row.deletedAt == nil {
 					superseded = true
 					break
 				}
@@ -753,7 +797,10 @@ func (c *worktreeCutover) flatEnvironmentSupersedesSessionWorktree(
 		return false
 	}
 	env, ok := c.envs[envID]
-	return ok && env.taskID == ownerTaskID && env.repositoryID == wt.repositoryID && env.worktreeID != ""
+	if !ok || env.taskID != ownerTaskID || env.repositoryID != wt.repositoryID || env.worktreeID == "" {
+		return false
+	}
+	return c.targetsForTask(ownerTaskID).activeTargetForWorktree(env.worktreeID) != nil
 }
 
 // sessionOwnerTaskID returns the task that owns the environment a session

@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["02-tree-and-target-navigation"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 04: General and standalone target coverage

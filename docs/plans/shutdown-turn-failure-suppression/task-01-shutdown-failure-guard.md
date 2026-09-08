@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/shutdown-turn-failure-suppression/spec.md"
+spec: "../../specs/platform/requirements/shutdown-turn-failure-suppression.md"
 parallelism: sequential
 ---
 

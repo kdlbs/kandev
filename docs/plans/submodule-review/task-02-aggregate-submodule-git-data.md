@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-discover-nested-repository-scopes"]
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 02: Aggregate root and submodule Git data

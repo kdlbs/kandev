@@ -1,7 +1,23 @@
 import { test, expect } from "../../fixtures/test-base";
 import { JiraSettingsPage } from "../../pages/jira-settings-page";
+import { assertJiraWatcherQualifiedBranchPersists } from "./jira-watcher-branch-flow";
 
 test.describe("Jira settings", () => {
+  test("qualified remote branch persists through Jira watcher reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await assertJiraWatcherQualifiedBranchPersists({
+      page: testPage,
+      apiClient,
+      seedData,
+      inputMode: "mouse",
+      prCapture,
+    });
+  });
+
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
     testPage,
     seedData,
@@ -125,9 +141,8 @@ test.describe("Jira settings", () => {
     await settings.saveButton.click();
     await expect(settings.deleteButton).toBeVisible();
 
-    // confirm() is a native dialog — auto-accept so the click proceeds.
-    testPage.once("dialog", (d) => void d.accept());
     await settings.deleteButton.click();
+    await testPage.getByTestId("jira-remove-confirm").click();
     await expect(settings.deleteButton).toHaveCount(0);
     await expect(settings.siteInput).toHaveValue("");
     await expect(settings.secretInput).toHaveValue("");

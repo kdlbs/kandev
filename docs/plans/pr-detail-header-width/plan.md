@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/pr-detail-header-width/spec.md
+spec: docs/specs/ui/requirements/pr-detail-header-width.md
 created: 2026-08-14
 status: done
 ---

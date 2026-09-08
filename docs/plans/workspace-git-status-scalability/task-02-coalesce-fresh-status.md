@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-linear-diff-enrichment"
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 02: Coalesce live workspace status observations

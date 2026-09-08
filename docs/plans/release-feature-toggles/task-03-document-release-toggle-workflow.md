@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-centralize-backend-bindings", "02-consolidate-frontend-contract"]
 plan: "plan.md"
-spec: "../../specs/feature-toggles/spec.md"
+spec: "../../specs/platform/requirements/feature-toggles.md"
 ---
 
 # Task 03: Document release-toggle workflow

@@ -11,11 +11,30 @@ import (
 //
 // Implementations MUST be safe for concurrent use and SHOULD treat
 // (IdempotencyKey) as a uniqueness key when set: if a request with the same
-// idempotency key has already been queued the implementation returns nil
-// without enqueuing a duplicate.
+// idempotency key has already been queued the implementation returns
+// QueueOutcomeDeduped (nil error) without enqueuing a duplicate.
 type RunQueueAdapter interface {
-	QueueRun(ctx context.Context, req QueueRunRequest) error
+	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
+
+// QueueOutcome reports what QueueRun actually did with a request, so a
+// caller that needs to log or act on the result — not just detect an error —
+// doesn't have to infer it from side effects. A duplicated declaration lives
+// in internal/runs/service (see that package's RunQueueAdapter doc); both
+// MUST match.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable queue identity, so nothing was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// queued row for the same agent + reason within the coalescing
+	// window, so nothing new was inserted.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+)
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.
 //
@@ -72,6 +91,13 @@ type DecisionInfo struct {
 	DeciderID   string
 	Role        string
 	Comment     string
+
+	// SupersededAt is non-nil once a rework round has superseded this row
+	// (workflow_step_decisions.superseded_at). ListStepDecisions returns
+	// superseded rows alongside active ones so timelines render full history;
+	// a caller that needs only the currently-decided state must filter on
+	// this field itself rather than treating a non-empty result as "decided".
+	SupersededAt *time.Time
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine
@@ -103,6 +129,87 @@ type ParticipantStore interface {
 // doubles that do not have workflow-aware storage.
 type WorkflowScopedParticipantStore interface {
 	ListTaskParticipantsForWorkflow(ctx context.Context, taskID, workflowID string) ([]ParticipantInfo, error)
+}
+
+// ParticipantSeatWriter is the engine's contract for guaranteeing a
+// decision-required seat exists for a role somewhere in the task's workflow
+// (REQ-OFFICE-REVIEW-SEATS-001). Both methods are workflow+role scoped, not
+// step-scoped: a seat recorded against an earlier step in the same workflow
+// still counts, so re-entry after a rejection round never seats the role
+// twice (AC-001.5, AC-003.5).
+//
+// EnsureParticipantSeatCallback uses HasRoleSeatForTaskWorkflow as a cheap
+// existence peek before invoking the caster (skipping it entirely when a
+// seat already exists), and EnsureRoleSeat as the durable, transactional,
+// concurrency-safe write once the caster has resolved an agent to seat.
+// EnsureRoleSeat is itself the callback's idempotence mechanism: repeated
+// calls for the same (workflowID, taskID, role) converge on the one row a
+// single-transaction check-then-insert produced, so no separate durable
+// idempotency marker is needed.
+type ParticipantSeatWriter interface {
+	HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID, taskID, role string) (bool, error)
+	EnsureRoleSeat(ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string) (ParticipantInfo, error)
+}
+
+// SeatProvenance records why a particular agent was selected to fill a
+// role's seat, for the AC-004 observability counters. It is not persisted
+// on the participant row itself.
+type SeatProvenance string
+
+const (
+	// SeatProvenanceEligiblePool means the caster selected an agent from the
+	// role's normal eligible-agent pool (REQ-002 steps 3-4).
+	SeatProvenanceEligiblePool SeatProvenance = "eligible_pool"
+	// SeatProvenanceRunnerFallback means the eligible pool was empty and the
+	// caster fell back to seating the task's runner (REQ-002 step 2).
+	SeatProvenanceRunnerFallback SeatProvenance = "runner_fallback"
+)
+
+// ParticipantSeatCastResult is the typed outcome of a casting resolution
+// attempt. AgentProfileID and Provenance are meaningless when Unfillable is
+// true — REQ-002 step 2's no-runner branch, meaning no agent could be
+// resolved for the role at all. WorkspaceID is populated on every result,
+// including Unfillable ones, so the AC-OFFICE-REVIEW-SEATS-004.1 warning
+// record can identify the workspace without a second lookup.
+//
+// SelfReview is true both when the chosen agent is the task's runner and
+// when it already holds another seat on this task (the office seat
+// caster's best-effort cross-step exclusion, AC-OFFICE-REVIEW-SEATS-002.3,
+// ran out of alternatives). It is a counter label on RecordSeatProvenance,
+// not a persisted or user-visible field.
+type ParticipantSeatCastResult struct {
+	AgentProfileID string
+	WorkspaceID    string
+	Provenance     SeatProvenance
+	SelfReview     bool
+	Unfillable     bool
+}
+
+// ParticipantSeatCaster resolves which agent should fill a role's seat when
+// none exists yet, per REQ-002's five-step deterministic algorithm. The
+// office package implements this against role-specific workspace agent pools;
+// the engine treats the result as opaque.
+type ParticipantSeatCaster interface {
+	// stepID is the immutable workflow step that the task entered. Callers
+	// must pass this value instead of asking the adapter to re-read mutable
+	// task state after the transition commits. workflowID scopes any
+	// cross-step exclusion read the caster performs to the task's current
+	// workflow, so participant rows left over from a workflow the task has
+	// since switched away from (switch_workflow durably keeps them; see
+	// ListParticipantsForTaskWorkflow's doc comment) never count as already
+	// seated for the new workflow's casting decision.
+	CastParticipantSeat(ctx context.Context, workflowID, taskID, stepID, role string) (ParticipantSeatCastResult, error)
+}
+
+// AgentProfileResolver answers whether an agent profile id still resolves to
+// a live (non-deleted) agent profile. The quorum guard uses it to drop a
+// required seat whose agent was deleted after the seat was cast, rather than
+// waiting forever on an agent that can never decide
+// (REQ-OFFICE-REVIEW-SEATS-004.3). Nil-safe like every other optional Engine
+// dependency: when unwired, every seat is kept exactly as before this
+// capability existed.
+type AgentProfileResolver interface {
+	AgentProfileExists(ctx context.Context, agentProfileID string) (bool, error)
 }
 
 // DecisionStore reads and writes workflow_step_decisions rows. The engine

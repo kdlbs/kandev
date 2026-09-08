@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/provider-error-recovery.md
+spec: docs/specs/platform/requirements/provider-error-recovery.md
 created: 2026-08-17
 status: done
 ---

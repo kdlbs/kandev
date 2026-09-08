@@ -39,6 +39,40 @@ func TestIsValidBaseBranchRef(t *testing.T) {
 	}
 }
 
+func TestIsValidDefaultBranchName(t *testing.T) {
+	cases := map[string]bool{
+		"main":            true,
+		"release/v2":      true,
+		"feature/foo-bar": true,
+		"":                false,
+		"main/":           false, // trailing slash, via IsValidBaseBranchRef
+		"a//b":            false, // consecutive slashes, via IsValidBaseBranchRef
+		"HEAD":            false, // git symbolic ref
+		"ORIG_HEAD":       false, // git symbolic ref
+		"FETCH_HEAD":      false, // git symbolic ref
+		"MERGE_HEAD":      false, // git symbolic ref
+		"head":            true,  // lowercase is a real, distinct ref name
+	}
+	for branch, want := range cases {
+		if got := IsValidDefaultBranchName(branch); got != want {
+			t.Errorf("IsValidDefaultBranchName(%q) = %v, want %v", branch, got, want)
+		}
+	}
+}
+
+func TestIsGitSymbolicRef(t *testing.T) {
+	for _, ref := range []string{"HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD"} {
+		if !IsGitSymbolicRef(ref) {
+			t.Errorf("IsGitSymbolicRef(%q) = false, want true", ref)
+		}
+	}
+	for _, ref := range []string{"main", "head", "MERGE_HEAD_2"} {
+		if IsGitSymbolicRef(ref) {
+			t.Errorf("IsGitSymbolicRef(%q) = true, want false", ref)
+		}
+	}
+}
+
 func TestIsKnownSafeGitFlagAllowsRequiredGitOperationFlags(t *testing.T) {
 	for _, flag := range []string{"--dry-run", "--first-parent", "--is-ancestor"} {
 		if !IsKnownSafeGitFlag(flag) {

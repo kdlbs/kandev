@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-cycle-analyzer"]
 plan: "plan.md"
-spec: "../../specs/workflow-cycle-guardrails/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cycle-guardrails.md"
 ---
 
 # Task 02: Workflow mutation guard

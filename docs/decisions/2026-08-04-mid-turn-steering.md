@@ -87,7 +87,7 @@ Add mid-turn steering as an additive, flag-gated delivery path.
 
 This supersedes the mid-turn-steering non-goal in ADR 0049 for the
 steer-capable case. The full behavior is specified in
-[docs/specs/platform/mid-turn-steering.md](../specs/platform/mid-turn-steering.md).
+[docs/specs/platform/requirements/mid-turn-steering.md](../specs/platform/requirements/mid-turn-steering.md).
 
 ## Consequences
 

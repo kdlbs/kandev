@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 01: Re-run bootstrap when the dialog reopens

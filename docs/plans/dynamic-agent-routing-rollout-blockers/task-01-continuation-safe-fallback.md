@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing-rollout-blockers.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing-rollout-blockers.md"
 ---
 
 # Task 01: Continuation-safe fallback

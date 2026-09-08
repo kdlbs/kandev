@@ -15,6 +15,7 @@ const fetchTaskMock = vi.hoisted(() =>
   }),
 );
 const updateTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+const PARENT_PICKER_TRIGGER = "parent-picker-trigger";
 
 vi.mock("@/lib/api/domains/kanban-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
@@ -93,7 +94,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("ParentPicker", () => {
-  it("uses canonical detach after confirming No parent", async () => {
+  it("uses a local confirmation after selecting No parent", async () => {
     render(
       <Wrapper>
         <ParentPicker task={task} />
@@ -102,12 +103,13 @@ describe("ParentPicker", () => {
 
     await waitFor(() => expect(fetchTaskMock).toHaveBeenCalledWith(task.id));
 
-    fireEvent.click(screen.getByTestId("parent-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PARENT_PICKER_TRIGGER));
     fireEvent.click(await screen.findByText("No parent"));
-    const dialog = await screen.findByRole("alertdialog", { name: "Detach task from parent?" });
-    expect(dialog.textContent).toContain("shares its parent's workspace");
+    const confirmation = await screen.findByRole("dialog", { name: "Detach task from parent?" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(confirmation.textContent).toContain("shares its parent's workspace");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Detach" }));
+      fireEvent.click(screen.getByTestId("detach-task-confirm"));
     });
 
     expect(detachTaskMock).toHaveBeenCalledWith(task.id);
@@ -121,12 +123,40 @@ describe("ParentPicker", () => {
       </Wrapper>,
     );
 
-    fireEvent.click(screen.getByTestId("parent-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PARENT_PICKER_TRIGGER));
     await act(async () => {
       fireEvent.click(await screen.findByText("Parent two"));
     });
 
     expect(updateTaskMock).toHaveBeenCalledWith(task.id, { parent_id: "parent-2" });
     expect(detachTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending detach confirmation when another parent is selected", async () => {
+    render(
+      <Wrapper>
+        <ParentPicker task={task} />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByTestId(PARENT_PICKER_TRIGGER));
+    const noParent = await screen.findByText("No parent");
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(noParent);
+      fireEvent.click(screen.getByTestId(PARENT_PICKER_TRIGGER));
+      await act(async () => {
+        fireEvent.click(screen.getByText("Parent two"));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+
+      expect(updateTaskMock).toHaveBeenCalledWith(task.id, { parent_id: "parent-2" });
+      expect(screen.queryByRole("dialog", { name: "Detach task from parent?" })).toBeNull();
+      expect(detachTaskMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

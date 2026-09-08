@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-backend-ci-options-api"]
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 04: Frontend API State Hook

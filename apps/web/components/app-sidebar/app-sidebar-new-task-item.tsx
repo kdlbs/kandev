@@ -16,7 +16,9 @@ import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialo
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request";
-import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
+import type { QuickChatActivityState } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
@@ -43,7 +45,7 @@ type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
   testId: string;
-  dot?: boolean;
+  activity?: QuickChatActivityState;
   onClick: () => void;
 };
 
@@ -52,7 +54,7 @@ function RowActionButton({
   label,
   testId,
   onClick,
-  dot = false,
+  activity = null,
 }: RowActionButtonProps) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const hoveredRef = useRef(false);
@@ -85,13 +87,7 @@ function RowActionButton({
         >
           <span className="relative flex">
             <Icon className="h-3.5 w-3.5" />
-            {dot && (
-              <span
-                aria-hidden="true"
-                className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-                data-testid="quick-chat-unseen-dot"
-              />
-            )}
+            <QuickChatActivityIndicator activity={activity} />
           </span>
         </button>
       </TooltipTrigger>
@@ -179,12 +175,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const quickChatHasUnseenIdle = useAppStore((state) =>
-    selectQuickChatHasUnseenIdle(state, workspaceId),
-  );
-  const quickChatLabel = t(
-    quickChatHasUnseenIdle ? "sidebar:quickChatUnseen" : "sidebar:quickChat",
-  );
+  const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   const isImproveWorkspace = activeWorkspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME;
@@ -242,7 +233,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
               label={quickChatLabel}
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
-              dot={quickChatHasUnseenIdle}
+              activity={quickChatActivity}
             />
             <AppSidebarWorkspaceActions
               workspaceId={workspaceId}

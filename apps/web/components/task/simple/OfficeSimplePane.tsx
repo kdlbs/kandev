@@ -33,6 +33,8 @@ import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "./components/topbar-working-indicator";
+import { TaskTitleEditable } from "./components/task-title-editable";
+import { TaskDescriptionEditable } from "./components/task-description-editable";
 import { TreeCancelDialog } from "@/components/task/TreeCancelDialog";
 import {
   cancelTaskTree,
@@ -507,12 +509,12 @@ export function OfficeSimplePane({
               executionState={task.executionState}
             />
           )}
-          <h1 className="text-xl font-semibold mt-4">{task.title}</h1>
-          {task.description && (
-            <div className="prose prose-sm mt-4 max-w-none text-sm whitespace-pre-wrap">
-              {task.description}
-            </div>
-          )}
+          <TaskTitleEditable taskId={task.id} title={task.title} />
+          <TaskDescriptionEditable
+            taskId={task.id}
+            description={task.description}
+            sessions={sessions}
+          />
           <TaskActionRow
             task={task}
             treePreview={treePreview}

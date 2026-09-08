@@ -8,7 +8,7 @@ depends_on:
   - "02-harden-origin-reconciliation"
   - "03-resolve-resume-repositories-once"
 plan: "plan.md"
-spec: "../../specs/native-kandev-cli/spec.md"
+spec: "../../specs/cli/requirements/native-kandev-cli.md"
 ---
 
 # Task 04: Document Service Identity Recovery

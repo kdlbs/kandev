@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 created: 2026-07-23
 status: complete
 ---

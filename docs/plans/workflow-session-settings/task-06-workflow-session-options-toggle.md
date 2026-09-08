@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-editor-and-carry-analysis"]
 plan: "plan.md"
-spec: "../../specs/workflow-session-settings/spec.md"
+spec: "../../specs/tasks/requirements/workflow-session-settings.md"
 ---
 
 # Task 06: Refine the workflow session-options toggle and family choices

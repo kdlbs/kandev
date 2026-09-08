@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-event-delivery-and-startup"]
 plan: "plan.md"
-spec: "../../specs/automations-pr-merged-trigger/spec.md"
+spec: "../../specs/office/requirements/automations-pr-merged-trigger.md"
 ---
 
 # Task 02: Bind the Archive Target

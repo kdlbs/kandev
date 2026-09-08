@@ -37,7 +37,7 @@ func RegisterProcessRoutes(
 	svc *service.Service,
 	lifecycleMgr *lifecycle.Manager,
 	log *logger.Logger,
-) {
+) *ProcessHandlers {
 	handlers := &ProcessHandlers{
 		service:      svc,
 		lifecycleMgr: lifecycleMgr,
@@ -63,10 +63,13 @@ func RegisterProcessRoutes(
 
 	// Session-level ACP operations (mode/model switching)
 	session := api.Group("/task-sessions/:id")
+	session.GET("/agentctl/metrics", handlers.httpGetAgentctlMetrics)
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
+	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
+	return handlers
 }
 
 type httpStartProcessRequest struct {

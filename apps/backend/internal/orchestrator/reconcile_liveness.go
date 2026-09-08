@@ -186,13 +186,13 @@ func (s *Service) repairDeadRowLiveness(ctx context.Context, running *models.Exe
 	} else {
 		err = s.repo.RepairExecutorRunningDead(ctx, running.SessionID)
 	}
-	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+	if errors.Is(err, models.ErrExecutorRunningNotFound) || errors.Is(err, models.ErrExecutionRotated) {
+		return nil
+	}
+	if err != nil {
 		s.logger.Warn("failed to repair executor row liveness during reconciliation",
 			zap.String("session_id", running.SessionID),
 			zap.Error(err))
-	}
-	if errors.Is(err, models.ErrExecutorRunningNotFound) || errors.Is(err, models.ErrExecutionRotated) {
-		return nil
 	}
 	return err
 }

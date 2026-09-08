@@ -82,6 +82,11 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.getByRole("button", { name: "Open menu" }).click();
     const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
     await tasksMenu.getByText("Show task details", { exact: true }).click();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
+        message: "task detail preference was not persisted",
+      })
+      .toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(tasksMenu).toHaveCount(0);
 

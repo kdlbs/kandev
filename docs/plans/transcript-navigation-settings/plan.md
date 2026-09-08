@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/transcript-navigation-settings.md
+spec: docs/specs/ui/requirements/transcript-navigation-settings.md
 created: 2026-07-30
 status: implemented
 ---

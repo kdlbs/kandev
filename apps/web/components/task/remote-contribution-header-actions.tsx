@@ -48,7 +48,7 @@ export function RemoteContributionHeaderActions({
             type="button"
             size="icon"
             variant="ghost"
-            className="h-6 w-6 cursor-pointer text-yellow-600 hover:bg-yellow-500/10 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300"
+            className="h-11 w-11 cursor-pointer text-yellow-600 hover:bg-yellow-500/10 hover:text-yellow-600 md:h-6 md:w-6 dark:text-yellow-400 dark:hover:text-yellow-300"
             aria-label={t("task:remoteContributionChangedTitle")}
             title={t("task:remoteContributionChangedTooltip")}
             data-testid="header-remote-contribution-warning"

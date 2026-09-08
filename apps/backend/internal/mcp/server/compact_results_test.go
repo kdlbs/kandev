@@ -81,6 +81,48 @@ func TestPlanAck_ReportsStoredSizeNotSentSize(t *testing.T) {
 	assert.Contains(t, text, "6 bytes")
 }
 
+// TestUpdateTaskPlan_SurfacesTruncationWarning pins that planWriteAck relays
+// a plan_write_warning field from the backend response into the tool result
+// text an agent actually reads. The ws handler is the layer that computes
+// this warning (internal/mcp/handlers/task_plan_guard.go); this test only
+// pins that the ack layer above it doesn't drop the field on the floor.
+func TestUpdateTaskPlan_SurfacesTruncationWarning(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"task_id":               "task-A",
+		"title":                 "Plan",
+		"content":               "y",
+		"plan_write_warning":    "WARNING: this write replaced 40000 chars with 1 (dropped 39999 chars, 100%). Plan revision 3 has the prior content.",
+		"prior_revision_number": float64(3),
+	}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	text := planText(t, callTool(t, s, "update_task_plan_kandev", map[string]interface{}{
+		"content": "y",
+	}))
+
+	assert.Contains(t, text, "Plan updated successfully")
+	assert.Contains(t, text, "WARNING")
+	assert.Contains(t, text, "40000 chars with 1")
+	assert.Contains(t, text, "revision 3")
+}
+
+// TestUpdateTaskPlan_NoWarningWhenAbsent pins that the ack stays exactly the
+// pre-existing shape when the backend reports no truncation.
+func TestUpdateTaskPlan_NoWarningWhenAbsent(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"task_id": "task-A",
+		"title":   "Plan",
+		"content": "step two",
+	}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	text := planText(t, callTool(t, s, "update_task_plan_kandev", map[string]interface{}{
+		"content": "step two",
+	}))
+
+	assert.NotContains(t, text, "WARNING")
+}
+
 func TestCreateTask_ResponseOmitsDescriptionEcho(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{
 		"id":          "task-new",

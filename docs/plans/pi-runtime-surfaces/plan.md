@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/cli-mode-parity/spec.md
+spec: docs/specs/cli/requirements/cli-mode-parity.md
 created: 2026-08-16
 status: complete
 ---
@@ -18,8 +18,8 @@ for passthrough, and makes installation and discovery agree on that executable.
 The durable managed-runtime boundary is recorded in
 [`docs/decisions/2026-08-12-validated-managed-runtime-version-selection.md`](../../decisions/2026-08-12-validated-managed-runtime-version-selection.md),
 and the observable behavior is specified in
-[`docs/specs/cli-mode-parity/spec.md`](../../specs/cli-mode-parity/spec.md) and
-[`docs/specs/agents/runtime-updates.md`](../../specs/agents/runtime-updates.md).
+[`docs/specs/cli/requirements/cli-mode-parity.md`](../../specs/cli/requirements/cli-mode-parity.md) and
+[`docs/specs/agents/requirements/runtime-updates.md`](../../specs/agents/requirements/runtime-updates.md).
 
 ---
 

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["05-run-dev"]
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 06: Makefile cutover to the Go dev launcher

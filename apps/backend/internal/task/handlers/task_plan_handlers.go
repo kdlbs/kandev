@@ -43,7 +43,7 @@ func (h *TaskHandlers) wsCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan.Plan))
 }
 
 // wsGetTaskPlan retrieves a task plan
@@ -95,7 +95,7 @@ func (h *TaskHandlers) wsUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan.Plan))
 }
 
 // wsDeleteTaskPlan deletes a task plan

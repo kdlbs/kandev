@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-prove-auto-run-flows"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-run.md"
+spec: "../../specs/ui/requirements/message-queue-run.md"
 ---
 
 # Task 05: Publish Auto-run guidance
@@ -41,11 +41,11 @@ git diff --check
 
 - `docs/public/coordination.md`
 - `docs/public/sessions-and-review.md`
-- `docs/specs/ui/message-queue-run.md`
-- `docs/specs/ui/message-queue-send-now.md`
-- `docs/specs/ui/message-queue-pin.md`
-- `docs/specs/ui/message-queue-reorder.md`
-- `docs/specs/ui/message-queue-management.md`
+- `docs/specs/ui/requirements/message-queue-run.md`
+- `docs/specs/ui/requirements/message-queue-send-now.md`
+- `docs/specs/ui/requirements/message-queue-pin.md`
+- `docs/specs/ui/requirements/message-queue-reorder.md`
+- `docs/specs/ui/requirements/message-queue-management.md`
 - `docs/specs/INDEX.md`
 - `docs/decisions/2026-08-16-server-owned-queue-auto-run.md`
 - `docs/decisions/INDEX.md`
@@ -85,7 +85,7 @@ this task to `done`, record results below, and synchronize `plan.md`.
   they now explain one-turn-at-a-time Auto-run, finish-current OFF, immediate
   Cancel with a parked OFF backlog, targeted Send Now resume, and lifecycle or
   clarification deferral.
-- Marked `docs/specs/ui/message-queue-run.md` and its index entry `shipped`.
+- Marked `docs/specs/ui/requirements/message-queue-run.md` and its index entry `shipped`.
   The accepted ADR remains indexed; adjacent queue specs retain row Send Now,
   pin, reorder, management, and backward-compatible protocol boundaries.
 - Terminology audit found obsolete labels only in deliberate historical

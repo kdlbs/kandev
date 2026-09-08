@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-present-submodule-review-hierarchy", "04-order-nested-git-mutations"]
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 05: Prove responsive submodule review

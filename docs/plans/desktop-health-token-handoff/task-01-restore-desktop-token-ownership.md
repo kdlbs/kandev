@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 01: Restore desktop token ownership
@@ -52,8 +52,8 @@ None.
 
 ## Inputs
 
-- `docs/specs/port-collision-safety/spec.md`, Backend readiness ownership and Issue #2372 scenarios.
-- `docs/specs/desktop-tauri-app/spec.md`, Existing launch and data contract.
+- `docs/specs/executors/requirements/port-collision-safety.md`, Backend readiness ownership and Issue #2372 scenarios.
+- `docs/specs/desktop/requirements/desktop-tauri-app.md`, Existing launch and data contract.
 - `apps/desktop/src-tauri/src/backend.rs`, `launch_and_wait` and
   `command_spec_uses_headless_launcher_and_loopback_env`.
 - `apps/backend/internal/launcher/start.go`, `runManagedApp`.

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 01: Restore network startup logging
@@ -47,7 +47,7 @@ contract.
 
 ## Inputs
 
-- `docs/specs/go-dev-launcher/spec.md`, startup output section and scenarios.
+- `docs/specs/platform/requirements/go-dev-launcher.md`, startup output section and scenarios.
 - The previous Node behavior in `apps/cli/src/shared.ts` at the pre-migration
   revision, especially `listHostNetworkAddresses`, `networkUrlsForPort`, and
   `logStartupInfo`.

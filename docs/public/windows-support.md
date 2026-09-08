@@ -16,8 +16,8 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 
 | Path | Best for | Main limitations |
 |---|---|---|
-| [Desktop app](./desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
-| [npm/npx CLI](./cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
+| [Desktop app](desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
+| [npm/npx CLI](cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
 | WSL 2 CLI | Linux-only agent tools and shell scripts | Browser launch and Windows/WSL path interop are dependency-bound |
 | Native source checkout | Contributors testing Windows-specific code | Manual toolchain and curated Windows test subset; not the simplest product install |
 
@@ -26,7 +26,7 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 The recommended Windows product path is the x64 NSIS installer from [GitHub Releases](https://github.com/kdlbs/kandev/releases):
 
 1. Download the file whose name begins `kandev-desktop-windows-x64-` and ends in `.exe`, plus its `.sha256` file.
-2. Verify its SHA-256 value as shown in [Desktop App](./desktop-app.md).
+2. Verify its SHA-256 value as shown in [Desktop App](desktop-app.md).
 3. Run the installer and launch Kandev from the Start menu.
 
 The desktop app bundles Kandev and `agentctl`; Node.js is not required. It uses Microsoft WebView2 and binds its owned backend to `127.0.0.1`. Current Windows normally includes WebView2; repair or install the runtime if the app cannot create its window.
@@ -65,7 +65,7 @@ $env:KANDEV_SERVER_HOST = '127.0.0.1'
 kandev
 ```
 
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](./configuration.md).
+Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](configuration.md).
 
 ## Windows paths and command discovery
 
@@ -113,7 +113,7 @@ Windows long-path policy and each application's long-path awareness still apply.
 
 Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
 
-See [Git operations](./git-operations.md) for branch/worktree lifecycle and [Executors](./executors.md) for prepare scripts and copied files.
+See [Git operations](git-operations.md) for branch/worktree lifecycle and [Executors](executors.md) for prepare scripts and copied files.
 
 ## Docker Desktop
 
@@ -130,7 +130,7 @@ docker version
 docker info
 ```
 
-The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](./docker.md).
+The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](docker.md).
 
 <details>
 <summary>Run Kandev in WSL 2</summary>
@@ -190,7 +190,7 @@ The release bundle carries remote `agentctl` helpers for Linux `amd64`/`arm64` a
 
 `kandev service` supports systemd on Linux and launchd on macOS only. Native Windows Service Control Manager integration is not implemented. For interactive Windows use, choose Desktop or keep the CLI process in a terminal. Do not wrap it in an arbitrary service manager without designing user profile, `PATH`, network, process-tree, update, and data permissions explicitly.
 
-WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](./run-as-a-service.md) only after verifying systemd in that distribution.
+WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](run-as-a-service.md) only after verifying systemd in that distribution.
 
 ## Build from source on Windows
 

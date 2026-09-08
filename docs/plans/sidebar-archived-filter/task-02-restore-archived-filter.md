@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-archived-filter.md"
+spec: "../../specs/ui/requirements/sidebar-archived-filter.md"
 ---
 
 # Task 02: Restore archived filter contract

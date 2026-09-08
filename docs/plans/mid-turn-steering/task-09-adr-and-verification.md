@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["01-negotiate-steer-capability", "02-runtime-toggle", "03-fold-handoff-fixtures", "04-adapter-steer-admission", "05-orchestrator-steer-admission", "06-session-steer-contract", "07-composer-steer-affordance", "08-mock-agent-and-e2e"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 09: Record the decision and verify the whole feature
@@ -27,7 +27,7 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Files likely touched:** `docs/decisions/` (new ADR),
   `docs/decisions/INDEX.md`,
   `docs/decisions/0049-fine-grained-foreground-idle-busy-signal.md` (supersession
-  note), `docs/specs/platform/mid-turn-steering.md` (status → `building` or
+  note), `docs/specs/platform/requirements/mid-turn-steering.md` (status → `building` or
   `shipped`), `docs/plans/mid-turn-steering/plan.md` (status), and
   `docs/public/**` only if user-facing behavior changed.
 - **Dependencies:** All prior tasks.

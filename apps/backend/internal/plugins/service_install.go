@@ -45,14 +45,16 @@ const downloadTimeout = 60 * time.Second
 // survive) and restarts the previous version's process, so a failed upgrade
 // attempt never destroys a previously working install.
 func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
-	result, err := pkgtar.Install(r, s.pluginsDir)
+	result, err := s.extractPackage(r)
 	if err != nil {
 		return nil, err
 	}
+	defer s.releaseExtraction(result.InstallPath)
 	if err := s.checkMinKandevVersion(result.Manifest.MinKandevVersion); err != nil {
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
+	s.warnWebhookAccessIssues(*result.Manifest)
 	s.agentToolInstallMu.Lock()
 	catalogLocked := true
 	defer func() {
@@ -123,6 +125,14 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	catalogLocked = false
 
 	activateErr := s.activate(rec)
+	if activateErr == nil {
+		// Only now can the new version be confirmed running, which is the
+		// point at which the versions it superseded stop being rollback
+		// targets. Pruning any earlier would delete what a failed upgrade
+		// falls back to; pruneSupersededVersions re-checks that the process is
+		// actually up before deleting anything.
+		s.pruneSupersededVersions(rec.ID, rec.Version, previousVersion(oldRec, hadOldRec))
+	}
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()
 
@@ -131,6 +141,65 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+// extractPackage runs pkgtar.Install and registers the extracted version
+// directory as an in-flight install, both under extractingMu so the directory
+// is never visible on disk without being marked. Install cannot take the
+// per-plugin lifecycle lock any earlier than this — the id is only known once
+// the package's manifest has been parsed — so without the mark, two
+// overlapping installs of the same id would both extract, and whichever
+// acquired the lock first would prune the other's fresh directory and leave it
+// activating an InstallPath that no longer exists.
+//
+// The mutex serializes extraction across every plugin, not just one id. That
+// is deliberate and cheap: an install is a rare operator- or poller-driven
+// action, and the alternative (marking after pkgtar returns) leaves exactly
+// the gap this exists to close.
+func (s *Service) extractPackage(r io.Reader) (*pkgtar.InstallResult, error) {
+	s.extractingMu.Lock()
+	defer s.extractingMu.Unlock()
+
+	result, err := pkgtar.Install(r, s.pluginsDir)
+	if err != nil {
+		return nil, err
+	}
+	if s.extractingPaths == nil {
+		s.extractingPaths = make(map[string]int)
+	}
+	s.extractingPaths[result.InstallPath]++
+	return result, nil
+}
+
+// releaseExtraction drops one in-flight mark for path, deferred by Install so
+// it runs however that install ends (rejected package, failed persist, or a
+// completed activation).
+func (s *Service) releaseExtraction(path string) {
+	s.extractingMu.Lock()
+	defer s.extractingMu.Unlock()
+	if s.extractingPaths[path] > 1 {
+		s.extractingPaths[path]--
+		return
+	}
+	delete(s.extractingPaths, path)
+}
+
+// extractionInFlight reports whether some install has extracted path and not
+// yet finished with it.
+func (s *Service) extractionInFlight(path string) bool {
+	s.extractingMu.Lock()
+	defer s.extractingMu.Unlock()
+	return s.extractingPaths[path] > 0
+}
+
+// previousVersion returns the version an in-place upgrade replaced, or "" when
+// this install had no existing record to replace (a first install, or one over
+// a plugin whose record was lost) and therefore knows of no rollback target.
+func previousVersion(oldRec *store.Record, hadOldRec bool) string {
+	if !hadOldRec || oldRec == nil {
+		return ""
+	}
+	return oldRec.Version
 }
 
 // DevKandevVersion is the version string an un-stamped local build carries

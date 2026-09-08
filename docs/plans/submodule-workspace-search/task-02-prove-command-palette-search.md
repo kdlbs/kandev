@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-correct-mixed-graph-search"]
 plan: "plan.md"
-spec: "../../specs/ui/task-workspace-content-search.md"
+spec: "../../specs/ui/requirements/task-workspace-content-search.md"
 ---
 
 # Task 02: Prove Command-Palette Search

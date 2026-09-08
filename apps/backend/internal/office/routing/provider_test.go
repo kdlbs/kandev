@@ -19,9 +19,22 @@ type fakeProviderRepo struct {
 	byID             map[string]*models.AgentInstance
 	clearedParkedFor []string // workspace ids passed to ClearAllParked
 	clearedParkedErr error
+
+	// cfgSeq, when non-nil, makes GetWorkspaceRouting return a different
+	// config on each successive call (advancing cfgSeqIdx), simulating a
+	// workspace routing row changing between two reads within a single
+	// logical operation (AC-20d race coverage). Falls back to cfg once
+	// the sequence is exhausted.
+	cfgSeq    []*WorkspaceConfig
+	cfgSeqIdx int
 }
 
 func (f *fakeProviderRepo) GetWorkspaceRouting(_ context.Context, _ string) (*WorkspaceConfig, error) {
+	if f.cfgSeqIdx < len(f.cfgSeq) {
+		cfg := f.cfgSeq[f.cfgSeqIdx]
+		f.cfgSeqIdx++
+		return cfg, nil
+	}
 	return f.cfg, nil
 }
 
@@ -414,6 +427,61 @@ func TestProvider_PreviewAgentRoundTrips(t *testing.T) {
 	}
 }
 
+// AC-20d: PreviewItem.TierSource must equal what Resolve actually used,
+// never a value computed from a separately-read, potentially stale copy
+// of the workspace config. previewForAgent reads the workspace config
+// once for tierSourceForAgent and Resolve reads it again internally;
+// this simulates a routing config write landing between those two reads
+// and asserts the preview reports the same source the live resolve did,
+// not the stale snapshot's answer.
+func TestProvider_PreviewAgentTierSourceMatchesResolveDespiteConfigRaceBetweenReads(t *testing.T) {
+	profiles := map[ProviderID]ProviderProfile{
+		"claude-acp": {
+			ExecutionProfileIDs: ExecutionProfileIDs{Frontier: "claude-opus", Balanced: "claude-sonnet", Economy: "claude-haiku"},
+			TierMap:             TierMap{Frontier: "opus", Balanced: "sonnet", Economy: "haiku"},
+		},
+	}
+	stale := &WorkspaceConfig{
+		Enabled:          true,
+		DefaultTier:      TierBalanced,
+		ProviderOrder:    []ProviderID{"claude-acp"},
+		ProviderProfiles: profiles,
+		RoleTiers:        RoleTierMap{"qa": TierFrontier},
+	}
+	fresh := &WorkspaceConfig{
+		Enabled:          true,
+		DefaultTier:      TierBalanced,
+		ProviderOrder:    []ProviderID{"claude-acp"},
+		ProviderProfiles: profiles,
+		RoleTiers:        RoleTierMap{}, // role tier removed between the two reads
+	}
+	agent := &models.AgentInstance{ID: "a1", Name: "Alice", WorkspaceID: "ws-1", Role: settingsmodels.AgentRoleQA}
+	repo := &fakeProviderRepo{
+		cfgSeq: []*WorkspaceConfig{stale, fresh},
+		agents: []*models.AgentInstance{agent},
+		byID:   map[string]*models.AgentInstance{"a1": agent},
+	}
+	resolver := NewResolver(&providerResolverAdapter{repo: repo}, nil)
+	p := NewProvider(repo, nil, resolver, &fakeRetry{})
+
+	item, err := p.PreviewAgent(context.Background(), "a1")
+	if err != nil {
+		t.Fatalf("PreviewAgent: %v", err)
+	}
+	if item == nil {
+		t.Fatal("PreviewAgent returned nil item")
+		return
+	}
+	if item.TierSource != TierSourceWorkspace {
+		t.Errorf("TierSource = %q, want %q — must match what Resolve actually computed against"+
+			" the fresh config, not the stale role_tiers entry read earlier",
+			item.TierSource, TierSourceWorkspace)
+	}
+	if item.EffectiveTier != string(TierBalanced) {
+		t.Errorf("EffectiveTier = %q, want %q", item.EffectiveTier, TierBalanced)
+	}
+}
+
 func TestProvider_UpdateRejectsInvalid(t *testing.T) {
 	cfg := &WorkspaceConfig{}
 	p, _ := newProviderTest(cfg, nil)
@@ -522,6 +590,37 @@ func TestProvider_UpdateClearsParkedWhenExecutionProfileChanges(t *testing.T) {
 	}
 	if len(repo.clearedParkedFor) != 1 || repo.clearedParkedFor[0] != "ws-1" {
 		t.Fatalf("execution profile change did not clear parked runs: %v", repo.clearedParkedFor)
+	}
+}
+
+func TestProvider_UpdateClearsParkedOnRoleTiersOnlyChange(t *testing.T) {
+	prev := &WorkspaceConfig{
+		Enabled:       true,
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"claude-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"claude-acp": {
+				TierMap: TierMap{Frontier: "opus", Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{
+					Frontier: "claude-opus", Balanced: "claude-sonnet",
+				},
+			},
+		},
+		RoleTiers: RoleTierMap{"qa": TierFrontier},
+	}
+	p, repo := newProviderTest(prev, nil)
+	// Only RoleTiers changes; DefaultTier, ProviderOrder, and
+	// ProviderProfiles stay identical. A run parked because the "qa"
+	// role resolved to frontier with no usable candidate should unblock
+	// once that role is remapped to balanced.
+	next := *prev
+	next.RoleTiers = RoleTierMap{"qa": TierBalanced}
+
+	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if len(repo.clearedParkedFor) != 1 || repo.clearedParkedFor[0] != "ws-1" {
+		t.Fatalf("role-tiers-only change did not clear parked runs: %v", repo.clearedParkedFor)
 	}
 }
 

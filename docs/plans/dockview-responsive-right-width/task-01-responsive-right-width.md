@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Separate Responsive and Manual Right-Column Widths
@@ -68,7 +68,7 @@ the same behavior and must land together.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`, especially Persistence guarantees
+- `docs/specs/ui/requirements/task-layout-profiles.md`, especially Persistence guarantees
   and the display-switch scenarios.
 - `docs/plans/dockview-responsive-right-width/plan.md`.
 - Existing user-resize persistence coverage in

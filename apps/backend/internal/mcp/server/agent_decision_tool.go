@@ -13,7 +13,7 @@ import (
 
 // registerRecordStepDecisionTool registers record_step_decision_kandev, the
 // Office quorum decision-recording tool. Per the tool contract in
-// docs/specs/workflow-quorum-decision-recording/spec.md, it takes no
+// docs/specs/tasks/requirements/workflow-quorum-decision-recording-agent-surface.md, it takes no
 // task_id — task/step/role are resolved server-side from the calling
 // session, matching every other Office tool.
 func (s *Server) registerRecordStepDecisionTool() {

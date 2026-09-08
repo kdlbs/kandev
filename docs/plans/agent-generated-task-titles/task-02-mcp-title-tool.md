@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-title-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 02: Task MCP tool and first-turn instruction

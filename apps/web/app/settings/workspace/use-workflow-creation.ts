@@ -10,6 +10,8 @@ import {
   type WorkflowStep,
   type WorkflowTemplate,
   type Workspace,
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
 } from "@/lib/types/http";
 import { createWorkflowDuplication } from "./workflow-duplication";
 
@@ -68,6 +70,12 @@ function toDraftStep(
     is_start_step: definition.is_start_step,
     show_in_command_panel: definition.show_in_command_panel,
     agent_profile_id: definition.agent_profile_id,
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      definition.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      definition.profile_session_end_policy,
+    ),
     auto_advance_requires_signal: definition.auto_advance_requires_signal,
     cancel_triggers_turn_complete: definition.cancel_triggers_turn_complete,
     wip_limit: definition.wip_limit,

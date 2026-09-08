@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["03-backend-cancellation-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/ui/cancel-turn-progress.md"
+spec: "../../specs/ui/requirements/cancel-turn-progress.md"
 ---
 
 # Task 04: Cancellation projection contract

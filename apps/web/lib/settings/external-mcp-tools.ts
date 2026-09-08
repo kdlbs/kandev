@@ -2,11 +2,6 @@
 // Mirrors apps/backend/internal/mcp/server (ModeExternal). Keep in sync when
 // tools are added, removed, or renamed.
 //
-// KNOWN DRIFT: `ModeExternal` registers 33 tools, this lists 30 —
-// `list_repositories_kandev`, `import_workflow_kandev` and
-// `get_task_conversation_kandev` are missing, so the settings page
-// under-advertises the endpoint. See the note in `external-mcp-tools.test.ts`.
-//
 // The `name`s are the protocol identifiers an external agent calls, so they stay
 // literal in every locale. Only the group titles and the human descriptions are
 // copy, and they travel as catalog keys resolved at render — this module is
@@ -39,9 +34,15 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
     tools: [
       { name: "list_workspaces_kandev", descriptionKey: "settings:externalMcpToolListWorkspaces" },
       { name: "list_workflows_kandev", descriptionKey: "settings:externalMcpToolListWorkflows" },
+      {
+        name: "list_repositories_kandev",
+        descriptionKey: "settings:externalMcpToolListRepositories",
+      },
       { name: "create_workflow_kandev", descriptionKey: "settings:externalMcpToolCreateWorkflow" },
       { name: "update_workflow_kandev", descriptionKey: "settings:externalMcpToolUpdateWorkflow" },
       { name: "delete_workflow_kandev", descriptionKey: "settings:externalMcpToolDeleteWorkflow" },
+      { name: "import_workflow_kandev", descriptionKey: "settings:externalMcpToolImportWorkflow" },
+      { name: "export_workflow_kandev", descriptionKey: "settings:externalMcpToolExportWorkflow" },
     ],
   },
   {
@@ -137,6 +138,14 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
         name: "list_task_sessions_kandev",
         descriptionKey: "settings:externalMcpToolListTaskSessions",
       },
+      {
+        name: "list_pending_agent_permissions_kandev",
+        descriptionKey: "settings:externalMcpToolListPendingAgentPermissions",
+      },
+      {
+        name: "resolve_agent_permission_kandev",
+        descriptionKey: "settings:externalMcpToolResolveAgentPermission",
+      },
       { name: "move_task_kandev", descriptionKey: "settings:externalMcpToolMoveTask" },
       { name: "delete_task_kandev", descriptionKey: "settings:externalMcpToolDeleteTask" },
       { name: "archive_task_kandev", descriptionKey: "settings:externalMcpToolArchiveTask" },
@@ -144,6 +153,10 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
         name: "update_task_state_kandev",
         descriptionKey: "settings:externalMcpToolUpdateTaskState",
         descriptionValues: { states: TASK_STATES },
+      },
+      {
+        name: "get_task_conversation_kandev",
+        descriptionKey: "settings:externalMcpToolGetTaskConversation",
       },
     ],
   },
@@ -155,6 +168,34 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
         name: "create_task_kandev",
         descriptionKey: "settings:externalMcpToolCreateTask",
         descriptionValues: { parentIdParam: PARENT_ID_PARAM },
+      },
+    ],
+  },
+  {
+    titleKey: "settings:externalMcpGroupTaskDependencies",
+    descriptionKey: "settings:externalMcpGroupTaskDependenciesDescription",
+    tools: [
+      {
+        name: "add_task_dependency_kandev",
+        descriptionKey: "settings:externalMcpToolAddTaskDependency",
+      },
+      {
+        name: "remove_task_dependency_kandev",
+        descriptionKey: "settings:externalMcpToolRemoveTaskDependency",
+      },
+    ],
+  },
+  {
+    titleKey: "settings:externalMcpGroupQuestions",
+    descriptionKey: "settings:externalMcpGroupQuestionsDescription",
+    tools: [
+      {
+        name: "list_pending_questions_kandev",
+        descriptionKey: "settings:externalMcpToolListPendingQuestions",
+      },
+      {
+        name: "answer_question_kandev",
+        descriptionKey: "settings:externalMcpToolAnswerQuestion",
       },
     ],
   },

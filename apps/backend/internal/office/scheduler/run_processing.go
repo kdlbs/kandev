@@ -27,14 +27,19 @@ func (ss *SchedulerService) ClaimNextRun(ctx context.Context) (*models.Run, erro
 	return req, nil
 }
 
-// FinishRun marks a claimed run as finished.
+// FinishRun marks a claimed run as finished. outcome is written as NULL:
+// this dormant parallel copy of the service-layer FinishRun has no
+// production caller and therefore no established semantic label for what
+// happened, so it is not bucketed as processed (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome").
 func (ss *SchedulerService) FinishRun(ctx context.Context, id string) error {
-	return ss.repo.FinishRun(ctx, id, RunStatusFinished)
+	return ss.repo.FinishRun(ctx, id, RunStatusFinished, nil)
 }
 
-// FailRun marks a claimed run as failed.
+// FailRun marks a claimed run as failed. outcome is written as NULL, same
+// as the service-layer FailRun: a failed run is bucketed on status alone.
 func (ss *SchedulerService) FailRun(ctx context.Context, id string) error {
-	return ss.repo.FinishRun(ctx, id, RunStatusFailed)
+	return ss.repo.FinishRun(ctx, id, RunStatusFailed, nil)
 }
 
 // ProcessRunGuard checks if the agent is still eligible to be woken.

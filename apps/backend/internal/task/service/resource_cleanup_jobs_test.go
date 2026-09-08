@@ -55,6 +55,12 @@ func (b *joinCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*worktree
 	return ctx.Err()
 }
 
+func (b *joinCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return b.CleanupWorktrees(ctx, worktrees)
+}
+
 type recordingLegacyCleanup struct {
 	calls int
 }
@@ -222,6 +228,12 @@ func (b *activityCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*work
 	}
 }
 
+func (b *activityCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return b.CleanupWorktrees(ctx, worktrees)
+}
+
 func TestClaimedCleanupDrainsMaintenanceAndHoldsActivityThroughDestructiveWork(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	coordinator := activity.NewCoordinator(activity.Options{})
@@ -306,6 +318,12 @@ func (c *cancellableCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*w
 	case <-c.release:
 		return nil
 	}
+}
+
+func (c *cancellableCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return c.CleanupWorktrees(ctx, worktrees)
 }
 
 func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {
@@ -489,6 +507,85 @@ func TestUnarchiveCancellationPreservesCleanupResourcesAfterBlockedCleaner(t *te
 	}
 }
 
+func TestArchiveCleanupNormalizesLegacyEnvironmentDeletionFlag(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	const taskID = "task-legacy-archive-snapshot"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-legacy-archive-snapshot")
+	env := &models.TaskEnvironment{
+		ID: "env-legacy-archive-snapshot", TaskID: taskID,
+		ExecutorType: "worktree", ContainerID: "legacy-container",
+		WorkspacePath: "/tmp/legacy-archive", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-legacy-archive", RepositoryID: "repo-legacy-archive",
+			WorktreeID: "worktree-legacy-archive", WorktreePath: "/tmp/legacy-archive/repo",
+			WorktreeBranch: "feature/legacy-archive", Status: "deleted",
+		}},
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, taskID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		TaskEnvironment:      env,
+		DeleteEnvironmentRow: true, // legacy archive snapshot written before the fix
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "archive-legacy-snapshot", OperationID: "archive:" + taskID,
+		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerArchive,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	svc.SetEnvironmentDestroyer(&stubDestroyer{})
+	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+	got, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after legacy archive cleanup: %v", err)
+	}
+	if got.TaskID != taskID || len(got.Repos) != 1 || got.Repos[0].WorktreeID != env.Repos[0].WorktreeID {
+		t.Fatalf("legacy archive environment = %+v, want retained owner and repository identity", got)
+	}
+}
+
+func TestArchiveCleanupSkipsLegacyDestructiveFallback(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	const taskID = "task-legacy-archive-fallback"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-legacy-archive-fallback")
+	if err := repo.ArchiveTask(ctx, taskID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
+	if err != nil {
+		t.Fatalf("marshal legacy fallback snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "archive-legacy-fallback", OperationID: "archive:" + taskID,
+		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerArchive,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	legacy := &recordingLegacyCleanup{}
+	svc.SetWorktreeCleanup(legacy)
+	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+	if legacy.calls != 0 {
+		t.Fatalf("legacy archive cleanup calls = %d, want 0", legacy.calls)
+	}
+}
+
 func TestExecuteTaskResourceCleanupJob_CancellationSkipsLegacyCleanup(t *testing.T) {
 	taskSvc, _, _ := createTestService(t)
 	legacy := &recordingLegacyCleanup{}
@@ -499,7 +596,7 @@ func TestExecuteTaskResourceCleanupJob_CancellationSkipsLegacyCleanup(t *testing
 	err := taskSvc.executeTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
 		ID: "delete-job-cancelled", TaskID: "task-cancelled",
 		Trigger: models.TaskResourceCleanupTriggerDelete,
-	}, taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
+	}, &taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cleanup error = %v, want context cancellation", err)
@@ -965,6 +1062,68 @@ func TestPreparedCleanupIsNotRunnableUntilStarted(t *testing.T) {
 	}
 	if started.State != models.TaskResourceCleanupStatePending {
 		t.Fatalf("started state = %q, want pending", started.State)
+	}
+}
+
+func TestPreparedCascadeCleanupSnapshotPersistsWorktreeTaskDirNames(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	const taskID = "task-prepared-task-dir"
+	const sessionID = "session-prepared-task-dir"
+	const repositoryID = "repo-prepared-task-dir"
+	const taskDirName = "prepared-task-dir_root"
+	seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+
+	repoPath := initSimpleGitRepo(t)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: repositoryID, WorkspaceID: "ws-" + taskID, Name: repositoryID,
+		SourceType: "local", LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	const environmentID = "env-prepared-task-dir"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspacePath: "/workspace/prepared-task-dir", TaskDirName: taskDirName,
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.TaskEnvironmentID = environmentID
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link task session: %v", err)
+	}
+	mgr := newCleanupTestWorktreeManager(t, repo)
+	wt, err := mgr.Create(ctx, worktree.CreateRequest{
+		TaskID: taskID, SessionID: sessionID, TaskTitle: "Prepared cleanup task directory",
+		RepositoryID: repositoryID, RepositoryPath: repoPath, BaseBranch: "main",
+		TaskDirName: taskDirName, RepoName: repositoryID,
+	})
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	taskSvc.SetWorktreeCleanup(mgr)
+
+	const operationID = "cascade_delete:cascade-task-dir:task-prepared-task-dir"
+	if err := taskSvc.PrepareTaskResourceCleanup(ctx, taskID,
+		models.TaskResourceCleanupTriggerCascadeDelete, operationID, true); err != nil {
+		t.Fatalf("PrepareTaskResourceCleanup: %v", err)
+	}
+	prepared, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJobByOperationID: %v", err)
+	}
+	var snapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(prepared.ResourceSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode prepared cleanup snapshot: %v", err)
+	}
+	if got := snapshot.WorktreeTaskDirNames[wt.ID]; got != taskDirName {
+		t.Fatalf("prepared snapshot task directory = %q, want %q", got, taskDirName)
 	}
 }
 

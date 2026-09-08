@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-localize-watcher-and-task-fallbacks"]
 plan: "plan.md"
-spec: "../../specs/i18n-audit-watcher-copy/spec.md"
+spec: "../../specs/platform/requirements/i18n-audit-watcher-copy.md"
 ---
 
 # Task 02: Remove Obsolete Catalog Entries

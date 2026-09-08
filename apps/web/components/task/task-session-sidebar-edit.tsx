@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import type { TaskRepositorySnapshot } from "@/components/task-create-dialog-types";
 import type { KanbanState } from "@/lib/state/slices";
 import type { Task } from "@/lib/types/http";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -17,6 +18,7 @@ export type SidebarTaskEditTarget = {
   workflowStepId: string;
   state?: Task["state"];
   repositoryId?: string;
+  repositories?: TaskRepositorySnapshot[];
 };
 
 export function buildSidebarTaskEditTarget(
@@ -35,6 +37,7 @@ export function buildSidebarTaskEditTarget(
     workflowStepId,
     state: sourceTask.state,
     repositoryId: sourceTask.repositoryId ?? undefined,
+    repositories: sourceTask.repositories,
   };
 }
 
@@ -92,6 +95,7 @@ export function SidebarTaskEditDialog({
               workflowStepId: target.workflowStepId,
               state: target.state,
               repositoryId: target.repositoryId,
+              repositories: target.repositories,
             }
           : null
       }
@@ -102,6 +106,7 @@ export function SidebarTaskEditDialog({
               description: target.description,
               state: target.state,
               repositoryId: target.repositoryId,
+              repositories: target.repositories,
             }
           : undefined
       }

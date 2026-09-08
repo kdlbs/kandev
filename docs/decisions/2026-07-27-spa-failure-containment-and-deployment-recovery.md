@@ -1,6 +1,6 @@
 # SPA Failure Containment and Deployment Recovery
 
-**Status:** accepted
+**Status:** accepted (amended 2026-09-03)
 **Date:** 2026-07-27
 **Area:** frontend
 
@@ -15,6 +15,10 @@ The SPA also has a single React root without a first-party application error
 boundary. Settings and Office are lazy routes rendered with a null Suspense
 fallback. An uncaught render or lazy-import error can empty the React root, and
 a pending import can look like the same blank failure.
+
+An application document can also remain open across a backend restart. The
+document then has old boot data and an old settings interlock token. Waiting for
+the next protected mutation exposes an internal recovery condition too late.
 
 Two render-determinism defects compound this behavior:
 
@@ -76,6 +80,29 @@ insufficient because it leaves the old frontend module graph alive.
 
 Desktop-native update behavior is unchanged.
 
+### Backend-generation recovery
+
+Each application document receives the backend `boot_id` in its boot payload.
+After every successful WebSocket connection, the application shell requests
+`/system/info` without cache and compares the live ID with the document ID.
+
+- A different ID proves that the backend process changed. The current document
+  enters a one-way reload-required state.
+- A disconnect, failed request, missing ID, or equal ID does not prove a
+  restart. It does not enter reload-required state.
+- Every authenticated application route presents the same persistent in-flow
+  alert. The alert is not a toast and does not expire or allow dismissal.
+- The user must select **Reload page**. Kandev does not reload automatically
+  because the current route can contain unsaved work.
+- A typed stale-settings-interlock response enters the same state when a
+  protected mutation races with proactive detection.
+- Intentional restart and self-update flows coordinate with this state. One
+  flow owns the reload action at a time, so the UI does not show duplicate
+  reload-required surfaces.
+
+The reload keeps the current browser location. The new document receives the
+new process identity and leaves reload-required state.
+
 ### Render determinism
 
 - SPA route adapters pass synchronous parsed identifiers to client components.
@@ -96,6 +123,10 @@ Desktop-native update behavior is unchanged.
   stops reloading and exposes an actionable fallback.
 - Successful service updates replace the old HTML and JavaScript graph as soon
   as the new backend is authoritative.
+- An open application document identifies a changed backend process after its
+  WebSocket reconnects. It gives the user a clear recovery action before the
+  next mutation.
+- Temporary network failures do not claim that Kandev restarted.
 - Settings route adapters and Zustand selectors have explicit identity
   contracts that are enforceable with focused tests.
 - Error boundaries do not catch event-handler or arbitrary asynchronous
@@ -120,6 +151,27 @@ retry is not reliable.
 
 Rejected. A missing or corrupt asset could create an infinite cross-document
 reload loop.
+
+### Reload automatically after every backend restart
+
+Rejected. The open route can contain unsaved work. A persistent warning lets
+the user copy that work before a full reload.
+
+### Treat every WebSocket reconnect as a backend restart
+
+Rejected. Temporary network failures also reconnect the WebSocket. A changed
+`boot_id` is the required proof.
+
+### Poll process identity on a fixed timer
+
+Rejected. A backend restart already breaks and reconnects the shared WebSocket.
+Checking identity after connection recovery gives prompt detection without
+continuous background requests.
+
+### Handle only the settings interlock rejection
+
+Rejected. That response appears only after a protected settings mutation. It
+does not protect other routes from continued use with old boot and route data.
 
 ### Retain multiple generations of embedded assets
 

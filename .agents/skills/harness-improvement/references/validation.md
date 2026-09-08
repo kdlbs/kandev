@@ -6,6 +6,8 @@ references, or always-on instruction files.
 ```bash
 python3 scripts/lint-harness-files.test.py
 python3 .github/scripts/lint-harness-files.py --all
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
 git diff --check -- <changed-files>
 wc -l <changed-harness-files>
 ```

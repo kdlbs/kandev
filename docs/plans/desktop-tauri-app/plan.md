@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/desktop-tauri-app/spec.md
+spec: docs/specs/desktop/requirements/desktop-tauri-app.md
 created: 2026-06-23
 status: done
 ---
@@ -14,9 +14,9 @@ Add `apps/desktop` as a Tauri v2 shell that packages the existing native Kandev 
 
 ## Architecture Records
 
-- Spec: `docs/specs/desktop-tauri-app/spec.md`
+- Spec: `docs/specs/desktop/requirements/desktop-tauri-app.md`
 - Decision: `docs/decisions/0026-tauri-desktop-shell.md`
-- Existing dependencies: ADR-0021 Go-served SPA with boot state, ADR-0022 embedded Vite assets, and the native launcher spec at `docs/specs/native-kandev-cli/spec.md`.
+- Existing dependencies: ADR-0021 Go-served SPA with boot state, ADR-0022 embedded Vite assets, and the native launcher spec at `docs/specs/cli/requirements/native-kandev-cli.md`.
 
 ---
 

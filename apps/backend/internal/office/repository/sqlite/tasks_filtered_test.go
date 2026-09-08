@@ -49,7 +49,8 @@ func ensureTasksTable(t *testing.T, repo *sqlite.Repository) {
 			task_id TEXT NOT NULL,
 			role TEXT NOT NULL,
 			agent_profile_id TEXT NOT NULL,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)`,
 		`CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,

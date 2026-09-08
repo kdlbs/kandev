@@ -205,6 +205,9 @@ func TestCreate_AtomicRenameLeavesNoTmpAndReportsFullSize(t *testing.T) {
 	if reported != info.Size() {
 		t.Errorf("reported size %d != on-disk size %d", reported, info.Size())
 	}
+	if _, ok := job.Result["path"]; ok {
+		t.Fatal("job result exposes the install's absolute backup path")
+	}
 }
 
 // A ".tmp" sidecar (an in-progress VACUUM INTO) must never appear in List(),

@@ -35,6 +35,35 @@ export interface MainTopBarSlotProps {
   presentation: "desktop" | "mobile";
 }
 
+/**
+ * Context passed to components registered for the `chat-submit-decoration`
+ * slot, which renders *over* the chat composer's send button rather than
+ * beside it. The host positions the layer against the button's box and makes
+ * it `pointer-events-none`. Keep decorations inert when possible; hover or
+ * focus disclosure can observe the host button from an effect. A decoration
+ * renders inside the layer, not beside the button, and `pointer-events-auto`
+ * is a last resort for a separate hit target that does not obstruct send.
+ */
+export interface ChatSubmitDecorationSlotProps {
+  /** Task the composer belongs to, or null for task-less quick chat. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Session the composer is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every kandev session id on the task (includes `activeSessionId`). */
+  sessionIds: string[];
+  presentation: "desktop" | "mobile";
+  /** True while the composer is dispatching the current message. */
+  isSending: boolean;
+  /** True when the agent is mid-turn, so the next send queues behind it. */
+  isAgentBusy: boolean;
+  /** True when the send button itself is disabled. */
+  disabled: boolean;
+  /** True when plan mode is on (the button sends a plan request). */
+  planModeEnabled: boolean;
+}
+
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
 export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
 
@@ -302,6 +331,20 @@ export interface TaskFilterRegistration {
   label: string;
   getOptions(): PluginTaskFilterOption[];
   matches(context: { taskId: string }, selected: string[]): boolean;
+}
+
+export interface TaskListFacetValue {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** A synchronous, page-local facet contribution for the host task list. */
+export interface TaskListFacetRegistration {
+  id: string;
+  label: string;
+  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  subscribe?(listener: () => void): () => void;
 }
 
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
@@ -692,6 +735,7 @@ export interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 export type PluginHost = PluginHostApi;

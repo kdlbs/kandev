@@ -1,5 +1,5 @@
 // Package cron owns the Phase 5 cron-driven trigger handlers (see
-// docs/specs/task-model-unification/plan.md, B5.1–B5.4).
+// docs/specs/tasks/system-design/model-unification.md, B5.1–B5.4).
 //
 // Three handlers run on a shared tick loop:
 //

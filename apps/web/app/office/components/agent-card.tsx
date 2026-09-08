@@ -4,6 +4,7 @@ import { memo } from "react";
 import Link from "@/components/routing/app-link";
 import { IconExternalLink, IconLoader2 } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import type { AgentSummary, SessionSummary } from "@/lib/api/domains/office-api";
 import { AgentAvatar as RoleAwareAgentAvatar } from "./agent-avatar";
 import { timeAgo } from "@/lib/utils/time";
@@ -159,11 +160,12 @@ function TaskPill({ pill, isLive }: { pill: ActivePill; isLive: boolean }) {
       className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1 text-sm hover:bg-muted/50 transition-colors cursor-pointer truncate"
     >
       {isLive ? (
-        <IconLoader2
+        <CompositorSpin
           data-testid="agent-card-task-pill-spinner"
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
-          aria-label={t("office:beingWorkedOn")}
-        />
+          className="h-3.5 w-3.5 shrink-0 text-primary"
+        >
+          <IconLoader2 aria-label={t("office:beingWorkedOn")} className="size-full" />
+        </CompositorSpin>
       ) : null}
       {pill.identifier ? (
         <span className="font-mono text-xs text-muted-foreground shrink-0">{pill.identifier}</span>

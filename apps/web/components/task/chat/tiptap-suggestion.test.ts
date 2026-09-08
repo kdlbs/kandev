@@ -10,6 +10,21 @@ import {
 import { createMentionSuggestion } from "./tiptap-suggestion";
 import * as entityReferenceSuggestions from "./tiptap-entity-reference-suggestion";
 
+function createSuggestionPositioningProps() {
+  return {
+    placement: "bottom-start" as const,
+    offset: { mainAxis: 4, crossAxis: 0 },
+    flip: true,
+    floatingUi: {
+      placement: "bottom-start" as const,
+      strategy: "absolute" as const,
+      middleware: [],
+    },
+    mount: vi.fn(() => vi.fn()),
+    loading: false,
+  };
+}
+
 describe("entity reference suggestion", () => {
   it("provides an independent # suggestion config", () => {
     expect(
@@ -236,6 +251,7 @@ describe("entity reference suggestion lifecycle", () => {
       command: vi.fn(),
       decorationNode: null,
       clientRect: () => new DOMRect(10, 20, 1, 10),
+      ...createSuggestionPositioningProps(),
     };
 
     expect(lifecycle).toBeDefined();
@@ -311,7 +327,7 @@ describe("createMentionSuggestion", () => {
       onSelect: vi.fn(),
     };
     const suggestion = createMentionSuggestion(
-      { getItems: vi.fn().mockResolvedValue([task, file]) },
+      { getItems: vi.fn().mockResolvedValue([task, file]), onSelect: vi.fn() },
       vi.fn(),
       vi.fn(),
     );
@@ -321,5 +337,48 @@ describe("createMentionSuggestion", () => {
     });
 
     expect(items).toEqual([task, file]);
+  });
+
+  it("records selection through the shared command path", () => {
+    const task: MentionItem = {
+      id: "task:task-1",
+      kind: "task",
+      label: "Selected task",
+      task: {
+        taskId: "task-1",
+        title: "Selected task",
+        workflowId: "workflow-1",
+        workflowStepId: "step-1",
+        state: null,
+      },
+      onSelect: vi.fn(),
+    };
+    const setMenuState = vi.fn();
+    const onSelect = vi.fn();
+    const suggestion = createMentionSuggestion(
+      { getItems: vi.fn().mockResolvedValue([task]), onSelect },
+      setMenuState,
+      vi.fn(),
+    );
+    const lifecycle = suggestion.render?.();
+    const command = vi.fn();
+
+    lifecycle?.onStart?.({
+      editor: {} as never,
+      range: { from: 1, to: 2 },
+      query: "",
+      text: "@",
+      items: [task],
+      command,
+      decorationNode: null,
+      clientRect: null,
+      ...createSuggestionPositioningProps(),
+    });
+
+    const menu = setMenuState.mock.calls[0]?.[0];
+    menu?.command?.(task);
+
+    expect(command).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(task);
   });
 });

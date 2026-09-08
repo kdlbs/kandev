@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/enable-disable-toggle.md"
+spec: "../../specs/integrations/requirements/enable-disable-toggle.md"
 ---
 
 # Task 01: Enabled hooks for Azure DevOps, GitHub, GitLab

@@ -9,22 +9,41 @@ const TASK_ID = "task-1";
 const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
 const PREPARE_STATUS_TESTID = "executor-prepare-status";
 const SETTINGS_BUTTON_TESTID = "executor-settings-button";
+const POD_NAME = "kandev-pod-1";
 const BRANCH_PUSH_HINT =
   "Push your branch to its remote in the confirmation dialog to preserve committed work before resetting.";
 const SPRITES_ENV = { executor_type: "sprites", sandbox_id: "kandev-abc" };
 const SPRITES_WORKTREE_ENV = { ...SPRITES_ENV, worktree_path: "/tmp/worktree" };
 const DOCKER_ENV = { executor_type: "local_docker", container_id: "abcdef" };
+const KUBERNETES_ENV = {
+  executor_type: "k8s",
+  executor_id: "executor-1",
+  executor_profile_id: "profile-1",
+};
 
 type MockEnv = {
   executor_type: string;
   sandbox_id?: string;
   container_id?: string;
   worktree_path?: string;
+  executor_id?: string;
+  executor_profile_id?: string;
 };
 
 let mockPrepareState: SessionPrepareState | null = null;
 let mockSessionState: string | null = null;
 let mockEnv: MockEnv | null = null;
+let mockTouchDrawer = false;
+let mockKubernetesSession = {
+  session_id: "session-1",
+  task_id: "task-1",
+  pod_name: POD_NAME,
+  pod_phase: "Running",
+  container_state: "running",
+  restarts: 0,
+  workspace_kind: "empty_dir",
+  failure_reason: undefined as string | undefined,
+};
 
 const renderButton = () => {
   render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
@@ -40,6 +59,17 @@ afterEach(() => {
   mockPrepareState = null;
   mockSessionState = null;
   mockEnv = null;
+  mockTouchDrawer = false;
+  mockKubernetesSession = {
+    session_id: "session-1",
+    task_id: "task-1",
+    pod_name: POD_NAME,
+    pod_phase: "Running",
+    container_state: "running",
+    restarts: 0,
+    workspace_kind: "empty_dir",
+    failure_reason: undefined,
+  };
 });
 
 vi.mock("@/components/state-provider", () => ({
@@ -62,6 +92,14 @@ vi.mock("@/lib/api/domains/task-environment-api", () => ({
     container: null,
   })),
   resetTaskEnvironment: vi.fn().mockResolvedValue({ success: true }),
+}));
+
+vi.mock("@/lib/api/domains/kubernetes-api", () => ({
+  getKubernetesTaskSession: vi.fn().mockImplementation(async () => mockKubernetesSession),
+}));
+
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => mockTouchDrawer,
 }));
 
 vi.mock("./task-reset-env-confirm-dialog", () => ({
@@ -209,5 +247,59 @@ describe("ExecutorSettingsButton reset tooltip", () => {
     hoverSettingsButton();
 
     expect(await screen.findByText(BRANCH_PUSH_HINT)).toBeTruthy();
+  });
+});
+
+describe("ExecutorSettingsButton Kubernetes disclosure", () => {
+  it("shows Pod details and safe controls without generic reset", async () => {
+    mockEnv = KUBERNETES_ENV;
+
+    renderButton();
+    hoverSettingsButton();
+
+    expect(await screen.findByText(POD_NAME)).toBeTruthy();
+    const actions = screen.getByTestId("executor-settings-kubernetes-actions");
+    expect(screen.getByTestId("kubernetes-environment-summary").contains(actions)).toBe(true);
+    const refresh = screen.getByTestId("executor-settings-refresh");
+    expect(refresh.getAttribute("aria-label")).toBe("Refresh");
+    expect(refresh.className).toContain("h-10");
+    expect(refresh.className).toContain("w-10");
+    const settings = screen.getByTestId("executor-settings-link");
+    expect(settings.getAttribute("href")).toBe("/settings/executors/profile-1");
+    expect(settings.getAttribute("aria-label")).toBe("Executor settings");
+    expect(screen.queryByTestId("executor-settings-reset")).toBeNull();
+  });
+
+  it("opens the same disclosure in a touch Drawer from a 44px trigger", async () => {
+    mockEnv = KUBERNETES_ENV;
+    mockTouchDrawer = true;
+
+    renderButton();
+    const trigger = screen.getByRole("button", { name: /executor settings/i });
+    expect(trigger.className).toContain("h-11");
+    expect(trigger.className).toContain("w-11");
+    fireEvent.click(trigger);
+
+    expect(await screen.findByTestId("executor-settings-drawer")).toBeTruthy();
+    expect(await screen.findByText(POD_NAME)).toBeTruthy();
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("h-11");
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("w-11");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("h-11");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("w-11");
+  });
+
+  it("uses the Pod-off package when the exact Kubernetes row reports failure", async () => {
+    mockEnv = KUBERNETES_ENV;
+    mockKubernetesSession = {
+      ...mockKubernetesSession,
+      pod_phase: "Failed",
+      container_state: "terminated",
+      failure_reason: "ImagePullBackOff",
+    };
+
+    renderButton();
+
+    const icon = await screen.findByTestId("executor-status-kubernetes-icon");
+    expect(icon.classList.contains("tabler-icon-package-off")).toBe(true);
   });
 });

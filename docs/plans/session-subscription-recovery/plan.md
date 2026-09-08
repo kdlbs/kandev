@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/session-subscription-recovery/spec.md
+spec: docs/specs/platform/requirements/session-subscription-recovery.md
 created: 2026-08-05
 status: implemented
 issue: https://github.com/kdlbs/kandev/issues/2287

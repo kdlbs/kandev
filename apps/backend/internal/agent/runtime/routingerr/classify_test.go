@@ -59,7 +59,12 @@ func TestClassify_ProviderRules(t *testing.T) {
 		{"claude auth", "claude-acp", "you are not authenticated", CodeAuthRequired},
 		{"claude model", "claude-acp", "model claude-foo not found here", CodeModelUnavailable},
 		{"codex quota", "codex-acp", "insufficient_quota for project", CodeQuotaLimited},
-		{"codex usage limit", "codex-acp", `{"codexErrorInfo":"usageLimitExceeded"}`, CodeQuotaLimited},
+		{
+			"codex usage limit",
+			"codex-acp",
+			`{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
+			CodeQuotaLimited,
+		},
 		{"codex rate", "codex-acp", "rate_limit_exceeded", CodeRateLimited},
 		{"codex apikey", "codex-acp", "invalid api key provided", CodeMissingCredentials},
 		{"opencode auth", "opencode-acp", "Unauthorized request", CodeAuthRequired},
@@ -186,6 +191,33 @@ func TestClassify_OpenCodeUsageLimitIsHighConfidenceQuota(t *testing.T) {
 	})
 	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
 		t.Fatalf("classification = %+v, want high-confidence quota_limited", e)
+	}
+}
+
+func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	for _, stderr := range []string{
+		"AI_APICallError: Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance",
+		"AI_APICallError: Daily usage limit reached. Resets in 4hr 19min.",
+		"AI_APICallError: monthly usage limit reached.",
+	} {
+		e := Classify(Input{
+			Phase:      PhaseStreaming,
+			ProviderID: "opencode-acp",
+			Stderr:     stderr,
+		})
+		if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+			t.Fatalf("classification of %q = %+v, want high-confidence quota_limited", stderr, e)
+		}
+	}
+}
+
+func TestHasProviderRules(t *testing.T) {
+	if !HasProviderRules("opencode-acp") {
+		t.Fatal("opencode-acp should have provider rules")
+	}
+	if HasProviderRules("opencode-go") {
+		t.Fatal("model-provider ID opencode-go must not resolve to provider rules")
 	}
 }
 

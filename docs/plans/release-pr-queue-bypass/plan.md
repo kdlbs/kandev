@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/release-pr-queue-bypass/spec.md
+spec: docs/specs/release/requirements/release-pr-queue-bypass.md
 created: 2026-08-17
 status: complete
 ---

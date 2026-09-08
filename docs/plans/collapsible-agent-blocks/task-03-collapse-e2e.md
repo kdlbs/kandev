@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-collapse-persistence-hook", "02-collapsible-agent-card-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/collapsible-agent-blocks.md"
+spec: "../../specs/agents/requirements/collapsible-agent-blocks.md"
 ---
 
 # Task 03: Collapse behavior E2E

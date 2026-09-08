@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/context-compaction-count/spec.md"
+spec: "../../specs/ui/requirements/context-compaction-count.md"
 ---
 
 # Task 01: Persist inferred compaction counts

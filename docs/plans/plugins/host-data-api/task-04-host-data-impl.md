@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-proto-contract", "02-session-loc-aggregation", "03-sdk-data-accessors"]
 plan: "plan.md"
-spec: "../../../specs/plugins/spec.md"
+spec: "../../../specs/plugins/requirements/plugins.md"
 adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
@@ -32,7 +32,8 @@ gating, and wire the new service dependencies through `plugins.Service`.
 - Apply the v1 scoping rule: global reads, filters narrow results, ephemeral
   tasks excluded unless requested. Leave a single scoping hook per ADR 0043(a).
 - Implement opaque-cursor pagination (server-defined cursor encoding + max cap).
-- Write RPC handlers return `codes.Unimplemented`.
+- Implemented task and message writes route through the task service and
+  orchestrator delivery path.
 - **Wiring:** add the new service deps to `plugins.Service`, `plugins.NewService`,
   and `Provide`; thread them into `hostForPlugin` so each spawned `pluginHost`
   can serve data RPCs. Confirm the new RPCs are served over the existing Host
@@ -43,7 +44,7 @@ gating, and wire the new service dependencies through `plugins.Service`.
   `ListSessionCodeStats` results via the Host channel; one without it gets
   `PermissionDenied` naming `api_read:sessions`.
 - All read RPCs map internal models to DTOs with no proto/domain-struct leakage;
-  write RPCs return `Unimplemented`.
+  write RPCs enforce capabilities and return their task/message results.
 - `make -C apps/backend proto` not required here (done in task-01); package builds
   and tests pass.
 

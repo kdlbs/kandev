@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["02-watcher-dispatch", "03-task-mr-linking-launch", "04-reviewers-subscriptions", "05-watch-settings-ui", "06-mr-review-ui", "07-mr-creation-runtime"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 08: GitLab Parity E2E And Documentation
@@ -53,7 +53,7 @@ rtk node scripts/validate-public-docs.mjs
 - `docs/public/feature-status.md`
 - `docs/public/extending-kandev.md`
 - `docs/public/websocket-api.md`
-- `docs/specs/gitlab-integration/spec.md`
+- `docs/specs/integrations/requirements/gitlab-integration.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/gitlab-integration-parity/plan.md`
 - `docs/plans/gitlab-integration-parity/task-*.md`

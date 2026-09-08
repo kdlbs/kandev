@@ -5,7 +5,7 @@ status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow-sync-workspace-authz/spec.md"
+spec: "../../specs/tasks/requirements/workflow-sync-workspace-authz.md"
 ---
 
 # Task 01: Service-layer workspace authorization

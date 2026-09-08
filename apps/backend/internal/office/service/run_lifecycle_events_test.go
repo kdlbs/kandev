@@ -314,7 +314,7 @@ func TestFinishRun_PublishesOfficeRunProcessed(t *testing.T) {
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	if err := svc.FinishRun(ctx, run.ID); err != nil {
+	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestFinishRun_PublishesOfficeRunProcessedForSourceCommentTask(t *testing.T)
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	if err := svc.FinishRun(ctx, run.ID); err != nil {
+	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 

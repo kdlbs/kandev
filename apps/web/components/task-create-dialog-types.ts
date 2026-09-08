@@ -5,6 +5,7 @@ import type {
   RepositorySet,
   Executor,
   Task,
+  TaskPriority,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -13,6 +14,8 @@ import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by
 import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -27,6 +30,7 @@ import type {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -54,6 +58,7 @@ export interface TaskCreateDialogProps {
     workflowStepId: string;
     state?: Task["state"];
     repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
   } | null;
   onSuccess?: (
     task: Task,
@@ -109,6 +114,26 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Saved repository policy selected for this row. */
+  branchPolicyId?: string;
+};
+
+/** Repository fields needed to rehydrate an edit form without losing a policy snapshot. */
+export type TaskRepositorySnapshot = {
+  repository_id: string;
+  base_branch?: string;
+  id?: string;
+  task_id?: string;
+  checkout_branch?: string;
+  branch_policy_id?: string;
+  branch_policy_name?: string;
+  branch_policy_base_branch?: string;
+  branch_policy_branch_template?: string;
+  branch_policy_pull_request_target?: string;
+  position?: number;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
 };
 
 /**
@@ -143,6 +168,7 @@ export type StepType = {
   workflowId?: string;
   position?: number;
   is_start_step?: boolean;
+  prompt?: string;
   events?: {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -152,6 +178,12 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Create-mode source preset: start without a repository in a scratch workspace. */
+  noRepository?: boolean;
+  /** Create-mode launch hint; the dialog resolves a capable local profile by type. */
+  preferLocalExecutor?: boolean;
+  /** Existing task repository rows, including immutable policy snapshots. */
+  repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
   branch?: string;
   /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
@@ -198,6 +230,25 @@ export type StoreSelections = {
   effectiveWorkflowId?: string | null;
 };
 
+/**
+ * Agent-profile compatibility with the selected executor profile.
+ *   compatible:            no executor selected, nothing selected yet, or the
+ *                          selection passes the executor's credential check.
+ *   selected-incompatible: a compatible profile exists but the selected one
+ *                          fails the executor credential check (e.g. executor
+ *                          switched after the agent was chosen, or a workflow
+ *                          pins it).
+ *   selected-unavailable: a compatible profile exists, but the current
+ *                         selection is disabled or unavailable because dynamic
+ *                         routing is off.
+ *   none-compatible:       an executor is selected and no profile passes.
+ */
+export type AgentCompatState =
+  | "compatible"
+  | "selected-incompatible"
+  | "selected-unavailable"
+  | "none-compatible";
+
 export type DialogComputedValues = {
   isPassthroughProfile: boolean;
   effectiveWorkflowId: string | null;
@@ -220,8 +271,12 @@ export type DialogComputedValues = {
   effectiveAgentProfileId: string;
   /** Display name of the currently selected executor profile (null if none). */
   selectedExecutorProfileName: string | null;
-  /** True when an executor profile is selected and no agent profile is compatible with it. */
+  /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
+  /** Compatibility state of the effective agent profile with the selected executor profile. */
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile (null when none is selected or it is unknown). */
+  selectedAgentProfileName: string | null;
   /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
   compatibleAgentProfiles: AgentProfileOption[];
   /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
@@ -253,6 +308,7 @@ export type DialogComputedArgs = {
   lastUsedWorkflowIdsByWorkspace: Record<string, string>;
   userSettingsLoaded?: boolean;
   snapshots: Record<string, WorkflowSnapshotData>;
+  agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
 export type TaskCreateEffectsArgs = {
@@ -329,7 +385,10 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
+  /** False while rows are hydrated from an existing task; true after user edits. */
+  repositoriesDirty: boolean;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
+  setRepositoriesDirty: (dirty: boolean) => void;
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
@@ -397,12 +456,18 @@ export type DialogFormState = {
   /** No-repo mode: when true the task is created with no repositories. */
   noRepository: boolean;
   setNoRepository: (v: boolean) => void;
+  /** Launch-only hint for choosing a capable direct local executor profile. */
+  preferLocalExecutor: boolean;
+  setPreferLocalExecutor: (v: boolean) => void;
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
   /** Create-mode opt-in. Autopilot is immutable after task creation. */
   autopilot: boolean;
   setAutopilot: (v: boolean) => void;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
+  setPriority: (v: TaskPriority) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -417,9 +482,10 @@ export type SubmitHandlersDeps = {
   workspaceId: string | null;
   workflowId: string | null;
   effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
+  /** Whether the user explicitly changed repository selections in this form. */
+  repositoriesDirty: boolean;
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
@@ -444,6 +510,7 @@ export type SubmitHandlersDeps = {
     workflowStepId: string;
     state?: Task["state"];
     repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
   } | null;
   onSuccess?: (
     task: Task,
@@ -461,6 +528,8 @@ export type SubmitHandlersDeps = {
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
+  /** Refreshes selected branch-policy options after a stale task submission. */
+  refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
@@ -485,8 +554,12 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  /** Edit-mode dependency draft and persistence state. */
+  editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -527,14 +600,18 @@ export type DialogFormBodyProps = {
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
   isCreatingSession: boolean;
+  isCreatingTask?: boolean;
   workflows: WorkflowsState["items"];
   snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
+  launchPreview: TaskCreateLaunchPreview | null;
   fs: DialogFormState;
+  editDependencies: TaskEditDialogDependenciesState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   onTaskNameChange: (v: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
@@ -580,7 +657,11 @@ export type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile, for the incompatible-agent note. */
+  selectedAgentProfileName: string | null;
+  /** Name of the effective workflow, for the workflow-locked incompatible note. */
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;

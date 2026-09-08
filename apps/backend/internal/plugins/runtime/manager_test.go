@@ -62,6 +62,9 @@ func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) 
 func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
 	return nil, nil
 }
+func (fakeHostTaskReader) Move(context.Context, pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
+	return nil, nil
+}
 
 func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
 	r.h.mu.Lock()

@@ -210,5 +210,18 @@
   "workflowStep": "工作流步骤",
   "yourJiraSessionExpiredOrNeeds": "你的 Jira 会话已过期或需要二次验证。请重新连接以查看此工单。",
   "builtinViewAssignedToMe": "指派给我",
-  "builtinViewUnassigned": "未指派"
+  "builtinViewUnassigned": "未指派",
+  "connectWithAtlassian": "连接 Atlassian",
+  "connecting": "正在连接...",
+  "oauth2": "OAuth 2.0",
+  "oauthConnected": "已通过 OAuth 连接。令牌会自动刷新。",
+  "oauthDescription": "通过 Atlassian OAuth 2.1（含 PKCE）进行身份验证。无需创建应用或提供凭据。点击即可在浏览器中授权。令牌过期后会自动刷新。",
+  "oauthStartFailed": "无法启动 OAuth：{{error}}",
+  "oauthTokenExpires": "令牌过期时间：{{date}}",
+  "oauthPasteInstructions": "在新标签页中完成授权",
+  "oauthPasteHelp": "在 Atlassian 上批准后，你将被重定向到一个无法加载的 localhost 网址。请从浏览器地址栏复制完整网址并粘贴到下方。",
+  "oauthPopupBlocked": "浏览器已阻止授权窗口。请允许弹出窗口，然后重试。",
+  "oauthComplete": "完成",
+  "oauthCancel": "取消",
+  "oauthPasteInvalid": "网址无效。请确保复制了包含 code 和 state 参数的完整重定向网址。"
 }

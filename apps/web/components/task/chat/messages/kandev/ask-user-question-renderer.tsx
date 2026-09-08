@@ -6,10 +6,12 @@ import { EmptyListNote, KandevBody, KandevRow, KeyValueRow, SummaryDot } from ".
 import { pickArray, pickString, shortId } from "./parse";
 import type { KandevRenderer } from "./types";
 import { useTranslation } from "react-i18next";
+import { ClarificationMarkdown } from "../../clarification-markdown";
 
 type QuestionOption = { label?: string; description?: string };
 type Question = {
   id?: string;
+  title?: string;
   prompt?: string;
   options?: QuestionOption[];
 };
@@ -23,20 +25,42 @@ function QuestionBlock({ q, answer }: { q: Question; answer: AnswerEntry | undef
   const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      {q.prompt && <div className="text-xs text-foreground whitespace-pre-wrap">{q.prompt}</div>}
+      {q.title && (
+        <ClarificationMarkdown
+          variant="inline"
+          className="text-[11px] font-medium text-muted-foreground"
+        >
+          {q.title}
+        </ClarificationMarkdown>
+      )}
+      {q.prompt && (
+        <ClarificationMarkdown variant="block" className="text-xs text-foreground">
+          {q.prompt}
+        </ClarificationMarkdown>
+      )}
       {q.options && q.options.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="space-y-1">
           {q.options.map((opt, i) => {
             const isSelected = answer?.selected === opt.label;
             return (
-              <Badge
-                key={`${opt.label ?? i}`}
-                variant={isSelected ? "default" : "outline"}
-                className="text-[10px]"
-                title={opt.description}
-              >
-                {opt.label ?? t("task:option", { index: i + 1 })}
-              </Badge>
+              <div key={`${opt.label ?? i}`} className="flex min-w-0 items-start gap-2">
+                <Badge
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-auto min-h-5 max-w-full shrink whitespace-normal overflow-visible text-left text-[10px] leading-tight"
+                >
+                  <ClarificationMarkdown variant="inline">
+                    {opt.label ?? t("task:option", { index: i + 1 })}
+                  </ClarificationMarkdown>
+                </Badge>
+                {opt.description && (
+                  <ClarificationMarkdown
+                    variant="inline"
+                    className="min-w-0 flex-1 text-[10px] leading-relaxed text-muted-foreground"
+                  >
+                    {opt.description}
+                  </ClarificationMarkdown>
+                )}
+              </div>
             );
           })}
         </div>
@@ -86,48 +110,56 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
   const promptShort = firstPrompt ? firstPrompt.replace(/\s+/g, " ").trim() : undefined;
 
   return (
-    <KandevRow
-      Icon={IconHelpHexagon}
-      title={t("task:kandevAskUserQuestion")}
-      summary={
-        <span className="inline-flex items-center gap-1.5 min-w-0">
-          <span>{t("task:questionCount", { count: questions.length })}</span>
-          {promptShort && (
-            <>
-              <SummaryDot />
-              <span className="truncate max-w-[50ch]">&ldquo;{promptShort}&rdquo;</span>
-            </>
+    <div data-testid="ask-user-question-renderer">
+      <KandevRow
+        Icon={IconHelpHexagon}
+        title={t("task:kandevAskUserQuestion")}
+        summary={
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            <span>{t("task:questionCount", { count: questions.length })}</span>
+            {promptShort && (
+              <>
+                <SummaryDot />
+                <span className="truncate max-w-[50ch]">
+                  &ldquo;
+                  <ClarificationMarkdown variant="inline" linkBehavior="passive" className="inline">
+                    {promptShort}
+                  </ClarificationMarkdown>
+                  &rdquo;
+                </span>
+              </>
+            )}
+          </span>
+        }
+        status={status}
+        hasExpandableContent={questions.length > 0 || !!context}
+      >
+        <KandevBody>
+          {context && (
+            <KeyValueRow label={t("task:contextFieldLabel")}>
+              <span className="whitespace-pre-wrap">{context}</span>
+            </KeyValueRow>
           )}
-        </span>
-      }
-      status={status}
-      hasExpandableContent={questions.length > 0 || !!context}
-    >
-      <KandevBody>
-        {context && (
-          <KeyValueRow label={t("task:contextFieldLabel")}>
-            <span className="whitespace-pre-wrap">{context}</span>
-          </KeyValueRow>
-        )}
-        {questions.length === 0 ? (
-          <EmptyListNote messageKey="task:noQuestionsFound" />
-        ) : (
-          <div className="space-y-3">
-            {questions.map((q, i) => (
-              <QuestionBlock
-                key={q.id ?? i}
-                q={q}
-                answer={matchAnswerForQuestion(responses, q, i)}
-              />
-            ))}
-          </div>
-        )}
-        {pendingId && status === "running" && (
-          <div className="text-[10px] italic text-muted-foreground/70">
-            {t("task:awaitingUserResponse", { pendingId: shortId(pendingId) })}
-          </div>
-        )}
-      </KandevBody>
-    </KandevRow>
+          {questions.length === 0 ? (
+            <EmptyListNote messageKey="task:noQuestionsFound" />
+          ) : (
+            <div className="space-y-3">
+              {questions.map((q, i) => (
+                <QuestionBlock
+                  key={q.id ?? i}
+                  q={q}
+                  answer={matchAnswerForQuestion(responses, q, i)}
+                />
+              ))}
+            </div>
+          )}
+          {pendingId && status === "running" && (
+            <div className="text-[10px] italic text-muted-foreground/70">
+              {t("task:awaitingUserResponse", { pendingId: shortId(pendingId) })}
+            </div>
+          )}
+        </KandevBody>
+      </KandevRow>
+    </div>
   );
 };

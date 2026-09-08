@@ -183,6 +183,7 @@ func TestInterpolateJiraPrompt(t *testing.T) {
 		IssueType:    "Bug",
 		AssigneeName: "Alice",
 		ProjectKey:   "PROJ",
+		Description:  "Steps to reproduce",
 	}
 
 	// Empty template falls back to a default that mentions key + URL.
@@ -193,11 +194,19 @@ func TestInterpolateJiraPrompt(t *testing.T) {
 
 	// All placeholders.
 	got = interpolateJiraPrompt(
-		"{{issue.key}} | {{issue.summary}} | {{issue.status}} | {{issue.priority}} | {{issue.assignee}}",
+		"{{issue.key}} | {{issue.summary}} | {{issue.status}} | {{issue.priority}} | {{issue.assignee}} | {{issue.description}}",
 		ticket,
 	)
-	want := "PROJ-7 | Login fails on mobile | In Progress | High | Alice"
+	want := "PROJ-7 | Login fails on mobile | In Progress | High | Alice | Steps to reproduce"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// A missing description resolves to an empty value rather than leaving the
+	// placeholder in the task prompt.
+	ticket.Description = ""
+	got = interpolateJiraPrompt("Description: {{issue.description}}", ticket)
+	if got != "Description: " {
+		t.Errorf("empty description = %q, want empty value", got)
 	}
 }

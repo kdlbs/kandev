@@ -72,6 +72,47 @@ func TestClarificationTurnAuthorityLogsCanceledLookupAtDebug(t *testing.T) {
 	}
 }
 
+func TestClarificationTurnAuthorityAfterRecoveryAllowsOwnedCompletionButRejectsSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-recovery-authority", "session-recovery-authority", models.TaskSessionStateRunning)
+	turnService := &repoTurnService{repo: repo}
+	base := time.Now().UTC()
+	completedAt := base.Add(time.Second)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-recovery-authority",
+		TaskID:        "task-recovery-authority",
+		TaskSessionID: "session-recovery-authority",
+		StartedAt:     base,
+		CompletedAt:   &completedAt,
+	}); err != nil {
+		t.Fatalf("create completed clarification turn: %v", err)
+	}
+
+	svc := &Service{logger: testLogger(), turnService: turnService}
+	data := clarificationAnsweredData{
+		SessionID:           "session-recovery-authority",
+		PendingID:           "pending-recovery-authority",
+		ClarificationTurnID: "turn-recovery-authority",
+	}
+	if !svc.clarificationTurnStillCurrentAfterRecovery(ctx, data) {
+		t.Fatal("owned cancellation completion was rejected before queueing the replacement")
+	}
+
+	successor := &models.Turn{
+		ID:            "turn-recovery-successor",
+		TaskID:        "task-recovery-authority",
+		TaskSessionID: "session-recovery-authority",
+		StartedAt:     base.Add(time.Minute),
+	}
+	if err := repo.CreateTurn(ctx, successor); err != nil {
+		t.Fatalf("create successor turn: %v", err)
+	}
+	if svc.clarificationTurnStillCurrentAfterRecovery(ctx, data) {
+		t.Fatal("clarification recovery accepted a successor active turn")
+	}
+}
+
 func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T) {
 	svc, agentMgr := setupSupersededClarificationTurn(t)
 	svc.clarificationWatchdogTimeout = time.Millisecond

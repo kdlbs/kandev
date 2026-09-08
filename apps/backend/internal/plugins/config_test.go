@@ -400,7 +400,7 @@ func TestGetConfigHandlerMissingReturns404(t *testing.T) {
 }
 
 func TestUpdateConfigHandlerInvalidSchemaReturns400(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
 	rec := doRequest(router, http.MethodPatch, "/api/plugins/kandev-plugin-github",

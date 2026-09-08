@@ -7,7 +7,7 @@ import (
 
 // fieldDisposition records what AC-22 calls a field's "disposition": either exported
 // under a named YAML key, or excluded for a stated reason. See
-// docs/specs/automations-yaml-export/spec.md § Round-trip completeness, the field
+// docs/specs/office/requirements/automations-yaml-export.md § Round-trip completeness, the field
 // disposition table under "Data model".
 //
 // This is the anti-`reports_to` guard: Office's config export declared and emitted an
@@ -20,18 +20,23 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
-	"Name":              {exported: true, yamlKey: "name"},
-	"Description":       {exported: true, yamlKey: "description"},
-	"Prompt":            {exported: true, yamlKey: "prompt"},
-	"TaskTitleTemplate": {exported: true, yamlKey: "task_title_template"},
-	"Enabled":           {exported: true, yamlKey: "enabled"},
-	"MaxConcurrentRuns": {exported: true, yamlKey: "max_concurrent_runs"},
-	"Triggers":          {exported: true, yamlKey: "triggers"},
-	"WorkflowID":        {exported: true, yamlKey: "workflow.name"},
-	"WorkflowStepID":    {exported: true, yamlKey: "workflow.step"},
-	"AgentProfileID":    {exported: true, yamlKey: "agent_profile"},
-	"ExecutorProfileID": {exported: true, yamlKey: "executor_profile"},
-	"RepositoryIDs":     {exported: true, yamlKey: "repositories"},
+	"Name":               {exported: true, yamlKey: "name"},
+	"Description":        {exported: true, yamlKey: "description"},
+	"Prompt":             {exported: true, yamlKey: "prompt"},
+	"TaskTitleTemplate":  {exported: true, yamlKey: "task_title_template"},
+	"Enabled":            {exported: true, yamlKey: "enabled"},
+	"MaxConcurrentRuns":  {exported: true, yamlKey: "max_concurrent_runs"},
+	"ContinuationPolicy": {exported: true, yamlKey: "continuation_policy"},
+	"TaskMode":           {exported: true, yamlKey: "task_mode"},
+	"RepositoryMode":     {exported: true, yamlKey: "repository_mode"},
+	"Triggers":           {exported: true, yamlKey: "triggers"},
+	"WorkflowID":         {exported: true, yamlKey: "workflow.name"},
+	"WorkflowStepID":     {exported: true, yamlKey: "workflow.step"},
+	"AgentProfileID":     {exported: true, yamlKey: "agent_profile"},
+	"ExecutorProfileID":  {exported: true, yamlKey: "executor_profile"},
+	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
+	"Repositories":       {exported: false},
+	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity

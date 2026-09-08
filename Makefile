@@ -143,7 +143,7 @@ help:
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
-	@echo "  test-e2e         Run E2E tests (headless, parallel)"
+	@echo "  test-e2e         Run E2E tests (headless, resource-bounded)"
 	@echo "  test-e2e-headed  Run E2E tests with visible browser"
 	@echo "  test-e2e-ui      Run E2E tests in Playwright UI mode"
 	@echo "  test-e2e-ci      Run E2E tests in Docker with CI-like Linux + resource limits"
@@ -566,6 +566,7 @@ test-scripts:
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
+	@python3 scripts/lint-spec-files.test.py
 	@python3 scripts/lint-architecture.test.py
 	@python3 scripts/playwright-blob-audit.test.py
 	@bash scripts/release-desktop.test.sh
@@ -574,11 +575,11 @@ test-scripts:
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
 	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
-	@node --test scripts/validate-public-docs.test.mjs
+	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e
 test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
-	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
+	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
 		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" -- --output="e2e/test-results-$$project" || status=1; \
@@ -621,7 +622,7 @@ test-e2e-ci:
 #
 
 .PHONY: lint
-lint: lint-backend lint-web lint-harness lint-architecture
+lint: lint-backend lint-web lint-harness lint-specs lint-architecture
 	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
@@ -638,6 +639,11 @@ lint-web:
 lint-harness:
 	@printf "$(CYAN)Linting harness files...$(RESET)\n"
 	@python3 .github/scripts/lint-harness-files.py --all
+
+.PHONY: lint-specs
+lint-specs:
+	@printf "$(CYAN)Linting specification files...$(RESET)\n"
+	@python3 scripts/lint-spec-files.py --all
 
 .PHONY: lint-architecture
 lint-architecture:

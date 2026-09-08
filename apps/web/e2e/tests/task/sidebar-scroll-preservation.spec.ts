@@ -349,6 +349,7 @@ test.describe("sidebar scrolling", () => {
       "aria-current",
       "true",
     );
+    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         async () => {

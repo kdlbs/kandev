@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
@@ -106,10 +107,9 @@ function writePersistedCollapsed(sessionId: string, collapsed: boolean): void {
 function StateGlyph({ isLive, isTerminal }: { isLive: boolean; isTerminal: boolean }) {
   if (isLive) {
     return (
-      <IconLoader2
-        className="h-3 w-3 animate-spin text-primary shrink-0"
-        data-testid="session-state-running"
-      />
+      <CompositorSpin className="h-3 w-3 text-primary shrink-0" data-testid="session-state-running">
+        <IconLoader2 className="size-full" />
+      </CompositorSpin>
     );
   }
   return (

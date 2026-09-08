@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-progress-disclosure"]
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 03: Desktop and Tablet Progress E2E

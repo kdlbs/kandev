@@ -178,6 +178,7 @@ function renderPanel(
   const filePath = mode.kind === "file" ? mode.path : undefined;
   const fileRepositoryName = mode.kind === "file" ? mode.repositoryName : undefined;
   const prKey = mode.kind === "file" ? mode.prKey : undefined;
+  const changeLayer = mode.kind === "file" ? mode.changeLayer : undefined;
   const effectiveSourceFilter = mode.kind === "all" ? activeSource : (mode.sourceFilter ?? "all");
   return (
     <TaskChangesPanel
@@ -185,6 +186,7 @@ function renderPanel(
       filePath={filePath}
       fileRepositoryName={fileRepositoryName}
       prKey={prKey}
+      changeLayer={changeLayer}
       selectedDiff={selectedDiff}
       onClearSelected={onClearSelected}
       onOpenFile={onOpenFile}

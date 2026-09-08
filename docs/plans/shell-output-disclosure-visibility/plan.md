@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/acp-shell-command-output.md
+spec: docs/specs/ui/requirements/acp-shell-command-output.md
 created: 2026-08-07
 status: done
 ---

@@ -10,14 +10,15 @@ import (
 )
 
 // Wakeup request status constants — kept in sync with the spec's
-// "queued" | "claimed" | "coalesced" | "skipped" enum. Terminal states
-// (claimed, coalesced, skipped) all stamp finished_at; only "queued"
-// is visible to the dispatcher's claim path.
+// "queued" | "claimed" | "coalesced" | "skipped" | "failed" enum.
+// Terminal states all stamp finished_at; only "queued" is visible to the
+// dispatcher's claim path.
 const (
 	WakeupStatusQueued    = "queued"
 	WakeupStatusClaimed   = "claimed"
 	WakeupStatusCoalesced = "coalesced"
 	WakeupStatusSkipped   = "skipped"
+	WakeupStatusFailed    = "failed"
 )
 
 // ErrWakeupIdempotencyConflict is returned by CreateWakeupRequest when
@@ -185,6 +186,63 @@ func (r *Repository) MarkWakeupRequestCoalesced(
 	return r.mergeWakeupPayloadIntoRunSnapshot(ctx, id, intoRunID)
 }
 
+// PromoteRunAndCoalesceWakeupIfQueued atomically promotes a queued run,
+// attaches the wakeup request, increments the coalesced count, and merges the
+// request payload. The first run update holds the writer lock until commit, so
+// the scheduler cannot claim the run with only part of the coalesced state.
+// It returns false when the scheduler claimed the run before this transaction.
+func (r *Repository) PromoteRunAndCoalesceWakeupIfQueued(
+	ctx context.Context, requestID, runID, reason string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs SET reason = ? WHERE id = ? AND status = 'queued'
+	`), reason, runID)
+	if err != nil {
+		return false, err
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE agent_wakeup_requests
+		SET status = ?, run_id = ?, claimed_at = ?, finished_at = ?
+		WHERE id = ?
+	`), WakeupStatusCoalesced, runID, now, now, requestID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs SET coalesced_count = coalesced_count + 1 WHERE id = ?
+	`), runID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs
+		SET context_snapshot = json_patch(
+			COALESCE(NULLIF(context_snapshot, ''), '{}'),
+			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
+		)
+		WHERE id = ?
+	`), requestID, runID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // bumpRunCoalescedCount increments coalesced_count on the runs row by 1.
 // Used by MarkWakeupRequestCoalesced when a wakeup-request lands on top
 // of an in-flight run for the same agent.
@@ -235,6 +293,19 @@ func (r *Repository) MarkWakeupRequestSkipped(
 		SET status = ?, reason = ?, finished_at = ?
 		WHERE id = ?
 	`), WakeupStatusSkipped, reason, now, id)
+	return err
+}
+
+// MarkWakeupRequestFailed transitions a request to a terminal failed state
+// when direct dispatch cannot claim it. This prevents a queued row from
+// appearing healthy when no background poller can retry it.
+func (r *Repository) MarkWakeupRequestFailed(ctx context.Context, id, reason string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_wakeup_requests
+		SET status = ?, reason = ?, finished_at = ?
+		WHERE id = ? AND status = ?
+	`), WakeupStatusFailed, reason, now, id, WakeupStatusQueued)
 	return err
 }
 

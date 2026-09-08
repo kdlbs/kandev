@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/agent-launch-prompt-composer.md"
+spec: "../../specs/ui/requirements/agent-launch-prompt-composer.md"
 ---
 
 # Task 01: Reuse shared launch composer

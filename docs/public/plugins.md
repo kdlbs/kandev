@@ -1,19 +1,25 @@
 ---
 title: "Plugins"
-description: "Install and manage kandev plugins: Go backends kandev spawns and supervises, with an optional native frontend bundle."
+description: "Install and manage kandev plugins: supervised Go backends, optional native UI bundles, and isolated web apps for experimental canvases."
 status: experimental
 ---
 
 # Plugins
 
-Plugins extend kandev without forking core: a plugin ships a **Go backend**
-that kandev spawns and supervises as a subprocess over a strict typed gRPC
-protocol, and can optionally ship a **native frontend bundle** that kandev
-loads into the SPA. This page covers what plugins are, how to install and
-manage them, and the current security posture. To discover and install plugins
-from the in-app catalog, see the [Plugin marketplace](plugins-marketplace.md).
-For building a plugin, see [Authoring a plugin](plugins-authoring.md). For the
-manifest schema, see [Plugin manifest reference](plugins-manifest.md).
+Plugins extend kandev without forking core. A managed plugin ships a **Go
+backend** that kandev spawns and supervises as a subprocess over a strict typed
+gRPC protocol. It can also ship a **native frontend bundle** that kandev loads
+into the SPA. The experimental canvas system also uses plugin manifests for
+isolated static web apps that can omit the backend. This page covers what
+plugins are, how to install and manage them, and the current security posture.
+To discover and install plugins from the in-app catalog, see the [Plugin
+marketplace](plugins-marketplace.md). For building a plugin, see [Authoring a
+plugin](plugins-authoring.md). For the manifest schema, see [Plugin manifest
+reference](plugins-manifest.md).
+
+See [Agent-authored Canvases](canvases.md) for the isolated web-app lifecycle.
+These apps run inside a sandboxed iframe and do not join the native plugin UI
+surface.
 
 Plugins are an operator-level, instance-wide capability, there is no
 per-user plugin access. Installing a plugin requires an administrator when
@@ -21,6 +27,10 @@ authentication is enabled. They ship in the base product with no feature flag
 to turn on: **Settings > Plugins** is always available in the sidebar. Because
 loaded plugin code runs with backend privileges, install only plugins you
 trust, see [Security posture](#security-posture).
+
+This operator-level rule applies to installed plugin records. Agent-authored
+canvas instances use task or workspace scope and the human review described in
+[Agent-authored Canvases](canvases.md).
 
 ## Quick path
 
@@ -31,7 +41,11 @@ trust, see [Security posture](#security-posture).
 
 ## How it works
 
-![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
+![Plugin runtime lifecycle: Kandev installs, verifies, extracts, and supervises a plugin subprocess; bus events and external webhooks reach it, it calls the Host API, and the SPA can optionally load its native UI bundle.](../screenshots/plugin-architecture.svg)
+
+[Open full-size SVG diagram][plugin-runtime-diagram]
+
+[plugin-runtime-diagram]: ../../docs/screenshots/plugin-architecture.svg
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every
@@ -47,10 +61,12 @@ plugin is installed and active. Bundles can also inject components into
 host-defined slots, including **icon buttons in the chat composer toolbar**
 (beside the model picker, mic, and send button), so an active plugin can add
 its own action right where you message an agent. A bundle can also declare
-**keybindings** (user-overridable at **Settings > Keyboard Shortcuts**, with
-core shortcuts always winning on a conflict) and open host-owned **modal
-windows** from anywhere in its code: see [Authoring a
-plugin](plugins-authoring.md) for both.
+**keybindings** (user-overridable on the installed plugin's detail page at
+**Settings > Plugins > `<plugin>`**, with core shortcuts always winning on a
+conflict) and open host-owned **modal windows** from anywhere in its code: see
+[Authoring a plugin](plugins-authoring.md) for both. Shortcut overrides are
+personal to each user; plugin configuration and lifecycle controls remain
+administrator-only.
 
 ### Global Status contributions
 
@@ -127,6 +143,14 @@ Either path runs the same pipeline:
    Before persistence, credential-like values such as PATs, bearer tokens,
    labeled secrets/API keys, and the host home path are redacted; plugin stdout
    is not stored verbatim.
+6. Once the new version is confirmed running, delete the plugin's older
+   extracted versions, keeping the version now running plus the one it
+   replaced as a rollback target (see "Version retention on disk"). This step
+   is skipped entirely when the install or the spawn fails, and a deletion that
+   fails is logged without failing the install. Skipping it is not the same as
+   deleting nothing: an install that extracted successfully but could not be
+   recorded is rolled back, which removes that one new version directory and
+   restarts the previous one.
 
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright. The package is installed,
@@ -139,6 +163,11 @@ settings page; a `Setup required` badge marks a plugin whose manifest declares
 a required setting that has no value yet:
 
 ![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
+
+The Installed tab also gives you an overview of automatic updates, installed
+versions, available updates, and per-plugin controls:
+
+![Settings > Plugins showing automatic updates and the installed plugin list with sync, update, enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
 
 <details>
 <summary>Filesystem sideload and synchronization</summary>
@@ -247,6 +276,25 @@ host-managed runtime fields, including `signed`, `last_error`, and
 `last_error_at`. The diagnostic fields are empty until a runtime failure is
 recorded and are cleared after successful recovery.
 
+### Version retention on disk
+
+Two extracted versions is the steady state for a plugin that runs: the one
+currently running and the one it replaced, which is what a failed upgrade falls
+back to. Older versions are deleted once a newer one is confirmed running,
+either right after the install that superseded them or at the next backend
+start. The retained count is fixed and not configurable.
+
+It is a steady state rather than a hard cap, because the cleanup is
+conservative and never insists. Kandev deletes a version directory only after
+confirming that the plugin's process is up, so a plugin that is disabled,
+errored, or was never started keeps every version it has, and a deletion that
+fails leaves that version in place until the next attempt. It never
+touches `data/`, a directory whose name does not match the version declared by
+the `manifest.yaml` inside it, or anything outside `~/.kandev/plugins/<id>/`.
+Because an upgrade previously left its predecessor behind forever, an instance
+that has been auto-updating for a long time can reclaim a substantial amount of
+disk on its first restart after upgrading to this version.
+
 ## Security posture
 
 - **Auth is the spawn relationship.** Kandev spawns the plugin subprocess
@@ -272,6 +320,11 @@ recorded and are cleared after successful recovery.
   a failing bundle or `initialize` is caught and never breaks boot; slot
   components render behind error boundaries. Hard sandboxing (a worker or
   realm boundary) is explicit future work: see below.
+- **Isolated web apps use a separate browser boundary.** Kandev serves their
+  packaged files in a sandboxed iframe with an opaque origin. The app receives
+  only reviewed Kandev capabilities and exact HTTPS network origins. It cannot
+  use the host DOM, cookies, host authentication headers, or an injected
+  JavaScript API. See [Security and trust](security.md#isolated-web-applications).
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
 - **Curated marketplace, no auto-install.** The [Plugin

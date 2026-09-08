@@ -91,6 +91,8 @@ function RowActions({
             variant="ghost"
             size="icon-sm"
             className="cursor-pointer"
+            data-testid={`automation-delete-button-${id}`}
+            aria-label={t("automations:delete")}
             onClick={() => onDelete(id)}
           >
             <IconTrash className="h-3.5 w-3.5 text-destructive" />

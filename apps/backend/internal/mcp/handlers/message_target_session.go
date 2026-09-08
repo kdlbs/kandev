@@ -93,7 +93,7 @@ func (h *Handlers) resolveMessageTargetSession(
 		// A terminal primary with nothing live is handed to dispatch rather than
 		// rejected here, so the caller still gets the documented
 		// INTERNAL_ERROR for "target session FAILED/CANCELLED"
-		// (docs/specs/tasks/parent-child-message-interrupt.md, "Errors").
+		// (docs/specs/tasks/requirements/parent-child-message-interrupt.md, "Errors").
 		// Only the message improves; the code is a contract this change has no
 		// business rewriting as a side effect.
 		return primary, true, nil

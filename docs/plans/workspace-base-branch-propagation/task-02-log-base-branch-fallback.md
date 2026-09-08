@@ -6,7 +6,7 @@ wave: 2
 parallelism: sequential
 depends_on: ["01-push-base-branches-every-workspace"]
 plan: "plan.md"
-spec: "../../specs/workspace-base-branch-propagation/spec.md"
+spec: "../../specs/workspaces/requirements/workspace-base-branch-propagation.md"
 ---
 
 # Task 02: Make the integration-branch fallback observable

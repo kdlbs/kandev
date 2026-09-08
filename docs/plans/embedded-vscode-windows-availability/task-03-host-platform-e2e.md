@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-filter-task-topbar-editors"]
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-windows-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-windows-availability.md"
 ---
 
 # Task 03: Prove host-platform behavior

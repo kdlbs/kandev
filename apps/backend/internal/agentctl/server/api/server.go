@@ -16,8 +16,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -100,6 +102,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -113,6 +116,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace state (poll mode driven by gateway focus signal)
 		api.POST("/workspace/poll-mode", s.handleSetPollMode)
+		api.POST("/workspace/refresh", s.handleRefreshWorkspace)
 
 		// Workspace rescan: triggered by the kandev backend after a new
 		// sibling worktree appears on disk (multi-branch add_branch flow).
@@ -137,7 +141,10 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/html-previews", s.handleWorkspacePreviewPublish)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/upload", s.handleFileUpload)
+		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
@@ -147,6 +154,7 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST(agentctltypes.CanvasSourceTransferPath[len("/api/v1"):], s.handleCanvasSourceTransfer)
 		api.POST("/attachments/materialize", s.handleMaterializeAttachment)
 		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
@@ -327,8 +335,10 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
+	// ModeExternal stays rejected on purpose: it belongs to the backend's own
+	// MCP endpoint for external coding agents, and no launch path can emit it.
+	if !mcpmode.IsInstanceMode(req.Mode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
@@ -427,10 +437,10 @@ func (s *Server) handleStart(c *gin.Context) {
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
 	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
 type optionalArgs struct {

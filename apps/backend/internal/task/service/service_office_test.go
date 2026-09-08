@@ -19,6 +19,12 @@ type dbStepResolver struct {
 	repo *sqliterepo.Repository
 }
 
+type noOpWorkspacePolicyAttacher struct{}
+
+func (noOpWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, WorkspacePolicy) error {
+	return nil
+}
+
 func (r *dbStepResolver) ResolveStartStep(ctx context.Context, workflowID string) (string, error) {
 	var stepID string
 	err := r.repo.DB().QueryRowContext(ctx,
@@ -26,6 +32,17 @@ func (r *dbStepResolver) ResolveStartStep(ctx context.Context, workflowID string
 		workflowID).Scan(&stepID)
 	if err == sql.ErrNoRows {
 		return r.ResolveFirstStep(ctx, workflowID)
+	}
+	return stepID, err
+}
+
+func (r *dbStepResolver) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	var stepID string
+	err := r.repo.DB().QueryRowContext(ctx,
+		`SELECT id FROM workflow_steps WHERE workflow_id = ? AND events LIKE '%auto_start_agent%' ORDER BY position LIMIT 1`,
+		workflowID).Scan(&stepID)
+	if err == sql.ErrNoRows {
+		return r.ResolveStartStep(ctx, workflowID)
 	}
 	return stepID, err
 }
@@ -72,6 +89,7 @@ func setupOfficeTest(t *testing.T) (*Service, *sqliterepo.Repository) {
 		t.Fatalf("EnsureOfficeWorkflow: %v", err)
 	}
 	svc.SetStartStepResolver(&dbStepResolver{repo: repo})
+	svc.SetWorkspacePolicyAttacher(noOpWorkspacePolicyAttacher{})
 	return svc, repo
 }
 

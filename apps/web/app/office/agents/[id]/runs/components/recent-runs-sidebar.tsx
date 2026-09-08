@@ -4,6 +4,7 @@ import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { cn } from "@/lib/utils";
 import type { AgentRunSummary } from "@/lib/api/domains/office-extended-api";
 import { timeAgo } from "@/lib/utils/time";
@@ -84,11 +85,13 @@ function RecentRunsRow({ run, agentId, active }: RowProps) {
     >
       <div className="flex items-center gap-2">
         {isRunning && (
-          <IconLoader2
-            className="h-3 w-3 animate-spin text-primary shrink-0"
+          <CompositorSpin
+            className="h-3 w-3 text-primary shrink-0"
             data-testid={`recent-run-row-running-icon-${run.id}`}
             aria-hidden="true"
-          />
+          >
+            <IconLoader2 className="size-full" />
+          </CompositorSpin>
         )}
         <span className="font-mono text-[11px]">{run.id_short}</span>
         <Badge variant="outline" className="text-[10px]">

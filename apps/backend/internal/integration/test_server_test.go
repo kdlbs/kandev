@@ -158,8 +158,9 @@ func (a *testMessageCreatorAdapter) CreateSessionMessage(ctx context.Context, ta
 	return err
 }
 
-func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -181,8 +182,20 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 	return msg.ID, nil
 }
 
-func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *testMessageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *testMessageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *testMessageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 func (a *testMessageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {

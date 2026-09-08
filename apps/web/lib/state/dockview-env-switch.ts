@@ -94,6 +94,8 @@ export type EnvSwitchParams = {
   /** Build the effective default, optionally honoring a route layout intent. */
   buildDefault: (api: DockviewApi, intentName?: string) => void;
   getDefaultLayout: () => LayoutState;
+  /** Resolve pinned widths from the effective custom default for a workbench. */
+  getDefaultPinnedWidths?: (totalWidth: number) => Map<string, number>;
   /** Explicit layout from the task route, such as `?layout=plan`. */
   initialLayout?: string | null;
 };
@@ -335,13 +337,14 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // Column widths from the outgoing env stay live across the switch because
   // we skipped fromJSON. Apply the target env's widths explicitly:
   //   - saved layout exists → use responsive defaults (or a manual right width)
-  //   - no saved layout (brand-new env) → compute fresh defaults via
-  //     getPinnedWidth (ratio-based, clamped to legacy initial cap)
+  //   - no saved layout with a custom default → use its scaled pinned widths
+  //   - otherwise → compute fresh defaults via getPinnedWidth
   applyPinnedColumnSizes(
     api,
     saved as SerializedDockview | null,
     params.safeWidth,
     getManualRightWidth(newEnvId),
+    !saved ? (params.getDefaultPinnedWidths?.(params.safeWidth) ?? new Map()) : new Map(),
   );
 
   api.layout(params.safeWidth, params.safeHeight);
@@ -405,8 +408,7 @@ function extractSavedColumnSizes(saved: SerializedDockview): number[] | null {
   return root.data.map((child: any) => (typeof child?.size === "number" ? child.size : NaN));
 }
 
-/** Compute the target width for a pinned column. Right-column geometry from a
- *  serialized layout is intentionally ignored unless a manual preference exists. */
+/** Compute the target width for a pinned column from the target environment. */
 // eslint-disable-next-line max-params
 function targetPinnedWidth(
   col: LayoutState["columns"][number],
@@ -415,7 +417,12 @@ function targetPinnedWidth(
   totalWidth: number,
   manualRightWidth: number | null,
   sidebarWidth: number,
+  defaultPinnedWidths: ReadonlyMap<string, number>,
 ): number | undefined {
+  if (!savedSizes && manualRightWidth === null) {
+    const defaultWidth = defaultPinnedWidths.get(col.id);
+    if (typeof defaultWidth === "number" && defaultWidth > 0) return defaultWidth;
+  }
   if (col.id === "right") {
     return resolveResponsiveRightWidth(totalWidth, sidebarWidth, manualRightWidth);
   }
@@ -435,6 +442,7 @@ function applyPinnedColumnSizes(
   saved: SerializedDockview | null,
   totalWidth: number,
   manualRightWidth: number | null,
+  defaultPinnedWidths: ReadonlyMap<string, number> = new Map(),
 ): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
@@ -460,7 +468,15 @@ function applyPinnedColumnSizes(
     const target =
       col.id === "sidebar"
         ? getPinnedWidth(col, totalWidth, undefined)
-        : targetPinnedWidth(col, i, savedSizes, totalWidth, manualRightWidth, sidebarTarget);
+        : targetPinnedWidth(
+            col,
+            i,
+            savedSizes,
+            totalWidth,
+            manualRightWidth,
+            sidebarTarget,
+            defaultPinnedWidths,
+          );
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);

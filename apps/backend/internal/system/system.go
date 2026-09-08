@@ -17,11 +17,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/disk"
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
+	systempersistence "github.com/kandev/kandev/internal/system/persistence"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -51,13 +53,18 @@ type BuildInfo struct {
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
 // application. OrchestratorShutdown stops in-flight agent executions before
-// destructive resets. RestoreQuiesce stops the complete database-backed
-// runtime before a SQLite restore closes the shared pool. TaskSessions is the
-// authoritative session reader used by the install-wide sleep-inhibition
-// service.
+// destructive resets. DatabaseQuiesce stops database-backed workers before a
+// factory reset mutates the shared schema. RestoreQuiesce stops the complete
+// database-backed runtime before a SQLite restore closes the shared pool.
+// TaskSessions is the authoritative session reader used by the install-wide
+// sleep-inhibition service.
 type Wiring struct {
 	OrchestratorShutdown func()
+	DatabaseQuiesce      func() error
 	RestoreQuiesce       func() error
+	SystemSettings       *systemsettings.Store
+	RequiredStores       *requiredstores.Tracker
+	PersistenceHealth    *requiredstores.Health
 	MessageQueue         queuesettings.Target
 	MessageQueueConfig   queuesettings.Configuration
 	TaskSessions         sleepinhibition.SessionReader
@@ -83,6 +90,7 @@ type Service struct {
 	Storage         *storage.Handler
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
+	Persistence    *systempersistence.Handler
 }
 
 // Provide constructs the composed Service. The HTTP routes are
@@ -107,14 +115,19 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	dbSvc.DatabaseQuiesce = wiring.DatabaseQuiesce
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 	backupsSvc.RestoreQuiesce = wiring.RestoreQuiesce
 
-	settingsStore, err := systemsettings.NewStore(pool)
-	if err != nil {
-		log.Error("Failed to initialize system settings store", zap.Error(err))
+	settingsStore := wiring.SystemSettings
+	if settingsStore == nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
+		if err != nil {
+			log.Error("Failed to initialize system settings store", zap.Error(err))
+		}
 	}
 	var metricsSvc *metrics.Service
 	var queueSettingsSvc *queuesettings.Service
@@ -146,6 +159,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		updatesSvc.SetNightlyURL(registryURL)
 	}
 
+	var persistenceHandler *systempersistence.Handler
+	if wiring.RequiredStores != nil {
+		persistenceHandler = systempersistence.NewHandler(
+			wiring.RequiredStores, wiring.PersistenceHealth, pool.Writer().DriverName(),
+		)
+	}
+
 	return &Service{
 		logger:   log,
 		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
@@ -163,6 +183,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		SleepInhibition: sleepInhibitionSvc,
 		Updates:         updatesSvc,
 		Restart:         restart.NewManagerFromEnv(),
+		Persistence:     persistenceHandler,
 	}
 }
 
@@ -181,12 +202,13 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	// Destructive install-wide mutations require the admin role. With
 	// authentication disabled the synthetic single-user identity is an admin,
 	// so behavior is unchanged; with it enabled, members are read-only here.
-	admin := g.Group("", authn.RequireAdmin())
+	admin := g.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
-		storage.RegisterRoutes(g, s.Storage)
+		storage.RegisterRoutes(g, admin, s.Storage)
 	}
+	systempersistence.RegisterRoutes(g, s.Persistence)
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
 	g.POST("/disk-usage/refresh", disk.HandleRefresh(s.Disk))
@@ -197,7 +219,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
 
-	backups.RegisterRoutes(g, s.Backups)
+	backups.RegisterRoutes(g, admin, s.Backups)
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))

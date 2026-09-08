@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: [task-01-profile-fields]
 plan: docs/plans/no-silent-model-fallback/plan.md
-spec: docs/specs/no-silent-model-fallback/spec.md
+spec: docs/specs/agents/requirements/no-silent-model-fallback.md
 ---
 
 # Task 3 — Session start: strict model application

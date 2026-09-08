@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
+  IconColumns,
   IconList,
   IconLayoutKanban,
   IconMenu2,
@@ -25,25 +26,30 @@ import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
-import { linkToTaskOverview, linkToTasks } from "@/lib/links";
+import {
+  resolveTaskListingNavigation,
+  type TaskListingPage,
+} from "@/lib/task-listing/view-navigation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
-import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
-import type { ComponentProps, RefObject } from "react";
+import type { ComponentProps, ReactNode, RefObject } from "react";
 
 type KanbanHeaderProps = {
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
+  currentPage?: TaskListingPage;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
+  taskListingControls?: ReactNode;
 };
 
 type ViewToggleItem = {
@@ -56,6 +62,7 @@ type ViewToggleItem = {
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "kanban", icon: IconLayoutKanban, labelKey: "kanban:kanban" },
   { value: "pipeline", icon: IconTimeline, labelKey: "kanban:pipeline" },
+  { value: "threads", icon: IconColumns, labelKey: "kanban:threads" },
   { value: "list", icon: IconList, labelKey: "kanban:list" },
 ];
 
@@ -79,12 +86,23 @@ function getWorkspaceLabel(
  * picked the wrong branch in every other locale. `currentPage` is the
  * discriminant; the title is derived from it.
  */
-function isHomePage(currentPage: string): boolean {
-  return currentPage !== "tasks";
+const HEADER_TITLE_KEYS: Record<TaskListingPage, string> = {
+  kanban: "sidebar:home",
+  tasks: "sidebar:tasks",
+  threads: "threads:title",
+};
+
+function getHeaderTitle(currentPage: TaskListingPage, t: TFunction): string {
+  return t(HEADER_TITLE_KEYS[currentPage]);
 }
 
-function getHeaderTitle(currentPage: string, t: TFunction): string {
-  return isHomePage(currentPage) ? t("sidebar:home") : t("sidebar:tasks");
+/**
+ * Which toggle segment reads as pressed. The Tasks and Threads pages each
+ * render exactly one view, so the stored preference cannot contradict them.
+ */
+function resolveToggleValue(currentPage: TaskListingPage, effectiveView: string): string {
+  if (currentPage === "tasks") return "list";
+  return currentPage === "threads" ? "threads" : effectiveView;
 }
 
 function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
@@ -161,12 +179,7 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const quickChatHasUnseenIdle = useAppStore((state) =>
-    selectQuickChatHasUnseenIdle(state, workspaceId),
-  );
-  const quickChatLabel = t(
-    quickChatHasUnseenIdle ? "sidebar:quickChatUnseen" : "sidebar:quickChat",
-  );
+  const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   if (!workspaceId) return null;
 
@@ -192,13 +205,7 @@ function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
       >
         <span className="relative flex">
           <IconMessageCircle className="h-4 w-4" />
-          {quickChatHasUnseenIdle && (
-            <span
-              aria-hidden="true"
-              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-              data-testid="quick-chat-unseen-dot"
-            />
-          )}
+          <QuickChatActivityIndicator activity={quickChatActivity} />
         </span>
       </Button>
     </>
@@ -218,11 +225,12 @@ function TabletHeader({
   setMenuOpen,
   showHealthIndicator,
   onOpenHealthDialog,
+  taskListingControls,
 }: {
   title: string;
   workspaceLabel: string;
   workspaceId?: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -231,6 +239,7 @@ function TabletHeader({
   setMenuOpen: (open: boolean) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  taskListingControls?: ReactNode;
 }) {
   const { t } = useTranslation();
   const pluginTaskFilters = usePluginTaskFilters();
@@ -261,16 +270,19 @@ function TabletHeader({
           />
           <TopbarMetrics size="lg" />
           <TabletQuickActions workspaceId={workspaceId} />
+          {taskListingControls}
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown
-            triggerSize="icon-lg"
-            currentPage={currentPage}
-            pluginFilters={pluginTaskFilters.filters}
-            pluginFilterSelections={pluginTaskFilters.selections}
-            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
-          />
+          {currentPage !== "threads" && (
+            <KanbanDisplayDropdown
+              triggerSize="icon-lg"
+              currentPage={currentPage}
+              pluginFilters={pluginTaskFilters.filters}
+              pluginFilterSelections={pluginTaskFilters.selections}
+              onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+            />
+          )}
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -303,11 +315,12 @@ function DesktopHeader({
   handleViewChange,
   showHealthIndicator,
   onOpenHealthDialog,
+  taskListingControls,
 }: {
   title: string;
   workspaceLabel: string;
   workspaceId?: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -315,6 +328,7 @@ function DesktopHeader({
   handleViewChange: (value: string) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  taskListingControls?: ReactNode;
 }) {
   const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
@@ -347,16 +361,19 @@ function DesktopHeader({
             currentPage={currentPage}
           />
           <TopbarMetrics size="lg" />
+          {taskListingControls}
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown
-            triggerSize="icon-lg"
-            currentPage={currentPage}
-            pluginFilters={pluginTaskFilters.filters}
-            pluginFilterSelections={pluginTaskFilters.selections}
-            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
-          />
+          {currentPage !== "threads" && (
+            <KanbanDisplayDropdown
+              triggerSize="icon-lg"
+              currentPage={currentPage}
+              pluginFilters={pluginTaskFilters.filters}
+              pluginFilterSelections={pluginTaskFilters.selections}
+              onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+            />
+          )}
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -369,25 +386,22 @@ function DesktopHeader({
 }
 
 function useHeaderView(
-  currentPage: string,
+  currentPage: TaskListingPage,
   workspaceId: string | undefined,
   workflowId: string | null,
   onViewModeChange: (mode: string) => void,
 ) {
   const router = useRouter();
   return (value: string) => {
-    if (value === "list") {
-      onViewModeChange("list");
-      if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
-    } else if (value === "kanban") {
-      onViewModeChange("kanban");
-      if (currentPage !== "kanban")
-        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
-    } else if (value === "pipeline") {
-      onViewModeChange("pipeline");
-      if (currentPage !== "kanban")
-        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
-    }
+    const next = resolveTaskListingNavigation({
+      view: value,
+      currentPage,
+      workspaceId,
+      workflowId,
+    });
+    if (!next) return;
+    onViewModeChange(next.view);
+    if (next.href) router.push(next.href);
   };
 }
 
@@ -398,6 +412,7 @@ export function KanbanHeader({
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
+  taskListingControls,
 }: KanbanHeaderProps) {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
@@ -408,7 +423,7 @@ export function KanbanHeader({
   const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } = display;
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
-  const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
+  const toggleValue = resolveToggleValue(currentPage, effectiveTaskListingView);
   const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
   const title = getHeaderTitle(currentPage, t);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId, t);
@@ -424,6 +439,7 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
+          taskListingControls={taskListingControls}
           {...sharedSearch}
           tasksListOptions={tasksListOptions}
         />
@@ -441,6 +457,7 @@ export function KanbanHeader({
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
             setMenuOpen={setMenuOpen}
+            taskListingControls={taskListingControls}
             {...healthProps}
           />
           <MobileMenuSheet
@@ -461,6 +478,7 @@ export function KanbanHeader({
         workspaceId={workspaceId}
         currentPage={currentPage}
         {...sharedSearch}
+        taskListingControls={taskListingControls}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}
         {...healthProps}

@@ -44,7 +44,7 @@ inferred from generic session lifecycle state.
   update-only preference or de-duplication store.
 
 The user-visible contract is defined by
-[Semantic Notifications](../specs/platform/notifications.md).
+[Semantic Notifications](../specs/platform/requirements/notifications.md).
 
 ## Consequences
 

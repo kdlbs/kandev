@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-regression-e2e"]
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 ---
 
 # Task 02: Implement the caret-preserving clamp hook

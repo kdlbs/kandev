@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/context-window-unmeasured-state.md
+spec: docs/specs/ui/requirements/context-window-unmeasured-state.md
 created: 2026-08-07
 status: completed
 ---

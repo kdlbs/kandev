@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-github-commit-detail"]
 plan: "plan.md"
-spec: "../../specs/pr-only-commit-details/spec.md"
+spec: "../../specs/ui/requirements/pr-only-commit-details.md"
 ---
 
 # Task 02: Source-aware commit UI

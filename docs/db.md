@@ -2,7 +2,7 @@
 
 Kandev supports two database backends: **SQLite** (default) and **PostgreSQL**.
 
-> See [`configuration.md`](./configuration.md) for the full backend configuration reference (every YAML key + env var). This page focuses on database-specific settings.
+> See [`configuration.md`](configuration.md) for the full backend configuration reference (every YAML key + env var). This page focuses on database-specific settings.
 
 ## SQLite (default)
 

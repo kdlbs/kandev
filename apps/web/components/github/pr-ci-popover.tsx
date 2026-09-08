@@ -99,6 +99,7 @@ function PRCIPopoverHeader({
     <ChangeRequestPopoverHeader
       number={pr.pr_number}
       title={title}
+      author={pr.author_login}
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
       openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}

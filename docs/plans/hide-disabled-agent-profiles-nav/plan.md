@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/hide-disabled-profiles-nav.md
+spec: docs/specs/agents/requirements/hide-disabled-profiles-nav.md
 created: 2026-08-11
 status: complete
 ---
@@ -9,7 +9,7 @@ status: complete
 ## Overview
 
 Mirror the shipped integrations feature ("Hide disabled integrations from
-left panel navigation", `docs/specs/integrations/enable-disable-toggle.md`)
+left panel navigation", `docs/specs/integrations/requirements/enable-disable-toggle.md`)
 for agent profiles: a single install-wide, `localStorage`-backed boolean,
 toggled from the agents settings page, that filters the Settings left
 panel's Agents tree. No backend, HTTP, or WS change.

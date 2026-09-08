@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 03: Agentctl Process Group Shutdown

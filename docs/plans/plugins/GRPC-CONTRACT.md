@@ -213,6 +213,11 @@ duplicated here; this section covers the RPC list (added to `service Host` above
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
 
+API v1 DTO fields are additive-only. `Task.labels` field 23, shipped in v0.93.0,
+remains generated and readable as a deprecated compatibility field. New plugins
+store provider-specific annotations in plugin-owned task state and render them
+through plugin UI slots; CreateTask and UpdateTask do not expose label writes.
+
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
 
@@ -227,6 +232,8 @@ plugin's manifest:
 | `ListRepositories`      | `api_read:repositories`      | repositories      |
 | `ListSessions`          | `api_read:sessions`          | sessions          |
 | `ListSessionCodeStats`  | `api_read:sessions`          | sessions          |
+| `ListMessages`          | `api_read:messages`          | messages          |
+| `ListPendingInteractions` / `GetInteraction` | `api_read:interactions` | interactions |
 
 An undeclared capability returns gRPC `PermissionDenied` with message
 `capability 'api_read:tasks' not declared` (substituting the actual resource) —
@@ -243,8 +250,10 @@ created task's metadata — a plugin cannot set it itself. `CreateTask` resolves
 sane placement defaults when the plugin omits them: an empty `workspace_id`
 resolves to the single workspace (ambiguous otherwise → `InvalidArgument`), an
 empty `workflow_id` to that workspace's first workflow. `UpdateTask` accepts a
-conservative field mask — `title`, `description`, `state`, `workflow_step_id`
-(each optional/leave-unset). `start_agent` best-effort auto-launches an agent
+conservative field mask — `title`, `description`, `state`, and `priority` (each
+optional/leave-unset). `workflow_step_id` remains present for
+wire compatibility but is rejected; plugins use `MoveTask` for transitions.
+`start_agent` best-effort auto-launches an agent
 through the orchestrator; a launch failure does not fail the create.
 
 Write validation/error contract (so plugin authors can predict outcomes):
@@ -264,6 +273,37 @@ running session queues the prompt (`status: "queued"`); an idle/completed one is
 prompted, resuming the agent if its process is gone (`"sent"`); a never-started
 one is launched with the prompt as its first turn (`"started"`). A failed
 dispatch deletes the recorded message so no orphan prompt is left.
+
+**Pending interactions** (`api_read:interactions` / `api_write:interactions`,
+ADR 0052 — `docs/decisions/0052-plugin-host-interaction-api.md`) are the durable
+record of every agent request still owed a human answer: a tool permission
+request, or a whole clarification bundle collapsed into one `Interaction` with
+its `questions`. Session state is deliberately NOT that record —
+`WAITING_FOR_INPUT` also describes an ordinarily completed turn — so a plugin
+that branches on state alone reports attention nobody owes.
+
+`ListPendingInteractions` applies the same turn/session authority Kandev's own
+list surfaces use: only the session's current durable turn counts, terminal
+sessions quarantine pending history, and only the newest permission row of that
+turn is answerable. `GetInteraction` resolves ANY interaction by pending id,
+terminal ones included, so an event-driven cache that started late, restarted,
+or dropped an event converges on the current result instead of `NotFound`.
+
+The three writes route through the first-party services the native UI drives:
+`RespondToPermission` through the orchestrator, `AnswerClarification` and
+`CancelClarification` through the clarification handler (including its durable
+exclusive claim and its detached-resume fallback). A permission response must
+name one of the interaction's declared options — Kandev derives the
+approve/deny outcome from that option's recorded ACP kind, so a plugin cannot
+report an outcome the agent never offered — and the target session comes from
+the durable record, never from the request.
+
+Writes are terminal-once: the first response wins, an already-resolved
+interaction answers `FailedPrecondition`, and an unknown id answers `NotFound`.
+Those two codes are the distinction a reconciling cache needs between "someone
+else answered first" and "my id is stale". `CancelClarification` is delivered as
+a decline rather than an in-memory cancellation, so it also settles a bundle
+whose original waiter went away in a restart.
 
 **Reads and writes go through the service layer, never a repository.** Each read
 handler calls the relevant internal service (task service, workflow service, the

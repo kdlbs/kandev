@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/transcript-navigation-settings.md"
+spec: "../../specs/ui/requirements/transcript-navigation-settings.md"
 ---
 
 # Task 01: Portable Settings Contract

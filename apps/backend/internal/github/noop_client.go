@@ -125,7 +125,7 @@ func (c *NoopClient) RequestReviewers(context.Context, string, string, int, []st
 	return ErrNoClient
 }
 
-func (c *NoopClient) MergePR(context.Context, string, string, int, string) (MergeOutcome, error) {
+func (c *NoopClient) MergePR(context.Context, string, string, int, MergePRRequest) (MergeOutcome, error) {
 	return "", ErrNoClient
 }
 

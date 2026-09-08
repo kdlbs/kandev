@@ -13,14 +13,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
+// newRouter mirrors the production wiring in internal/system: a read group
+// plus an admin group guarded by authn.RequireAdmin. The identity is an admin
+// (as the synthetic single-user identity is when auth is disabled), so these
+// handler tests exercise behavior rather than the role guard, which
+// internal/system's route tests own.
 func newRouter(svc *Service) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
+		c.Next()
+	})
 	g := r.Group("/api/v1/system")
-	RegisterRoutes(g, svc)
+	RegisterRoutes(g, g.Group("", authn.RequireAdmin()), svc)
 	return r
 }
 

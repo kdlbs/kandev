@@ -174,7 +174,15 @@ func TestProbeACPSessionWithContextRejectsProviderWithoutModelSelection(t *testi
 	}
 }
 
-func TestProbeACPSessionWithContextTimesOutWithoutConfigSnapshot(t *testing.T) {
+// TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot pins that
+// when an agent advertises a typed model config option (so the probe applies the
+// model via session/set_config_option) but returns neither inline options nor a
+// follow-up config-update notification, the probe fails. Keeping the pre-switch
+// session/new snapshot would report the previous model's options as the resolved
+// configuration for the newly selected model, so this must stay an error. The
+// empty-resolution relaxation is scoped to the legacy session/set_model path
+// (auggie); see TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty.
+func TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot(t *testing.T) {
 	c2aR, c2aW := io.Pipe()
 	a2cR, a2cW := io.Pipe()
 	t.Cleanup(func() {

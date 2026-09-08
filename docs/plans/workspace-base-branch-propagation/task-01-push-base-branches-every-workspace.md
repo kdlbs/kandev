@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspace-base-branch-propagation/spec.md"
+spec: "../../specs/workspaces/requirements/workspace-base-branch-propagation.md"
 ---
 
 # Task 01: Push stored base branches to every workspace

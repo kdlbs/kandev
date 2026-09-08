@@ -85,6 +85,22 @@ func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, s
 	return nil
 }
 
+func (m *mockAgentManager) ListPendingPermissionsBySessionID(context.Context, string) ([]streams.PendingAgentPermission, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) ResolvePermissionBySessionID(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) CancelPermissionBySessionID(context.Context, string, string, string) (*streams.PermissionCancelResponse, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return client.ProbeResultUnknown, nil
+}
+
 func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	return nil
 }

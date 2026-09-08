@@ -81,6 +81,10 @@ type OverviewReader interface {
 	SettingsCapabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
+type OverviewStateReader interface {
+	Read(context.Context) (OverviewRead, error)
+}
+
 type HandlerConfig struct {
 	Settings          SettingsManager
 	Runs              RunLister
@@ -107,19 +111,24 @@ func (h *Handler) logError(message string, err error) {
 	}
 }
 
-func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
-	group.GET("/storage", handler.getStorage)
-	group.GET("/storage/disk", handler.getStorageDisk)
-	group.GET("/storage/settings", handler.getStorageSettings)
-	group.PATCH("/storage/settings", handler.patchSettings)
-	group.POST("/storage/go-cache/adopt", handler.adoptGoCache)
-	group.POST("/storage/analyze", handler.analyze)
-	group.POST("/storage/run", handler.runNow)
-	group.GET("/storage/runs", handler.listRuns)
-	group.GET("/storage/quarantine", handler.listQuarantine)
-	group.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
-	group.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
-	group.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
+// RegisterRoutes wires storage maintenance onto the /api/v1/system groups.
+// Reading the current usage, policy, run history, and quarantine contents is
+// open to any authenticated caller; every route that changes install-wide
+// state (settings, adoption, cleanup passes, quarantine restore/purge)
+// requires the admin role.
+func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
+	read.GET("/storage", handler.getStorage)
+	read.GET("/storage/disk", handler.getStorageDisk)
+	read.GET("/storage/settings", handler.getStorageSettings)
+	read.GET("/storage/runs", handler.listRuns)
+	read.GET("/storage/quarantine", handler.listQuarantine)
+	admin.PATCH("/storage/settings", handler.patchSettings)
+	admin.POST("/storage/go-cache/adopt", handler.adoptGoCache)
+	admin.POST("/storage/analyze", handler.analyze)
+	admin.POST("/storage/run", handler.runNow)
+	admin.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
+	admin.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
+	admin.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
 }
 
 func (h *Handler) getStorageDisk(c *gin.Context) {
@@ -282,10 +291,25 @@ func (h *Handler) getStorage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load storage settings"})
 		return
 	}
-	snapshot, err := h.config.Overview.Get(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	var (
+		snapshot *OverviewSnapshot
+		analysis StorageAnalysisState
+	)
+	if stateReader, ok := h.config.Overview.(OverviewStateReader); ok {
+		read, readErr := stateReader.Read(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot, analysis = read.Snapshot, read.Analysis
+	} else {
+		legacy, readErr := h.config.Overview.Get(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot = &legacy
+		analysis = readyAnalysisState(0, defaultOverviewCacheTTL, legacy.AnalyzedAt, legacy.AnalyzedAt, legacy.AnalyzedAt)
 	}
 	runs, err := h.config.Runs.ListRuns(c.Request.Context(), 1)
 	if err != nil {
@@ -296,9 +320,14 @@ func (h *Handler) getStorage(c *gin.Context) {
 	if len(runs) > 0 {
 		lastRun = &runs[0]
 	}
+	var summary any
+	var analyzedAt any
+	if snapshot != nil {
+		summary, analyzedAt = snapshot.Summary, snapshot.AnalyzedAt
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings": settings, "capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
-		"summary": snapshot.Summary, "analyzed_at": snapshot.AnalyzedAt, "last_run": lastRun,
+		"summary": summary, "analyzed_at": analyzedAt, "analysis": analysis, "last_run": lastRun,
 	})
 }
 

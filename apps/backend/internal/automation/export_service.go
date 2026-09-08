@@ -137,6 +137,27 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		Description:       a.Description,
 		Enabled:           a.Enabled,
 		MaxConcurrentRuns: a.MaxConcurrentRuns,
+		ContinuationPolicy: func() ContinuationPolicy {
+			if a.ContinuationPolicy == "" {
+				return ContinuationPolicyNewTask
+			}
+			return a.ContinuationPolicy
+		}(),
+		TaskMode: func() TaskMode {
+			if a.TaskMode == "" {
+				return TaskModeAutomationRun
+			}
+			return a.TaskMode
+		}(),
+		RepositoryMode: func() RepositoryMode {
+			if a.RepositoryMode == "" {
+				if len(a.RepositoryIDs) > 0 {
+					return RepositoryModeSelected
+				}
+				return RepositoryModeNone
+			}
+			return a.RepositoryMode
+		}(),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
 		AgentProfile:      resolved.AgentProfile,

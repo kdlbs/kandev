@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["01-acp-detached-lifecycle", "02-session-activity-ownership", "03-client-state-contract", "04-realistic-e2e-coverage"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 05: Review and verification

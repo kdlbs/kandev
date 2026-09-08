@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Prepare bounded, immutable PR walkthrough context from Git objects."""
+
+import argparse
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import subprocess
+import sys
+
+
+MAX_FILE_BYTES = 512 * 1024
+MAX_TOTAL_BYTES = 8 * 1024 * 1024
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REGULAR_MODES = {"100644", "100755"}
+
+
+class ContextError(Exception):
+    """Raised when the trusted context cannot be prepared."""
+
+
+def git(repo: str, *args: str, text: bool = False) -> subprocess.CompletedProcess:
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=text,
+        check=False,
+    )
+
+
+def require_sha(repo: str, value: str, name: str) -> str:
+    if not SHA_RE.fullmatch(value):
+        raise ContextError(f"{name} SHA must be 40 lowercase hexadecimal characters")
+    result = git(repo, "cat-file", "-e", f"{value}^{{commit}}")
+    if result.returncode != 0:
+        raise ContextError(f"{name} SHA is not an available commit")
+    return value
+
+
+def resolve_merge_base(repo: str, base_sha: str, head_sha: str) -> str:
+    result = git(repo, "merge-base", base_sha, head_sha, text=True)
+    if result.returncode != 0:
+        raise ContextError("could not resolve a merge base between base and head SHAs")
+    merge_base = result.stdout.strip()
+    if not SHA_RE.fullmatch(merge_base):
+        raise ContextError("git returned an invalid merge base")
+    return merge_base
+
+
+def changed_files(repo: str, merge_base: str, head_sha: str) -> list[tuple[str, bytes]]:
+    result = git(
+        repo,
+        "diff",
+        "--name-status",
+        "-z",
+        "--no-renames",
+        f"{merge_base}...{head_sha}",
+    )
+    if result.returncode != 0:
+        raise ContextError("could not compute the triple-dot changed-file set")
+
+    fields = [field for field in result.stdout.split(b"\0") if field]
+    if len(fields) % 2:
+        raise ContextError("git returned a malformed changed-file list")
+    files = [(fields[index].decode("ascii"), fields[index + 1]) for index in range(0, len(fields), 2)]
+    return sorted(files, key=lambda item: (item[1], item[0]))
+
+
+def display_path(path_bytes: bytes) -> str:
+    return path_bytes.decode("utf-8", errors="surrogateescape")
+
+
+def is_safe_path(path: str) -> bool:
+    if not path:
+        return False
+    try:
+        path.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    parts = path.split("/")
+    return not (
+        path.startswith(("/", ":"))
+        or "\\" in path
+        or "\x00" in path
+        or any(part in {"", ".", ".."} for part in parts)
+        or PurePosixPath(path).is_absolute()
+    )
+
+
+def head_tree_entry(repo: str, head_sha: str, path_bytes: bytes) -> tuple[str, str, str] | None:
+    result = git(
+        repo,
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        "-r",
+        "--full-tree",
+        head_sha,
+        "--",
+        path_bytes.decode("utf-8", errors="surrogateescape"),
+    )
+    if result.returncode != 0:
+        raise ContextError("could not inspect the PR head tree")
+    records = [record for record in result.stdout.split(b"\0") if record]
+    if len(records) != 1:
+        return None
+    metadata, separator, matched_path = records[0].partition(b"\t")
+    fields = metadata.split()
+    if not separator or len(fields) != 3 or matched_path != path_bytes:
+        return None
+    mode, object_type, object_id = (field.decode("ascii") for field in fields)
+    return mode, object_type, object_id
+
+
+def blob_size(repo: str, object_id: str) -> int:
+    result = git(repo, "cat-file", "-s", object_id, text=True)
+    if result.returncode != 0:
+        raise ContextError("could not inspect a PR head file object")
+    try:
+        return int(result.stdout.strip())
+    except ValueError as exc:
+        raise ContextError("git returned an invalid file size") from exc
+
+
+def blob_bytes(repo: str, object_id: str) -> bytes:
+    result = git(repo, "cat-file", "blob", object_id)
+    if result.returncode != 0:
+        raise ContextError("could not read a PR head file object")
+    return result.stdout
+
+
+def entry_for_path(
+    repo: str,
+    head_sha: str,
+    status: str,
+    path_bytes: bytes,
+    root: Path,
+    materialized_bytes: int,
+) -> tuple[dict[str, object], int]:
+    path = display_path(path_bytes)
+    entry: dict[str, object] = {
+        "path": path,
+        "status": status,
+        "materialized": False,
+    }
+    if status == "D":
+        entry["reason"] = "deleted"
+        return entry, materialized_bytes
+    if not is_safe_path(path):
+        entry["reason"] = "unsafe_path"
+        return entry, materialized_bytes
+
+    tree_entry = head_tree_entry(repo, head_sha, path_bytes)
+    if tree_entry is None:
+        entry["reason"] = "missing"
+        return entry, materialized_bytes
+    mode, object_type, object_id = tree_entry
+    if mode not in REGULAR_MODES or object_type != "blob":
+        entry["reason"] = "non_regular"
+        entry["mode"] = mode
+        entry["object_type"] = object_type
+        return entry, materialized_bytes
+
+    size = blob_size(repo, object_id)
+    entry["bytes"] = size
+    if size > MAX_FILE_BYTES:
+        entry["reason"] = "oversized"
+        return entry, materialized_bytes
+    if materialized_bytes + size > MAX_TOTAL_BYTES:
+        entry["reason"] = "budget_excluded"
+        return entry, materialized_bytes
+
+    content = blob_bytes(repo, object_id)
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        entry["reason"] = "binary"
+        return entry, materialized_bytes
+
+    destination = root / Path(*path.split("/"))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    entry["materialized"] = True
+    materialized_bytes += size
+    return entry, materialized_bytes
+
+
+def prepare(repo: str, base_sha: str, head_sha: str, output_dir: Path) -> Path:
+    require_sha(repo, base_sha, "base")
+    require_sha(repo, head_sha, "head")
+    merge_base = resolve_merge_base(repo, base_sha, head_sha)
+    files = changed_files(repo, merge_base, head_sha)
+
+    head_root = output_dir / "head" / "files"
+    if head_root.exists() or head_root.is_symlink():
+        if head_root.is_symlink():
+            raise ContextError("context output head/files must not be a symlink")
+        shutil.rmtree(head_root)
+    head_root.mkdir(parents=True, exist_ok=True)
+
+    manifest_files: list[dict[str, object]] = []
+    total_bytes = 0
+    for status, path_bytes in files:
+        entry, total_bytes = entry_for_path(
+            repo, head_sha, status, path_bytes, head_root, total_bytes
+        )
+        manifest_files.append(entry)
+
+    manifest: dict[str, object] = {
+        "version": 1,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "merge_base": merge_base,
+        "max_file_bytes": MAX_FILE_BYTES,
+        "max_total_bytes": MAX_TOTAL_BYTES,
+        "materialized_bytes": total_bytes,
+        "files": manifest_files,
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
+    return manifest_path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--base-sha", required=True)
+    parser.add_argument("--head-sha", required=True)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    args = parser.parse_args()
+    try:
+        manifest_path = prepare(
+            args.repo, args.base_sha, args.head_sha, args.output_dir
+        )
+    except (OSError, ContextError, ValueError) as exc:
+        print(f"PR walkthrough context failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"prepared {manifest_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

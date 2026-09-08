@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/i18n-second-audit-gaps/spec.md
+spec: docs/specs/platform/requirements/i18n-second-audit-gaps.md
 created: 2026-08-13
 status: completed
 ---

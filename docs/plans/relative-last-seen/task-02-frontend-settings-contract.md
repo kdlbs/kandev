@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-last-seen-setting"]
 plan: "plan.md"
-spec: "../../specs/relative-last-seen/spec.md"
+spec: "../../specs/ui/requirements/relative-last-seen.md"
 ---
 
 # Task 02: Frontend settings contract and SSR mapping

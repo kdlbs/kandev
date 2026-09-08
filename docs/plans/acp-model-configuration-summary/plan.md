@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/acp-model-configuration-summary.md
+spec: docs/specs/ui/requirements/acp-model-configuration-summary.md
 created: 2026-07-15
 status: implemented
 ---

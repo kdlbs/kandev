@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-telemetry-activation-registry", "02-turn-start-step-stamp"]
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 03: Ledger schema and migration

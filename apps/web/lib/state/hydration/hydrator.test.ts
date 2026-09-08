@@ -9,6 +9,12 @@ import type { AppState } from "@/lib/state/store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 const TERMINAL_TAB_ID = "terminal-1";
+const DEFAULT_TASK_ROW = {
+  detailsEnabled: true,
+  detailOrder: ["relative_time", "repository", "pull_request_number"],
+  visibleDetails: ["relative_time", "repository", "pull_request_number"],
+  trailing: "git_changes",
+};
 
 /** Builds an AppState draft carrying only the default UI slice for hydrateUI tests. */
 function makeDraft(): AppState {
@@ -449,6 +455,7 @@ describe("hydrateState — sidebar views from user settings", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: DEFAULT_TASK_ROW,
     });
   });
 

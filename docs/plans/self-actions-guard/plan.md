@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/auth/self-actions-guard.md
+spec: docs/specs/auth/requirements/self-actions-guard.md
 created: 2026-08-15
 updated: 2026-08-15
 status: complete

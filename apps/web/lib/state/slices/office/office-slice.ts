@@ -42,7 +42,7 @@ export const defaultOfficeState: OfficeSliceState = {
     },
     meta: null,
     isLoading: false,
-    refetchTriggers: {},
+    refetchTrigger: null,
     routing: {
       byWorkspace: {},
       knownProviders: [],
@@ -220,6 +220,11 @@ function createTaskActions(set: SetFn) {
 }
 
 function createMiscActions(set: SetFn) {
+  // Per-store closure state for batching setOfficeRefetchTrigger calls; see
+  // that action below.
+  let pendingRefetchTypes: string[] = [];
+  let refetchFlushScheduled = false;
+
   return {
     setApprovals: (approvals: OfficeSlice["office"]["approvals"]) =>
       set((draft) => {
@@ -271,11 +276,28 @@ function createMiscActions(set: SetFn) {
       set((draft) => {
         draft.office.isLoading = loading;
       }),
-    setOfficeRefetchTrigger: (type: string) =>
-      set((draft) => {
-        const prev = draft.office.refetchTriggers[type] ?? 0;
-        draft.office.refetchTriggers[type] = prev + 1;
-      }),
+    // Same-tick calls (e.g. `task:<id>` immediately followed by `dashboard`
+    // for one WS event) are buffered and flushed as a single trigger object
+    // in a microtask. Without this, React's automatic batching of the
+    // resulting store updates only ever lets a listener observe the *last*
+    // write in the tick — any earlier type in the same burst is silently
+    // dropped for a listener whose effect hasn't run in between the two
+    // `set()` calls.
+    setOfficeRefetchTrigger: (type: string) => {
+      if (!pendingRefetchTypes.includes(type)) {
+        pendingRefetchTypes.push(type);
+      }
+      if (refetchFlushScheduled) return;
+      refetchFlushScheduled = true;
+      queueMicrotask(() => {
+        const types = pendingRefetchTypes;
+        pendingRefetchTypes = [];
+        refetchFlushScheduled = false;
+        set((draft) => {
+          draft.office.refetchTrigger = { types, timestamp: Date.now() };
+        });
+      });
+    },
   };
 }
 

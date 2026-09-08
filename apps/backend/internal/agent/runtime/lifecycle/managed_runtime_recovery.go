@@ -26,18 +26,12 @@ func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) 
 		}
 
 		packageSpec := args[npxIndex+3]
-		if packageSpec != packageName {
-			versionPrefix := packageName + "@"
-			if !strings.HasPrefix(packageSpec, versionPrefix) {
-				return nil, "", false
-			}
-			version := strings.TrimPrefix(packageSpec, versionPrefix)
-			if version == "" {
-				return nil, "", false
-			}
-			if _, err := managedruntime.ParseStableVersion(version); err != nil {
-				return nil, "", false
-			}
+		versionPrefix := packageName + "@"
+		if !strings.HasPrefix(packageSpec, versionPrefix) {
+			return nil, "", false
+		}
+		if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+			return nil, "", false
 		}
 
 		recovered := append([]string(nil), args...)

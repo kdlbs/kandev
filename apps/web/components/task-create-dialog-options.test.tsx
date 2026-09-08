@@ -15,21 +15,33 @@ type MockStore = {
     loaded: boolean;
     tools: [];
   };
+  agentProfileRecentUse: {
+    loaded: boolean;
+    records: Record<string, { profileIds: string[]; revision: number; updatedAt: string }>;
+  };
 };
 
 let mockStore: MockStore = {
   features: { dynamicAgentRouting: true },
   availableAgents: { items: [], loading: false, loaded: true, tools: [] },
+  agentProfileRecentUse: { loaded: false, records: {} },
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockStore) => unknown) => selector(mockStore),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      agentProfileRecentUse: mockStore.agentProfileRecentUse,
+      setAgentProfileRecentUse: vi.fn(),
+    }),
+  }),
 }));
 
 function setAvailableAgents(items: AvailableAgent[]) {
   mockStore = {
     features: { dynamicAgentRouting: true },
     availableAgents: { items, loading: false, loaded: true, tools: [] },
+    agentProfileRecentUse: { loaded: false, records: {} },
   };
 }
 
@@ -40,6 +52,19 @@ const AGENT_WITH_GPT: AvailableAgent = {
     default_model: "gpt-5",
     available_models: [{ id: "gpt-5", name: "GPT-5" }],
     current_model_id: "gpt-5",
+    available_modes: [],
+    supports_dynamic_models: false,
+    status: "ok",
+  },
+} as unknown as AvailableAgent;
+
+const AGENT_WITH_OPUS_VARIATION: AvailableAgent = {
+  name: "omp-acp",
+  available: true,
+  model_config: {
+    default_model: "opus[1m]",
+    available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    current_model_id: "opus[1m]",
     available_modes: [],
     supports_dynamic_models: false,
     status: "ok",
@@ -61,8 +86,14 @@ function profileOption(overrides: Partial<AgentProfileOption>): AgentProfileOpti
   };
 }
 
-function OptionsProbe({ profiles }: { profiles: AgentProfileOption[] }) {
-  const options = useAgentProfileOptions(profiles);
+function OptionsProbe({
+  profiles,
+  context,
+}: {
+  profiles: AgentProfileOption[];
+  context?: "task_create";
+}) {
+  const options = useAgentProfileOptions(profiles, context);
   return (
     <TooltipProvider>
       <div>
@@ -70,6 +101,7 @@ function OptionsProbe({ profiles }: { profiles: AgentProfileOption[] }) {
           <div
             key={option.value}
             data-testid={`option-${index}`}
+            data-value={option.value}
             data-disabled={option.disabled ? "true" : undefined}
             data-reason={option.disabledReason}
           >
@@ -164,6 +196,36 @@ describe("useAgentProfileOptions enabled filter", () => {
   });
 });
 
+describe("useAgentProfileOptions recent-use ordering", () => {
+  it("ranks remembered eligible profiles and keeps unseen source order", () => {
+    mockStore.agentProfileRecentUse = {
+      loaded: true,
+      records: {
+        task_create: {
+          profileIds: ["missing", "p-disabled", "p-recent"],
+          revision: 1,
+          updatedAt: "2026-08-27T12:00:00Z",
+        },
+      },
+    };
+    render(
+      <OptionsProbe
+        context="task_create"
+        profiles={[
+          profileOption({ id: "p-unseen", label: "Agent • unseen" }),
+          profileOption({ id: "p-disabled", label: "Agent • disabled", enabled: false }),
+          profileOption({ id: "p-recent", label: "Agent • recent" }),
+          profileOption({ id: "p-other", label: "Agent • other" }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getAllByTestId(/option-/).map((option) => option.getAttribute("data-value")),
+    ).toEqual(["p-recent", "p-unseen", "p-other"]);
+  });
+});
+
 describe("useAgentProfileOptions executor-authoritative model hint", () => {
   it("keeps a profile whose start model is absent from the host probe selectable", () => {
     const option = renderOptions([profileOption({ model: GONE_MODEL })]);
@@ -174,6 +236,14 @@ describe("useAgentProfileOptions executor-authoritative model hint", () => {
   it("keeps a profile with an available start model selectable", () => {
     const option = renderOptions([profileOption({ model: "gpt-5" })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+  });
+
+  it("names a unique advertised variation without disabling the profile", () => {
+    setAvailableAgents([AGENT_WITH_OPUS_VARIATION]);
+    const option = renderOptions([profileOption({ model: "opus" })]);
+
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(getModelProbeWarningLabel()).toContain("opus[1m]");
   });
 
   it("keeps a profile with an empty (agent default) model selectable", () => {

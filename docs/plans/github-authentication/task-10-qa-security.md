@@ -8,7 +8,7 @@ depends_on:
    "04-app-oauth-webhooks", "05-service-routing", "06-executor-credentials",
    "07-http-health-mocks", "08-frontend-settings", "09-e2e-docs"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 10: Integrated QA And Security Verification
@@ -32,7 +32,7 @@ spec: "../../specs/integrations/github-authentication.md"
 ## Files Likely Touched
 
 - Focused regression tests in files owned by Tasks 01-09
-- `docs/specs/integrations/github-authentication.md`
+- `docs/specs/integrations/requirements/github-authentication.md`
 - `docs/plans/github-authentication/plan.md`
 - All task frontmatter statuses
 - Relevant `AGENTS.md` files only when implementation established a durable convention

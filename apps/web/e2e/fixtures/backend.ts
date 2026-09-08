@@ -1,11 +1,12 @@
 import { test as base } from "@playwright/test";
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
+import { killProcessGroup } from "./process-group";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -32,7 +33,12 @@ const HEALTH_POLL_MS = 250;
  * release. See apps/web/e2e/README.md.
  */
 function isContainerProjectActive(projectName: string): boolean {
-  if (projectName === "containers" || projectName === "docker") return true;
+  if (
+    projectName === "containers" ||
+    projectName === "kubernetes-compat" ||
+    projectName === "docker"
+  )
+    return true;
   if (process.env.KANDEV_E2E_CONTAINERS === "1") return true;
   if (process.env.KANDEV_E2E_DOCKER === "1") return true;
   return false;
@@ -44,6 +50,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Current backend PID, exposed for process-owned socket assertions. */
+  pid: () => number | undefined;
   /**
    * Kill the backend process and respawn with the same config (DB, ports,
    * tmpDir persist). The captured env is rebuilt from the baseline snapshot
@@ -163,76 +171,6 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
   }
   // Timeout expired — proceed anyway; the new process will fail-fast if the
   // port is still held and waitForHealth will surface the error.
-}
-
-type WindowsTreeKiller = (pid: number, done: (error?: Error) => void) => void;
-type ProcessAliveProbe = (pid: number) => boolean;
-
-const taskkillProcessTree: WindowsTreeKiller = (pid, done) => {
-  execFile("taskkill", ["/PID", String(pid), "/T", "/F"], (error) => done(error ?? undefined));
-};
-
-const isProcessAlive: ProcessAliveProbe = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Kills the backend and every child process it owns. POSIX uses the detached
- * process group; Windows needs taskkill because negative-PID signals are not
- * supported there.
- */
-export function killProcessGroup(
-  proc: ChildProcess,
-  platform: NodeJS.Platform = process.platform,
-  killWindowsTree: WindowsTreeKiller = taskkillProcessTree,
-  processIsAlive: ProcessAliveProbe = isProcessAlive,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (!proc.pid) {
-      resolve();
-      return;
-    }
-
-    const pid = proc.pid;
-
-    if (platform === "win32") {
-      killWindowsTree(pid, (error) => {
-        if (error && processIsAlive(pid)) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-      return;
-    }
-
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Process group may already be gone
-      resolve();
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        // Already dead
-      }
-      resolve();
-    }, 7_000);
-
-    proc.on("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
 }
 
 type BackendFixtureLifecycle = {
@@ -475,7 +413,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // --- Spawn backend ---
         backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
         registerProcess(backendProc);
-        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+        // /ready (not /health) — /health flips green as soon as the listener
+        // is bound, before routes are wired; tests that immediately issue API
+        // requests need the readiness contract instead.
+        await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         const frontendUrl = baseUrl;
 
         /**
@@ -499,14 +440,15 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           await waitForPortFree(backendPort);
           backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
           registerProcess(backendProc);
-          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
-          await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
+          // /ready, not /health — see the comment on the initial spawn above.
+          await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         };
 
         let recovery: Promise<void> | null = null;
         const ensureReady = async () => {
           try {
-            await waitForHealth(`${baseUrl}/health`, 5_000);
+            await waitForHealth(`${baseUrl}/ready`, 5_000, backendProc);
             return;
           } catch {
             // A worker can outlive a backend process that a prior test left
@@ -527,6 +469,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          pid: () => backendProc?.pid,
           restart,
           ensureReady,
           useEnv,

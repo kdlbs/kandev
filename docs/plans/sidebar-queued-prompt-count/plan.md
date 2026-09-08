@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-queued-prompt-count.md
+spec: docs/specs/ui/requirements/sidebar-queued-prompt-count.md
 created: 2026-08-04
 status: implemented
 ---

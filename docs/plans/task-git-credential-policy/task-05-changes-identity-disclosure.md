@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-launch-resume-snapshot"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 05: Show Launch Credential Identity In The Changes Branch Disclosure

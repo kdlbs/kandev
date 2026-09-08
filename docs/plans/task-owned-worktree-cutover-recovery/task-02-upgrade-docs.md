@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-cutover-repair"]
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 ---
 
 # Task 02: Document safe cutover recovery
@@ -39,7 +39,7 @@ Sequential. Documentation must describe the implemented migration behavior.
 
 ## Inputs
 
-- `docs/specs/session-delete-resource-cleanup/spec.md`
+- `docs/specs/tasks/requirements/session-delete-resource-cleanup.md`
 - `docs/plans/task-owned-worktree-cutover-recovery/plan.md`
 - Existing cutover backup and rollback guidance.
 

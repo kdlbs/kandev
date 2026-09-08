@@ -34,7 +34,7 @@ func (r *Repository) warnSubagentContextMigration(name string, err error) {
 // "subagent_task" (AC-21), and publishes the two write-once kandev_meta
 // activation keys that let a consumer distinguish "zero fan-out" from
 // "unmeasured, before capture began" (AC-24, AC-25). See
-// docs/specs/subagent-context-persistence/spec.md § Backfill.
+// docs/specs/agents/requirements/subagent-context-persistence.md § Backfill.
 //
 // runMigrations() (and therefore this function) runs on every boot, not just
 // the first. AC-24d (revision 4) requires the guard to be "both backfill keys

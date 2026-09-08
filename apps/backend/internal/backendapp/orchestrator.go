@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
 	"strings"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/delivery"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
@@ -29,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	executorpkg "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -68,6 +71,8 @@ func provideOrchestrator(
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
+	settingsStore *systemsettings.Store,
+	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -81,6 +86,8 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
+	serviceCfg.OfficeSessionIdentity =
+		cfg != nil && cfg.Features.OfficeSessionIdentity
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -94,10 +101,15 @@ func provideOrchestrator(
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
+	if len(trackers) > 0 && trackers[0] != nil {
+		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
+		}
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
+	queueSettings := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg)).Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
@@ -122,13 +134,17 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
+	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
+	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
+		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
@@ -144,6 +160,7 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
@@ -167,6 +184,11 @@ func provideOrchestrator(
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
 
+	// Let the task service read the orchestrator's task-level
+	// parked_on_background_work OR-aggregate and its own monotonic revision so
+	// task.updated events carry it (spec: docs/specs/disambiguate-waiting/spec.md).
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).
@@ -176,6 +198,17 @@ func provideOrchestrator(
 	// resolves sessions through its own repo handle, so it does not inherit the
 	// task service's authorize* checks.
 	orchestratorSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	orchestratorSvc.SetSessionControlChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionControl)
+	})
+	// Starting, resuming, steering and dispatching a turn are writes, so they
+	// need session.prompt rather than mere reach.
+	orchestratorSvc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt)
+	})
+	orchestratorSvc.SetTaskPromptChecker(func(ctx context.Context, taskID string) error {
+		return taskSvc.AuthorizeTaskScope(ctx, taskID, authz.ScopeSessionPrompt)
+	})
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
@@ -231,10 +264,9 @@ func provideOrchestrator(
 	// Wire repository resolver for auto-cloning repos during review task creation
 	if repoCloner != nil {
 		orchestratorSvc.SetRepositoryResolver(&repositoryResolverAdapter{
-			cloner:   repoCloner,
-			protocol: repoclone.DetectGitProtocol(),
-			taskSvc:  taskSvc,
-			logger:   log,
+			cloner:  repoCloner,
+			taskSvc: taskSvc,
+			logger:  log,
 		})
 
 		// Wire repo cloner into executor for provider-backed repos with no local path
@@ -254,6 +286,20 @@ type githubCredentialPolicyService interface {
 
 type githubExecutorCredentialPolicyAdapter struct {
 	service githubCredentialPolicyService
+}
+
+type githubPRBaseResolver struct {
+	service *githubpkg.Service
+}
+
+func (r githubPRBaseResolver) ResolvePRBaseBranch(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (string, error) {
+	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, number)
+	if err != nil || pr == nil {
+		return "", err
+	}
+	return pr.BaseBranch, nil
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
@@ -313,17 +359,29 @@ func resolveQueueSettings(
 	log *logger.Logger,
 	startup ...queuesettings.Configuration,
 ) queuesettings.Resolution {
+	return resolveQueueSettingsWithStore(nil, pool, log, startup...)
+}
+
+func resolveQueueSettingsWithStore(
+	settingsStore *systemsettings.Store,
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
-	if pool != nil {
-		rawStore, err := systemsettings.NewStore(pool)
+	if settingsStore == nil && pool != nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
 		if err != nil {
 			log.Warn("Failed to initialize message queue settings store", zap.Error(err))
+		}
+	}
+	if settingsStore != nil {
+		loaded, err := queuesettings.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
 		} else {
-			configured, err = queuesettings.NewStore(rawStore).Load(context.Background())
-			if err != nil {
-				log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
-				configured = nil
-			}
+			configured = loaded
 		}
 	}
 	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)
@@ -971,10 +1029,14 @@ func (u *repoLocalPathUpdater) UpdateTaskRepositoryBaseBranch(ctx context.Contex
 
 // repositoryResolverAdapter resolves GitHub repos by cloning + finding/creating DB records.
 type repositoryResolverAdapter struct {
-	cloner   *repoclone.Cloner
-	protocol string
-	taskSvc  *taskservice.Service
-	logger   *logger.Logger
+	cloner  reviewRepositoryCloner
+	taskSvc *taskservice.Service
+	logger  *logger.Logger
+}
+
+type reviewRepositoryCloner interface {
+	EnsureWorkspaceCloned(context.Context, string, string, string, string, string) (string, error)
+	BuildCloneURLWithHost(context.Context, string, string, string, string) (string, error)
 }
 
 // ResolveForReview implements orchestrator.RepositoryResolver.
@@ -1000,7 +1062,7 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 		return existing.ID, baseBranch, nil
 	}
 
-	cloneURL, err := repoclone.CloneURL(provider, owner, name, a.protocol)
+	cloneURL, err := a.cloner.BuildCloneURLWithHost(ctx, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("unsupported provider: %w", err)
 	}
@@ -1079,10 +1141,26 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	if strings.TrimSpace(repo.DefaultBranch) == detected {
 		return detected
 	}
+	// detected is still the correct base branch for the review in progress
+	// even when the write below fails, so it is always returned. But a
+	// failure here is not a transient blip to shrug off: it leaves
+	// repositories.default_branch empty, which (per spec "Degraded
+	// evaluation") permanently degrades every future delivery-ledger
+	// evaluation of this repository to default_branch_unknown until some
+	// later write succeeds — and this call site retries with the same
+	// detected value on every future invocation, so a rejection driven by
+	// validation (as opposed to a transient DB error) will repeat forever.
+	// Review round 3, finding #4: this used to log at Warn and nothing
+	// else, making that permanent degradation invisible. Error level plus
+	// the dedicated counter make it observable the same way ancestry/write
+	// failures already are in internal/delivery/metrics.go.
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {
-		a.logger.Warn("failed to persist detected default branch",
+		delivery.RecordDefaultBranchPersistError()
+		a.logger.Error("failed to persist detected default branch: repository row keeps its prior "+
+			"default_branch and will read as default_branch_unknown in the delivery ledger until a "+
+			"future write succeeds",
 			zap.String("repository_id", repo.ID),
 			zap.String(branchFieldKey, detected),
 			zap.Error(err))

@@ -40,13 +40,18 @@ type AgentLatestRunDTO struct {
 }
 
 // AgentRunActivityDay is one row of the Run Activity chart.
-// `total = succeeded + failed + other`.
+// `total = succeeded + skipped + unclassified + failed + other`; total is
+// unchanged in value from before Skipped/Unclassified existed (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome § Response shapes") —
+// only the partition of what used to be counted as succeeded changed.
 type AgentRunActivityDay struct {
-	Date      string `json:"date"`
-	Succeeded int    `json:"succeeded"`
-	Failed    int    `json:"failed"`
-	Other     int    `json:"other"`
-	Total     int    `json:"total"`
+	Date         string `json:"date"`
+	Succeeded    int    `json:"succeeded"`
+	Skipped      int    `json:"skipped"`
+	Unclassified int    `json:"unclassified"`
+	Failed       int    `json:"failed"`
+	Other        int    `json:"other"`
+	Total        int    `json:"total"`
 }
 
 // AgentTaskPriorityDay is one row of the Tasks by Priority chart.
@@ -70,11 +75,18 @@ type AgentTaskStatusDay struct {
 	Backlog    int    `json:"backlog"`
 }
 
-// AgentSuccessRateDay is one row of the Success Rate chart.
+// AgentSuccessRateDay is one row of the Success Rate chart. Succeeded now
+// counts processed runs only; Unclassified is the marker that lets a
+// reader tell a pre-activation day (unclassified accounts for the whole
+// non-failed, non-other remainder) from a fully-classified one
+// (unclassified == 0) without consulting kandev_meta (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome § Response shapes").
+// Total remains the same full denominator as before this field existed.
 type AgentSuccessRateDay struct {
-	Date      string `json:"date"`
-	Succeeded int    `json:"succeeded"`
-	Total     int    `json:"total"`
+	Date         string `json:"date"`
+	Succeeded    int    `json:"succeeded"`
+	Unclassified int    `json:"unclassified"`
+	Total        int    `json:"total"`
 }
 
 // AgentRecentTaskDTO is one row of the Recent Tasks list on the agent
@@ -315,11 +327,13 @@ func padAgentRunActivity(dates []string, rows []sqlite.AgentRunDayRow) []AgentRu
 	for i, date := range dates {
 		row := byDate[date]
 		out[i] = AgentRunActivityDay{
-			Date:      date,
-			Succeeded: row.Succeeded,
-			Failed:    row.Failed,
-			Other:     row.Other,
-			Total:     row.Succeeded + row.Failed + row.Other,
+			Date:         date,
+			Succeeded:    row.Succeeded,
+			Skipped:      row.Skipped,
+			Unclassified: row.Unclassified,
+			Failed:       row.Failed,
+			Other:        row.Other,
+			Total:        row.Succeeded + row.Skipped + row.Unclassified + row.Failed + row.Other,
 		}
 	}
 	return out
@@ -375,9 +389,10 @@ func buildSuccessRate(dates []string, rows []sqlite.AgentRunDayRow) []AgentSucce
 	for i, date := range dates {
 		row := byDate[date]
 		out[i] = AgentSuccessRateDay{
-			Date:      date,
-			Succeeded: row.Succeeded,
-			Total:     row.Succeeded + row.Failed + row.Other,
+			Date:         date,
+			Succeeded:    row.Succeeded,
+			Unclassified: row.Unclassified,
+			Total:        row.Succeeded + row.Skipped + row.Unclassified + row.Failed + row.Other,
 		}
 	}
 	return out

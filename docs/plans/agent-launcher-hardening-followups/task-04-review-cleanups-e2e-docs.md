@@ -7,7 +7,7 @@ depends_on:
   - "01-interim-settings-interlock"
   - "03-restart-and-launch-rollback"
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 04: Review cleanups, E2E, and docs
@@ -47,7 +47,7 @@ node scripts/validate-public-docs.mjs
 - `apps/web/lib/types/agent-profile.ts`
 - `docs/public/agents-and-profiles.md`
 - `docs/public/security.md`
-- `docs/specs/office/agents.md`
+- `docs/specs/office/requirements/agents.md`
 - this task file
 
 ## Inputs

@@ -9,6 +9,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
+  SidebarTaskColorAutomation,
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
@@ -16,12 +17,24 @@ import type {
   StartupPage,
 } from "@/lib/types/http";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
+import type {
+  AgentProfileRecentUseRecord,
+  AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { TaskColor } from "@/lib/task-colors";
+
+export type {
+  AgentProfileRecentUseRecord,
+  AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -419,7 +432,12 @@ export type UserSettingsState = {
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
+  threadViews: ThreadView[];
+  threadActiveViewId: string | null;
+  threadViewDraft: ThreadViewDraft | null;
   sidebarTaskPrefs: SidebarTaskPrefsState;
+  sidebarTaskColorAutomation: SidebarTaskColorAutomation;
+  sidebarTaskColors: Record<string, TaskColor | null>;
   taskCreateLastUsed: TaskCreateLastUsedState;
   jiraSavedViews: unknown;
   jiraTaskPresets: unknown;
@@ -428,6 +446,7 @@ export type UserSettingsState = {
   gitlabSavedPresets: unknown;
   azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
+  defaultUtilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;
@@ -436,8 +455,11 @@ export type UserSettingsState = {
   lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
+  quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps: string[];
   loaded: boolean;
 };
 
@@ -471,6 +493,7 @@ export type SettingsSliceState = {
   settingsData: SettingsDataState;
   sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
+  agentProfileRecentUse: AgentProfileRecentUseState;
 };
 
 export type SettingsSliceActions = {
@@ -512,6 +535,11 @@ export type SettingsSliceActions = {
   setSleepInhibitionLoading: (loading: boolean) => void;
   setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
+  setAgentProfileRecentUse: (state: AgentProfileRecentUseState) => void;
+  applyAgentProfileRecentUse: (
+    context: AgentProfileRecentUseContext,
+    record: AgentProfileRecentUseRecord,
+  ) => void;
   bumpAgentProfilesVersion: () => void;
 };
 

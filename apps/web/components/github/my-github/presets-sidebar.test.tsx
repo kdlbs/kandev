@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsSidebar } from "./presets-sidebar";
@@ -15,7 +15,7 @@ const savedPreset: SavedPreset = {
   isDefault: false,
 };
 
-function expectDeleteDoesNotSelect() {
+async function expectDeleteDoesNotSelect() {
   const onSelect = vi.fn();
   const onDeleteSaved = vi.fn();
   render(
@@ -35,7 +35,17 @@ function expectDeleteDoesNotSelect() {
 
   fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs saved query" }));
 
-  expect(onDeleteSaved).toHaveBeenCalledWith(savedPreset.id);
+  expect(onDeleteSaved).not.toHaveBeenCalled();
+  expect(onSelect).not.toHaveBeenCalled();
+  const confirmation = screen.getByRole("group", { name: "Delete Kandev PRs?" });
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+  expect(onDeleteSaved).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs saved query" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs" }));
+
+  await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith(savedPreset.id));
+  expect(onDeleteSaved).toHaveBeenCalledOnce();
   expect(onSelect).not.toHaveBeenCalled();
 }
 

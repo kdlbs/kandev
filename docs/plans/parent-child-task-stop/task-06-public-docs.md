@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["03-mcp-stop-handler", "04-task-mcp-tool"]
 plan: "plan.md"
-spec: "../../specs/tasks/parent-child-task-stop.md"
+spec: "../../specs/tasks/requirements/parent-child-task-stop.md"
 ---
 
 # Task 06: Public stop documentation

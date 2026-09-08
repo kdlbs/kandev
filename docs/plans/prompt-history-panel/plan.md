@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/prompt-history-panel.md
+spec: docs/specs/ui/requirements/prompt-history-panel.md
 created: 2026-08-13
 updated: 2026-08-17
 status: shipped

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-sdk-extension-seam"]
 plan: "plan.md"
-spec: "../../specs/agents/cursor-subagent-metadata.md"
+spec: "../../specs/agents/requirements/cursor-subagent-metadata.md"
 ---
 
 # Task 02: Parse and correlate cursor/task onto the subagent payload

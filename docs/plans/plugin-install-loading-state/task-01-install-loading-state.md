@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/spec.md"
+spec: "../../specs/plugins/requirements/plugins.md"
 ---
 
 # Task 01: Show install loading state
@@ -46,7 +46,7 @@ Sequential. The UI and tests share the same transient install-state contract.
 
 ## Inputs
 
-- `docs/specs/plugins/spec.md` install pipeline and install-dialog scenario.
+- `docs/specs/plugins/requirements/plugins.md` install pipeline and install-dialog scenario.
 - `docs/plans/plugin-install-loading-state/plan.md` root-cause evidence and
   mobile parity contract.
 - Existing `installBusy` wiring in

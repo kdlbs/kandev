@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["05-agentctl-settings-propagation"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 06: Message queue configuration lock

@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["10-frontend-search-client"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 11: Composer Entity Reference Interaction

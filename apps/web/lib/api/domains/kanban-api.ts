@@ -67,6 +67,7 @@ export async function createTask(
     position?: number;
     repositories?: Array<{
       repository_id: string;
+      branch_policy_id?: string;
       base_branch?: string;
       checkout_branch?: string;
       pr_number?: number;
@@ -142,6 +143,9 @@ export async function updateTask(
     }>;
     /** Nest under another task. Empty string clears the parent (un-nest). */
     parent_id?: string;
+    /** Human assignee. "" unassigns; omitting the field leaves it alone. */
+    assignee_user_id?: string;
+    priority?: TaskPriority;
   },
   options?: ApiRequestOptions,
 ) {
@@ -211,12 +215,22 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type DeleteTaskParams = {
+  cascade?: boolean;
+  discardWorktreeChanges?: boolean;
+};
+
 export async function deleteTask(
   taskId: string,
-  params?: { cascade?: boolean },
+  params?: DeleteTaskParams,
   options?: ApiRequestOptions,
 ) {
-  const query = params?.cascade ? "?cascade=true" : "";
+  const queryParams = new URLSearchParams();
+  if (params?.cascade) queryParams.set("cascade", "true");
+  if (params?.discardWorktreeChanges) {
+    queryParams.set("discard_worktree_changes", "true");
+  }
+  const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
   return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },

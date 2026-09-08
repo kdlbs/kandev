@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/gitlab-mr-task-list-badges/spec.md
+spec: docs/specs/integrations/requirements/gitlab-mr-task-list-badges.md
 created: 2026-08-13
 status: draft
 ---

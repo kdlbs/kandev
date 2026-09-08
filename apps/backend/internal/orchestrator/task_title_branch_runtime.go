@@ -375,7 +375,7 @@ func (s *Service) performTitleBranchRename(
 	branch string,
 ) (string, error) {
 	suffix := titleBranchSuffix(executorType, task.ID)
-	newName, err := renderTitleBranchName(title, task, binding.repository, suffix)
+	newName, err := renderTitleBranchNameForTaskRepository(title, task, binding.repository, binding.taskRepository, suffix)
 	if err != nil {
 		return "", err
 	}

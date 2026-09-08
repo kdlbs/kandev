@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 01: Contain LSP Project Progress Text
@@ -49,7 +49,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/lsp-file-intelligence/spec.md`, especially the server-progress and responsive-surface scenarios.
+- `docs/specs/platform/requirements/lsp-file-intelligence.md`, especially the server-progress and responsive-surface scenarios.
 - Confirmed reproduction: a 320px content box rendered the representative progress message at `scrollWidth: 502px`; applying `overflow-wrap: anywhere` reduced it to `320px` without truncation.
 - Existing desktop progress and status-placement scenarios in `apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts`.
 - Existing tablet drawer geometry scenario in `apps/web/e2e/tests/lsp/mobile-lsp-file-intelligence.spec.ts`.

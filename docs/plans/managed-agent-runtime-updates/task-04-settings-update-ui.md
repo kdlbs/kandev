@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-backend-update-pipeline"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 role: implementer
 model_tier: default
 ---

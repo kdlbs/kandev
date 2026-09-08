@@ -20,7 +20,8 @@ import (
 
 // History entry type constants.
 const (
-	historyEntryTypeToolCall = "tool_call"
+	historyEntryTypeToolCall       = "tool_call"
+	resumeConversationMessageLimit = 50
 )
 
 // SessionHistoryManager stores and retrieves session history for context injection.
@@ -210,18 +211,21 @@ func (m *SessionHistoryManager) GenerateResumeContext(sessionID, newPrompt strin
 		return newPrompt, nil // No history to inject
 	}
 
-	// Format history as conversation context
+	conversation := selectResumeConversation(entries, resumeConversationMessageLimit)
+	if len(conversation) == 0 {
+		return newPrompt, nil
+	}
+
+	// Format history as conversation context. Tool activity and lifecycle
+	// events are deliberately filtered before the bounded window is selected;
+	// they must not displace conversation messages from fallback context.
 	var historyBuilder strings.Builder
-	for _, entry := range entries {
+	for _, entry := range conversation {
 		switch entry.Type {
 		case "user_message":
 			fmt.Fprintf(&historyBuilder, "\n[USER]: %s\n", truncateForContext(entry.Content, 2000))
 		case "agent_message":
 			fmt.Fprintf(&historyBuilder, "\n[ASSISTANT]: %s\n", truncateForContext(entry.Content, 2000))
-		case historyEntryTypeToolCall:
-			fmt.Fprintf(&historyBuilder, "\n[TOOL CALL: %s]\n", entry.ToolName)
-		case "tool_result":
-			fmt.Fprintf(&historyBuilder, "\n[TOOL RESULT: %s] %s\n", entry.ToolName, truncateForContext(entry.Content, 500))
 		}
 	}
 
@@ -252,6 +256,23 @@ Do not repeat work that was already completed. Build on the existing progress.
 		zap.Int("context_length", len(resumePrompt)))
 
 	return resumePrompt, nil
+}
+
+func selectResumeConversation(entries []HistoryEntry, limit int) []HistoryEntry {
+	if limit <= 0 {
+		return nil
+	}
+	conversation := make([]HistoryEntry, 0, min(limit, len(entries)))
+	for _, entry := range entries {
+		if (entry.Type != "user_message" && entry.Type != "agent_message") || strings.TrimSpace(entry.Content) == "" {
+			continue
+		}
+		conversation = append(conversation, entry)
+		if len(conversation) > limit {
+			conversation = conversation[1:]
+		}
+	}
+	return conversation
 }
 
 // HasHistory checks if a session has any stored history.

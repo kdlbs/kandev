@@ -22,7 +22,7 @@ func TestExternalMCP_ToolsListOverHTTP(t *testing.T) {
 	log := newTestLogger(t)
 
 	dispatcher := ws.NewDispatcher()
-	backendClient := NewDispatcherBackendClient(dispatcher, log)
+	backendClient := NewExternalDispatcherBackendClient(dispatcher, log)
 	srv := NewExternal(backendClient, log, "")
 
 	gin.SetMode(gin.TestMode)
@@ -62,6 +62,8 @@ func TestExternalMCP_ToolsListOverHTTP(t *testing.T) {
 	assert.Contains(t, names, "create_task_kandev", "external mode must expose create_task_kandev")
 	assert.Contains(t, names, "list_workspaces_kandev")
 	assert.Contains(t, names, "get_mcp_config_kandev")
+	assert.Contains(t, names, "list_pending_questions_kandev", "external mode must expose the external question-answering tools")
+	assert.Contains(t, names, "answer_question_kandev", "external mode must expose the external question-answering tools")
 	assert.NotContains(t, names, "ask_user_question_kandev", "external mode must not expose session-scoped tools")
 	assert.NotContains(t, names, "create_task_plan_kandev")
 }
@@ -81,7 +83,7 @@ func TestExternalMCP_ToolsCallDispatchesToBackend(t *testing.T) {
 		})
 	})
 
-	backendClient := NewDispatcherBackendClient(dispatcher, log)
+	backendClient := NewExternalDispatcherBackendClient(dispatcher, log)
 	srv := NewExternal(backendClient, log, "")
 
 	gin.SetMode(gin.TestMode)
@@ -108,6 +110,24 @@ func TestExternalMCP_ToolsCallDispatchesToBackend(t *testing.T) {
 	jsonLine := extractDataLine(resp.body)
 	require.NotEmpty(t, jsonLine)
 	assert.Contains(t, jsonLine, "ws-1")
+}
+
+func TestExternalMCPRoutesPreserveHTTPAndSSEPaths(t *testing.T) {
+	srv := NewExternal(nil, newTestLogger(t), "")
+	router := gin.New()
+	srv.RegisterBackendRoutes(router)
+
+	wants := map[string]bool{
+		"GET /mcp/sse":      true,
+		"POST /mcp/message": true,
+		"POST /mcp":         true,
+	}
+	for _, route := range router.Routes() {
+		delete(wants, route.Method+" "+route.Path)
+	}
+	if len(wants) != 0 {
+		t.Fatalf("missing external MCP routes: %v", wants)
+	}
 }
 
 type httpResp struct {

@@ -49,6 +49,7 @@ func (f *fakeStore) CreateRun(_ context.Context, req taskservice.CreateRunReques
 		WorkflowStepID: req.WorkflowStepID,
 		AgentID:        req.AgentID,
 		Model:          req.Model,
+		EntryID:        req.EntryID,
 		Status:         models.ReviewRunPending,
 	}
 	f.runs[run.ID] = run
@@ -60,6 +61,20 @@ func (f *fakeStore) ActiveRun(context.Context, string) (*models.TaskReviewRun, e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.active, nil
+}
+
+func (f *fakeStore) FindRunByEntryID(_ context.Context, entryID string) (*models.TaskReviewRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if entryID == "" {
+		return nil, nil
+	}
+	for _, run := range f.runs {
+		if run.EntryID == entryID {
+			return run, nil
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeStore) MarkRunRunning(_ context.Context, runID string) (*models.TaskReviewRun, error) {
@@ -506,6 +521,41 @@ func TestRunner_ReturnsExistingActiveRunInsteadOfDuplicating(t *testing.T) {
 	}
 	if h.inference.promptCount() != 0 {
 		t.Fatal("a duplicate request must not call the provider again")
+	}
+}
+
+// TestRunner_RedeliveryOfCompletedEntryDoesNotLaunchSecondRun covers
+// AC-OFFICE-STEP-ENTRY-001.10: a step-entry redelivery (after the first run
+// already completed, or after a restart cleared in-memory dedup state) must
+// rejoin the run already created for that entry rather than starting a
+// second one. The ActiveRun check alone cannot catch this because the first
+// run is no longer pending/running by the time the redelivery arrives.
+func TestRunner_RedeliveryOfCompletedEntryDoesNotLaunchSecondRun(t *testing.T) {
+	h := newRunnerHarness(t,
+		map[string]any{"a.go": fileEntry("a.go", "@@ -1 +1,2 @@\n x\n+y\n", "", "")},
+		[]string{okResponse("a.go", 2)},
+	)
+
+	first, err := h.runner.Run(context.Background(), RunRequest{TaskID: "task-1", EntryID: "entry-1"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.store.statusOf(first.ID); got != models.ReviewRunCompleted {
+		t.Fatalf("expected the first run to complete, got status %q", got)
+	}
+
+	second, err := h.runner.Run(context.Background(), RunRequest{TaskID: "task-1", EntryID: "entry-1"})
+	if err != nil {
+		t.Fatalf("Run (redelivery): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected the redelivery to rejoin run %q, got %q", first.ID, second.ID)
+	}
+	if got := h.store.runCount(); got != 1 {
+		t.Fatalf("expected exactly one run row, got %d", got)
+	}
+	if got := h.inference.promptCount(); got != 1 {
+		t.Fatalf("expected exactly one inference pass, got %d", got)
 	}
 }
 

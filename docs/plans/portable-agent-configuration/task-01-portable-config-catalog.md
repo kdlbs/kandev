@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/portable-agent-configuration/spec.md"
+spec: "../../specs/agents/requirements/portable-agent-configuration.md"
 ---
 
 # Task 01: Define portable configuration catalog

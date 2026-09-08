@@ -175,6 +175,8 @@ export type UpdateTaskPayload = {
   status?: string;
   comment?: string;
   assignee_agent_profile_id?: string;
+  /** The human assignee. "" unassigns; omitting the field leaves it alone. */
+  assignee_user_id?: string;
   priority?: string;
   project_id?: string;
   parent_id?: string;
@@ -625,8 +627,6 @@ export function getWorkspaceSettings(workspaceId: string, options?: ApiRequestOp
 export function updateWorkspaceSettings(
   workspaceId: string,
   data: {
-    name?: string;
-    description?: string;
     require_approval_for_new_agents?: boolean;
     require_approval_for_task_completion?: boolean;
     require_approval_for_skill_changes?: boolean;

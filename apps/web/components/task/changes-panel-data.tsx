@@ -137,7 +137,7 @@ export type ChangesPanelBodyProps = {
   onUnstage: (path: string, repo?: string) => Promise<void>;
   onBulkStage: (paths: string[]) => void;
   onBulkUnstage: (paths: string[]) => void;
-  onBulkDiscard: (paths: string[]) => void;
+  onBulkDiscard: (paths: string[], anchor?: HTMLElement) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;

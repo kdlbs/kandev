@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-centered-save-surface"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 02: Rendered desktop and mobile coverage
@@ -52,7 +52,7 @@ surface contract.
 
 ## Inputs
 
-- `docs/specs/ui/settings-manual-save.md` — centered surface, Reset, and mobile
+- `docs/specs/ui/requirements/settings-manual-save.md` — centered surface, Reset, and mobile
   scenarios.
 - `docs/plans/settings-save-action-redesign/plan.md` — E2E Tests and Mobile
   parity sections.

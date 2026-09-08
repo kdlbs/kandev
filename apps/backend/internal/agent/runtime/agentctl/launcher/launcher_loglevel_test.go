@@ -1,6 +1,12 @@
 package launcher
 
-import "testing"
+import (
+	"bytes"
+	stdlog "log"
+	"log/slog"
+	"strings"
+	"testing"
+)
 
 func TestChildLogLevel(t *testing.T) {
 	tests := []struct {
@@ -73,6 +79,98 @@ func TestChildLogLevel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := childLogLevel(tt.line); got != tt.want {
 				t.Fatalf("childLogLevel(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChildLogLevelSlogTextRecords(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  string
+	}{
+		{name: "debug", level: "DEBUG", want: "DEBUG"},
+		{name: "info", level: "INFO", want: "INFO"},
+		{name: "warn", level: "WARN", want: "WARN"},
+		{name: "error", level: "ERROR", want: "ERROR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := "time=2026-08-12T10:00:00.000Z level=" + tt.level +
+				" source=main.go:97 msg=\"agentctl record\""
+			if got := childLogLevel(line); got != tt.want {
+				t.Fatalf("childLogLevel(%q) = %q, want %q", line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChildLogLevelSlogDefaultRecords(t *testing.T) {
+	var output bytes.Buffer
+	originalWriter := stdlog.Writer()
+	originalFlags := stdlog.Flags()
+	stdlog.SetOutput(&output)
+	stdlog.SetFlags(stdlog.LstdFlags)
+	t.Cleanup(func() {
+		stdlog.SetOutput(originalWriter)
+		stdlog.SetFlags(originalFlags)
+	})
+
+	tests := []struct {
+		name  string
+		write func()
+		want  string
+	}{
+		{name: "info", write: func() { slog.Default().Info("agentctl record", "component", "acp-conn") }, want: "INFO"},
+		{name: "warn", write: func() { slog.Default().Warn("agentctl record", "component", "acp-conn") }, want: "WARN"},
+		{name: "error", write: func() { slog.Default().Error("agentctl record", "component", "acp-conn") }, want: "ERROR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output.Reset()
+			tt.write()
+			line := strings.TrimSpace(output.String())
+			if line == "" {
+				t.Fatal("slog.Default produced no output")
+			}
+			if got := childLogLevel(line); got != tt.want {
+				t.Fatalf("childLogLevel(%q) = %q, want %q", line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChildLogLevelRejectsMalformedSlogTextRecords(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "missing time anchor",
+			line: "level=INFO source=main.go:97 msg=\"agentctl record\"",
+		},
+		{
+			name: "missing level anchor",
+			line: "time=2026-08-12T10:00:00.000Z msg=\"level=INFO\"",
+		},
+		{
+			name: "missing message field",
+			line: "time=2026-08-12T10:00:00.000Z level=INFO source=main.go:97",
+		},
+		{
+			name: "level anchor is not second field",
+			line: "time=2026-08-12T10:00:00.000Z source=main.go:97 level=INFO msg=\"record\"",
+		},
+		{
+			name: "message-looking key is inside a quoted attribute",
+			line: `time=2026-08-12T10:00:00.000Z level=INFO attr="foo msg=bar" component=acp-conn`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := childLogLevel(tt.line); got != "" {
+				t.Fatalf("childLogLevel(%q) = %q, want no recognized level", tt.line, got)
 			}
 		})
 	}

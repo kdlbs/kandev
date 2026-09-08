@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["06-frontend-output-disclosure"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 07: Lazy Shell Output E2E Verification
@@ -38,7 +38,7 @@ make lint
 - `apps/web/e2e/tests/chat/tool-execute-output.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-tool-execute-output.spec.ts`
 - `apps/web/e2e/pages/session-page.ts` only if a reusable active-chat disclosure helper removes duplication
-- `docs/specs/ui/acp-shell-command-output.md` for status only, unless verification reveals a genuine contract correction
+- `docs/specs/ui/requirements/acp-shell-command-output.md` for status only, unless verification reveals a genuine contract correction
 - `docs/specs/INDEX.md` for matching status
 - `docs/plans/acp-shell-command-output/plan.md`
 - `docs/plans/acp-shell-command-output/task-07-lazy-output-e2e.md`

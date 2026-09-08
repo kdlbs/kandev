@@ -1,6 +1,6 @@
 // System pages — frontend types mirroring the
 // `apps/backend/internal/system/` HTTP surface (see
-// docs/specs/system-page/spec.md "Backend surface").
+// docs/specs/system-page/requirements/system-page.md "Backend surface").
 
 export interface SystemInfo {
   version: string;
@@ -36,6 +36,7 @@ export interface DiskUsageResponse {
 export interface DatabaseStats {
   driver: string;
   path: string;
+  backup_directory: string;
   size_bytes: number;
   wal_size_bytes: number;
   schema_version: string;
@@ -47,7 +48,6 @@ export type SnapshotKind = "auto" | "manual";
 
 export interface SnapshotInfo {
   name: string;
-  path: string;
   size_bytes: number;
   /** ISO timestamp. */
   mtime: string;
@@ -369,6 +369,50 @@ export interface StorageSummary {
   docker: StorageDockerSummary;
 }
 
+export type StorageSummaryPartial = {
+  workspaces?: StorageWorkspaceSummary | null;
+  go_cache?: StorageGoCacheSummary | null;
+  quarantine?: StorageQuarantineSummary | null;
+  temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
+  docker?: StorageDockerSummary | null;
+};
+
+export type StorageAnalysisStateName = "scanning" | "ready" | "failed";
+export type StorageSourceStateName = "pending" | "scanning" | "ready" | "failed";
+
+export interface StorageSourceProgress {
+  state: StorageSourceStateName;
+  completed_items: number;
+  total_items?: number;
+  bytes_scanned: number;
+  error?: string;
+}
+
+export interface StorageAnalysisProgress {
+  completed_sources: number;
+  total_sources: number;
+  sources: Record<string, StorageSourceProgress>;
+}
+
+export interface StorageAnalysisState {
+  generation: number;
+  state: StorageAnalysisStateName;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  cache_ttl_seconds: number;
+  refresh_due_at: string | null;
+  stale: boolean;
+  error: string | null;
+  progress: StorageAnalysisProgress;
+  partial_summary: StorageSummaryPartial | null;
+}
+
+export interface StorageAnalysisUpdatedPayload {
+  generation: number;
+  state: StorageAnalysisStateName;
+}
+
 export type StorageRunState =
   | "queued"
   | "running"
@@ -438,8 +482,9 @@ export interface StorageQuarantinePurgeResult {
 export interface StorageOverviewResponse {
   settings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
-  summary: StorageSummary;
-  analyzed_at: string;
+  summary: StorageSummary | null;
+  analyzed_at: string | null;
+  analysis: StorageAnalysisState;
   last_run: StorageMaintenanceRun | null;
 }
 

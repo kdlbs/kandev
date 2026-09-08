@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-attachment-storage-api"]
 plan: "plan.md"
-spec: "../../specs/tasks/prompt-attachments.md"
+spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ---
 
 # Task 02: Agent attachment delivery

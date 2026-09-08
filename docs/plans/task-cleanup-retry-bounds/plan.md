@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/runtime-cleanup.md
+spec: docs/specs/tasks/system-design/runtime-cleanup.md
 created: 2026-07-29
 status: implemented
 ---

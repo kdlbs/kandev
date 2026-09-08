@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 )
 
@@ -493,6 +494,47 @@ func TestComputeGuardOutcome_SlateEmpty(t *testing.T) {
 	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove})
 	if got.Satisfied || got.Reason != ReasonSlateEmpty {
 		t.Fatalf("expected slate_empty, got %+v", got)
+	}
+}
+
+func readQuorumSlateEmptyCounter(role string) int64 {
+	m := expvar.Get("workflow_quorum_slate_empty_total")
+	if m == nil {
+		return 0
+	}
+	kv := m.(*expvar.Map).Get(role)
+	if kv == nil {
+		return 0
+	}
+	iv, ok := kv.(*expvar.Int)
+	if !ok {
+		return 0
+	}
+	return iv.Value()
+}
+
+// TestComputeGuardOutcome_MalformedRoleSanitizesSlateEmptyCounterLabel covers
+// AC-OFFICE-REVIEW-SEATS-004.6/.11 on the slate_empty path: guard.Role is
+// operator-editable step config, and a value outside the fixed
+// ParticipantRole set must fold to the SeatRoleLabelInvalid sentinel on the
+// counter rather than growing its label cardinality with an arbitrary
+// string.
+func TestComputeGuardOutcome_MalformedRoleSanitizesSlateEmptyCounterLabel(t *testing.T) {
+	const malformedRole = "not-a-real-role"
+	eng := quorumEngine(newFakeDecisionStore(), scopedParticipants{})
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+
+	before := readQuorumSlateEmptyCounter(SeatRoleLabelInvalid)
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: malformedRole, Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonSlateEmpty {
+		t.Fatalf("expected slate_empty, got %+v", got)
+	}
+	after := readQuorumSlateEmptyCounter(SeatRoleLabelInvalid)
+	if after-before != 1 {
+		t.Fatalf("%s counter delta = %d, want 1", SeatRoleLabelInvalid, after-before)
+	}
+	if got := readQuorumSlateEmptyCounter(malformedRole); got != 0 {
+		t.Fatalf("expected no counter entry under the raw operator string %q, got %d", malformedRole, got)
 	}
 }
 

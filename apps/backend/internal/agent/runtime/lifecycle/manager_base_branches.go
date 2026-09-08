@@ -79,11 +79,13 @@ func (m *Manager) PushBaseBranchesForTask(ctx context.Context, taskID string, br
 		if exec.TaskID != taskID {
 			continue
 		}
-		client := exec.GetAgentCtlClient()
+		client, releaseClient := exec.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
-		if err := client.SetBaseBranches(ctx, branches); err != nil {
+		err := client.SetBaseBranches(ctx, branches)
+		releaseClient()
+		if err != nil {
 			m.logger.Warn("failed to push base branches to agentctl",
 				zap.String("task_id", taskID),
 				zap.String("execution_id", exec.ID),

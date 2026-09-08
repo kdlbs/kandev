@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-launcher-configuration-consumption"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 03: Backend security and lifecycle settings

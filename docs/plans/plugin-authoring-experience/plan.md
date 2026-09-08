@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/authoring-experience.md
+spec: docs/specs/plugins/requirements/authoring-experience.md
 created: 2026-08-02
 status: complete
 ---

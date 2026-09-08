@@ -82,7 +82,7 @@ The first-transition-wins, idempotent-by-`OperationID`, `EvaluateOnly`-mode cont
 
 Two entry paths:
 
-- **Engine-emitted runs** — every `queue_run` action lands here. Coalescing (5s window for same agent + reason), per-agent serialisation (one claimed run per agent), idempotency (24h dedup window), cooldown (per-agent), and atomic task checkout (one agent per task at a time) all apply. The scheduler claims runs and dispatches via `runtime.Launch`.
+- **Engine-emitted runs** — every `queue_run` action lands here. Coalescing (5s window for same agent + reason), per-agent serialisation (one claimed run per agent), idempotency (a 24h lookup plus a durable unique key), cooldown (per-agent), and atomic task checkout (one agent per task at a time) all apply. The scheduler claims runs and dispatches via `runtime.Launch`.
 - **User-initiated launches** — a user clicking Start on a kanban task bypasses the queue and calls `runtime.Launch` directly. The queue's coalescing isn't appropriate when latency matters and the user explicitly chose timing.
 
 `run_events` (the audit log we already have) keeps its current shape. Per-run streaming via `office.run.event_appended.<run_id>` works unchanged. The WS event subjects (`office.run.queued`, `office.run.processed`, `office.run.event_appended.*`) keep the `office.` prefix for now to preserve frontend stability — they're string constants we can rename later if we want.
@@ -296,11 +296,10 @@ We chose #2 in Wave 8. The deviation from the original ADR is documented inline 
 ## References
 
 - Conversation thread on 2026-05-04/05 working through the design.
-- `docs/specs/task-model-unification/spec.md` — feature spec (the user-visible changes).
-- `docs/specs/task-model-unification/plan.md` — phased implementation plan.
+- `docs/specs/tasks/requirements/model-unification.md` — feature requirements (the user-visible changes).
 - ADR 0003 — `executors_running` as the single source of truth for execution identity. Continues into this ADR's `agent_executions` rename inside the runtime package.
-- `docs/specs/office-overview/spec.md` — original office product framing; this ADR re-expresses its goals in workflow terms.
-- `docs/specs/office-task-session-lifecycle/spec.md` — IDLE-between-turns model that this ADR formalises into `current_execution_id` on `task_sessions`.
-- `docs/specs/office-scheduler/spec.md` — the wakeup queue mechanics this ADR preserves verbatim under the new `runs` name.
-- `docs/specs/office-routines/spec.md` — routines feed the engine via task creation; no behavioural change.
+- `docs/specs/office/requirements/overview.md` — original Office product framing; this ADR re-expresses its goals in workflow terms.
+- `docs/specs/office/system-design/tasks-01.md` — task and agent session lifecycle that this ADR formalises into `current_execution_id` on `task_sessions`.
+- `docs/specs/office/requirements/scheduler.md` — the wakeup queue mechanics this ADR preserves under the new `runs` name.
+- Office automation requirements — routines feed the engine via task creation; no behavioural change.
 - `apps/backend/internal/workflow/engine/` — the engine being generalised.

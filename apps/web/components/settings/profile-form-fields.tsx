@@ -338,7 +338,7 @@ function CapabilitiesRowContent({
     <div className={gapCls}>
       <div className="flex items-end gap-2" data-testid="profile-capabilities-model-row">
         <div
-          className={`flex-1 min-w-0 ${gapCls}`}
+          className={`${hasModes ? "flex-1" : "w-full md:max-w-xl"} min-w-0 ${gapCls}`}
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >

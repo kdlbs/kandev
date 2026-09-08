@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-workspace-content-search.md
+spec: docs/specs/ui/requirements/task-workspace-content-search.md
 created: 2026-08-14
 status: done
 ---

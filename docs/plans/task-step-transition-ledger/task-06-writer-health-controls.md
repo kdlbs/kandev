@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["04-ledger-writer-chokepoints", "05-caller-attribution-wiring"]
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 06: Writer health controls

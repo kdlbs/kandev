@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/cancel-turn-progress.md
+spec: docs/specs/ui/requirements/cancel-turn-progress.md
 created: 2026-08-03
 status: completed
 ---

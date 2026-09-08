@@ -215,7 +215,7 @@ type CommandOptions struct {
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
 	// ManagedRuntimeVersion is an internal exact version override for trusted
-	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
 }
 
@@ -275,6 +275,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// NamespacesMCPToolsByServer is true for clients that add the MCP server
+	// name to every tool before presenting it to the model. The per-instance
+	// Kandev MCP server removes that presentation suffix before the client adds
+	// it back, so the model sees the canonical tool name.
+	NamespacesMCPToolsByServer bool
 }
 
 // MountTemplate defines a mount with template variables.
@@ -455,6 +460,14 @@ type RemoteAuth struct {
 	Methods []RemoteAuthMethod `json:"methods"`
 }
 
+// RemoteAuthFileConflictPolicy defines how a credential transfer handles an existing target.
+type RemoteAuthFileConflictPolicy string
+
+const (
+	// RemoteAuthFileConflictPolicyMergeJSONObject preserves target-only keys and replaces collisions with source values.
+	RemoteAuthFileConflictPolicyMergeJSONObject RemoteAuthFileConflictPolicy = "merge_json_object"
+)
+
 // RemoteAuthMethod describes one way an agent can authenticate in a remote environment.
 type RemoteAuthMethod struct {
 	// Type is "env" (set env var via secret) or "files" (copy local files to remote).
@@ -470,6 +483,9 @@ type RemoteAuthMethod struct {
 	TargetRelDir string `json:"target_rel_dir,omitempty"`
 	// Label is a UI label for the file copy option (for type="files").
 	Label string `json:"label,omitempty"`
+	// FileConflictPolicy controls how an existing target file is handled. It is
+	// an internal transfer contract and is not part of the remote-auth API.
+	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

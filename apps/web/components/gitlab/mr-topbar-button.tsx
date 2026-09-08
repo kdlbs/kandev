@@ -192,7 +192,6 @@ function MRMenuTriggerButton({
 function MRDropdownList({
   taskId,
   mrs,
-  single,
   canLink,
   onOpenReview,
   onUnlink,
@@ -200,7 +199,6 @@ function MRDropdownList({
 }: {
   taskId: string;
   mrs: TaskMR[];
-  single: TaskMR | null;
   canLink: boolean;
   onOpenReview: (mr: TaskMR) => void;
   onUnlink: (associationId: string) => void;
@@ -230,10 +228,12 @@ function MRDropdownList({
             {t("gitlab:unlink")}
             {mr.mr_iid}
           </DropdownMenuItem>
+          {/* The automation switches are per-MR, so each linked MR gets its
+              own group here rather than one shared group for the task. */}
+          <DropdownMenuSeparator />
+          <MRAutomationControls taskId={taskId} mr={mr} />
         </div>
       ))}
-      <DropdownMenuSeparator />
-      <MRAutomationControls taskId={taskId} mr={single ?? undefined} />
       {canLink ? (
         <>
           <DropdownMenuSeparator />
@@ -381,7 +381,6 @@ function MRMenuButton({
       <MRDropdownList
         taskId={taskId}
         mrs={mrs}
-        single={single}
         canLink={canLink}
         onOpenReview={openReview}
         onUnlink={onUnlink}

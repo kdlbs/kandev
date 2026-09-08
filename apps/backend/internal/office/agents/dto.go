@@ -50,14 +50,53 @@ type UpdateAgentStatusRequest struct {
 	PauseReason string `json:"pause_reason"`
 }
 
+// agentResponseBody wraps a models.AgentInstance for API responses,
+// shadowing the shared struct's "model" key so it can be omitted for
+// Office identities (role != ""). Embedding rather than hand-mirroring
+// the 43 JSON-tagged fields on the shared struct keeps this DTO in
+// sync automatically as that struct grows; a *string shadow field
+// (not string) is required because the embedded struct's Model field
+// has no `omitempty` — a plain string would drop the "model" key
+// entirely for role=="" rows too, which AC-13 requires unchanged.
+type agentResponseBody struct {
+	*models.AgentInstance
+	Model *string `json:"model,omitempty"`
+}
+
+// newAgentResponseBody wraps agent for an API response. Model is set
+// (and so emitted) only for role=="" rows (execution profiles); nil —
+// omitted from JSON — for Office identities. A nil agent stays nil so
+// callers serialise "agent": null exactly as before, never a
+// zero-valued {} DTO.
+func newAgentResponseBody(agent *models.AgentInstance) *agentResponseBody {
+	if agent == nil {
+		return nil
+	}
+	body := &agentResponseBody{AgentInstance: agent}
+	if agent.Role == "" {
+		m := agent.Model
+		body.Model = &m
+	}
+	return body
+}
+
+// newAgentResponseBodies wraps a slice of agents for a list response.
+func newAgentResponseBodies(agents []*models.AgentInstance) []*agentResponseBody {
+	out := make([]*agentResponseBody, len(agents))
+	for i, a := range agents {
+		out[i] = newAgentResponseBody(a)
+	}
+	return out
+}
+
 // AgentResponse wraps a single agent instance.
 type AgentResponse struct {
-	Agent *models.AgentInstance `json:"agent"`
+	Agent *agentResponseBody `json:"agent"`
 }
 
 // AgentListResponse wraps a list of agent instances.
 type AgentListResponse struct {
-	Agents []*models.AgentInstance `json:"agents"`
+	Agents []*agentResponseBody `json:"agents"`
 }
 
 // UpsertMemoryRequest is the request body for creating/updating agent memory.

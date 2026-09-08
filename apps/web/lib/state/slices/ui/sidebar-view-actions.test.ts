@@ -17,6 +17,19 @@ type UIStore = UseBoundStore<StoreApi<UISlice>>;
 
 const CREATE_FAILED = "create failed";
 const RENAME_FAILED = "rename failed";
+const DRAFT_WRITE_FAILED = "draft write failed";
+
+type SettingsResponse = Awaited<ReturnType<typeof updateUserSettings>>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
 
 function makeStore(): UIStore {
   return create<UISlice>()(
@@ -87,6 +100,12 @@ describe("createSidebarView semantics", () => {
       sort: { key: "state", direction: "asc" },
       group: "repository",
       collapsedGroups: [],
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
     expect(sidebar.activeViewId).toBe(createdId);
     expect(sidebar.draft).toBeNull();
@@ -241,5 +260,83 @@ describe("createSidebarView failure isolation", () => {
     );
     expect(failedStore.getState().sidebarViews.views).toHaveLength(1);
     expect(successfulStore.getState().sidebarViews.views).toHaveLength(2);
+  });
+});
+
+describe("sidebar draft write failure isolation", () => {
+  it("restores the confirmed draft after a task-row write fails", async () => {
+    const store = makeStore();
+    seedSidebar(store, [makeView("all", "All tasks")]);
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+
+    store.getState().updateSidebarDraft({
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "none",
+      },
+    });
+
+    expect(store.getState().sidebarViews.draft).not.toBeNull();
+    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(DRAFT_WRITE_FAILED));
+    expect(store.getState().sidebarViews.draft).toBeNull();
+  });
+});
+
+describe("sidebar write ordering", () => {
+  it("keeps a queued successful save after an earlier draft failure", async () => {
+    const store = makeStore();
+    seedSidebar(store, [makeView("all", "All tasks")]);
+    const draftResponse = deferred<SettingsResponse>();
+    const saveResponse = deferred<SettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementationOnce(() => draftResponse.promise)
+      .mockImplementationOnce(() => saveResponse.promise);
+
+    store.getState().updateSidebarDraft({
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "none",
+      },
+    });
+    store.getState().saveSidebarDraftOverwrite();
+
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    draftResponse.reject(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
+
+    saveResponse.resolve({ settings: {} } as SettingsResponse);
+    await waitFor(() => {
+      expect(store.getState().sidebarViews.draft).toBeNull();
+      expect(store.getState().sidebarViews.views[0]?.taskRow?.detailsEnabled).toBe(false);
+    });
+  });
+
+  it("does not resurrect a failed create when its queued draft also fails", async () => {
+    const store = makeStore();
+    const original = makeView("all", "All tasks");
+    seedSidebar(store, [original]);
+    const createResponse = deferred<SettingsResponse>();
+    const draftResponse = deferred<SettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementationOnce(() => createResponse.promise)
+      .mockImplementationOnce(() => draftResponse.promise);
+
+    const createdId = store.getState().createSidebarView();
+    expect(createdId).not.toBeNull();
+    store.getState().updateSidebarDraft({ group: "state" });
+
+    createResponse.reject(new ApiError(CREATE_FAILED, 500, {}));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
+    draftResponse.reject(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+
+    await waitFor(() => {
+      expect(store.getState().sidebarViews.views).toEqual([original]);
+      expect(store.getState().sidebarViews.activeViewId).toBe(original.id);
+      expect(store.getState().sidebarViews.draft).toBeNull();
+    });
   });
 });

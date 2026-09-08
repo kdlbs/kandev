@@ -34,6 +34,28 @@ func (c *Controller) PreviewAgentUpdate(
 	name string,
 	targetVersions ...string,
 ) (*dto.AgentUpdatePreviewDTO, error) {
+	target := ""
+	if len(targetVersions) > 0 {
+		target = strings.TrimSpace(targetVersions[0])
+	}
+	return c.previewAgentUpdate(ctx, name, target, false)
+}
+
+// PreviewAgentUpdateUseDefault previews returning to the reviewed Kandev
+// default without claiming maintenance state or running a candidate.
+func (c *Controller) PreviewAgentUpdateUseDefault(
+	ctx context.Context,
+	name string,
+) (*dto.AgentUpdatePreviewDTO, error) {
+	return c.previewAgentUpdate(ctx, name, "", true)
+}
+
+func (c *Controller) previewAgentUpdate(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	useDefault bool,
+) (*dto.AgentUpdatePreviewDTO, error) {
 	if c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
 	}
@@ -54,30 +76,34 @@ func (c *Controller) PreviewAgentUpdate(
 	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
 		current = caps.AgentVersion
 	}
-	active, err := c.activeRuntimeVersion(ctx, name, spec.Package)
+	active, effective, defaultVersion, err := c.runtimeVersions(ctx, name, spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(ctx, spec.Package, active, current)
+	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(
+		ctx, spec.Package, active, current, effective, defaultVersion,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	target := catalogue.Latest
-	if len(targetVersions) > 0 && strings.TrimSpace(targetVersions[0]) != "" {
-		target = strings.TrimSpace(targetVersions[0])
-		if _, err := managedruntime.ParseStableVersion(target); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
-		}
-		if exactCatalogue && !catalogue.Has(target) {
-			return nil, fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, target)
-		}
+	target, err := resolvePreviewTarget(
+		catalogue,
+		exactCatalogue,
+		targetVersion,
+		defaultVersion,
+		useDefault,
+	)
+	if err != nil {
+		return nil, err
 	}
-	operation, err := managedruntime.ClassifyOperation(active, current, target)
+	operation, err := managedruntime.ClassifyEffectiveOperation(
+		useDefault, active, effective, current, target, defaultVersion,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
 	}
 	command := spec.CacheUpdateCommand(target).Args()
-	if !exactCatalogue && (len(targetVersions) == 0 || strings.TrimSpace(targetVersions[0]) == "") {
+	if !exactCatalogue && targetVersion == "" && !useDefault {
 		// Keep the compatibility preview for embedders that provide only the
 		// legacy latest-version seam. Production uses the catalogue resolver and
 		// always previews an exact package@version command.
@@ -87,13 +113,40 @@ func (c *Controller) PreviewAgentUpdate(
 		AgentName:         name,
 		Package:           spec.Package,
 		CurrentVersion:    current,
+		DefaultVersion:    defaultVersion,
 		ActiveVersion:     active,
+		EffectiveVersion:  effective,
 		TargetVersion:     target,
 		Operation:         string(operation),
 		AvailableVersions: runtimeVersionDTOs(catalogue),
 		Command:           command,
 		CommandString:     buildCommandString(command),
 	}, nil
+}
+
+func resolvePreviewTarget(
+	catalogue managedruntime.Catalogue,
+	exactCatalogue bool,
+	targetVersion string,
+	defaultVersion string,
+	useDefault bool,
+) (string, error) {
+	target := catalogue.Latest
+	switch {
+	case useDefault:
+		target = defaultVersion
+	case targetVersion != "":
+		target = targetVersion
+	default:
+		return target, nil
+	}
+	if _, err := managedruntime.ParseStableVersion(target); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
+	}
+	if exactCatalogue && !catalogue.Has(target) {
+		return "", fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, target)
+	}
+	return target, nil
 }
 
 func (c *Controller) resolveRuntimeCatalogue(
@@ -146,6 +199,23 @@ func (c *Controller) activeRuntimeVersion(
 	return selection.Version, nil
 }
 
+func (c *Controller) runtimeVersions(
+	ctx context.Context,
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+) (active, effective, defaultVersion string, err error) {
+	defaultVersion = spec.DefaultVersionOrPinned()
+	active, err = c.activeRuntimeVersion(ctx, agentName, spec.Package)
+	if err != nil {
+		return "", "", defaultVersion, err
+	}
+	effective = defaultVersion
+	if active != "" {
+		effective = active
+	}
+	return active, effective, defaultVersion, nil
+}
+
 // RuntimeUpdater is the external-process and host-probe boundary used by
 // managed runtime jobs. Implementations must execute commands as direct argv.
 type RuntimeUpdater interface {
@@ -165,6 +235,11 @@ type RuntimeUpdater interface {
 type RuntimeVersionMetadata struct {
 	Versions []string
 	Latest   string
+}
+
+type npmRuntimeMetadata struct {
+	Versions []string          `json:"versions"`
+	DistTags map[string]string `json:"dist-tags"`
 }
 
 // RuntimeVersionResolver obtains package metadata without executing a package.
@@ -267,12 +342,9 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 	if err != nil {
 		return RuntimeVersionMetadata{}, err
 	}
-	var metadata struct {
-		Versions []string          `json:"versions"`
-		DistTags map[string]string `json:"dist-tags"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &metadata); err != nil {
-		return RuntimeVersionMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	metadata, err := parseNPMRuntimeMetadata(output)
+	if err != nil {
+		return RuntimeVersionMetadata{}, err
 	}
 	latest := ""
 	if metadata.DistTags != nil {
@@ -282,6 +354,26 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 		return RuntimeVersionMetadata{}, errors.New("npm latest runtime version is empty")
 	}
 	return RuntimeVersionMetadata{Versions: metadata.Versions, Latest: latest}, nil
+}
+
+func parseNPMRuntimeMetadata(output string) (npmRuntimeMetadata, error) {
+	payload := []byte(strings.TrimSpace(output))
+	if len(payload) > 0 && payload[0] == '[' {
+		var records []npmRuntimeMetadata
+		if err := json.Unmarshal(payload, &records); err != nil {
+			return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+		}
+		if len(records) != 1 {
+			return npmRuntimeMetadata{}, errors.New("parse npm runtime metadata: expected one record")
+		}
+		return records[0], nil
+	}
+
+	var metadata npmRuntimeMetadata
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	}
+	return metadata, nil
 }
 
 func runDirectCommandOutput(ctx context.Context, command agents.Command) (string, error) {
@@ -323,7 +415,11 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packa
 	if err != nil {
 		return err
 	}
-	return managedruntime.RemoveNpxExecutionTree(cacheRoot, packageName)
+	// Cache repair must target the same exact package spec used by the managed
+	// launch command. Known built-ins therefore invalidate their pinned tree,
+	// while unknown packages retain the unversioned compatibility path.
+	spec := agents.ManagedNPMRuntimeSpec{Package: packageName}
+	return managedruntime.RemoveNpxExecutionTree(cacheRoot, spec.PackageSpec(""))
 }
 
 func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
@@ -430,6 +526,25 @@ func (c *Controller) EnqueueAgentUpdate(
 	name string,
 	targetVersion string,
 ) (*dto.AgentUpdateJobDTO, error) {
+	return c.enqueueAgentUpdate(ctx, name, strings.TrimSpace(targetVersion), false)
+}
+
+// EnqueueAgentUpdateUseDefault validates and activates the reviewed Kandev
+// default, deleting an operator selection only after the candidate probe
+// succeeds.
+func (c *Controller) EnqueueAgentUpdateUseDefault(
+	ctx context.Context,
+	name string,
+) (*dto.AgentUpdateJobDTO, error) {
+	return c.enqueueAgentUpdate(ctx, name, "", true)
+}
+
+func (c *Controller) enqueueAgentUpdate(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	useDefault bool,
+) (*dto.AgentUpdateJobDTO, error) {
 	if c.updateJobStore == nil || c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
 	}
@@ -448,6 +563,9 @@ func (c *Controller) EnqueueAgentUpdate(
 	if strings.TrimSpace(spec.Package) == "" {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
+	if useDefault {
+		targetVersion = spec.DefaultVersionOrPinned()
+	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {
 		return nil, ErrRuntimeUpdateTargetRequired
@@ -455,10 +573,18 @@ func (c *Controller) EnqueueAgentUpdate(
 	if err := c.validateAgentUpdateTarget(ctx, spec, targetVersion); err != nil {
 		return nil, err
 	}
-	if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
-		return noOp, nil
+	if !useDefault {
+		if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
+			return noOp, nil
+		}
 	}
-	job, err := c.updateJobStore.Enqueue(name, spec, targetVersion)
+	var job *AgentUpdateJob
+	var err error
+	if useDefault {
+		job, err = c.updateJobStore.EnqueueDefault(name, spec)
+	} else {
+		job, err = c.updateJobStore.Enqueue(name, spec, targetVersion)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -515,16 +641,19 @@ func (c *Controller) alreadyActiveHealthyUpdate(
 		return nil
 	}
 	now := time.Now().UTC()
+	defaultVersion := spec.DefaultVersionOrPinned()
 	return &dto.AgentUpdateJobDTO{
-		AgentName:      agentName,
-		Status:         dto.AgentUpdateJobStatusSucceeded,
-		Operation:      string(managedruntime.OperationUpToDate),
-		CurrentVersion: caps.AgentVersion,
-		ActiveVersion:  selection.Version,
-		TargetVersion:  targetVersion,
-		Output:         "Runtime already up to date.\n",
-		StartedAt:      now,
-		FinishedAt:     &now,
+		AgentName:        agentName,
+		Status:           dto.AgentUpdateJobStatusSucceeded,
+		Operation:        string(managedruntime.OperationUpToDate),
+		CurrentVersion:   caps.AgentVersion,
+		DefaultVersion:   defaultVersion,
+		ActiveVersion:    selection.Version,
+		EffectiveVersion: selection.Version,
+		TargetVersion:    targetVersion,
+		Output:           "Runtime already up to date.\n",
+		StartedAt:        now,
+		FinishedAt:       &now,
 	}
 }
 

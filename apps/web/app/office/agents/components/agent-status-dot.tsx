@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { useAppStore } from "@/components/state-provider";
 import type { AgentStatus } from "@/lib/state/slices/office/types";
 
@@ -26,8 +27,9 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
   // identifier rather than copy — translating it would invent a label the rest
   // of the app never shows.
   const label = metaStatus?.label ?? status;
+  const Dot = status === "working" ? CompositorPulse : "span";
   return (
-    <span
+    <Dot
       className={cn("inline-block h-2 w-2 rounded-full shrink-0", colorClass, className)}
       title={label}
     />

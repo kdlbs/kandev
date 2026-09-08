@@ -12,7 +12,35 @@ Kandev combines a Go server and native launcher, a Vite/React web client, a Type
 1. Run `make bootstrap` once in a fresh checkout.
 2. Use `make dev` for normal full-stack work.
 3. Find the owning backend, web, CLI, desktop, or runtime boundary before editing.
-4. Run focused checks, update public docs, and leave a small reviewable diff.
+4. Open an issue before a large architectural change and discuss its direction
+   with maintainers before opening a PR.
+5. Keep one logical change in a small PR. Split unrelated work.
+6. Run focused checks, update public docs, and leave a small reviewable diff.
+
+## Contribution language
+
+Use English for issues, PRs, documentation, specifications, plans, code
+comments, and review discussion. Product localization values can use their
+target language. Keep the surrounding explanation in English.
+
+## Discuss large architectural changes first
+
+Open an issue before you implement or submit a large architectural change. This
+includes a new subsystem, a public API or protocol change, a persistence or
+data-model change, a new execution boundary, an authentication or
+permission-model change, or a cross-cutting change across subsystems.
+
+Describe the problem, proposed direction, affected boundaries, alternatives,
+and migration or compatibility risks in the issue. Wait until maintainers have
+discussed the direction before opening the PR. Link the issue from the PR.
+An agent must stop and report missing discussion instead of opening the PR.
+
+## Keep PRs small
+
+Prefer one logical change and the smallest practical diff. Split unrelated
+cleanup, refactoring, documentation, and feature work into separate PRs.
+Smaller PRs reduce the risk surface, make review easier, and reduce maintainer
+burden.
 
 ## Set up the repository
 
@@ -99,6 +127,9 @@ The complete source and Landing build contract is in the [public docs contributi
 ## Review checklist
 
 - The change has one clear user impact and owning subsystem.
+- Large architectural changes have a linked issue with maintainer discussion
+  before the PR opens.
+- The PR contains one logical change and the smallest practical diff.
 - Wire changes update Go DTOs, TypeScript types/clients, compatibility behavior, and protocol docs together.
 - Persistence changes include fresh-schema and upgrade-path tests.
 - Credentials, external text, shell arguments, URLs, paths, and logs respect their trust boundary.

@@ -109,15 +109,25 @@ export async function markSessionRead(
   });
 }
 
+/** Lists session messages with optional prompt filtering and around-window lookup. */
 export async function listTaskSessionMessages(
   taskSessionId: string,
-  params?: { limit?: number; before?: string; after?: string; sort?: "asc" | "desc" },
+  params?: {
+    limit?: number;
+    before?: string;
+    after?: string;
+    around?: string;
+    author_type?: "user";
+    sort?: "asc" | "desc";
+  },
   options?: ApiRequestOptions,
 ) {
   const query = new URLSearchParams();
-  if (params?.limit) query.set("limit", params.limit.toString());
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
   if (params?.before) query.set("before", params.before);
   if (params?.after) query.set("after", params.after);
+  if (params?.around) query.set("around", params.around);
+  if (params?.author_type) query.set("author_type", params.author_type);
   if (params?.sort) query.set("sort", params.sort);
   const suffix = query.toString();
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ""}`;

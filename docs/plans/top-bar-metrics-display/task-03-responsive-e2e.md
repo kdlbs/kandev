@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-persist-preference", "02-settings-and-rendering"]
 plan: "plan.md"
-spec: "../../specs/ui/app-status-bar.md"
+spec: "../../specs/ui/requirements/app-status-bar.md"
 ---
 
 # Task 03: Prove desktop and mobile flows

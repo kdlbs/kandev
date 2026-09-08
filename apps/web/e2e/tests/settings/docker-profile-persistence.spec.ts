@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { setStoreRole } from "../../helpers/session-store";
 
 /**
  * Regression test for the Docker executor profile UI persisting Dockerfile
@@ -203,5 +204,74 @@ test.describe("Docker executor profile persistence", () => {
     } finally {
       await apiClient.deleteExecutor(exec.id).catch(() => {});
     }
+  });
+
+  test("user namespace support persists through Save and reload", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const exec = await apiClient.createExecutor("e2e-userns-persistence", "local_docker");
+    const profile = await apiClient.createExecutorProfile(exec.id, {
+      name: "userns",
+      config: { image_tag: "kandev-agent:e2e" },
+    });
+    await testPage.route("**/api/v1/docker/containers?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"containers":[]}',
+      });
+    });
+
+    try {
+      await testPage.goto(`/settings/executors/${profile.id}`);
+      const toggle = testPage.getByRole("switch", { name: "User namespace support" });
+      await expect(toggle).not.toBeChecked();
+
+      await toggle.click();
+      await testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" })
+        .click();
+      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect
+        .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
+        .toMatchObject({ allow_user_namespaces: "true" });
+
+      await testPage.reload();
+      await expect(toggle).toBeChecked();
+
+      await toggle.click();
+      await testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" })
+        .click();
+      await expect
+        .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
+        .not.toHaveProperty("allow_user_namespaces");
+    } finally {
+      await apiClient.deleteExecutor(exec.id).catch(() => {});
+    }
+  });
+
+  /**
+   * POST /api/v1/docker/build is admin-gated on the backend, so a member must
+   * not be shown an enabled control that can only end in a 403. Auth is
+   * disabled in e2e, which leaves the role undefined and the button enabled,
+   * so the member identity is injected through the store bridge the same way
+   * the message-queue settings spec does.
+   */
+  test("member sees the build control disabled with an explanation", async ({ testPage }) => {
+    await testPage.goto("/settings/executors/new/local_docker");
+    await expect(testPage.locator("#profile-name")).toHaveValue("Docker", { timeout: 10_000 });
+    await testPage.getByRole("button", { name: "Use defaults" }).click();
+
+    const buildButton = testPage.getByRole("button", { name: "Build Image" });
+    await expect(buildButton).toBeEnabled();
+
+    await setStoreRole(testPage, "member");
+
+    await expect(buildButton).toBeDisabled();
+    await expect(testPage.getByText("Only administrators can build images.")).toBeVisible();
   });
 });

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/entity-reference-composer.md
+spec: docs/specs/ui/requirements/entity-reference-composer.md
 created: 2026-08-17
 status: completed
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-scoped-secret-storage", "02-repository-secret-bindings"]
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 03: Resolve Multi-Source Task Environments

@@ -15,9 +15,15 @@ import (
 )
 
 const (
+	// RootRepositoryKey identifies the root repository in summary rebuilds when
+	// a snapshot has no repository_name metadata. It is intentionally stable
+	// across sessions and process restarts.
+	RootRepositoryKey = "default"
+
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
 	MaxActiveErrorPreviewBytes  = 512
+	MaxActiveErrorDetailsBytes  = 4096
 	maxSessionIDBytes           = 256
 	maxTaskRepositoryIDBytes    = 256
 	maxPendingActionBytes       = 128
@@ -59,6 +65,7 @@ type ActiveErrorSummary struct {
 	Stamp            string    `json:"stamp"`
 	OccurredAt       time.Time `json:"occurred_at"`
 	Preview          string    `json:"preview"`
+	Details          string    `json:"details,omitempty"`
 	Category         string    `json:"category,omitempty"`
 	RecoveryActions  []string  `json:"recovery_actions,omitempty"`
 }
@@ -78,13 +85,15 @@ type GitSummary struct {
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count          int    `json:"count,omitempty"`
-	OpenCount      int    `json:"open_count,omitempty"`
-	Attention      bool   `json:"attention,omitempty"`
-	AggregateState string `json:"aggregate_state,omitempty"`
-	State          string `json:"state,omitempty"`
-	Number         int    `json:"number,omitempty"`
-	URL            string `json:"url,omitempty"`
+	Count            int    `json:"count,omitempty"`
+	OpenCount        int    `json:"open_count,omitempty"`
+	Attention        bool   `json:"attention,omitempty"`
+	AutoFixEnabled   bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled bool   `json:"auto_merge_enabled,omitempty"`
+	AggregateState   string `json:"aggregate_state,omitempty"`
+	State            string `json:"state,omitempty"`
+	Number           int    `json:"number,omitempty"`
+	URL              string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -149,6 +158,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
 		{"active error stamp", activeError.Stamp, maxActiveErrorStampBytes},
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
+		{"active error details", activeError.Details, MaxActiveErrorDetailsBytes},
 		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
 	}
 	for _, field := range fields {
@@ -159,7 +169,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	if len(activeError.RecoveryActions) > 3 {
 		return fmt.Errorf("active error has more than three recovery actions")
 	}
-	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActions(activeError.RecoveryActions)) {
+	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActionsForCategory(activeError.Category, activeError.RecoveryActions)) {
 		return fmt.Errorf("active error has unknown or duplicate recovery actions")
 	}
 	return nil

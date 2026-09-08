@@ -42,6 +42,32 @@ async function expectDiffText(testPage: Page, text: string, timeout = 45_000) {
   );
 }
 
+async function expectDiffTextAbsent(testPage: Page, text: string, timeout = 10_000) {
+  await expect
+    .poll(
+      () =>
+        testPage.evaluate((searchText: string) => {
+          const visibleContainers = Array.from(document.querySelectorAll("diffs-container")).filter(
+            (container) => {
+              const bounds = container.getBoundingClientRect();
+              const style = window.getComputedStyle(container);
+              return (
+                bounds.width > 0 &&
+                bounds.height > 0 &&
+                style.display !== "none" &&
+                style.visibility !== "hidden"
+              );
+            },
+          );
+          return visibleContainers.every(
+            (container) => !container.shadowRoot?.textContent?.includes(searchText),
+          );
+        }, text),
+      { timeout },
+    )
+    .toBe(true);
+}
+
 test.describe("Mobile changes panel", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
@@ -179,6 +205,74 @@ test.describe("Mobile changes panel", () => {
     await expect(testPage.getByText("File Changes")).toBeVisible({ timeout: 10_000 });
     await expectDiffText(testPage, "STAGED_ONLY_MARKER");
     await testPage.getByTestId("mobile-diff-sheet-close").tap();
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.12
+  test("shows same path in staged and unstaged sections", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile Mixed Change",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.createFile("mobile-mixed-layer.txt", "base\n");
+    git.stageFile("mobile-mixed-layer.txt");
+    git.commit("Add mobile mixed layer fixture");
+    git.modifyFile("mobile-mixed-layer.txt", "base\nMOBILE_STAGED_LAYER_MARKER\n");
+    git.stageFile("mobile-mixed-layer.txt");
+    git.modifyFile(
+      "mobile-mixed-layer.txt",
+      "base\nMOBILE_STAGED_LAYER_MARKER\nMOBILE_UNSTAGED_LAYER_MARKER\n",
+    );
+
+    await openMobileChangesPanel(testPage);
+    await expandSection(testPage, "unstaged-files-section");
+    await expandSection(testPage, "staged-files-section");
+
+    const unstagedRow = testPage
+      .getByTestId("unstaged-files-section")
+      .getByTestId("file-row-mobile-mixed-layer.txt");
+    const stagedRow = testPage
+      .getByTestId("staged-files-section")
+      .getByTestId("file-row-mobile-mixed-layer.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(stagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+1", { exact: true })).toBeVisible();
+    await expect(stagedRow.getByText("+1", { exact: true })).toBeVisible();
+
+    await unstagedRow.tap();
+    await expect(testPage.getByText("File Changes")).toBeVisible({ timeout: 10_000 });
+    await expectDiffText(testPage, "MOBILE_UNSTAGED_LAYER_MARKER");
+    await testPage.getByTestId("mobile-diff-sheet-close").tap();
+
+    await stagedRow.tap();
+    await expect(testPage.getByText("File Changes")).toBeVisible({ timeout: 10_000 });
+    await expectDiffText(testPage, "MOBILE_STAGED_LAYER_MARKER");
+    await expectDiffTextAbsent(testPage, "MOBILE_UNSTAGED_LAYER_MARKER");
+    await testPage.getByTestId("mobile-diff-sheet-close").tap();
+
+    await stagedRow.getByTitle("Unstage file").tap();
+    await expect(stagedRow).toHaveCount(0);
+    await expect(unstagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+2", { exact: true })).toBeVisible();
   });
 
   test("tapping a PR file row opens file diff sheet with diff content", async ({

@@ -108,7 +108,7 @@ func TestBuildAgentProfileMatcher_SkipsDisabledProfile(t *testing.T) {
 // TestBuildAgentProfileMatcher_PreservesDisabledExistingBinding is the
 // reconciliation regression: a workflow step already bound to a profile that
 // gets disabled after the fact must keep that binding on the next sync, per
-// docs/specs/agents/profile-disable.md ("existing sessions/workflows keep
+// docs/specs/agents/requirements/profile-disable.md ("existing sessions/workflows keep
 // their profile"). Excluding disabled profiles from *candidate selection*
 // must not also strip a binding that was already in place.
 func TestBuildAgentProfileMatcher_PreservesDisabledExistingBinding(t *testing.T) {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSystemInfo, requestRestart } from "@/lib/api/domains/system-api";
+import { registerBackendReloadOwner } from "@/lib/platform/backend-reload-coordinator";
 // The module-level `t` (not the hook) so these resolve when the callback fires
 // and stay out of the callbacks' dependency arrays. This file has no JSX, so
 // `mode: "jsx-only"` can never see the strings below.
@@ -32,15 +33,30 @@ export function useKandevRestart({
   const [previousBootID, setPreviousBootID] = useState<string | null>(null);
   const activeRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
+  const ownerReleaseRef = useRef<(() => void) | null>(null);
 
-  const fail = useCallback((message: string) => {
-    activeRef.current = false;
-    setErrorMessage(message);
-    setPhase("error");
+  const claimReloadOwnership = useCallback(() => {
+    if (!ownerReleaseRef.current) ownerReleaseRef.current = registerBackendReloadOwner();
   }, []);
+
+  const releaseReloadOwnership = useCallback(() => {
+    ownerReleaseRef.current?.();
+    ownerReleaseRef.current = null;
+  }, []);
+
+  const fail = useCallback(
+    (message: string) => {
+      activeRef.current = false;
+      releaseReloadOwnership();
+      setErrorMessage(message);
+      setPhase("error");
+    },
+    [releaseReloadOwnership],
+  );
 
   const start = useCallback(async () => {
     if (activeRef.current) return;
+    claimReloadOwnership();
     activeRef.current = true;
     setErrorMessage(null);
     setPhase("starting");
@@ -53,15 +69,18 @@ export function useKandevRestart({
     } catch (e) {
       fail(e instanceof Error ? e.message : t("system:restartStartFailed"));
     }
-  }, [fail]);
+  }, [claimReloadOwnership, fail]);
 
   const dismiss = useCallback(() => {
     activeRef.current = false;
+    releaseReloadOwnership();
     setPhase("idle");
     setErrorMessage(null);
     setPreviousBootID(null);
     startedAtRef.current = null;
-  }, []);
+  }, [releaseReloadOwnership]);
+
+  useEffect(() => releaseReloadOwnership, [releaseReloadOwnership]);
 
   useEffect(() => {
     if (phase !== "restarting") return;

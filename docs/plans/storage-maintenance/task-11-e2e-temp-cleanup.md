@@ -5,7 +5,7 @@ status: complete
 wave: 7
 depends_on: ["10-inherit-service-temp"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 11: Contain E2E temporary roots

@@ -89,10 +89,10 @@ func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{
-		Package: opencodeACPPackage,
-		ACPArgs: []string{"acp", "--print-logs", "--log-level", "ERROR"},
-	}
+	return newManagedNPMRuntimeSpec(
+		opencodeACPPackage,
+		"acp", "--print-logs", "--log-level", "ERROR",
+	)
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
@@ -127,8 +127,9 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
-				Label: "Copy auth files",
+				Type:               "files",
+				Label:              "Copy auth files",
+				FileConflictPolicy: RemoteAuthFileConflictPolicyMergeJSONObject,
 				SourceFiles: map[string][]string{
 					"darwin": {".local/share/opencode/auth.json"},
 					"linux":  {".local/share/opencode/auth.json"},

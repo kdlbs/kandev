@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -72,6 +73,60 @@ func TestBuildPrompt_BlockersResolved(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "proceed") {
 		t.Errorf("missing 'proceed':\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
+	tests := []struct {
+		name     string
+		reason   string
+		contains []string
+	}{
+		{name: "blockers resolved", reason: "blockers_resolved", contains: []string{"All blockers"}},
+		{name: "children completed", reason: "children_completed", contains: []string{"All child tasks"}},
+		{name: "review started", reason: "review_started", contains: []string{
+			"You are reviewing",
+			"Legacy workflow task",
+			"record_step_decision_kandev",
+			"Posting a comment alone is not a decision",
+		}},
+		{name: "approval started", reason: "approval_started", contains: []string{
+			"You are approving",
+			"Legacy workflow task",
+			"record_step_decision_kandev",
+			"Posting a comment alone is not a decision",
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt := service.BuildPrompt(&service.PromptContext{
+				Reason:         tt.reason,
+				TaskIdentifier: "KAN-legacy",
+				TaskTitle:      "Legacy workflow task",
+			})
+			for _, c := range tt.contains {
+				if !strings.Contains(prompt, c) {
+					t.Errorf("legacy reason %q missing %q, got:\n%s", tt.reason, c, prompt)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildPrompt_TaskReviewRequestedUsesStageType(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonTaskReviewRequested,
+		StageType:      "approval",
+		TaskIdentifier: "KAN-review",
+		TaskTitle:      "Approve release",
+	})
+
+	if !strings.HasPrefix(prompt, "You are approving") {
+		t.Errorf("task_review_requested approver prompt = %q, want approver framing", prompt)
+	}
+	if !strings.Contains(prompt, "record_step_decision_kandev") {
+		t.Errorf("task_review_requested prompt missing decision tool contract: %q", prompt)
 	}
 }
 
@@ -342,7 +397,7 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 		"Auth service",
 		"Task description:",
 		"Implement OAuth2 flow.",
-		"Builder's comments:",
+		"Recent task comments:",
 		"Done the implementation",
 		"Added tests",
 		"Review the implementation carefully",
@@ -358,6 +413,55 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 	// Should NOT contain the default work assignment phrasing.
 	if strings.Contains(prompt, "You have been assigned") {
 		t.Errorf("review prompt should not contain assignment phrasing:\n%s", prompt)
+	}
+}
+
+// TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision is the
+// anti-contradiction assertion: a reviewer whose run holds the decision seat
+// must see record_step_decision in its own allowed-actions list, so it never
+// reads the writeDecisionContract instruction below as excluded by its own
+// stated permissions.
+func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:         service.RunReasonTaskAssigned,
+		TaskIdentifier: "KAN-10",
+		TaskTitle:      "Auth service",
+		StageType:      "review",
+		RunID:          "run-1",
+		AgentID:        "agent-1",
+		AllowedActions: []string{officeruntime.CapabilityPostComment, officeruntime.AvailableActionRecordStepDecision},
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if !strings.Contains(prompt, "You must call the record_step_decision_kandev tool") {
+		t.Fatalf("expected the decision contract sentence:\n%s", prompt)
+	}
+	allowedIdx := strings.Index(prompt, "- Allowed actions:")
+	if allowedIdx == -1 {
+		t.Fatalf("expected an allowed actions line:\n%s", prompt)
+	}
+	allowedLine := prompt[allowedIdx : strings.Index(prompt[allowedIdx:], "\n")+allowedIdx]
+	if !strings.Contains(allowedLine, officeruntime.AvailableActionRecordStepDecision) {
+		t.Fatalf("allowed actions line must list record_step_decision so it does not contradict the decision contract:\n%s", allowedLine)
+	}
+}
+
+func TestBuildPrompt_ApprovalStageUsesNeutralLifecycleLanguage(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonTaskAssigned,
+		TaskIdentifier: "KAN-11",
+		TaskTitle:      "Approve the deployment",
+		StageType:      "approval",
+	})
+
+	if !strings.Contains(prompt, "Confirm that the approval requirements are met") {
+		t.Errorf("approval prompt should describe its own requirements:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "All reviewers have approved") {
+		t.Errorf("approval prompt should not assume a prior review:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "mark the task done") {
+		t.Errorf("approval prompt should not assume approval is the final lifecycle step:\n%s", prompt)
 	}
 }
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-task-completion-icons.md"
+spec: "../../specs/ui/requirements/sidebar-task-completion-icons.md"
 ---
 
 # Task 01: Differentiate Sidebar Completion Icons
@@ -52,7 +52,7 @@ cd apps/web && pnpm run typecheck
 - `apps/web/e2e/tests/task/sidebar-settled-spinner.spec.ts`
 - `apps/web/e2e/tests/task/sidebar-workflow-completion-icon.spec.ts`
 - `apps/web/e2e/tests/task/mobile-sidebar-workflow-completion-icon.spec.ts`
-- `docs/specs/ui/sidebar-task-completion-icons.md`
+- `docs/specs/ui/requirements/sidebar-task-completion-icons.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/sidebar-task-completion-icons/plan.md`
 - `docs/plans/sidebar-task-completion-icons/task-01-sidebar-completion-icons.md`
@@ -68,7 +68,7 @@ the same components and tests.
 
 ## Inputs
 
-- `docs/specs/ui/sidebar-task-completion-icons.md`, especially the exact-match fallback and state
+- `docs/specs/ui/requirements/sidebar-task-completion-icons.md`, especially the exact-match fallback and state
   precedence scenarios.
 - `docs/plans/sidebar-task-completion-icons/plan.md`.
 - Existing status precedence in `apps/web/components/task/task-item.tsx`.

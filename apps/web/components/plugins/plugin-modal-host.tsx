@@ -32,6 +32,9 @@ const SIZE_CLASSES: Record<NonNullable<PluginModalOptions["size"]>, string> = {
   xl: "sm:max-w-5xl",
 };
 
+const DIALOG_CONTAINMENT_CLASSES =
+  "max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
+
 function preventWhenNotDismissible(dismissible: boolean) {
   return (event: Event) => {
     if (!dismissible) event.preventDefault();
@@ -90,10 +93,12 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
         {...noDescriptionProps}
+        data-testid={`plugin-modal-dialog-${instanceId}`}
+        data-layout="contained"
         className={
           modal.layout === "task-link"
-            ? "w-[calc(100vw-2rem)] sm:max-w-lg"
-            : SIZE_CLASSES[options.size ?? "md"]
+            ? `${DIALOG_CONTAINMENT_CLASSES} w-[calc(100vw-2rem)] sm:max-w-lg`
+            : `${DIALOG_CONTAINMENT_CLASSES} ${SIZE_CLASSES[options.size ?? "md"]}`
         }
         showCloseButton={dismissible}
         onEscapeKeyDown={guardClose}
@@ -113,9 +118,14 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
         {!options.title && !options.description && (
           <DialogTitle className="sr-only">{pluginDialogLabel()}</DialogTitle>
         )}
-        <PluginErrorBoundary context={`modal "${instanceId}" (plugin "${pluginId}")`}>
-          <Content />
-        </PluginErrorBoundary>
+        <div
+          data-testid={`plugin-modal-body-${instanceId}`}
+          className="row-start-2 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+        >
+          <PluginErrorBoundary context={`modal "${instanceId}" (plugin "${pluginId}")`}>
+            <Content />
+          </PluginErrorBoundary>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -20,6 +20,7 @@ import { useAppStore } from "@/components/state-provider";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
+import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -80,6 +81,11 @@ const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
     descriptionKey: "executors:hubDescriptionSprites",
   },
   { type: "ssh", brandLabel: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
+  {
+    type: "k8s",
+    labelKey: "executors:typeKubernetes",
+    descriptionKey: "executors:hubDescriptionKubernetes",
+  },
 ];
 
 function ExecutorIconBadge({ type }: { type: string }) {
@@ -94,13 +100,15 @@ function ExecutorIconBadge({ type }: { type: string }) {
 function ProfileCard({
   profile,
   onDelete,
+  canDelete,
 }: {
   profile: ProfileWithExecutor;
   onDelete: (id: string) => void;
+  canDelete: boolean;
 }) {
   // Subscribes so the `getExecutorLabel` badge below re-renders on a locale
   // switch; the helper resolves at call time but does not itself notify React.
-  useTranslation();
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <Card
@@ -118,7 +126,9 @@ function ProfileCard({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 shrink-0 cursor-pointer opacity-0 group-hover:opacity-100"
+          className="min-h-11 w-11 shrink-0 cursor-pointer md:h-8 md:min-h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+          disabled={!canDelete}
+          aria-label={t("executors:deleteProfile")}
           onClick={(e) => {
             e.stopPropagation();
             onDelete(profile.id);
@@ -134,15 +144,29 @@ function ProfileCard({
 function CreateTypeCard({
   execType,
   onClick,
+  disabled = false,
 }: {
   execType: ExecutorTypeCard;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <Card
-      className="cursor-pointer ring-primary/40 transition-colors hover:bg-muted/50"
-      onClick={onClick}
+      role="button"
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      className={
+        disabled
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer ring-primary/40 transition-colors hover:bg-muted/50"
+      }
+      onClick={disabled ? undefined : onClick}
+      onKeyDown={(event) => {
+        if (disabled || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onClick();
+      }}
     >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={execType.type} />
@@ -180,14 +204,18 @@ function DeleteProfileDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="min-h-11 cursor-pointer md:min-h-9"
+          >
             {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={onDelete}
             disabled={deleting}
-            className="cursor-pointer"
+            className="min-h-11 cursor-pointer md:min-h-9"
           >
             {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>
@@ -203,6 +231,8 @@ export default function ExecutorsHubPage() {
   const allProfiles = useAllProfiles();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
+  const role = useAppStore((state) => state.auth.user?.role);
+  const canManageKubernetes = role === undefined || role === "admin";
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -212,6 +242,7 @@ export default function ExecutorsHubPage() {
 
   const handleDelete = async () => {
     if (!profileToDelete) return;
+    if (profileToDelete.executor_type === "k8s" && !canManageKubernetes) return;
     setDeleting(true);
     try {
       await deleteExecutorProfile(profileToDelete.parent_executor_id, profileToDelete.id);
@@ -235,12 +266,18 @@ export default function ExecutorsHubPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("executors:hubDescription")}</p>
       </div>
       <Separator />
+      {!canManageKubernetes && <KubernetesReadOnlyNotice />}
       {allProfiles.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">{t("executors:profiles")}</h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {allProfiles.map((profile) => (
-              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onDelete={setDeleteProfileId}
+                canDelete={profile.executor_type !== "k8s" || canManageKubernetes}
+              />
             ))}
           </div>
         </div>
@@ -253,6 +290,7 @@ export default function ExecutorsHubPage() {
               key={execType.type}
               execType={execType}
               onClick={() => router.push(`/settings/executors/new/${execType.type}`)}
+              disabled={execType.type === "k8s" && !canManageKubernetes}
             />
           ))}
         </div>

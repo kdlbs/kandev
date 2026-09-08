@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-quick-terminal-ui"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 02: Prove Quick Terminal across viewports
@@ -52,7 +52,7 @@ managed E2E runner owns the same build/test artifact pipeline.
 
 ## Inputs
 
-- Spec: every `Scenarios` item in `docs/specs/quick-terminal/spec.md`.
+- Spec: every `Scenarios` item in `docs/specs/ui/requirements/quick-terminal.md`.
 - Plan: `E2E Tests`, `Mobile design contract`, and `Risks` in `plan.md`.
 - Existing patterns: `apps/web/e2e/tests/settings/host-shell-pty.spec.ts`,
   `apps/web/e2e/tests/chat/mobile-quick-chat-entry.spec.ts`, and the animation-aware geometry guidance

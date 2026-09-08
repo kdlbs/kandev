@@ -10,7 +10,7 @@
 // across CLIs, and don't depend on prompt instructions the agent
 // may rotate.
 //
-// See docs/specs/office-heartbeat-rework/spec.md §"Continuation
+// See docs/specs/office/requirements/scheduler.md §"Continuation
 // summary contract" for the section schema.
 package summary
 

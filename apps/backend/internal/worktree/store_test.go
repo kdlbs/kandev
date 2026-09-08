@@ -84,6 +84,44 @@ func TestSQLiteStore_ReinitializesSchema(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-stable-root", "task-current-owner")
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE task_environments
+		SET task_dir_name = ?
+		WHERE id = ?
+	`, "original-task-root_abc", "env-session-stable-root"); err != nil {
+		t.Fatalf("set task directory name: %v", err)
+	}
+
+	wt := &Worktree{
+		ID:           "wt-stable-root",
+		SessionID:    "session-stable-root",
+		RepositoryID: "repo-stable-root",
+		Path:         "/tmp/stable-root/repo",
+		Branch:       "feature/stable-root",
+		Status:       StatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := store.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	got, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	if got == nil {
+		t.Fatal("get worktree returned nil")
+	}
+	if got.TaskDirName != "original-task-root_abc" {
+		t.Fatalf("TaskDirName = %q, want original-task-root_abc", got.TaskDirName)
+	}
+}
+
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -163,5 +201,49 @@ func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-inventory", "task-inventory")
+
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug,
+			worktree_id, worktree_path, worktree_branch, position,
+			status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, '', ?, '', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, "env-repo-inventory", "env-session-inventory", "repo-inventory", "main", "/tmp/source-checkout", StatusActive); err != nil {
+		t.Fatalf("insert inventory-only row: %v", err)
+	}
+
+	physical := &Worktree{
+		ID:           "wt-physical",
+		SessionID:    "session-inventory",
+		RepositoryID: "repo-physical",
+		Path:         "/tmp/physical-worktree",
+		Branch:       "feature/task",
+		Status:       StatusActive,
+	}
+	if err := store.CreateWorktree(ctx, physical); err != nil {
+		t.Fatalf("create physical worktree: %v", err)
+	}
+
+	byTask, err := store.GetWorktreesByTaskID(ctx, "task-inventory")
+	if err != nil {
+		t.Fatalf("get worktrees by task: %v", err)
+	}
+	if len(byTask) != 1 || byTask[0].ID != physical.ID {
+		t.Fatalf("task worktrees = %+v, want only %q", byTask, physical.ID)
+	}
+
+	paths, err := store.ListActiveWorktreePaths(ctx)
+	if err != nil {
+		t.Fatalf("list active worktree paths: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != physical.Path {
+		t.Fatalf("active worktree paths = %v, want only %q", paths, physical.Path)
 	}
 }

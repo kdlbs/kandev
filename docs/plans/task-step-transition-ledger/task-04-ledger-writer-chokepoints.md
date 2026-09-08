@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-ledger-schema-migration"]
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 04: Ledger writer in the mutating transactions

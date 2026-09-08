@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/profile-disable.md
+spec: docs/specs/agents/requirements/profile-disable.md
 created: 2026-08-01
 status: implemented
 ---

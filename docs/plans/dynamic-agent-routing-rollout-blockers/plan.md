@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/dynamic-agent-routing-rollout-blockers.md
+spec: docs/specs/agents/requirements/dynamic-agent-routing-rollout-blockers.md
 created: 2026-08-15
 status: completed
 ---

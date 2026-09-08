@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -64,7 +66,12 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
 		},
 	}
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
+	release()
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +191,7 @@ func (m *Manager) resolveModelConfigFlight(
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	resp, err := inst.client.Probe(probeCtx, probeReq)
+	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, command, probeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +206,11 @@ func (m *Manager) resolveModelConfigFlight(
 		if isAuthError(resp.Error) {
 			resolution.Status = StatusAuthRequired
 		}
+		m.log.Warn("model config resolution failed",
+			zap.String("agent_type", agentType),
+			zap.String("model", req.Model),
+			zap.String("status", string(resolution.Status)),
+			zap.String("error", resp.Error))
 		return resolution, nil
 	}
 
@@ -334,7 +346,12 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
+	release()
 	if err != nil {
 		return nil, err
 	}

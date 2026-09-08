@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -75,10 +77,30 @@ func (m *Manager) SetProfileResolver(resolver interface {
 
 // instance is a single warm agentctl instance bound to an agent type.
 type instance struct {
-	agentType  string
-	instanceID string
-	workDir    string
-	client     *agentctlclient.Client
+	agentType         string
+	instanceID        string
+	workDir           string
+	client            *agentctlclient.Client
+	operationGateOnce sync.Once
+	operationGate     *semaphore.Weighted
+}
+
+// Shared probes and prompts each take one slot. Repair takes every slot so it
+// cannot remove an npm execution tree while another utility process uses it.
+const hostUtilityOperationCapacity int64 = 1 << 20
+
+func (i *instance) acquireOperation(ctx context.Context, exclusive bool) (func(), error) {
+	i.operationGateOnce.Do(func() {
+		i.operationGate = semaphore.NewWeighted(hostUtilityOperationCapacity)
+	})
+	weight := int64(1)
+	if exclusive {
+		weight = hostUtilityOperationCapacity
+	}
+	if err := i.operationGate.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	return func() { i.operationGate.Release(weight) }, nil
 }
 
 // NewManager constructs a HostUtilityManager.
@@ -249,20 +271,10 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 	}
 	if m.controlClient != nil {
 		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
-			// During shutdown agentctl may already be gone, so the delete
-			// returns a not-found/404. That is benign and idempotent: log DEBUG
-			// so it does not add teardown noise. Any other failure stays WARN.
-			if isInstanceNotFound(err) {
-				m.log.Debug("host utility instance already deleted",
-					zap.String("agent_type", inst.agentType),
-					zap.String("instance_id", inst.instanceID),
-					zap.String("error", err.Error()))
-			} else {
-				m.log.Warn("failed to delete host utility instance",
-					zap.String("agent_type", inst.agentType),
-					zap.String("instance_id", inst.instanceID),
-					zap.Error(err))
-			}
+			m.log.Warn("failed to delete host utility instance",
+				zap.String("agent_type", inst.agentType),
+				zap.String("instance_id", inst.instanceID),
+				zap.Error(err))
 		}
 	}
 	if inst.workDir == "" {
@@ -274,19 +286,6 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 			zap.String("path", inst.workDir),
 			zap.Error(err))
 	}
-}
-
-// isInstanceNotFound reports whether a DeleteInstance error means the agentctl
-// instance was already gone. ControlClient.DeleteInstance stringifies the
-// upstream error as "failed to delete instance: <msg> (status 404)" without a
-// wrapped sentinel, so this matches on the 404 status and the not-found phrase
-// rather than errors.Is.
-func isInstanceNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 404") || strings.Contains(msg, "not found")
 }
 
 // eligibleAgents returns enabled agents that implement InferenceAgent AND whose
@@ -637,20 +636,137 @@ func (m *Manager) probeWithCommand(
 	}
 
 	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
-	resp, err := inst.client.Probe(probeCtx, req)
-	now := time.Now()
+	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
 	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, now)
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
+	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+}
+
+func (m *Manager) probeManagedRuntime(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	command agents.Command,
+	req *agentctlutil.ProbeRequest,
+) (*agentctlutil.ProbeResponse, error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := inst.client.Probe(ctx, req)
+	release()
+	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+		return resp, err
+	}
+
+	release, err = inst.acquireOperation(ctx, true)
+	if err != nil {
+		return resp, nil
+	}
+	defer release()
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
+}
+
+func (m *Manager) recoverManagedRuntimeProbe(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	failedCommand agents.Command,
+	failedRequest *agentctlutil.ProbeRequest,
+	initial *agentctlutil.ProbeResponse,
+) *agentctlutil.ProbeResponse {
+	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return initial
+	}
+	spec := managed.ManagedNPMRuntime()
+	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	if !ok {
+		return initial
+	}
+	m.log.Info("recovering managed runtime host capability probe",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.Int("attempt", 1))
+	failedConfig := failedRequest.InferenceConfig
+	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
+		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
+	); err != nil {
+		m.log.Warn("managed runtime host capability probe cache repair failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.Error(err))
+		return initial
+	}
+	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
+	if err != nil {
+		m.log.Warn("managed runtime host capability probe retry failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.String("outcome", "failed"),
+			zap.Error(err))
+		return &agentctlutil.ProbeResponse{Success: false, Error: err.Error()}
+	}
+	m.log.Info("managed runtime host capability probe retry completed",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.String("outcome", string(capabilityStatus(response))))
+	return response
+}
+
+func cloneProbeRequestWithCommand(
+	request *agentctlutil.ProbeRequest,
+	command agents.Command,
+) *agentctlutil.ProbeRequest {
+	retry := *request
+	config := *request.InferenceConfig
+	config.Command = command.Args()
+	retry.InferenceConfig = &config
+	return &retry
+}
+
+func capabilityStatus(response *agentctlutil.ProbeResponse) Status {
+	if response != nil && response.Success {
+		return StatusOK
+	}
+	return StatusFailed
+}
+
+func managedRuntimeProbeRetry(
+	command agents.Command,
+	spec agents.ManagedNPMRuntimeSpec,
+) (agents.Command, string, bool) {
+	args := command.Args()
+	if len(args) < 4 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" {
+		return agents.Command{}, "", false
+	}
+	packageSpec := args[3]
+	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+		return agents.Command{}, "", false
+	}
+	prefix := spec.Package + "@"
+	if !strings.HasPrefix(packageSpec, prefix) {
+		return agents.Command{}, "", false
+	}
+	version := strings.TrimPrefix(packageSpec, prefix)
+	want := spec.ACPCommandWithNpmPreference(version, false).Args()
+	if !slices.Equal(args, want) {
+		return agents.Command{}, "", false
+	}
+	return spec.ACPCommandWithNpmPreference(version, true), packageSpec, true
+}
+
+func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, now time.Time) AgentCapabilities {
 	if !resp.Success {
 		status := StatusFailed
 		if isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
-		return probeFailureCapabilities(inst.agentType, status, resp.Error, resp.DurationMs, now)
+		return probeFailureCapabilities(agentType, status, resp.Error, resp.DurationMs, now)
 	}
 	caps := AgentCapabilities{
-		AgentType:       inst.agentType,
+		AgentType:       agentType,
 		AgentName:       resp.AgentName,
 		AgentVersion:    resp.AgentVersion,
 		Status:          StatusOK,
@@ -718,7 +834,7 @@ func (m *Manager) resolveInferenceCommand(
 		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
 	}
 	if !found || selection.Package != spec.Package {
-		return command, nil
+		return spec.ACPCommand(spec.DefaultVersion), nil
 	}
 	return spec.ACPCommand(selection.Version), nil
 }

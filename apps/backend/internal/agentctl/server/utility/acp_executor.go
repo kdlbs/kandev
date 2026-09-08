@@ -18,11 +18,13 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	"go.uber.org/zap"
 )
 
@@ -518,12 +520,18 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
 			zap.Error(err))
 	}
-	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
+	}
+	defer cleanup()
 
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions,
 	)
 	if err != nil {
+		cleanup()
+		stderrTail := stderr.tail()
 		// The tail goes to the log rather than into the response: handlers
 		// deliberately keep subprocess diagnostics and tmp paths out of client
 		// payloads. An empty tail is itself a result — the child produced no
@@ -531,11 +539,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Error("ACP probe failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
-			zap.String("stderr", stderr.tail()))
+			zap.String("stderr", stderrTail))
 		return &ProbeResponse{
-			Success:    false,
-			Error:      err.Error(),
-			DurationMs: int(time.Since(startTime).Milliseconds()),
+			Success:     false,
+			Error:       err.Error(),
+			FailureCode: managedRuntimeProbeFailureCode(cfg.Command, stderrTail),
+			DurationMs:  int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCode {
@@ -548,6 +557,25 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
 	return resp, nil
+}
+
+func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
+	packageSpec, ok := managedRuntimeProbePackageSpec(command)
+	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
+		return ""
+	}
+	return ProbeFailureManagedRuntimeNPMResolution
+}
+
+func managedRuntimeProbePackageSpec(command []string) (string, bool) {
+	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
+		return "", false
+	}
+	packageSpec := command[3]
+	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+		return "", false
+	}
+	return packageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is
@@ -796,6 +824,20 @@ func applyProbeModel(
 		return nil, err
 	}
 	if !received {
+		if method == sessionmodel.MethodSetModel {
+			// The legacy session/set_model RPC applied the model, but the agent
+			// surfaces no per-model config options and pushes no follow-up
+			// config-update notification (e.g. auggie, which advertises a flat
+			// model list and answers session/set_model with an empty result).
+			// That is a valid empty resolution, not a failure: the caller keeps
+			// the session-advertised options.
+			return nil, nil
+		}
+		// A typed session/set_config_option that returns neither inline options
+		// nor a config-update notification leaves us without an authoritative
+		// snapshot for the newly selected model. Keeping the pre-switch
+		// session/new snapshot would report the previous model's options as the
+		// current configuration, so treat this as a failure.
 		return nil, fmt.Errorf("ACP model selection returned no configuration options")
 	}
 	return updated, nil
@@ -904,7 +946,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 		if err != nil {
 			return nil, err
 		}
-		sessionResp.ConfigOptions = updated
+		if updated != nil {
+			sessionResp.ConfigOptions = updated
+		}
 	}
 	if updated, err := applyProbeConfigOptions(
 		ctx,
@@ -1167,19 +1211,22 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"auggie":        "auggie",
-	"cursor-agent":  "cursor-agent",
-	"devin":         "devin",
-	"grok":          "grok",
-	"hermes":        "hermes",
-	"kimi":          "kimi",
-	"kiro-cli-chat": "kiro-cli-chat",
-	"mock-agent":    "mock-agent",
-	"npx":           "npx",
-	"omp":           "omp",
-	openCodeCommand: openCodeCommand,
-	"qodercli":      "qodercli",
-	"traecli":       "traecli",
+	"agy_acp_server.par": "agy_acp_server.par",
+	"agy_acp_server.exe": "agy_acp_server.exe",
+	"auggie":             "auggie",
+	"cursor-agent":       "cursor-agent",
+	"devin":              "devin",
+	"goose":              "goose",
+	"grok":               "grok",
+	"hermes":             "hermes",
+	"kimi":               "kimi",
+	"kiro-cli-chat":      "kiro-cli-chat",
+	"mock-agent":         "mock-agent",
+	"npx":                "npx",
+	"omp":                "omp",
+	openCodeCommand:      openCodeCommand,
+	"qodercli":           "qodercli",
+	"traecli":            "traecli",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for

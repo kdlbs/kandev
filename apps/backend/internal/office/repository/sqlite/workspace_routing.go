@@ -33,14 +33,15 @@ func (r *Repository) GetWorkspaceRouting(
 		orderRaw   string
 		profsRaw   string
 		reasonsRaw string
+		rolesRaw   string
 		updatedAt  time.Time
 	)
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT enabled, default_tier, provider_order, provider_profiles,
-			COALESCE(tier_per_reason, '{}'), updated_at
+			COALESCE(tier_per_reason, '{}'), COALESCE(role_tiers, '{}'), updated_at
 		FROM office_workspace_routing
 		WHERE workspace_id = ?
-	`), workspaceID).Scan(&enabled, &tier, &orderRaw, &profsRaw, &reasonsRaw, &updatedAt)
+	`), workspaceID).Scan(&enabled, &tier, &orderRaw, &profsRaw, &reasonsRaw, &rolesRaw, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultWorkspaceRouting(), nil
 	}
@@ -60,10 +61,29 @@ func (r *Repository) GetWorkspaceRouting(
 	if err := json.Unmarshal([]byte(reasonsRaw), &cfg.TierPerReason); err != nil {
 		return nil, fmt.Errorf("routing: decode tier_per_reason: %w", err)
 	}
+	if err := decodeRoleTiers(rolesRaw, &cfg.RoleTiers); err != nil {
+		return nil, fmt.Errorf("routing: decode role_tiers: %w", err)
+	}
 	if cfg.ProviderProfiles == nil {
 		cfg.ProviderProfiles = map[routing.ProviderID]routing.ProviderProfile{}
 	}
 	return cfg, nil
+}
+
+// decodeRoleTiers decodes raw into *out, treating a literal empty
+// string as "{}" (no role policy) before unmarshalling (AC-32). The
+// adjacent tier_per_reason decode above does not need this: it reads
+// COALESCE(tier_per_reason, '{}'), which only substitutes for SQL
+// NULL, so a literal ” falls through to json.Unmarshal and errors —
+// which happens to be correct there (AC-33 malformed-JSON rejection),
+// but AC-32 explicitly names ” as a valid role_tiers value, so
+// copying the sibling's COALESCE-only pattern would wrongly reject it.
+func decodeRoleTiers(raw string, out *routing.RoleTierMap) error {
+	if raw == "" {
+		*out = routing.RoleTierMap{}
+		return nil
+	}
+	return json.Unmarshal([]byte(raw), out)
 }
 
 // UpsertWorkspaceRouting persists cfg for workspaceID, replacing any
@@ -88,6 +108,10 @@ func (r *Repository) UpsertWorkspaceRouting(
 	if err != nil {
 		return err
 	}
+	rolesRaw, err := marshalRoleTiers(cfg.RoleTiers)
+	if err != nil {
+		return err
+	}
 	enabled := 0
 	if cfg.Enabled {
 		enabled = 1
@@ -98,16 +122,17 @@ func (r *Repository) UpsertWorkspaceRouting(
 	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_workspace_routing
-			(workspace_id, enabled, default_tier, provider_order, provider_profiles, tier_per_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+			(workspace_id, enabled, default_tier, provider_order, provider_profiles, tier_per_reason, role_tiers, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			default_tier = excluded.default_tier,
 			provider_order = excluded.provider_order,
 			provider_profiles = excluded.provider_profiles,
 			tier_per_reason = excluded.tier_per_reason,
+			role_tiers = excluded.role_tiers,
 			updated_at = excluded.updated_at
-	`), workspaceID, enabled, tier, orderRaw, profsRaw, reasonsRaw, time.Now().UTC())
+	`), workspaceID, enabled, tier, orderRaw, profsRaw, reasonsRaw, rolesRaw, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("routing: upsert workspace %q: %w", workspaceID, err)
 	}
@@ -123,6 +148,7 @@ func defaultWorkspaceRouting() *routing.WorkspaceConfig {
 		ProviderOrder:    []routing.ProviderID{},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{},
 		TierPerReason:    routing.TierPerReason{},
+		RoleTiers:        routing.RoleTierMap{},
 	}
 }
 
@@ -211,6 +237,26 @@ func marshalTierPerReason(m routing.TierPerReason) (string, error) {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return "", fmt.Errorf("routing: marshal tier_per_reason: %w", err)
+	}
+	return string(b), nil
+}
+
+// marshalRoleTiers marshals the role tier policy, normalising nil to
+// "{}" and dropping empty-string values (AC-11: an empty value means
+// "absent, fall through to default_tier", not "explicitly set to a
+// blank tier" — dropping it here keeps GetWorkspaceRouting's read path
+// from ever having to special-case a persisted empty-string entry).
+func marshalRoleTiers(m routing.RoleTierMap) (string, error) {
+	out := make(routing.RoleTierMap, len(m))
+	for role, tier := range m {
+		if tier == "" {
+			continue
+		}
+		out[role] = tier
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("routing: marshal role_tiers: %w", err)
 	}
 	return string(b), nil
 }

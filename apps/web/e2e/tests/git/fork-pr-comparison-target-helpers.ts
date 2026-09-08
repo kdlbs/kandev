@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
@@ -22,6 +22,11 @@ export async function seedForkPRComparisonTask(
   const targetRemoteDir = path.join(backend.tmpDir, "repos", `upstream-${suffix}.git`);
   const targetWorktreeDir = path.join(backend.tmpDir, "repos", `upstream-${suffix}`);
   const localGit = new GitHelper(seedData.repositoryPath, gitEnv);
+
+  // The seed repository is shared by tests in a worker. A prior git test can
+  // leave it on a feature branch or with uncommitted fixture files, which
+  // makes the fork checkout below fail before the scenario starts.
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
   execFileSync("git", ["clone", "--bare", seedData.repositoryRemoteURL, targetRemoteDir], {
     env: gitEnv,
@@ -59,7 +64,7 @@ export async function seedForkPRComparisonTask(
   execFileSync(
     "git",
     ["config", "--global", `url.file://${comparisonTargetPath}.insteadOf`, targetURL],
-    { env: gitEnv },
+    { cwd: backend.tmpDir, env: gitEnv },
   );
 
   await apiClient.updateRepository(seedData.repositoryId, {
@@ -69,24 +74,6 @@ export async function seedForkPRComparisonTask(
     provider_owner: "contributor",
     provider_name: "widget-fork",
   });
-
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Fork PR comparison target",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repositories: [
-        {
-          repository_id: seedData.repositoryId,
-          base_branch: "main",
-          checkout_branch: "feature/fork",
-        },
-      ],
-    },
-  );
 
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("contributor");
@@ -127,12 +114,37 @@ export async function seedForkPRComparisonTask(
       stats_available: true,
     },
   ]);
+
+  const task = await apiClient.createTask(seedData.workspaceId, "Fork PR comparison target", {
+    description: "/e2e:simple-message",
+    agent_profile_id: seedData.agentProfileId,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repositories: [
+      {
+        repository_id: seedData.repositoryId,
+        base_branch: "main",
+        checkout_branch: "feature/fork",
+      },
+    ],
+  });
+
   await apiClient.associateGitHubTaskPR({
     workspace_id: seedData.workspaceId,
     task_id: task.id,
     repository_id: seedData.repositoryId,
     pr_url: "https://github.com/upstream/widget/pull/1701",
   });
+  await apiClient.launchSession({
+    task_id: task.id,
+    agent_profile_id: seedData.agentProfileId,
+    workflow_step_id: seedData.startStepId,
+    prompt: "/e2e:simple-message",
+  });
 
   return { task, headSHA };
+}
+
+export function resetForkPRComparisonRepository(seedData: SeedData, backend: BackendContext) {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
+	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -34,14 +36,19 @@ import (
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/mcp/canvasskill"
 	"github.com/kandev/kandev/internal/mentions"
+	officeconfigsync "github.com/kandev/kandev/internal/office/configsync"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -63,8 +70,26 @@ const (
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
+	if repos == nil || repos.RequiredStores == nil {
+		return nil, nil, errors.New("required-store tracker is unavailable")
+	}
+	storeTracker := repos.RequiredStores
+	if cfg.Features.Canvases {
+		if err := canvasskill.EnsureMaterialized(cfg.ResolvedHomeDir()); err != nil {
+			return nil, nil, fmt.Errorf("materialize canvas authoring skill: %w", err)
+		}
+	}
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
+
+	managedRuntimeSettings := repos.SystemSettings
+	if managedRuntimeSettings == nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
+	}
+	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := reconcileManagedRuntimeDefaults(context.Background(), managedRuntimeSelections, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
+	}
 
 	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
 	if err != nil {
@@ -74,11 +99,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
-	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
-	}
-	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
@@ -94,6 +114,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}))
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
+		dynamicruntime.WithCircuitLogger(log.Zap()),
 	)
 	if err := dynamicCircuits.Restore(context.Background()); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
@@ -134,7 +155,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Sessions:          repos.Task,
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
+			DiscoveryRoots:    repos.Task,
 			RepositorySets:    repos.Task,
+			BranchPolicies:    repos.Task,
 			RepositoryCleanup: repos.Task,
 			Executors:         repos.Task,
 			Environments:      repos.Task,
@@ -144,6 +167,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			StatusSummaries:   repos.Task,
 			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
+			Usage:             repos.Task,
 		},
 		eventBus,
 		log,
@@ -151,9 +175,37 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Roots:             cfg.RepositoryDiscovery.Roots,
 			MaxDepth:          cfg.RepositoryDiscovery.MaxDepth,
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
+			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
+	// Workspace membership needs to resolve colleague names and reject
+	// disabled or unknown accounts before writing a row.
+	taskSvc.SetUserDirectory(newUserDirectoryAdapter(repos.UserAccounts))
+	// The default organization is named generically: an instance has no
+	// company name to borrow, and an operator renames it in one click.
+	const defaultOrgName = "Default organization"
+	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
+	if recordErr := recordRequiredStore(storeTracker, "organizations", orgErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize organizations: %w", recordErr)
+	}
+	// The tenancy migration runs once at boot: it creates the default
+	// organization and puts every pre-tenancy user and workspace into it.
+	if _, err := orgSvc.EnsureDefaultOrg(context.Background(), defaultOrgName); err != nil {
+		return nil, nil, fmt.Errorf("organization migration: %w", err)
+	}
+	// The unit tree is built after the tenancy migration, which is what stamps
+	// organization ids: placing a workspace before it knows its organization
+	// would put it under the wrong root.
+	unitSvc, unitErr := buildOrgUnitService(dbPool, repos.Task, repos.UserAccounts, log)
+	if recordErr := recordRequiredStore(storeTracker, "organization-units", unitErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize organization units: %w", recordErr)
+	}
+	taskSvc.SetUnitPlacer(unitSvc)
+	taskSvc.SetUnitReach(unitSvc)
+	// Deleting an organization must take its unit tree with it.
+	orgSvc.SetUnitDeleter(unitSvc)
+
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
@@ -173,6 +225,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	// Same split for the rest of the workflow-step surface: the workflow
+	// package owns steps, templates and export/import, but a workflow's owner
+	// is its workspace's owner, which only the task service can resolve.
+	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
+	// A step's queue_run action names the task it starts work on, so the
+	// step-write API accepts task IDs as well.
+	workflowSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Wire the ADR 0015 audit-trail writer for manual step transitions.
 	// workflowSvc.CreateStepTransition already matches
@@ -190,7 +250,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileMatcher(repos, log),
 	)
 
-	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
+	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize github: %w", recordErr)
+	}
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetComparisonTargetObserver(taskSvc)
@@ -200,28 +263,64 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
 	}
-	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc, gitlabCleanup, gitlabErr := initGitLabServiceRequiredWithSettings(repos.SystemSettings, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "gitlab", gitlabErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize gitlab: %w", recordErr)
+	}
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
-	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
+	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize azure devops: %w", recordErr)
+	}
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
 		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
-	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
-	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
-	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
-	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
+	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "jira", jiraErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize jira: %w", recordErr)
+	}
+	linearSvc, _, linearErr := initLinearServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "linear", linearErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize linear: %w", recordErr)
+	}
+	sentrySvc, _, sentryErr := initSentryServiceRequired(dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordRequiredStore(storeTracker, "sentry", sentryErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize sentry: %w", recordErr)
+	}
+	workflowSyncSvc, _, workflowSyncErr := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
+	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
+	}
+	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
+	}
 	if pluginsSvc != nil {
 		// The ldflags-injected build version, so Install can enforce a
 		// package's manifest.min_kandev_version. This is the only production
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Separate from SetDataSources: githubSvc is optional (nil when github
+		// is unconfigured), and a nil source leaves tasks with no PullRequests
+		// rather than failing every task read.
+		if githubSvc != nil {
+			pluginsSvc.SetTaskPRSource(githubSvc)
+		}
+		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
+	}
+	canvasRepo, canvasErr := canvasservice.NewRepository(dbPool)
+	if recordErr := recordRequiredStore(storeTracker, "canvas", canvasErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize canvas: %w", recordErr)
+	}
+	canvasSvc, err := initCanvasServiceWithRepository(cfg.Features.Canvases, canvasRepo, eventBus, pluginsSvc, taskSvc, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize canvas service: %w", err)
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
@@ -230,7 +329,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
 	}
-	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
+	shareHTTP, _, shareErr := initShareHandlersRequired(dbPool, repos.Task, taskSvc, githubSvc, log, version)
+	if recordErr := recordRequiredStore(storeTracker, "task-share", shareErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize task share: %w", recordErr)
+	}
+	_, officeConfigErr := officeconfigsync.NewStore(dbPool.Writer(), dbPool.Reader())
+	if recordErr := recordRequiredStore(storeTracker, "office-config-sync", officeConfigErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize office config sync: %w", recordErr)
+	}
 
 	// Plumb code-host branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from their owning provider rather than relying
@@ -253,8 +359,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Initialize Automation service
 	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
-	if automationErr != nil {
-		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
+	if recordErr := recordRequiredStore(storeTracker, "automation", automationErr); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize automation: %w", recordErr)
 	}
 	if automationComponents != nil {
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
@@ -289,6 +395,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		DynamicProfileResolver:   dynamicResolver,
 		DynamicBindingResolver:   dynamicBindingResolver,
 		Task:                     taskSvc,
+		Org:                      orgSvc,
+		OrgUnits:                 unitSvc,
 		User:                     userSvc,
 		Editor:                   editorSvc,
 		Prompts:                  promptSvc,
@@ -305,6 +413,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		Canvas:                   canvasSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
@@ -325,6 +434,63 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	services.Mentions = mentionComponents
 	return services, agentSettingsController, nil
+}
+
+func initCanvasService(enabled bool, dbPool *db.Pool, eventBus bus.EventBus, pluginsSvc *plugins.Service, taskSvc *taskservice.Service, log *logger.Logger) (*canvasservice.Service, error) {
+	if !enabled || pluginsSvc == nil {
+		if enabled && pluginsSvc == nil {
+			return nil, errors.New("canvas: plugin service is required")
+		}
+		return nil, nil
+	}
+	canvasRepo, err := canvasservice.NewRepository(dbPool)
+	if err != nil {
+		return nil, fmt.Errorf("canvas repository: %w", err)
+	}
+	return initCanvasServiceWithRepository(enabled, canvasRepo, eventBus, pluginsSvc, taskSvc, log)
+}
+
+func initCanvasServiceWithRepository(
+	enabled bool,
+	canvasRepo *canvasservice.Repository,
+	eventBus bus.EventBus,
+	pluginsSvc *plugins.Service,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+) (*canvasservice.Service, error) {
+	if !enabled || pluginsSvc == nil {
+		if enabled && pluginsSvc == nil {
+			return nil, errors.New("canvas: plugin service is required")
+		}
+		return nil, nil
+	}
+	if taskSvc == nil {
+		return nil, errors.New("canvas: task service is required")
+	}
+	if canvasRepo == nil {
+		return nil, errors.New("canvas: repository is required")
+	}
+	canvasSvc := canvasservice.NewService(canvasRepo, pluginsSvc.Instances())
+	canvasSvc.SetInstanceStateCleanup(func(ctx context.Context, instanceID string) error {
+		instanceState := pluginsSvc.InstanceState()
+		if instanceState == nil {
+			return nil
+		}
+		return instanceState.DeleteInstance(ctx, instanceID)
+	})
+	if err := canvasSvc.Reconcile(context.Background()); err != nil {
+		return nil, fmt.Errorf("reconcile canvas lifecycle: %w", err)
+	}
+	canvasSvc.SetEventPublisher(func(ctx context.Context, event canvasservice.LifecycleEvent) {
+		if eventBus == nil || event.Type == "" {
+			return
+		}
+		if err := eventBus.Publish(ctx, event.Type, bus.NewEvent(event.Type, "canvas", event)); err != nil {
+			log.Warn("failed to publish canvas lifecycle event", zap.String("event", event.Type), zap.Error(err))
+		}
+	})
+	taskSvc.SetCanvasCleanup(canvasSvc)
+	return canvasSvc, nil
 }
 
 func reserveBuiltinMentionIdentities(
@@ -767,6 +933,15 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
+// ResolveAutoStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveAutoStartStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
 // githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
@@ -823,10 +998,24 @@ func initGitHubService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *github.Service {
-	adapter := &githubSecretAdapter{store: secretsStore}
-	svc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
+	svc, _, err := initGitHubServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+func initGitHubServiceRequired(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*github.Service, func() error, error) {
+	adapter := &githubSecretAdapter{store: secretsStore}
+	svc, cleanup, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("github store: %w", err)
 	}
 	if svc != nil {
 		// GitHub takes both a SecretProvider (read-only) and a SecretManager
@@ -841,7 +1030,7 @@ func initGitHubService(
 			log.Warn("one or more GitHub App registrations failed to initialize", zap.Error(authErr))
 		}
 	}
-	return svc
+	return svc, cleanup, nil
 }
 
 // gitlabSecretAdapter adapts secrets.SecretStore to the GitLab integration's
@@ -896,10 +1085,9 @@ type gitlabHostStore struct {
 	settings *systemsettings.Store
 }
 
-func newGitLabHostStore(dbPool *db.Pool) (gitlab.HostStore, error) {
-	settingsStore, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, err
+func newGitLabHostStore(settingsStore *systemsettings.Store) (gitlab.HostStore, error) {
+	if settingsStore == nil {
+		return nil, errors.New("system settings store is required")
 	}
 	return &gitlabHostStore{settings: settingsStore}, nil
 }
@@ -916,44 +1104,94 @@ func (s *gitlabHostStore) SetHost(ctx context.Context, host string) error {
 	return s.settings.Save(ctx, gitlabHostSettingKey, []byte(host))
 }
 
-// initGitLabService wires up the GitLab integration. Failures are non-fatal:
-// the rest of the backend still boots without GitLab configured.
-func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*gitlab.Service, func() error) {
-	adapter := &gitlabSecretAdapter{store: secretsStore}
-	hostStore, hostStoreErr := newGitLabHostStore(dbPool)
-	if hostStoreErr != nil {
-		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(hostStoreErr))
+// initGitLabService keeps the package-level test seam that owns its settings
+// store. Production startup uses initGitLabServiceWithSettings so the
+// required store is initialized exactly once during repository bootstrap.
+func initGitLabService(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error) {
+	settingsStore, err := systemsettings.NewStore(dbPool)
+	if err != nil {
+		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(err))
 		return nil, nil
+	}
+	return initGitLabServiceWithSettings(settingsStore, dbPool, eventBus, secretsStore, log)
+}
+
+// initGitLabServiceWithSettings is the compatibility seam used by tests and
+// callers that already have a settings store. Required production startup
+// uses initGitLabServiceRequiredWithSettings so local schema errors reach the
+// bootstrap tracker.
+func initGitLabServiceWithSettings(
+	settingsStore *systemsettings.Store,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error) {
+	svc, cleanup, err := initGitLabServiceRequiredWithSettings(settingsStore, dbPool, eventBus, secretsStore, log)
+	if err != nil {
+		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+		return nil, nil
+	}
+	return svc, cleanup
+}
+
+func initGitLabServiceRequiredWithSettings(
+	settingsStore *systemsettings.Store,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*gitlab.Service, func() error, error) {
+	if settingsStore == nil {
+		return nil, nil, errors.New("GitLab host store requires system settings")
+	}
+	adapter := &gitlabSecretAdapter{store: secretsStore}
+	hostStore, err := newGitLabHostStore(settingsStore)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitlab host store: %w", err)
+	}
+	store, err := gitlab.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitlab store: %w", err)
 	}
 	svc, cleanup, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
 	if err != nil {
-		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+		return nil, nil, fmt.Errorf("gitlab service: %w", err)
 	}
 	if svc != nil {
 		svc.SetSecretManager(adapter)
 		svc.SetWorkspaceSecretStore(secretadapter.New(secretsStore))
 		svc.SetEventBus(eventBus)
-		if store, storeErr := gitlab.NewStore(dbPool.Writer(), dbPool.Reader()); storeErr == nil {
-			svc.SetStore(store)
-			if migrationErr := gitlab.MigrateLegacyConnection(
-				context.Background(), store, secretadapter.New(secretsStore), adapter, adapter, hostStore, log,
-			); migrationErr != nil {
-				log.Warn("GitLab legacy connection migration failed (non-fatal)", zap.Error(migrationErr))
-			}
-		} else {
-			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
+		svc.SetStore(store)
+		if migrationErr := gitlab.MigrateLegacyConnection(
+			context.Background(), store, secretadapter.New(secretsStore), adapter, adapter, hostStore, log,
+		); migrationErr != nil {
+			log.Warn("GitLab legacy connection migration failed (non-fatal)", zap.Error(migrationErr))
 		}
 	}
-	return svc, cleanup
+	return svc, cleanup, nil
 }
 
 // initJiraService wires up the Jira integration. Failures are non-fatal.
 func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *jira.Service {
-	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initJiraServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+func initJiraServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*jira.Service, func() error, error) {
+	svc, cleanup, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jira store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initAzureDevOpsService wires the workspace-scoped Azure integration.
@@ -964,14 +1202,27 @@ func initAzureDevOpsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *azuredevops.Service {
-	svc, _, err := azuredevops.Provide(
-		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
-	)
+	svc, _, err := initAzureDevOpsServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
 	return svc
+}
+
+func initAzureDevOpsServiceRequired(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*azuredevops.Service, func() error, error) {
+	svc, cleanup, err := azuredevops.Provide(
+		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("azure-devops store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initWorkflowSyncService wires the workflow-sync service. Either integration
@@ -984,8 +1235,19 @@ func initWorkflowSyncService(
 ) *workflowsync.Service {
 	if githubSvc == nil && gitlabSvc == nil {
 		log.Warn("workflow sync disabled: no GitHub or GitLab service available")
+	}
+	svc, _, err := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
+	if err != nil {
+		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	return svc
+}
+
+func initWorkflowSyncServiceRequired(
+	dbPool *db.Pool, githubSvc *github.Service, gitlabSvc *gitlab.Service,
+	workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger,
+) (*workflowsync.Service, func() error, error) {
 	workflowSvc.SetSyncWorkflowOps(taskSvc)
 	var githubClients workflowsync.GitHubClientProvider
 	if githubSvc != nil {
@@ -995,31 +1257,46 @@ func initWorkflowSyncService(
 	if gitlabSvc != nil {
 		gitlabClients = gitlabSvc
 	}
-	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
+	svc, cleanup, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
 	if err != nil {
-		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
-		return nil
+		return nil, nil, fmt.Errorf("workflow-sync store: %w", err)
 	}
 	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-	return svc
+	return svc, cleanup, nil
 }
 
 // initLinearService wires up the Linear integration. Failures are non-fatal.
 func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
-	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initLinearServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
 }
 
+func initLinearServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*linear.Service, func() error, error) {
+	svc, cleanup, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("linear store: %w", err)
+	}
+	return svc, cleanup, nil
+}
+
 // initSentryService wires up the Sentry integration. Failures are non-fatal.
 func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *sentry.Service {
-	svc, _, err := sentry.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	svc, _, err := initSentryServiceRequired(dbPool, eventBus, secretsStore, log)
 	if err != nil {
 		log.Warn("Sentry service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+func initSentryServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*sentry.Service, func() error, error) {
+	svc, cleanup, err := sentry.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sentry store: %w", err)
+	}
+	return svc, cleanup, nil
 }
 
 // initShareHandlers wires up the public-share-links HTTP surface. Failures
@@ -1028,19 +1305,35 @@ func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 func initShareHandlers(
 	dbPool *db.Pool,
 	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
 	githubSvc *github.Service,
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
-	h, _, err := share.Provide(
-		dbPool.Writer(), dbPool.Reader(), taskRepo, githubSvc, log,
-		share.Config{KandevVersion: version},
-	)
+	h, _, err := initShareHandlersRequired(dbPool, taskRepo, authorizer, githubSvc, log, version)
 	if err != nil {
 		log.Warn("Share handlers initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
 	return h
+}
+
+func initShareHandlersRequired(
+	dbPool *db.Pool,
+	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
+	githubSvc *github.Service,
+	log *logger.Logger,
+	version string,
+) (*share.HTTPHandlers, func() error, error) {
+	h, cleanup, err := share.Provide(
+		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
+		share.Config{KandevVersion: version},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("task-share store: %w", err)
+	}
+	return h, cleanup, nil
 }
 
 // portsBackendDefault is the default backend HTTP port. We don't import
@@ -1065,12 +1358,39 @@ func initPluginsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *plugins.Service {
-	svc, _, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
-	if err != nil {
-		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
+	svc, _, storeErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
+	if err := storeErrors.CombinedError(); err != nil && log != nil {
+		log.Warn("Plugin SQL store initialization failed", zap.Error(err))
 		return nil
 	}
 	return svc
+}
+
+func initPluginsServiceRequired(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) (*plugins.Service, func() error, plugins.StoreInitErrors) {
+	return plugins.ProvideWithStoreErrors(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
+}
+
+func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {
+	var failures []error
+	for _, id := range []string{
+		"plugin-instances",
+		"plugin-marketplace",
+		"plugin-settings",
+		"plugin-state",
+		"plugin-instance-state",
+		"plugin-user-state",
+	} {
+		if err := recordRequiredStore(tracker, id, initErrors[id]); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 type pluginsHostUtilityAdapter struct {
@@ -1127,6 +1447,8 @@ type pluginTaskWriteService interface {
 	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
+	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
 
 type pluginsTaskWriterAdapter struct {
@@ -1152,6 +1474,8 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Metadata:       metadata,
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
+		Priority:       in.Priority,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err
@@ -1259,10 +1583,21 @@ func firstPluginPRNumber(values ...*int64) int {
 }
 
 func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.TaskUpdateInput) (*taskmodels.Task, error) {
+	// workflow_step_id is rejected on this path regardless of value (including
+	// a present but empty string) — Update never calls publishTaskMovedEvent,
+	// so writing the column directly would move the card without firing
+	// on_enter actions like auto-start. Use Move instead, which routes through
+	// MoveTaskWithOptions. Checked before the state validation below so a
+	// request that also carries an invalid state is still named as a
+	// rejected move, not a state error.
+	if in.WorkflowStepID != nil {
+		return nil, status.Error(codes.InvalidArgument,
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps")
+	}
 	req := &taskservice.UpdateTaskRequest{
-		Title:          in.Title,
-		Description:    in.Description,
-		WorkflowStepID: in.WorkflowStepID,
+		Title:       in.Title,
+		Description: in.Description,
+		Priority:    in.Priority,
 	}
 	if in.State != nil {
 		// v1.TaskState is a string type, so the cast can't fail — validate the
@@ -1276,6 +1611,131 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		req.State = &state
 	}
 	return a.svc.UpdateTask(ctx, in.ID, req)
+}
+
+func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskMoveInput) (*plugins.TaskMoveResult, error) {
+	workflowID, err := a.resolvePluginMoveWorkflowID(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := taskservice.MoveTaskOptions{
+		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
+		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
+	}
+	if in.WorkflowID == nil {
+		// workflowID above was inherited from a separate GetTask pre-read
+		// (resolvePluginMoveWorkflowID), not named explicitly by the plugin.
+		// Guard against a concurrent reassignment landing between that read
+		// and the write below: MoveTaskWithOptions re-checks this against the
+		// task's WorkflowID from its own fresh GetTask and fails the move
+		// instead of silently reverting the concurrent change.
+		opts.ExpectedWorkflowID = &workflowID
+	}
+
+	// Attach attribution before calling MoveTaskWithOptions: that method only
+	// falls back to its own default attribution when none is already present
+	// on the context (steptelemetry.HasTrigger), so setting it here — exactly
+	// like BulkMoveTasks does — survives untouched into the recorded ledger row.
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerPluginMove,
+		ActorKind: steptelemetry.ActorIntegration,
+		ActorID:   in.Source,
+	})
+
+	result, err := a.svc.MoveTaskWithOptions(ctx, in.TaskID, workflowID, in.WorkflowStepID, int(in.Position), opts)
+	if err != nil {
+		return nil, classifyPluginMoveError(err)
+	}
+	return &plugins.TaskMoveResult{
+		Task:         result.Task,
+		Transitioned: result.Transitioned,
+		FromStepID:   result.FromStepID,
+	}, nil
+}
+
+// resolvePluginMoveWorkflowID resolves the effective workflow id for a plugin
+// move: an explicit WorkflowID is used as-is; a nil WorkflowID inherits the
+// task's current workflow, requiring a lookup MoveTaskWithOptions doesn't do
+// on its own (it takes a plain workflow id with no "inherit current" case).
+//
+// A task with no current workflow resolves to "", passed through rather than
+// rejected here (AC-005.11 still ends in InvalidArgument, just not from this
+// function) — the binding precedence ladder requires the task's own state
+// (archived/active-session, AC-001.7/001.8) to be checked before its
+// destination (AC-001.6/005.11) is judged. Those state checks live inside
+// MoveTaskWithOptions' validateTaskMove, called after this function returns,
+// so failing fast here on an empty workflow id would answer InvalidArgument
+// for an archived task instead of FailedPrecondition. Passing "" through
+// instead lets validateTaskMove's GetWorkflow("") fail naturally — after the
+// state gates — with a "workflow not found" error classifyPluginMoveError
+// already maps to InvalidArgument.
+func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Context, in plugins.TaskMoveInput) (string, error) {
+	if in.WorkflowID != nil {
+		return *in.WorkflowID, nil
+	}
+	task, err := a.svc.GetTask(ctx, in.TaskID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			// classifyPluginMoveError's fixed "task not found" message, not a
+			// %q-interpolated one: MoveTask returns this error directly to the
+			// plugin without routing it through that classifier (see the
+			// caller), so building the status here has to match its no-leaked-
+			// identifiers convention itself rather than relying on a wrapper
+			// that never runs for this branch.
+			return "", classifyPluginMoveError(err)
+		}
+		// Do not forward repository or driver details across the plugin gRPC
+		// boundary. The classifier preserves cancellation codes and maps every
+		// other unexpected lookup failure to a fixed Internal status.
+		return "", classifyPluginMoveError(err)
+	}
+	return task.WorkflowID, nil
+}
+
+// classifyPluginMoveError maps MoveTaskWithOptions' bare validation errors to
+// the plugin MoveTask RPC's binding error-mapping table. It intentionally does
+// NOT reuse mcp/handlers.classifyMoveTaskError: that classifier lowercases and
+// buckets archived/active-session/different-workspace/step-not-in-workflow
+// into a single Conflict code, but this table requires FailedPrecondition for
+// the first two and InvalidArgument for the latter two.
+//
+// Every branch returns a fixed, generic message rather than the underlying
+// err.Error() text: validateTaskMove's messages are meant for trusted
+// board/MCP callers and can name internal identifiers, so forwarding them
+// verbatim to a plugin (an external, less-trusted caller) over the gRPC
+// status would leak implementation detail the plugin has no legitimate need
+// for. This mirrors classifyMoveTaskError's own fixed-message convention.
+func classifyPluginMoveError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return status.Error(codes.Canceled, "move task canceled")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.DeadlineExceeded, "move task deadline exceeded")
+	}
+	if errors.Is(err, repoerrors.ErrTaskNotFound) {
+		return status.Error(codes.NotFound, "task not found")
+	}
+	if errors.Is(err, taskservice.ErrWorkflowResolutionConflict) {
+		return status.Error(codes.Aborted, "task workflow changed concurrently, retry the move")
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "archived tasks cannot be moved"):
+		return status.Error(codes.FailedPrecondition, "task is archived and cannot be moved")
+	case strings.Contains(msg, "task has an active session"):
+		return status.Error(codes.FailedPrecondition, "task has an active session and cannot be moved")
+	case strings.Contains(msg, "workflow not found"),
+		strings.Contains(msg, "workflow step not found"),
+		strings.Contains(msg, "target workflow is in a different workspace"),
+		strings.Contains(msg, "target workflow step does not belong to target workflow"):
+		return status.Error(codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace")
+	default:
+		return status.Error(codes.Internal, "failed to move task")
+	}
 }
 
 // validPluginTaskState reports whether state is a state a plugin may set via

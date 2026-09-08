@@ -194,8 +194,10 @@ func TestWaitForExit_ReapsProcessGroupAfterNaturalLeaderExit(t *testing.T) {
 	})
 
 	childPID := waitForChildPID(t, pidFile, 5*time.Second)
+	stderrDone := make(chan struct{})
+	close(stderrDone)
 	m.wg.Add(1)
-	go m.waitForExit()
+	go m.waitForExit(stderrDone)
 
 	select {
 	case <-m.doneCh:
@@ -224,8 +226,10 @@ func TestWaitForExit_DoesNotPublishErrorForIntentionalStop(t *testing.T) {
 		_ = killProcessGroup(parentPID)
 	})
 
+	stderrDone := make(chan struct{})
+	close(stderrDone)
 	m.wg.Add(1)
-	go m.waitForExit()
+	go m.waitForExit(stderrDone)
 	require.NoError(t, killProcessGroup(parentPID))
 
 	select {

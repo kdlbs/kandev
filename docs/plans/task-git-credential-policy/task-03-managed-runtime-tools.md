@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["00-indexed-git-config-composition", "02-launch-resume-snapshot"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 03: Repair Managed Agentctl And Gh Runtime Tools

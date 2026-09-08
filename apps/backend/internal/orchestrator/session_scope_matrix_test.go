@@ -66,7 +66,7 @@ func sessionScopeCases() []deniedCase {
 			return s.CancelAgent(context.Background(), sessionID)
 		}},
 		{"RespondToPermission", func(s *Service) error {
-			return s.RespondToPermission(context.Background(), sessionID, "pending-1", "allow", false, false)
+			return s.RespondToPermission(context.Background(), "task-1", sessionID, "request-1", "pending-1", "allow", false, false)
 		}},
 		{"SetSessionPlanModeByID", func(s *Service) error {
 			return s.SetSessionPlanModeByID(context.Background(), sessionID, true)
@@ -99,6 +99,10 @@ func sessionScopeCases() []deniedCase {
 				context.Background(),
 				clarification.DetachedClarificationResume{TaskID: taskID, SessionID: sessionID},
 			)
+		}},
+		{"ProbeBackgroundWorkloads", func(s *Service) error {
+			_, err := s.ProbeBackgroundWorkloads(context.Background(), sessionID)
+			return err
 		}},
 	}
 }

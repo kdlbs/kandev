@@ -167,6 +167,7 @@ describe("GitLab QuickTaskLauncher recovery", () => {
         project_path: "group/project",
         labels: [],
         assignees: [],
+        milestone: "",
         created_at: FIXED_DATE,
         updated_at: FIXED_DATE,
       },

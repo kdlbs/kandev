@@ -10,11 +10,19 @@ import (
 // AgentRunDayRow holds per-day run outcome counts for one agent.
 // Status values mirror the runs.status column:
 // queued | claimed | finished | failed | cancelled.
+//
+// The five buckets are total over every (status, outcome) combination
+// (docs/specs/task-delivery-ledger/spec.md, "Office run outcome §
+// Repository query"): succeeded and skipped and unclassified partition
+// status='finished' by outcome; failed and other are unchanged by that
+// card.
 type AgentRunDayRow struct {
-	Date      string `db:"date"`
-	Succeeded int    `db:"succeeded"`
-	Failed    int    `db:"failed"`
-	Other     int    `db:"other"`
+	Date         string `db:"date"`
+	Succeeded    int    `db:"succeeded"`
+	Skipped      int    `db:"skipped"`
+	Unclassified int    `db:"unclassified"`
+	Failed       int    `db:"failed"`
+	Other        int    `db:"other"`
 }
 
 // RunCountsByDayForAgent returns per-day run outcome counts for an agent
@@ -22,9 +30,11 @@ type AgentRunDayRow struct {
 // the start of (today - days + 1) so the result range is inclusive of
 // today and `days` days back.
 //
-// finished → succeeded; failed (and timed_out, treated as failed
-// upstream) → failed; everything else (cancelled, queued, claimed) →
-// other.
+// finished + outcome='processed' → succeeded; finished + any other
+// non-NULL outcome → skipped; finished + outcome IS NULL → unclassified
+// (pre-activation rows, and any finished path with no established
+// semantic label); failed (and timed_out, treated as failed upstream) →
+// failed; everything else (cancelled, queued, claimed) → other.
 func (r *Repository) RunCountsByDayForAgent(
 	ctx context.Context, agentID string, days int,
 ) ([]AgentRunDayRow, error) {
@@ -35,7 +45,9 @@ func (r *Repository) RunCountsByDayForAgent(
 	var rows []AgentRunDayRow
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT strftime('%Y-%m-%d', requested_at) AS date,
-		       SUM(CASE WHEN status = 'finished' THEN 1 ELSE 0 END) AS succeeded,
+		       SUM(CASE WHEN status = 'finished' AND outcome = 'processed' THEN 1 ELSE 0 END) AS succeeded,
+		       SUM(CASE WHEN status = 'finished' AND outcome IS NOT NULL AND outcome != 'processed' THEN 1 ELSE 0 END) AS skipped,
+		       SUM(CASE WHEN status = 'finished' AND outcome IS NULL THEN 1 ELSE 0 END) AS unclassified,
 		       SUM(CASE WHEN status IN ('failed','timed_out') THEN 1 ELSE 0 END) AS failed,
 		       SUM(CASE WHEN status NOT IN ('finished','failed','timed_out') THEN 1 ELSE 0 END) AS other
 		FROM runs

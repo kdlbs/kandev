@@ -45,6 +45,9 @@ function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> 
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
     tombstonedSessions: {},
+    tabOrderByWorkspace: {},
+    tabOrderSyncErrorByWorkspace: {},
+    tabOrderSyncPendingByWorkspace: {},
     ...overrides,
   };
 }

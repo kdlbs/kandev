@@ -99,6 +99,9 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithNumber("position", mcp.Description("Step position (0-based). Defaults to end.")),
 			mcp.WithString("color", mcp.Description("Step color hex code (e.g. '#3b82f6')")),
 			mcp.WithString("prompt", mcp.Description("System prompt for agents in this step")),
+			mcp.WithString("agent_profile_id", mcp.Description("Optional agent profile ID for this destination step")),
+			mcp.WithString("profile_session_start_policy", mcp.Enum("reuse", "new"), mcp.Description("Session handling when this step starts after a profile switch")),
+			mcp.WithString("profile_session_end_policy", mcp.Enum("complete", "park"), mcp.Description("Session handling when this step ends for a profile switch")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
 			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step (default: false)")),
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
@@ -117,6 +120,9 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithString("name", mcp.Description("New step name")),
 			mcp.WithString("color", mcp.Description("New color hex code")),
 			mcp.WithString("prompt", mcp.Description("New system prompt")),
+			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID for this destination step")),
+			mcp.WithString("profile_session_start_policy", mcp.Enum("reuse", "new"), mcp.Description("Session handling when this step starts after a profile switch")),
+			mcp.WithString("profile_session_end_policy", mcp.Enum("complete", "park"), mcp.Description("Session handling when this step ends for a profile switch")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
 			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step")),
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
@@ -220,6 +226,53 @@ func (s *Server) registerConfigMcpTools() {
 		),
 		s.wrapHandler("update_mcp_config_kandev", s.updateMcpConfigHandler()),
 	)
+}
+
+// --- Saved prompt tools ---
+
+func (s *Server) registerConfigPromptTools() {
+	listTool := mcp.NewToolWithRawSchema(
+		"list_shared_prompts_kandev",
+		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
+	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	listTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	listTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
+	listTool.Annotations.OpenWorldHint = mcp.ToBoolPtr(false)
+	s.mcpServer.AddTool(
+		listTool,
+		s.wrapHandler("list_shared_prompts_kandev", s.listSharedPromptsHandler()),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_shared_prompt_kandev",
+			mcp.WithDescription("Read one saved prompt by its exact, case-sensitive name. Surrounding whitespace is ignored."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("name", mcp.Required(), mcp.MinLength(1), mcp.Description("Saved prompt name.")),
+		),
+		s.wrapHandler("get_shared_prompt_kandev", s.getSharedPromptHandler()),
+	)
+}
+
+func (s *Server) listSharedPromptsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return s.forwardToBackend(ctx, ws.ActionMCPListSharedPrompts, nil)
+	}
+}
+
+func (s *Server) getSharedPromptHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name := strings.TrimSpace(req.GetString("name", ""))
+		if name == "" {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetSharedPrompt, map[string]interface{}{"name": name})
+	}
 }
 
 // --- Executor config tools ---
@@ -442,7 +495,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
+		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
 			if args[key] != nil {
 				payload[key] = args[key]
 			}
@@ -468,7 +521,7 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
+		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
 			if args[key] != nil {
 				payload[key] = args[key]
 			}

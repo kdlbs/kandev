@@ -102,6 +102,58 @@ describe("ModelConfigSelector", () => {
   });
 });
 
+describe("ModelConfigSelector selected options", () => {
+  it("puts the current model and nested config value first", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-1", name: "Model 1" },
+          { id: "model-2", name: "Model 2" },
+          { id: "model-3", name: "Model 3" },
+        ]}
+        currentModel="model-2"
+        onModelChange={() => {}}
+        onConfigChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent?.trim())).toEqual([
+      "Model 2",
+      "Model 1",
+      "Model 3",
+    ]);
+    expect(screen.getByTestId("model-config-selected-row").className).toContain("bg-card");
+    expect(screen.getByTestId("model-config-selected-row").className).toContain(
+      "border-primary/50",
+    );
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    const effortSection = screen.getByTestId(effortSectionTestId);
+    expect(
+      within(effortSection)
+        .getAllByRole("button")
+        .map((button) => button.textContent?.trim()),
+    ).toEqual(["Medium", "Low", "High"]);
+    expect(within(effortSection).getByRole("button", { name: "Medium" }).className).toContain(
+      "bg-card",
+    );
+  });
+});
+
 describe("ModelConfigSelector loading behavior", () => {
   it("keeps the picker open after selecting a model without existing dependent options", () => {
     const onModelChange = vi.fn();

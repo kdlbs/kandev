@@ -10,7 +10,10 @@ import {
   type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
+import type { KubernetesSession } from "@/lib/types/http-kubernetes";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { getExecutorIcon } from "@/lib/executor-icons";
 import { resolveExecutorEnvironmentStatus, type StatusTone } from "./executor-environment-status";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -23,16 +26,27 @@ const TONE_CLASSES: Record<StatusTone, string> = {
   neutral: "border-muted text-muted-foreground",
 };
 
+const KubernetesPodIcon = getExecutorIcon("k8s");
+const KUBERNETES_POD_KEY = "executors:kubernetesPod";
+
 export function EnvironmentInfo({
   env,
   container,
   ssh,
+  kubernetes,
+  kubernetesLoaded = false,
+  kubernetesError = null,
   loading,
+  kubernetesActions,
 }: {
   env: TaskEnvironment | null;
   container: ContainerLiveStatus | null;
   ssh?: SSHLiveStatus | null;
+  kubernetes?: KubernetesSession | null;
+  kubernetesLoaded?: boolean;
+  kubernetesError?: string | null;
   loading: boolean;
+  kubernetesActions?: React.ReactNode;
 }) {
   const { t } = useTranslation();
   if (loading && !env) {
@@ -52,13 +66,39 @@ export function EnvironmentInfo({
     );
   }
 
+  if (env.executor_type === "k8s") {
+    return (
+      <KubernetesEnvironmentSummary
+        env={env}
+        container={container}
+        session={kubernetes ?? null}
+        loaded={kubernetesLoaded}
+        error={kubernetesError}
+        actions={kubernetesActions}
+      />
+    );
+  }
+
   return (
     <div className="px-3 pt-2.5 pb-1.5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
-        <StatusBadge env={env} container={container} />
+        <StatusBadge
+          env={env}
+          container={container}
+          kubernetes={kubernetes ?? null}
+          kubernetesLoaded={kubernetesLoaded}
+          kubernetesError={kubernetesError}
+        />
       </div>
-      <EnvironmentFields env={env} container={container} ssh={ssh ?? null} />
+      <EnvironmentFields
+        env={env}
+        container={container}
+        ssh={ssh ?? null}
+        kubernetes={kubernetes ?? null}
+        kubernetesLoaded={kubernetesLoaded}
+        kubernetesError={kubernetesError}
+      />
     </div>
   );
 }
@@ -66,18 +106,176 @@ export function EnvironmentInfo({
 function StatusBadge({
   env,
   container,
+  kubernetes,
+  kubernetesLoaded,
+  kubernetesError,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
+  kubernetes: KubernetesSession | null;
+  kubernetesLoaded: boolean;
+  kubernetesError: string | null;
 }) {
   // For container-backed envs the live state is the source of truth; for the
   // others fall back to the recorded TaskEnvironment.status.
-  const { label, tone } = resolveExecutorEnvironmentStatus(env, container);
+  const { label, tone } = resolveExecutorEnvironmentStatus(
+    env,
+    container,
+    env.executor_type === "k8s"
+      ? { session: kubernetes, loaded: kubernetesLoaded, error: kubernetesError }
+      : undefined,
+  );
   const className = TONE_CLASSES[tone];
   return (
-    <Badge variant="outline" className={`text-[10px] uppercase ${className}`}>
+    <Badge variant="outline" className={`h-6 rounded-full px-2.5 text-[11px] ${className}`}>
       {label}
     </Badge>
+  );
+}
+
+function KubernetesEnvironmentSummary({
+  env,
+  container,
+  session,
+  loaded,
+  error,
+  actions,
+}: {
+  env: TaskEnvironment;
+  container: ContainerLiveStatus | null;
+  session: KubernetesSession | null;
+  loaded: boolean;
+  error: string | null;
+  actions?: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="space-y-3 p-3" data-testid="kubernetes-environment-summary">
+      <div className="flex items-start gap-2.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/15 bg-primary/8 text-primary shadow-sm">
+          <KubernetesPodIcon className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
+            {formatExecutorType(env.executor_type)} {t(KUBERNETES_POD_KEY)}
+          </h3>
+          <div className="mt-1">
+            <StatusBadge
+              env={env}
+              container={container}
+              kubernetes={session}
+              kubernetesLoaded={loaded}
+              kubernetesError={error}
+            />
+          </div>
+        </div>
+        {actions}
+      </div>
+
+      {session ? (
+        <>
+          {session.pod_name ? (
+            <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                {t(KUBERNETES_POD_KEY)}
+              </p>
+              <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
+                  {session.pod_name}
+                </span>
+                <CopyButton label={t(KUBERNETES_POD_KEY)} value={session.pod_name} />
+              </div>
+            </div>
+          ) : null}
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {session.pod_phase ? (
+              <KubernetesFact label={t("task:status")} value={session.pod_phase} />
+            ) : null}
+            {session.container_state ? (
+              <KubernetesFact label={t("task:container")} value={session.container_state} />
+            ) : null}
+            <KubernetesFact
+              label={t("task:restarts")}
+              value={String(session.restarts)}
+              testId="kubernetes-restart-count"
+              tabular
+            />
+            {session.workspace_kind ? (
+              <KubernetesFact
+                label={t("task:workspaceMode")}
+                value={session.workspace_kind}
+                technical
+              />
+            ) : null}
+            {session.created_at ? (
+              <KubernetesFact
+                className="col-span-2"
+                label={t("task:created")}
+                value={formatDateTime(session.created_at)}
+              />
+            ) : null}
+          </dl>
+          {session.failure_reason ? (
+            <div className="rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2.5">
+              <p className="text-[11px] font-medium text-red-700 dark:text-red-300">
+                {t("task:error")}
+              </p>
+              <p className="mt-1 break-words text-xs text-foreground">{session.failure_reason}</p>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+          {error || (loaded ? t("task:executorEnvironmentIsUnavailable") : t("task:loadingStatus"))}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function KubernetesFact({
+  label,
+  value,
+  className = "",
+  testId,
+  technical = false,
+  tabular = false,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+  testId?: string;
+  technical?: boolean;
+  tabular?: boolean;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
+      <dd
+        data-testid={testId}
+        className={`mt-0.5 break-words text-xs text-foreground ${technical ? "font-mono" : ""} ${tabular ? "tabular-nums" : ""}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function CopyButton({ label, value }: { label: string; value: string }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      className="-mr-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+      aria-label={t("task:copy2", { label })}
+      onClick={() => {
+        void copyToClipboard(value).then((success) => {
+          if (success) toast.success(t("task:copied3", { label }));
+        });
+      }}
+    >
+      <IconCopy className="h-4 w-4" />
+    </button>
   );
 }
 
@@ -85,14 +283,29 @@ function EnvironmentFields({
   env,
   container,
   ssh,
+  kubernetes,
+  kubernetesLoaded,
+  kubernetesError,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
   ssh: SSHLiveStatus | null;
+  kubernetes: KubernetesSession | null;
+  kubernetesLoaded: boolean;
+  kubernetesError: string | null;
 }) {
   const { t } = useTranslation();
-  const fields = useMemo(() => buildFields(env, container, ssh), [env, container, ssh]);
+  const fields = useMemo(
+    () => buildFields(env, container, ssh, kubernetes),
+    [container, env, kubernetes, ssh],
+  );
   if (fields.length === 0) {
+    if (env.executor_type === "k8s") {
+      let message = t("task:loadingStatus");
+      if (kubernetesError) message = kubernetesError;
+      else if (kubernetesLoaded) message = t("task:executorEnvironmentIsUnavailable");
+      return <p className="text-xs text-muted-foreground">{message}</p>;
+    }
     return <p className="text-xs text-muted-foreground">{t("task:noResourceDetailsAvailable")}</p>;
   }
   return (
@@ -155,6 +368,7 @@ function buildFields(
   env: TaskEnvironment,
   container: ContainerLiveStatus | null,
   ssh: SSHLiveStatus | null,
+  kubernetes: KubernetesSession | null,
 ): FieldRow[] {
   const rows: FieldRow[] = [];
 
@@ -189,7 +403,33 @@ function buildFields(
     addSshRows(rows, ssh);
   }
 
+  if (env.executor_type === "k8s" && kubernetes) {
+    addKubernetesRows(rows, kubernetes);
+  }
+
   return rows;
+}
+
+function addKubernetesRows(rows: FieldRow[], session: KubernetesSession) {
+  if (session.pod_name) {
+    rows.push({ label: t(KUBERNETES_POD_KEY), value: session.pod_name, copy: true });
+  }
+  if (session.pod_phase) {
+    rows.push({ label: t("task:status"), value: session.pod_phase });
+  }
+  if (session.container_state) {
+    rows.push({ label: t("task:container"), value: session.container_state });
+  }
+  rows.push({ label: t("task:restarts"), value: String(session.restarts) });
+  if (session.workspace_kind) {
+    rows.push({ label: t("task:workspaceMode"), value: session.workspace_kind });
+  }
+  if (session.created_at) {
+    rows.push({ label: t("task:created"), value: formatDateTime(session.created_at) });
+  }
+  if (session.failure_reason) {
+    rows.push({ label: t("task:error"), value: session.failure_reason });
+  }
 }
 
 function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
@@ -274,6 +514,8 @@ function formatExecutorType(type: string): string {
       return t("task:executorTypeRemoteDocker");
     case "ssh":
       return "SSH";
+    case "k8s":
+      return t("executors:typeKubernetes");
     default:
       return type || t("task:executorTypeUnknown");
   }

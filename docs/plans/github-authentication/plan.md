@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/github-authentication.md
+spec: docs/specs/integrations/requirements/github-authentication.md
 created: 2026-07-19
 amended: 2026-07-21
 status: draft

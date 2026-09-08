@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-ownership-aware-repoint"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 parallelism: sequential
 ---
 
@@ -64,7 +64,7 @@ Task 03 (defines the `EnsureOwnedDirectoryLink` result struct with `PriorTarget`
 
 ## Inputs
 
-- Spec: strengthened atomicity behavior (`docs/specs/tasks/attach-workspace-sources.md:40-43`) and the
+- Spec: strengthened atomicity behavior (`docs/specs/tasks/system-design/attach-workspace-sources.md:40-43`) and the
   failure-mode row for restoring a repointed pre-existing link on a failed submission. Cancel/intact
   guarantees at `:51` and `:62`.
 - Plan: PR #2253 review remediation — Finding 2 (confirmed, most serious).

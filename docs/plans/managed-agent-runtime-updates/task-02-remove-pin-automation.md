@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 role: implementer
 model_tier: default
 ---

@@ -47,6 +47,40 @@ func TestUpdateIssueWatch_DeniesForeignWorkspace(t *testing.T) {
 	}
 }
 
+func TestIssueWatchIDOperationsDenyForeignWorkspace(t *testing.T) {
+	operations := []struct {
+		name string
+		run  func(*Service, string) error
+	}{
+		{name: "get", run: func(s *Service, id string) error { _, err := s.GetIssueWatch(context.Background(), id); return err }},
+		{name: "delete", run: func(s *Service, id string) error { return s.DeleteIssueWatch(context.Background(), id) }},
+		{name: "preview reset", run: func(s *Service, id string) error {
+			_, err := s.PreviewResetIssueWatch(context.Background(), id)
+			return err
+		}},
+		{name: "reset", run: func(s *Service, id string) error { _, err := s.ResetIssueWatch(context.Background(), id); return err }},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			f := newSvcFixture(t)
+			w := &IssueWatch{
+				WorkspaceID: "ws-victim", WorkflowID: "wf", WorkflowStepID: "step",
+				JQL: "project = X", AgentProfileID: "ap", Enabled: true,
+			}
+			if err := f.store.CreateIssueWatch(context.Background(), w); err != nil {
+				t.Fatalf("seed watch: %v", err)
+			}
+			f.svc.SetWorkspaceAuthorizer(denyOnly("ws-victim"))
+			if err := operation.run(f.svc, w.ID); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				t.Fatalf("expected ErrWorkspaceNotFound, got %v", err)
+			}
+			if got, err := f.store.GetIssueWatch(context.Background(), w.ID); err != nil || got == nil {
+				t.Fatalf("denied operation removed watch: watch=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 // TestListIssueWatches_DeniesForeignWorkspace covers the single-workspace list
 // path (the scoped form the settings page uses with an explicit workspace_id).
 func TestListIssueWatches_DeniesForeignWorkspace(t *testing.T) {

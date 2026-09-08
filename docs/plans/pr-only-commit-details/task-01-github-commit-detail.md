@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/pr-only-commit-details/spec.md"
+spec: "../../specs/ui/requirements/pr-only-commit-details.md"
 ---
 
 # Task 01: GitHub commit detail contract

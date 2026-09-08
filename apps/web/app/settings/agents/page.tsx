@@ -22,9 +22,11 @@ import {
   listAgents,
   listAvailableAgents,
 } from "@/lib/api";
-import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
+import { useAgentRuntimeUpdateStatuses } from "@/hooks/domains/settings/use-agent-runtime-update-statuses";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
@@ -55,12 +57,22 @@ type InstalledAgentsSectionProps = {
   resolveDisplayName: (name: string) => string;
   resolveCapabilityStatus: (name: string) => string | undefined;
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
+  resolveRuntimeUpdateStatus: (name: string) => AgentUpdateStatus | undefined;
   installJobs: Record<string, InstallJob>;
   updateJobs: Record<string, AgentUpdateJob>;
-  previewUpdate: (name: string, targetVersion?: string) => Promise<AgentUpdatePreview>;
-  startUpdate: (name: string, targetVersion: string) => Promise<AgentUpdateJob>;
+  previewUpdate: (
+    name: string,
+    targetVersion?: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdatePreview>;
+  startUpdate: (
+    name: string,
+    targetVersion: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
+  canManage: boolean;
 };
 
 function InstalledAgentsHeader({
@@ -71,7 +83,10 @@ function InstalledAgentsHeader({
 }: {
   rescanning: boolean;
   onOpenShell: () => void;
-  onOpenTuiDialog: () => void;
+  /** Absent for a caller without org.config.manage: creating a TUI agent is
+   *  a write this page must not offer them. Rescan and the host shell stay:
+   *  discovery is a read. */
+  onOpenTuiDialog?: () => void;
   onRescan: () => void;
 }) {
   const { t } = useTranslation();
@@ -107,16 +122,18 @@ function InstalledAgentsHeader({
           )}
           {t("agents:rescan")}
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onOpenTuiDialog}
-          className="h-11 cursor-pointer md:h-6"
-          data-testid="new-agent-button"
-        >
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addTuiAgent")}
-        </Button>
+        {onOpenTuiDialog && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenTuiDialog}
+            className="h-11 cursor-pointer md:h-6"
+            data-testid="new-agent-button"
+          >
+            <IconPlus className="h-4 w-4 mr-2" />
+            {t("agents:addTuiAgent")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -172,12 +189,14 @@ function InstalledAgentsSection({
   resolveDisplayName,
   resolveCapabilityStatus,
   resolveRuntimeUpdate,
+  resolveRuntimeUpdateStatus,
   installJobs,
   updateJobs,
   previewUpdate,
   startUpdate,
   setTuiDialogOpen,
   handleRescan,
+  canManage,
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
@@ -196,7 +215,7 @@ function InstalledAgentsSection({
       <InstalledAgentsHeader
         rescanning={rescanning}
         onOpenShell={() => setShellOpen(true)}
-        onOpenTuiDialog={() => setTuiDialogOpen(true)}
+        onOpenTuiDialog={canManage ? () => setTuiDialogOpen(true) : undefined}
         onRescan={() => void handleRescan()}
       />
       <HostShellDialog
@@ -239,10 +258,11 @@ function InstalledAgentsSection({
               ? {
                   capabilityStatus: resolveCapabilityStatus(agent.name),
                   runtimeUpdate: resolveRuntimeUpdate(agent.name),
+                  runtimeUpdateStatus: resolveRuntimeUpdateStatus(agent.name),
                   installJob: installJobs[agent.name],
                   updateJob: updateJobs[agent.name],
-                  onPreview: previewUpdate,
-                  onUpdate: startUpdate,
+                  onPreview: canManage ? previewUpdate : undefined,
+                  onUpdate: canManage ? startUpdate : undefined,
                   onAuthComplete: () => void handleRescan(),
                 }
               : {})}
@@ -270,6 +290,12 @@ function useAgentPageState() {
   const { items: availableAgents } = useAvailableAgents();
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
+  // Agents and agent profiles are org configuration: every write behind this
+  // page requires org.config.manage, which only an administrator holds.
+  const canManage = useIsAdmin();
+  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
+  const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
+    useAgentRuntimeUpdateStatuses(updateJobs);
 
   const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
   const savedAgentsByName = useMemo(
@@ -282,6 +308,7 @@ function useAgentPageState() {
     availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.status;
   const resolveRuntimeUpdate = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.runtime_update;
+  const resolveRuntimeUpdateStatus = (name: string) => statusByAgent[name];
 
   const handleRescan = async () => {
     if (rescanning) {
@@ -295,12 +322,11 @@ function useAgentPageState() {
       ]);
       setAgentDiscovery(discoveryResp.agents);
       setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
+      await refreshRuntimeUpdateStatuses();
     } finally {
       setRescanning(false);
     }
   };
-
-  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
 
   const handleCreateCustomTUI = async (data: {
     display_name: string;
@@ -325,6 +351,7 @@ function useAgentPageState() {
   };
 
   return {
+    canManage,
     savedAgents,
     installedAgents,
     discoveryAgents,
@@ -336,6 +363,7 @@ function useAgentPageState() {
     resolveDisplayName,
     resolveCapabilityStatus,
     resolveRuntimeUpdate,
+    resolveRuntimeUpdateStatus,
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
@@ -347,6 +375,7 @@ function useAgentPageState() {
 
 export default function AgentsSettingsPage() {
   const {
+    canManage,
     savedAgents,
     installedAgents,
     discoveryAgents,
@@ -358,6 +387,7 @@ export default function AgentsSettingsPage() {
     resolveDisplayName,
     resolveCapabilityStatus,
     resolveRuntimeUpdate,
+    resolveRuntimeUpdateStatus,
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
@@ -376,17 +406,19 @@ export default function AgentsSettingsPage() {
         </div>
         {/* The page's primary action: everything else on this page manages what
             is already installed. */}
-        <Button
-          size="sm"
-          className={settingsActionClassName("cursor-pointer")}
-          asChild
-          data-testid="install-agents-button"
-        >
-          <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
-            <IconDownload className="h-4 w-4 mr-2" />
-            {t("agents:installAgents")}
-          </Link>
-        </Button>
+        {canManage && (
+          <Button
+            size="sm"
+            className={settingsActionClassName("cursor-pointer")}
+            asChild
+            data-testid="install-agents-button"
+          >
+            <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
+              <IconDownload className="h-4 w-4 mr-2" />
+              {t("agents:installAgents")}
+            </Link>
+          </Button>
+        )}
       </div>
 
       <Separator />
@@ -394,6 +426,7 @@ export default function AgentsSettingsPage() {
       <HideDisabledAgentProfilesSetting />
 
       <InstalledAgentsSection
+        canManage={canManage}
         installedAgents={installedAgents}
         discoveryOrder={discoveryAgents}
         savedAgents={savedAgents}
@@ -403,6 +436,7 @@ export default function AgentsSettingsPage() {
         resolveDisplayName={resolveDisplayName}
         resolveCapabilityStatus={resolveCapabilityStatus}
         resolveRuntimeUpdate={resolveRuntimeUpdate}
+        resolveRuntimeUpdateStatus={resolveRuntimeUpdateStatus}
         installJobs={installJobs}
         updateJobs={updateJobs}
         previewUpdate={previewUpdate}

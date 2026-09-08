@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/jira-status-filter/spec.md"
+spec: "../../specs/integrations/requirements/jira-status-filter.md"
 ---
 
 # Task 01: Backend list-project-statuses endpoint

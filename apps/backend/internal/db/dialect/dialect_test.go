@@ -18,6 +18,15 @@ func TestIsPostgres(t *testing.T) {
 	}
 }
 
+func TestTimestampType(t *testing.T) {
+	if got := TimestampType(SQLite3); got != "DATETIME" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := TimestampType(PGX); got != "TIMESTAMPTZ" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestBoolToInt(t *testing.T) {
 	if BoolToInt(true) != 1 {
 		t.Error("expected 1 for true")
@@ -36,6 +45,15 @@ func TestBlobType(t *testing.T) {
 	}
 }
 
+func TestByteLength(t *testing.T) {
+	if got := ByteLength(SQLite3, "name"); got != "length(CAST(name AS BLOB))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := ByteLength(PGX, "name"); got != "octet_length(name)" {
+		t.Errorf("postgres: got %q", got)
+	}
+}
+
 func TestJSONExtract(t *testing.T) {
 	got := JSONExtract(SQLite3, "metadata", "status")
 	if got != "json_extract(metadata, '$.status')" {
@@ -44,6 +62,26 @@ func TestJSONExtract(t *testing.T) {
 	got = JSONExtract(PGX, "metadata", "status")
 	if got != "metadata::jsonb->>'status'" {
 		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestJSONExtractPath(t *testing.T) {
+	got := JSONExtractPath(SQLite3, "m.metadata", "question_id")
+	if got != "json_extract(m.metadata, '$.question_id')" {
+		t.Errorf("sqlite single segment: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question_id")
+	if got != "m.metadata::jsonb->>'question_id'" {
+		t.Errorf("pgx single segment: got %q", got)
+	}
+
+	got = JSONExtractPath(SQLite3, "m.metadata", "question", "id")
+	if got != "json_extract(m.metadata, '$.question.id')" {
+		t.Errorf("sqlite nested: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question", "id")
+	if got != "m.metadata::jsonb->'question'->>'id'" {
+		t.Errorf("pgx nested: got %q", got)
 	}
 }
 
@@ -80,6 +118,17 @@ func TestExcludeConfigModePredicate(t *testing.T) {
 	}
 }
 
+func TestExcludeTruthyMetadataPredicate(t *testing.T) {
+	got := ExcludeTruthyMetadataPredicate(SQLite3, "m.metadata", "parent_question")
+	if got != "json_extract(m.metadata, '$.parent_question') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeTruthyMetadataPredicate(PGX, "m.metadata", "parent_question")
+	if got != "COALESCE(m.metadata::jsonb->>'parent_question', '') NOT IN ('true', '1')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDurationMs(t *testing.T) {
 	got := DurationMs(SQLite3, "completed_at", "started_at")
 	if got != "(julianday(completed_at) - julianday(started_at)) * 86400000" {
@@ -109,6 +158,15 @@ func TestDateTimeOf(t *testing.T) {
 	}
 	got = DateTimeOf(PGX, "activation.value")
 	if got != "(activation.value)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestNullableTimestamp(t *testing.T) {
+	if got := NullableTimestamp(SQLite3, "?"); got != "?" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := NullableTimestamp(PGX, "?"); got != "(?)::timestamptz" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

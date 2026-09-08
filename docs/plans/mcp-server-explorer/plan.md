@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/mcp-session-observability/spec.md
+spec: docs/specs/platform/requirements/mcp-session-observability.md
 decision: docs/decisions/2026-08-18-session-mcp-tool-definition-details.md
 created: 2026-08-16
 updated: 2026-08-18

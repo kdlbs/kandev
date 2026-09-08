@@ -111,6 +111,8 @@ export type RunDetail = {
   summary_injected?: string;
   result_json?: string;
   context_snapshot?: string;
+  // Persisted when the run is created. Identifies the continuation-summary chain.
+  continuation_scope?: string;
   output_summary?: string;
   // Routing snapshot — omitted for legacy concrete-profile runs.
   routing?: RunRouting;
@@ -155,6 +157,8 @@ export type AgentLatestRun = {
 export type AgentRunActivityDay = {
   date: string;
   succeeded: number;
+  skipped: number;
+  unclassified: number;
   failed: number;
   other: number;
   total: number;
@@ -182,6 +186,7 @@ export type AgentTaskStatusDay = {
 export type AgentSuccessRateDay = {
   date: string;
   succeeded: number;
+  unclassified: number;
   total: number;
 };
 

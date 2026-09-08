@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 07: Explain missing Office CLI context
@@ -31,7 +31,7 @@ cd apps/backend && rtk go test ./cmd/agentctl -run 'TestNewKandevClient.*Missing
 
 ## Inputs
 
-- `docs/specs/office/agents.md`, sections **Environment variables** and
+- `docs/specs/office/requirements/agents.md`, sections **Environment variables** and
   **Failure modes**.
 - Existing `newKandevClient` tests and socket-free request-capture helpers.
 

@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { createSubmoduleReviewFixture, readGitValue } from "./submodule-review-helpers";
+import {
+  createSubmoduleReviewFixture,
+  expectStickyReviewHeaderClearance,
+  readGitValue,
+} from "./submodule-review-helpers";
 
 test.describe("Submodule review fixture", () => {
   test("cleans source repositories when setup fails", async ({ apiClient, seedData, backend }) => {
@@ -25,7 +29,7 @@ test.describe("Submodule review fixture", () => {
 });
 
 test.describe("Nested submodule Review", () => {
-  test.describe.configure({ retries: 1, timeout: 180_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test("shows nested scopes and commits child gitlinks through the UI", async ({
     testPage,
@@ -47,7 +51,7 @@ test.describe("Nested submodule Review", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
       const parentBaseSha = readGitValue(worktreePath, ["rev-parse", "HEAD"], backend.tmpDir);
 
       await session.clickTab("Changes");
@@ -83,9 +87,21 @@ test.describe("Nested submodule Review", () => {
       await expect
         .poll(() => session.reviewDiffText(), { timeout: 45_000 })
         .toEqual(expect.stringContaining("parent working-tree change"));
-      for (const expected of ["outer committed change", "inner committed change"]) {
+      for (const [repositoryName, expected] of [
+        ["vendor/outer", "outer committed change"],
+        ["vendor/outer/vendor/inner", "inner committed change"],
+      ] as const) {
+        // Diff bodies load when they enter the viewport. Select each nested
+        // file in the tree so the review list scrolls to it before asserting
+        // its content, just as a reviewer would navigate the changes.
+        await review
+          .locator(
+            `[data-testid="review-file-row"][data-file-path="README.md"][data-repository-name="${repositoryName}"]`,
+          )
+          .click();
         await expect.poll(() => session.reviewDiffText(), { timeout: 45_000 }).toContain(expected);
       }
+      await expectStickyReviewHeaderClearance(review, "mouse");
 
       await expect(
         review.locator('[data-testid="review-file-row"][data-file-path="vendor/outer"]'),

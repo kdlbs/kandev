@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-frontend-selection", "02-unit-tests"]
 plan: "plan.md"
-spec: "../../specs/ui/slash-command-composer.md"
+spec: "../../specs/ui/requirements/slash-command-composer.md"
 ---
 
 # Task 03: E2E Slash Command Composer Verification

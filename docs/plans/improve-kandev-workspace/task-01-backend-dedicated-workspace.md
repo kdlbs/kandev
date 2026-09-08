@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 01: Backend — dedicated Improve Kandev workspace
@@ -48,7 +48,7 @@ Sequential (wave 1).
 ## Inputs
 
 - Spec: "API surface" and "Scenarios" (workspace creation/reuse) in
-  `docs/specs/improve-kandev/spec.md`.
+  `docs/specs/workspaces/requirements/improve-kandev.md`.
 - Plan: `docs/plans/improve-kandev-workspace/plan.md` Backend section.
 - Patterns: `ensureWorkflow`'s find-then-create-then-re-read race handling in
   `handler.go`; `taskSvc.ListWorkspaces` / `taskSvc.CreateWorkspace`

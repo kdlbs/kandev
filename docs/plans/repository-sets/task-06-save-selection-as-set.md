@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["05-apply-set-in-picker"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 06: Save The Current Selection As A Set

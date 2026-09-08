@@ -1,0 +1,156 @@
+{
+  "cases": [
+    {
+      "name": "lifecycle_only boolean true excludes the newer turn",
+      "turns": [
+        { "id": "bool-true-real", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "bool-true-lifecycle", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": true } }
+      ],
+      "expected_current_turn_id": "bool-true-real"
+    },
+    {
+      "name": "lifecycle_only number 1 excludes the newer turn",
+      "turns": [
+        { "id": "num-one-real", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "num-one-lifecycle", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": 1 } }
+      ],
+      "expected_current_turn_id": "num-one-real"
+    },
+    {
+      "name": "lifecycle_only string true excludes the newer turn",
+      "turns": [
+        { "id": "str-true-real", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "str-true-lifecycle", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "true" } }
+      ],
+      "expected_current_turn_id": "str-true-real"
+    },
+    {
+      "name": "lifecycle_only string 1 excludes the newer turn",
+      "turns": [
+        { "id": "str-one-real", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "str-one-lifecycle", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "1" } }
+      ],
+      "expected_current_turn_id": "str-one-real"
+    },
+    {
+      "name": "lifecycle_only null keeps the newer turn eligible",
+      "turns": [
+        { "id": "null-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "null-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": null } }
+      ],
+      "expected_current_turn_id": "null-newer"
+    },
+    {
+      "name": "lifecycle_only absent key keeps the newer turn eligible",
+      "turns": [
+        { "id": "absent-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "absent-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": {} }
+      ],
+      "expected_current_turn_id": "absent-newer"
+    },
+    {
+      "name": "lifecycle_only boolean false keeps the newer turn eligible",
+      "turns": [
+        { "id": "bool-false-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "bool-false-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": false } }
+      ],
+      "expected_current_turn_id": "bool-false-newer"
+    },
+    {
+      "name": "lifecycle_only number 0 keeps the newer turn eligible",
+      "turns": [
+        { "id": "num-zero-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "num-zero-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": 0 } }
+      ],
+      "expected_current_turn_id": "num-zero-newer"
+    },
+    {
+      "name": "lifecycle_only empty string keeps the newer turn eligible",
+      "turns": [
+        { "id": "empty-str-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "empty-str-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "" } }
+      ],
+      "expected_current_turn_id": "empty-str-newer"
+    },
+    {
+      "name": "lifecycle_only string false keeps the newer turn eligible",
+      "turns": [
+        { "id": "str-false-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "str-false-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "false" } }
+      ],
+      "expected_current_turn_id": "str-false-newer"
+    },
+    {
+      "name": "lifecycle_only string 0 keeps the newer turn eligible",
+      "turns": [
+        { "id": "str-zero-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "str-zero-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "0" } }
+      ],
+      "expected_current_turn_id": "str-zero-newer"
+    },
+    {
+      "name": "lifecycle_only string yes keeps the newer turn eligible",
+      "turns": [
+        { "id": "yes-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "yes-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": "yes" } }
+      ],
+      "expected_current_turn_id": "yes-newer"
+    },
+    {
+      "name": "lifecycle_only empty object keeps the newer turn eligible",
+      "turns": [
+        { "id": "obj-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "obj-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": {} } }
+      ],
+      "expected_current_turn_id": "obj-newer"
+    },
+    {
+      "name": "lifecycle_only empty array keeps the newer turn eligible",
+      "turns": [
+        { "id": "arr-older", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "arr-newer", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": [] } }
+      ],
+      "expected_current_turn_id": "arr-newer"
+    },
+    {
+      "name": "a session with only lifecycle turns resolves no current turn",
+      "turns": [
+        { "id": "all-lifecycle-a", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": { "lifecycle_only": true } },
+        { "id": "all-lifecycle-b", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": "2026-08-14T11:00:00Z", "metadata": { "lifecycle_only": "1" } }
+      ],
+      "expected_current_turn_id": null
+    },
+    {
+      "name": "an open turn beats a later completed turn",
+      "turns": [
+        { "id": "order-open", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": null, "metadata": {} },
+        { "id": "order-completed-later", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T11:00:00Z", "completed_at": "2026-08-14T11:05:00Z", "metadata": {} }
+      ],
+      "expected_current_turn_id": "order-open"
+    },
+    {
+      "name": "later started_at wins among completed turns",
+      "turns": [
+        { "id": "order-started-later", "started_at": "2026-08-14T11:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} },
+        { "id": "order-started-earlier", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} }
+      ],
+      "expected_current_turn_id": "order-started-later"
+    },
+    {
+      "name": "tie on started_at broken by later created_at",
+      "turns": [
+        { "id": "order-created-later", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:01:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} },
+        { "id": "order-created-earlier", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} }
+      ],
+      "expected_current_turn_id": "order-created-later"
+    },
+    {
+      "name": "tie on started_at and created_at broken by higher id",
+      "turns": [
+        { "id": "order-tie-2", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} },
+        { "id": "order-tie-1", "started_at": "2026-08-14T10:00:00Z", "created_at": "2026-08-14T10:00:00Z", "completed_at": "2026-08-14T12:00:00Z", "metadata": {} }
+      ],
+      "expected_current_turn_id": "order-tie-2"
+    }
+  ]
+}

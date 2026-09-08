@@ -5,7 +5,7 @@ status: completed
 wave: 12
 depends_on: ["22-task-work-item-links"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 24: Azure Watcher Persistence

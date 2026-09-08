@@ -5,7 +5,7 @@ status: pending
 wave: 2
 depends_on: ["02-tasks-row-mr-badge", "03-tasks-page-mr-hydration"]
 plan: "plan.md"
-spec: "../../specs/gitlab-mr-task-list-badges/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-mr-task-list-badges.md"
 ---
 
 # Task 05: E2E for the `/tasks` list MR badge

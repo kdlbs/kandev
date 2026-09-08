@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-run-orchestration"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 07: `run_code_review` workflow step entry action

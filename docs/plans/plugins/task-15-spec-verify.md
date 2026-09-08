@@ -14,11 +14,11 @@ Reconcile the spec with what was built, update docs, and run the full
 format/typecheck/test/lint gate across backend and web.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` (status: draft).
+- Spec `docs/specs/plugins/requirements/plugins.md` (status: draft).
 - Implemented deltas from this plan.
 
 ## Acceptance
-1. Spec edits to `docs/specs/plugins/spec.md`:
+1. Spec edits to `docs/specs/plugins/requirements/plugins.md`:
    - Add the `ui.pages[]` manifest field (key/title/path/surface) and a new
      "UI page proxy" subsection under API surface (GET/POST
      `/api/plugins/{id}/ui/*`, header stripping for iframe embedding).

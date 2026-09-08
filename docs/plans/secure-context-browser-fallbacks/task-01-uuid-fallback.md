@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/secure-context-browser-fallbacks/spec.md"
+spec: "../../specs/auth/requirements/secure-context-browser-fallbacks.md"
 ---
 
 # Task 01: UUID fallback audit

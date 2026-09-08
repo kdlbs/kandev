@@ -411,9 +411,8 @@ type errUnauthorizedStub struct{}
 
 func (errUnauthorizedStub) Error() string { return "not authorized" }
 
-// A nil response with no error means the handler intentionally answered
-// nothing (e.g. a notification); nothing should go on the wire.
-func TestDispatchMCPRequest_WritesNothingForANilResponse(t *testing.T) {
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.4
+func TestDispatchMCPRequest_WritesAnErrorFrameForANilResponse(t *testing.T) {
 	handler := &stubMCPHandler{}
 
 	var written [][]byte
@@ -423,8 +422,15 @@ func TestDispatchMCPRequest_WritesNothingForANilResponse(t *testing.T) {
 		handler,
 		func(data []byte) error { written = append(written, data); return nil })
 
-	if len(written) != 0 {
-		t.Errorf("wrote %d frames, want none for a nil handler response", len(written))
+	if len(written) != 1 {
+		t.Fatalf("wrote %d frames, want 1 error frame", len(written))
+	}
+	var sent ws.Message
+	if err := json.Unmarshal(written[0], &sent); err != nil {
+		t.Fatalf("decode written frame: %v", err)
+	}
+	if sent.Type != ws.MessageTypeError || sent.ID != "req-3" {
+		t.Errorf("written frame = %+v, want a correlated error", sent)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -36,6 +37,7 @@ func decode(t *testing.T, msg *ws.Message, err error) ws.ErrorPayload {
 // production message changes, which it cannot do if both read the same symbol.
 const (
 	wantTaskIDRequired   = "task_id is required"
+	wantTaskNotFound     = "Task not found"
 	wantTaskPlanNotFound = "Task plan not found"
 )
 
@@ -57,6 +59,7 @@ func TestMappersCoverEverySentinel(t *testing.T) {
 		message string
 	}{
 		{"create/task_id", CreateError, service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{"create/task_not_found", CreateError, repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{"create/fallback", CreateError, boom, ws.ErrorCodeInternalError, "Failed to create task plan: disk on fire"},
 		// CreatePlan's ErrTaskPlanNotFound means the read-back after a
 		// successful write found nothing — a server fault, not a missing plan.
@@ -67,6 +70,7 @@ func TestMappersCoverEverySentinel(t *testing.T) {
 		{"get/fallback", GetError, boom, ws.ErrorCodeInternalError, "Failed to get task plan"},
 
 		{"update/task_id", UpdateError, service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{"update/task_not_found", UpdateError, repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{"update/plan_not_found", UpdateError, service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, wantTaskPlanNotFound},
 		{"update/fallback", UpdateError, boom, ws.ErrorCodeInternalError, "Failed to update task plan: disk on fire"},
 
@@ -99,6 +103,7 @@ func TestErrorCoversFullVocabulary(t *testing.T) {
 		message string
 	}{
 		{service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{service.ErrSessionIDRequired, ws.ErrorCodeValidation, "session_id is required"},
 		{service.ErrSessionTaskMismatch, ws.ErrorCodeValidation, "Session does not belong to task"},
 		{service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, wantTaskPlanNotFound},
@@ -143,6 +148,64 @@ func TestSentinelsMatchThroughWrapping(t *testing.T) {
 	}
 	if payload.Message != wantTaskPlanNotFound {
 		t.Errorf("message = %q, want %q", payload.Message, wantTaskPlanNotFound)
+	}
+}
+
+// TestContentTooLargeMapsToValidationWithDetails pins the dynamic-message
+// branch (REQ-TASKS-PLAN-CONTENT-SIZE-LIMIT-002/-003): CreateError and
+// UpdateError report service.PlanContentTooLargeError as VALIDATION_ERROR
+// with a message carrying both numbers, plus the structured details map the
+// browser classifies from.
+func TestContentTooLargeMapsToValidationWithDetails(t *testing.T) {
+	sizeErr := &service.PlanContentTooLargeError{Submitted: 300000, Limit: 262144}
+
+	cases := []struct {
+		name   string
+		mapper func(*ws.Message, error) (*ws.Message, error)
+	}{
+		{"create", CreateError},
+		{"update", UpdateError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, mapErr := tc.mapper(request(), sizeErr)
+			payload := decode(t, out, mapErr)
+			if payload.Code != ws.ErrorCodeValidation {
+				t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeValidation)
+			}
+			if payload.Message != sizeErr.Error() {
+				t.Errorf("message = %q, want %q", payload.Message, sizeErr.Error())
+			}
+			if payload.Details == nil {
+				t.Fatal("details is nil, want reason/limit/submitted")
+			}
+			if payload.Details["reason"] != "plan_content_too_large" {
+				t.Errorf("details[reason] = %v, want %q", payload.Details["reason"], "plan_content_too_large")
+			}
+			if limit, ok := payload.Details["limit"].(float64); !ok || int(limit) != sizeErr.Limit {
+				t.Errorf("details[limit] = %v, want %d", payload.Details["limit"], sizeErr.Limit)
+			}
+			if submitted, ok := payload.Details["submitted"].(float64); !ok || int(submitted) != sizeErr.Submitted {
+				t.Errorf("details[submitted] = %v, want %d", payload.Details["submitted"], sizeErr.Submitted)
+			}
+		})
+	}
+}
+
+// TestContentTooLargeMatchesThroughWrapping mirrors
+// TestSentinelsMatchThroughWrapping for the dynamic-message branch: it must
+// match via errors.As even when the service wraps the typed error.
+func TestContentTooLargeMatchesThroughWrapping(t *testing.T) {
+	sizeErr := &service.PlanContentTooLargeError{Submitted: 300000, Limit: 262144}
+	wrapped := fmt.Errorf("create plan: %w", sizeErr)
+
+	out, mapErr := CreateError(request(), wrapped)
+	payload := decode(t, out, mapErr)
+	if payload.Code != ws.ErrorCodeValidation {
+		t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeValidation)
+	}
+	if payload.Details["reason"] != "plan_content_too_large" {
+		t.Errorf("details[reason] = %v, want %q", payload.Details["reason"], "plan_content_too_large")
 	}
 }
 

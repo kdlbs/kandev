@@ -1,5 +1,5 @@
 ---
-spec: "../../specs/feature-toggles/spec.md"
+spec: "../../specs/platform/requirements/feature-toggles.md"
 status: done
 created: 2026-08-04
 ---
@@ -36,9 +36,8 @@ Introduced by `aee1846cd` *"feat: remove nextjs production runtime (#1389)"* —
 the line was born stubbed when the Next→Vite port dropped the server-side fetch.
 
 **Conditions:** every install whose backend reports restart support, which is the
-normal case — both [`launcher/supervisor.go:151`](../../../apps/backend/internal/launcher/supervisor.go)
-and [`cli/src/supervisor/backend.ts:105`](../../../apps/cli/src/supervisor/backend.ts)
-set `KANDEV_RESTART_ADAPTER=supervisor`. This contradicts ADR 0019, which states
+normal case — [`launcher/supervisor.go:168`](../../../apps/backend/internal/launcher/supervisor.go)
+sets `KANDEV_RESTART_ADAPTER=supervisor`. This contradicts ADR 0019, which states
 the UI needs a restart path "without asking users to manually find and restart
 the right process."
 

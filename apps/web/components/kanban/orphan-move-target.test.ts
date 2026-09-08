@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ORPHAN_STEP_ID, isOrphanMoveTarget } from "./swimlane-kanban-content";
-import { getStepAdjacency } from "./graph2-task-pipeline";
+import {
+  getStepAdjacency,
+  getStepAdjacencyForStep,
+  getStepMoveTargets,
+} from "./graph2-task-pipeline";
 import type { WorkflowStep } from "@/components/kanban-column";
 
 describe("isOrphanMoveTarget", () => {
@@ -11,6 +15,45 @@ describe("isOrphanMoveTarget", () => {
   it("treats real step ids as valid move targets", () => {
     expect(isOrphanMoveTarget("todo")).toBe(false);
     expect(isOrphanMoveTarget("")).toBe(false);
+  });
+});
+
+describe("getStepAdjacencyForStep", () => {
+  it("keeps auto-hidden workflow steps available as adjacent pipeline move targets", () => {
+    const steps = [{ id: "todo" }, { id: "doing" }, { id: "done" }] as WorkflowStep[];
+
+    expect(getStepAdjacencyForStep(steps, "doing")).toEqual({
+      hasPrev: true,
+      prevStepId: "todo",
+      hasNext: true,
+      nextStepId: "done",
+    });
+  });
+
+  it("returns no moves for a display-only step", () => {
+    expect(getStepAdjacencyForStep([{ id: "todo" } as WorkflowStep], "orphan")).toEqual({
+      hasPrev: false,
+      hasNext: false,
+    });
+  });
+});
+
+describe("getStepMoveTargets", () => {
+  const moveTargets = [
+    { id: "backlog", title: "Backlog" },
+    { id: "review", title: "Review" },
+    { id: "done", title: "Done" },
+  ] as WorkflowStep[];
+
+  it("flags only a hidden neighboring destination for tooltip disclosure", () => {
+    const result = getStepMoveTargets([moveTargets[1], moveTargets[2]], moveTargets, "review");
+
+    expect(result).toMatchObject({
+      prevStepTitle: "Backlog",
+      prevStepHidden: true,
+      nextStepTitle: "Done",
+      nextStepHidden: false,
+    });
   });
 });
 

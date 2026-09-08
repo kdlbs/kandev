@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-update-preview-api"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 03: Move updates into an ephemeral responsive dialog

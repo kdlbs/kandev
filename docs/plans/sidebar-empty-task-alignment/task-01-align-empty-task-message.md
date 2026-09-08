@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-empty-task-alignment.md"
+spec: "../../specs/ui/requirements/sidebar-empty-task-alignment.md"
 ---
 
 # Task 01: Align empty task message
@@ -53,7 +53,7 @@ Sequential. The RED geometry assertion, host-scoped class change, and desktop/mo
 
 ## Inputs
 
-- Repair behavior in `docs/specs/ui/sidebar-empty-task-alignment.md`.
+- Repair behavior in `docs/specs/ui/requirements/sidebar-empty-task-alignment.md`.
 - Root-cause geometry and host-scoping design in `docs/plans/sidebar-empty-task-alignment/plan.md`.
 - Existing empty-list coverage in `apps/web/e2e/tests/task/sidebar-scroll-preservation.spec.ts`.
 - Existing phone composition coverage in `apps/web/e2e/tests/task/mobile-task-listing-display.spec.ts`.

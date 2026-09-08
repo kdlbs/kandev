@@ -5,7 +5,7 @@ status: pending
 wave: 10
 depends_on: ["12-e2e-and-mock-agent"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 13: Public docs for native code review

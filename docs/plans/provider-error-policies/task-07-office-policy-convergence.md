@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["04-dynamic-conductor-policy-integration", "06-utility-policy-integration"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 07: Office policy convergence

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  IconTrash,
-  IconRefresh,
-  IconPlayerPlay,
-  IconPlayerPause,
-  IconRestore,
-} from "@tabler/icons-react";
+import { IconRefresh, IconPlayerPlay, IconPlayerPause, IconRestore } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -16,6 +10,8 @@ import type { LinearIssueWatch, LinearSearchFilter } from "@/lib/types/linear";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { formatRelative } from "@/lib/i18n/formats";
+import { WatcherDeleteAction } from "@/components/watches/watcher-delete-action";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type LinearIssueWatchTableProps = {
   watches: LinearIssueWatch[];
@@ -81,14 +77,20 @@ function WatchActions({
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const actionSize = isFinePointer ? "h-7 w-7" : "h-11 w-11";
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div
+      className="flex items-center justify-end gap-1"
+      data-watcher-actions
+      onClick={(event) => event.stopPropagation()}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             data-settings-dirty={isDirty}
             data-testid={`linear-watch-enabled-${watch.id}`}
             onClick={(e) => {
@@ -110,7 +112,7 @@ function WatchActions({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             onClick={(e) => {
               e.stopPropagation();
               onTrigger(watch.id);
@@ -126,7 +128,7 @@ function WatchActions({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             data-testid="watch-reset-button"
             aria-label={t("linear:resetWatch")}
             onClick={(e) => {
@@ -139,27 +141,90 @@ function WatchActions({
         </TooltipTrigger>
         <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-red-500 hover:text-red-600 cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(watch.id);
-            }}
-          >
-            <IconTrash className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("linear:delete")}</TooltipContent>
-      </Tooltip>
+      <WatcherDeleteAction
+        title={t("linear:deleteThisLinearWatcher")}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={t("linear:delete")}
+        ariaLabel={t("linear:deleteThisLinearWatcher")}
+        tooltipLabel={t("linear:delete")}
+        triggerTestId={`linear-watch-delete-${watch.id}`}
+        confirmTestId="linear-watch-delete-confirm"
+        onConfirm={() => onDelete(watch.id)}
+      />
     </div>
   );
 }
 
-export function LinearIssueWatchTable({
+function MobileWatchCard({
+  watch,
+  isDirty,
+  showWorkspace,
+  workspaceName,
+  onEdit,
+  onToggleEnabled,
+  onTrigger,
+  onReset,
+  onDelete,
+}: {
+  watch: LinearIssueWatch;
+  isDirty: boolean;
+  showWorkspace?: boolean;
+  workspaceName: (id: string) => string;
+  onEdit: (watch: LinearIssueWatch) => void;
+  onToggleEnabled: (watch: LinearIssueWatch) => void;
+  onTrigger: (id: string) => void;
+  onReset: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const workspaceLabel = showWorkspace ? workspaceName(watch.workspaceId) : null;
+  return (
+    <div
+      className="min-w-0 space-y-3 border-b px-1 py-4 last:border-b-0"
+      data-settings-dirty={isDirty}
+      data-testid={`linear-watch-mobile-row-${watch.id}`}
+    >
+      <button
+        type="button"
+        className="block w-full min-w-0 text-left cursor-pointer"
+        onClick={() => onEdit(watch)}
+      >
+        {workspaceLabel && (
+          <span
+            className="mb-1 block truncate text-xs text-muted-foreground"
+            title={workspaceLabel}
+          >
+            {workspaceLabel}
+          </span>
+        )}
+        <span className="block truncate font-mono text-sm" title={summarizeFilter(watch.filter)}>
+          {summarizeFilter(watch.filter)}
+        </span>
+        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant={watch.enabled ? "default" : "secondary"}>
+            {watch.enabled ? t("linear:active") : t("linear:paused")}
+          </Badge>
+          <span>
+            {t("linear:intervalMinutes", {
+              count: Math.round(watch.pollIntervalSeconds / 60),
+            })}
+          </span>
+          <span>{formatLastPolled(t, watch.lastPolledAt)}</span>
+        </span>
+      </button>
+      <WatchActions
+        watch={watch}
+        isDirty={isDirty}
+        onToggleEnabled={onToggleEnabled}
+        onTrigger={onTrigger}
+        onReset={onReset}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+function DesktopLinearIssueWatchTable({
   watches,
   dirtyIds,
   showWorkspace,
@@ -168,21 +233,11 @@ export function LinearIssueWatchTable({
   onTrigger,
   onReset,
   onToggleEnabled,
-}: LinearIssueWatchTableProps) {
+  workspaceName,
+}: LinearIssueWatchTableProps & { workspaceName: (id: string) => string }) {
   const { t } = useTranslation();
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
-
-  if (watches.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-4 text-center">
-        {t("linear:noLinearWatchersConfiguredCreateOne")}
-      </p>
-    );
-  }
-
   return (
-    <Table>
+    <Table className="min-w-[680px]">
       <TableHeader>
         <TableRow>
           {showWorkspace && <TableHead>{t("common:workspace")}</TableHead>}
@@ -201,7 +256,15 @@ export function LinearIssueWatchTable({
             data-settings-dirty={dirtyIds.has(watch.id)}
             data-settings-dirty-level="container"
             data-testid={`linear-watch-row-${watch.id}`}
-            onClick={() => onEdit(watch)}
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest("[data-watcher-actions]")
+              ) {
+                return;
+              }
+              onEdit(watch);
+            }}
           >
             {showWorkspace && (
               <TableCell className="text-xs text-muted-foreground">
@@ -241,5 +304,64 @@ export function LinearIssueWatchTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+export function LinearIssueWatchTable({
+  watches,
+  dirtyIds,
+  showWorkspace,
+  onEdit,
+  onDelete,
+  onTrigger,
+  onReset,
+  onToggleEnabled,
+}: LinearIssueWatchTableProps) {
+  const { t } = useTranslation();
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { usesDesktopWorkbench = true } = useResponsiveBreakpoint();
+  const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
+
+  if (watches.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-4 text-center">
+        {t("linear:noLinearWatchersConfiguredCreateOne")}
+      </p>
+    );
+  }
+
+  if (!usesDesktopWorkbench) {
+    return (
+      <div className="min-w-0" data-testid="linear-watch-mobile-list">
+        {watches.map((watch) => (
+          <MobileWatchCard
+            key={watch.id}
+            watch={watch}
+            isDirty={dirtyIds.has(watch.id)}
+            showWorkspace={showWorkspace}
+            workspaceName={workspaceName}
+            onEdit={onEdit}
+            onToggleEnabled={onToggleEnabled}
+            onTrigger={onTrigger}
+            onReset={onReset}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <DesktopLinearIssueWatchTable
+      watches={watches}
+      dirtyIds={dirtyIds}
+      showWorkspace={showWorkspace}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onTrigger={onTrigger}
+      onReset={onReset}
+      onToggleEnabled={onToggleEnabled}
+      workspaceName={workspaceName}
+    />
   );
 }

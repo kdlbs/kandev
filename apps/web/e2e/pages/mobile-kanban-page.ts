@@ -6,6 +6,7 @@ export class MobileKanbanPage {
   readonly mobileSearchBar: Locator;
   readonly mobileSearchToggle: Locator;
   readonly mobileMenuButton: Locator;
+  readonly menuCard: Locator;
   readonly swimlaneContainer: Locator;
   readonly boardNavigator: Locator;
 
@@ -15,6 +16,7 @@ export class MobileKanbanPage {
     this.mobileSearchBar = page.getByTestId("mobile-search-bar");
     this.mobileSearchToggle = page.getByTestId("mobile-search-toggle");
     this.mobileMenuButton = page.getByRole("button", { name: "Open menu" });
+    this.menuCard = page.getByTestId("mobile-home-menu-card");
     this.swimlaneContainer = page.getByTestId("swimlane-container");
     this.boardNavigator = page.getByTestId("mobile-board-navigator");
   }

@@ -195,3 +195,127 @@ func TestIsMissingTableError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsForeignKeyViolation(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "postgres foreign key violation",
+			err:  &pgconn.PgError{Code: postgresForeignKeyViolation},
+			want: true,
+		},
+		{
+			name: "wrapped postgres foreign key violation",
+			err:  fmt.Errorf("insert usage event: %w", &pgconn.PgError{Code: postgresForeignKeyViolation}),
+			want: true,
+		},
+		{
+			name: "postgres unique violation is not a foreign key violation",
+			err:  &pgconn.PgError{Code: "23505"},
+			want: false,
+		},
+		{
+			name: "sqlite foreign key constraint failed",
+			err:  errors.New("FOREIGN KEY constraint failed"),
+			want: true,
+		},
+		{
+			name: "wrapped sqlite foreign key constraint failed",
+			err:  fmt.Errorf("insert usage event: %w", errors.New("FOREIGN KEY constraint failed")),
+			want: true,
+		},
+		{
+			name: "sqlite unique constraint is not a foreign key violation",
+			err:  errors.New("UNIQUE constraint failed: task_usage_events.usage_event_id"),
+			want: false,
+		},
+		{
+			name: "unrelated",
+			err:  errors.New("no such table: task_usage_events"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsForeignKeyViolation(tt.err); got != tt.want {
+				t.Fatalf("IsForeignKeyViolation() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "postgres serialization failure",
+			err:  &pgconn.PgError{Code: postgresSerializationFailure},
+			want: true,
+		},
+		{
+			name: "postgres deadlock detected",
+			err:  &pgconn.PgError{Code: postgresDeadlockDetected},
+			want: true,
+		},
+		{
+			name: "wrapped postgres serialization failure",
+			err:  fmt.Errorf("insert usage event: %w", &pgconn.PgError{Code: postgresSerializationFailure}),
+			want: true,
+		},
+		{
+			name: "postgres foreign key violation is not transient",
+			err:  &pgconn.PgError{Code: postgresForeignKeyViolation},
+			want: false,
+		},
+		{
+			name: "sqlite busy",
+			err:  errors.New("database is locked"),
+			want: true,
+		},
+		{
+			name: "sqlite locked",
+			err:  errors.New("database table is locked"),
+			want: true,
+		},
+		{
+			name: "wrapped sqlite busy",
+			err:  fmt.Errorf("insert usage event: %w", errors.New("database is locked")),
+			want: true,
+		},
+		{
+			name: "sqlite constraint error is not transient",
+			err:  errors.New("UNIQUE constraint failed: task_usage_events.usage_event_id"),
+			want: false,
+		},
+		{
+			name: "unrelated",
+			err:  errors.New("no such table: task_usage_events"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTransientError(tt.err); got != tt.want {
+				t.Fatalf("IsTransientError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -2,6 +2,17 @@ package dialect
 
 import "fmt"
 
+// NullableTimestamp renders a nullable timestamp parameter for predicates
+// that use the parameter both as a NULL sentinel and as a timestamp value.
+// PostgreSQL cannot infer the type of a parameter used only in `? IS NULL`,
+// so the sentinel occurrence must carry an explicit timestamptz cast.
+func NullableTimestamp(driver, placeholder string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("(%s)::timestamptz", placeholder)
+	}
+	return placeholder
+}
+
 // DurationMs returns the SQL expression for the difference between two timestamps in milliseconds.
 //
 //	SQLite:   (julianday(end) - julianday(start)) * 86400000

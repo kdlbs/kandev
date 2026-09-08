@@ -5,7 +5,7 @@ status: pending
 wave: 3
 depends_on: ["02-parse-correlate-cursor-task"]
 plan: "plan.md"
-spec: "../../specs/agents/cursor-subagent-metadata.md"
+spec: "../../specs/agents/requirements/cursor-subagent-metadata.md"
 ---
 
 # Task 04: Manual live verification against a real Cursor subagent

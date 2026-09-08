@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-autosave-state"]
 plan: "plan.md"
-spec: "../../specs/workflow-settings-autosave/spec.md"
+spec: "../../specs/tasks/requirements/workflow-settings-autosave.md"
 ---
 
 # Task 02: Responsive Workflow Editor Layout

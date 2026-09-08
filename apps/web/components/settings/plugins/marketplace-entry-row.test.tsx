@@ -53,3 +53,23 @@ describe("MarketplaceEntryRow repo link", () => {
     expect(screen.getByText("-")).toBeTruthy();
   });
 });
+
+describe("MarketplaceEntryRow member view", () => {
+  it("keeps catalog metadata visible without install or update actions", () => {
+    const { rerender } = render(
+      <MarketplaceEntryRow entry={entry()} busy={false} onInstall={noop} canManage={false} />,
+    );
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+
+    rerender(
+      <MarketplaceEntryRow
+        entry={entry({ install_state: "update_available" })}
+        busy={false}
+        onInstall={noop}
+        canManage={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+  });
+});

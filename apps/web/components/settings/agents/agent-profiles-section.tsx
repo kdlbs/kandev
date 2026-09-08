@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCopy, IconDotsVertical, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -16,9 +16,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import Link from "@/components/routing/app-link";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { AgentProfileDeleteConfirmDialog } from "@/components/settings/agent-profile-delete-dialog";
+import { AgentProfileDeleteConfirmation } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -66,10 +67,12 @@ export function AgentProfilesSubList({
  */
 function ProfileRowActions({
   profile,
+  deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
 }: {
   profile: AgentProfile;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
 }) {
@@ -78,6 +81,7 @@ function ProfileRowActions({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={deleteAnchorRef}
           variant="ghost"
           size="sm"
           className="cursor-pointer min-h-11 min-w-11"
@@ -113,10 +117,12 @@ function ProfileRowActions({
 
 function ProfileRowInlineActions({
   profile,
+  deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
 }: {
   profile: AgentProfile;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
 }) {
@@ -142,6 +148,7 @@ function ProfileRowInlineActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={deleteAnchorRef}
             type="button"
             variant="destructive"
             size="icon"
@@ -159,55 +166,71 @@ function ProfileRowInlineActions({
   );
 }
 
-/** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
-export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const router = useRouter();
-  const { isFullDesktop } = useResponsiveBreakpoint();
-  const handleDuplicate = useProfileDuplicate();
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const store = useAppStoreApi();
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-  const href = profileHref(agent.name, profile.id);
-  const onDuplicate = () => void handleDuplicate(agent, profile);
+type ProfileRowDeleteConfirmationProps = {
+  open: boolean;
+  isFinePointer: boolean;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+  placement: "inline" | "popover";
+};
+type ProfileRowDeleteConfirmationBaseProps = Omit<ProfileRowDeleteConfirmationProps, "placement">;
 
-  const handleDelete = async () => {
-    setConfirmOpen(false);
-    const result = await deleteAgentProfileAction(profile.id);
-    if (result.status === "ok") {
-      // Read the store at write time, not at render: this closure was created
-      // before the await, so a snapshot taken then would be stale by now and
-      // two profiles deleted in quick succession would resurrect each other.
-      const nextAgents = store.getState().settingsAgents.items.map((item) => ({
-        ...item,
-        profiles: item.profiles.filter((p) => p.id !== profile.id),
-      }));
-      setSettingsAgents(nextAgents);
-      // `agentProfiles` is the flattened picker list over the same data. Every
-      // other writer updates the pair together, and its only refetch is a
-      // one-shot guarded by `agentsLoaded`, so skipping it here left the
-      // deleted profile selectable until a reload.
-      setAgentProfiles(
-        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
-      );
-      return;
-    }
-    // Conflicts (active sessions, watchers, routing tiers) carry a guided
-    // resolution flow that lives on the profile page — send the user there.
-    if (result.status === "conflict") {
-      toast({ title: t("agents:cannotDeleteAgentProfile"), variant: "error" });
-      router.push(href);
-      return;
-    }
-    toast({
-      title: t("agents:cannotDeleteAgentProfile"),
-      description: result.message,
-      variant: "error",
-    });
-  };
+function ProfileRowDeleteConfirmation({
+  open,
+  isFinePointer,
+  anchorRef,
+  onOpenChange,
+  onCancel,
+  onConfirm,
+  placement,
+}: ProfileRowDeleteConfirmationProps) {
+  if (placement === "inline" && (isFinePointer || !open)) return null;
+  if (placement === "popover" && !isFinePointer) return null;
 
+  const confirmation = (
+    <AgentProfileDeleteConfirmation
+      open={open}
+      isFinePointer={isFinePointer}
+      anchorRef={anchorRef}
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+  return placement === "inline" ? (
+    <div className="relative z-10 basis-full min-w-0">{confirmation}</div>
+  ) : (
+    confirmation
+  );
+}
+
+type ProfileRowCardProps = {
+  profile: AgentProfile;
+  href: string;
+  canManage: boolean;
+  confirmOpen: boolean;
+  isFinePointer: boolean;
+  isFullDesktop: boolean;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
+  onDuplicate: () => void;
+  onConfirmDelete: () => void;
+  confirmationProps: ProfileRowDeleteConfirmationBaseProps;
+};
+
+function ProfileRowCard({
+  profile,
+  href,
+  canManage,
+  confirmOpen,
+  isFinePointer,
+  isFullDesktop,
+  deleteAnchorRef,
+  onDuplicate,
+  onConfirmDelete,
+  confirmationProps,
+}: ProfileRowCardProps) {
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -236,26 +259,108 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          {isFullDesktop ? (
-            <ProfileRowInlineActions
-              profile={profile}
-              onDuplicate={onDuplicate}
-              onConfirmDelete={() => setConfirmOpen(true)}
-            />
-          ) : (
-            <ProfileRowActions
-              profile={profile}
-              onDuplicate={onDuplicate}
-              onConfirmDelete={() => setConfirmOpen(true)}
-            />
-          )}
+          {canManage &&
+            !(confirmOpen && !isFinePointer) &&
+            (isFullDesktop ? (
+              <ProfileRowInlineActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={onDuplicate}
+                onConfirmDelete={onConfirmDelete}
+              />
+            ) : (
+              <ProfileRowActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={onDuplicate}
+                onConfirmDelete={onConfirmDelete}
+              />
+            ))}
         </div>
+        <ProfileRowDeleteConfirmation {...confirmationProps} placement="inline" />
       </CardContent>
-      <AgentProfileDeleteConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        onConfirm={() => void handleDelete()}
-      />
+      <ProfileRowDeleteConfirmation {...confirmationProps} placement="popover" />
     </Card>
+  );
+}
+
+/** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
+export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+  const canManage = useIsAdmin();
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const router = useRouter();
+  const { isFinePointer, isFullDesktop } = useResponsiveBreakpoint();
+  const handleDuplicate = useProfileDuplicate();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const store = useAppStoreApi();
+  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const href = profileHref(agent.name, profile.id);
+  const closeDeleteConfirmation = () => {
+    setConfirmOpen(false);
+    queueMicrotask(() => deleteAnchorRef.current?.focus());
+  };
+  const handleDelete = async () => {
+    setConfirmOpen(false);
+    const result = await deleteAgentProfileAction(profile.id);
+    if (result.status === "ok") {
+      // Read the store at write time, not at render: this closure was created
+      // before the await, so a snapshot taken then would be stale by now and
+      // two profiles deleted in quick succession would resurrect each other.
+      const nextAgents = store.getState().settingsAgents.items.map((item) => ({
+        ...item,
+        profiles: item.profiles.filter((p) => p.id !== profile.id),
+      }));
+      setSettingsAgents(nextAgents);
+      // `agentProfiles` is the flattened picker list over the same data. Every
+      // other writer updates the pair together, and its only refetch is a
+      // one-shot guarded by `agentsLoaded`, so skipping it here left the
+      // deleted profile selectable until a reload.
+      setAgentProfiles(
+        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
+      );
+      return;
+    }
+    // Conflicts (active sessions, watchers, routing tiers) carry a guided
+    // resolution flow that lives on the profile page — send the user there.
+    if (result.status === "conflict") {
+      toast({ title: t("agents:cannotDeleteAgentProfile"), variant: "error" });
+      router.push(href);
+      return;
+    }
+    if (result.handled) {
+      closeDeleteConfirmation();
+      return;
+    }
+    toast({
+      title: t("agents:cannotDeleteAgentProfile"),
+      description: result.message,
+      variant: "error",
+    });
+    closeDeleteConfirmation();
+  };
+  const confirmationProps = {
+    open: confirmOpen,
+    isFinePointer,
+    anchorRef: deleteAnchorRef,
+    onOpenChange: setConfirmOpen,
+    onCancel: closeDeleteConfirmation,
+    onConfirm: () => void handleDelete(),
+  };
+  return (
+    <ProfileRowCard
+      profile={profile}
+      href={href}
+      canManage={canManage}
+      confirmOpen={confirmOpen}
+      isFinePointer={isFinePointer}
+      isFullDesktop={isFullDesktop}
+      deleteAnchorRef={deleteAnchorRef}
+      onDuplicate={() => void handleDuplicate(agent, profile)}
+      onConfirmDelete={() => setConfirmOpen(true)}
+      confirmationProps={confirmationProps}
+    />
   );
 }

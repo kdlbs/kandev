@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 01: Promote Dependency Edges to a Core Relationship

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/file-tree-chat-context.md
+spec: docs/specs/ui/requirements/file-tree-chat-context.md
 created: 2026-08-04
 status: complete
 ---

@@ -3,10 +3,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { getChangeRequestTerminology } from "@/hooks/use-git-operations";
 import {
-  MobilePRBranchSummary,
-  PRSubmitButton,
-} from "@/components/task/mobile/session-mobile-top-bar-dialog-parts";
-import {
   ChangeRequestPartialStatus,
   PRBranchSummary,
   PRDescriptionField,
@@ -19,7 +15,7 @@ describe.each([
   ["gitlab", "Merge Request", "MR"],
   ["github", "Pull Request", "PR"],
 ])("change request fields for %s", (provider, longName, shortName) => {
-  it("uses provider terminology in desktop and mobile controls", () => {
+  it("uses provider terminology in shared change-request fields", () => {
     const terminology = getChangeRequestTerminology(provider);
     render(
       <TooltipProvider>
@@ -40,21 +36,7 @@ describe.each([
           terminology={terminology}
         />
         <PRBranchSummary displayBranch="feature" baseBranch="main" terminology={terminology} />
-        <MobilePRBranchSummary
-          displayBranch="feature"
-          baseBranch="main"
-          terminology={terminology}
-        />
         <ChangeRequestPartialStatus terminology={terminology} />
-        <PRSubmitButton
-          prTitle="Title"
-          prBody="Body"
-          prDraft={false}
-          isGitLoading={false}
-          onCreatePR={() => {}}
-          terminology={terminology}
-          branchPushed
-        />
       </TooltipProvider>,
     );
 
@@ -66,10 +48,9 @@ describe.each([
     expect(
       screen.getByRole("button", { name: `Generate ${shortName} description with AI` }),
     ).toBeTruthy();
-    expect(screen.getAllByText(new RegExp(`Creating ${shortName} from`))).toHaveLength(2);
+    expect(screen.getByText(new RegExp(`Creating ${shortName} from`))).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe(
       `Branch was pushed; retry ${longName.toLowerCase()} creation.`,
     );
-    expect(screen.getByRole("button", { name: `Retry ${shortName}` })).toBeTruthy();
   });
 });

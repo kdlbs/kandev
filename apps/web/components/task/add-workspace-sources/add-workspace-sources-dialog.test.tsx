@@ -5,16 +5,26 @@ import { AddWorkspaceSourcesDialog } from "./add-workspace-sources-dialog";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { repositoryDiscoveryCoordinator } from "@/hooks/domains/workspace/use-repository-discovery";
 
 let isMobile = false;
 const ADD_SOURCES_LABEL = "Add sources";
-const { attachTaskWorkspaceSources, discoverRepositoriesAction, refreshRepositories } = vi.hoisted(
-  () => ({
+const {
+  attachTaskWorkspaceSources,
+  discoverRepositoriesAction,
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+  refreshRepositories,
+} = vi.hoisted(() => {
+  const discover = vi.fn().mockResolvedValue({ repositories: [] });
+  return {
     attachTaskWorkspaceSources: vi.fn(),
-    discoverRepositoriesAction: vi.fn().mockResolvedValue({ repositories: [] }),
+    discoverRepositoriesAction: discover,
+    getRepositoryDiscoveryAction: discover,
+    refreshRepositoryDiscoveryAction: discover,
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+  };
+});
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
@@ -33,8 +43,16 @@ vi.mock("@/components/folder-picker", () => ({
     </button>
   ),
 }));
+vi.mock("@/components/repository-discovery-controls", () => ({
+  RepositoryDiscoveryControls: ({ enabled }: { enabled?: boolean }) =>
+    enabled !== false ? <div data-testid="repository-discovery-controls" /> : null,
+}));
 vi.mock("@/lib/api/domains/kanban-api", () => ({ attachTaskWorkspaceSources }));
-vi.mock("@/app/actions/workspaces", () => ({ discoverRepositoriesAction }));
+vi.mock("@/app/actions/workspaces", () => ({
+  discoverRepositoriesAction,
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+}));
 
 async function finishClose(surface: HTMLElement, isDrawer: boolean) {
   await waitFor(() => expect(surface.getAttribute("data-state")).not.toBe("open"));
@@ -49,13 +67,14 @@ function openRepositoryMenu() {
   return trigger;
 }
 
-function Harness({
-  makeTurnActive = false,
-  executorType = "worktree",
-}: {
-  makeTurnActive?: boolean;
-  executorType?: string;
-}) {
+async function selectRepositoryMenuItem(label: string) {
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: label })).toBeNull());
+}
+
+function Harness(props: { makeTurnActive?: boolean; executorType?: string | null }) {
+  const makeTurnActive = props.makeTurnActive ?? false;
+  const executorType = Object.hasOwn(props, "executorType") ? props.executorType : "worktree";
   return (
     <StateProvider>
       <HarnessContent makeTurnActive={makeTurnActive} executorType={executorType} />
@@ -68,7 +87,7 @@ function HarnessContent({
   executorType,
 }: {
   makeTurnActive: boolean;
-  executorType: string;
+  executorType: string | null | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
@@ -114,6 +133,7 @@ function HarnessContent({
 
 afterEach(() => {
   cleanup();
+  repositoryDiscoveryCoordinator.dispose();
   isMobile = false;
   attachTaskWorkspaceSources.mockReset();
   discoverRepositoriesAction.mockClear();
@@ -156,6 +176,34 @@ describe("AddWorkspaceSourcesDialog consequences", () => {
     );
     expect(consequences.textContent).not.toContain("This restarts the task workspace");
   });
+
+  it("treats Kubernetes as a live remote workspace", async () => {
+    render(<Harness executorType="k8s" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const consequences = await screen.findByTestId("workspace-change-consequences");
+
+    expect(consequences.textContent).toContain("This updates the live task workspace");
+    expect(consequences.textContent).not.toContain("This restarts the task workspace");
+  });
+});
+
+describe("AddWorkspaceSourcesDialog repository discovery", () => {
+  it("mounts discovery controls only inside a saved repository selector", async () => {
+    render(
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    openRepositoryMenu();
+    await selectRepositoryMenuItem("Workspace repository");
+    fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+
+    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+  });
 });
 
 describe("AddWorkspaceSourcesDialog", () => {
@@ -197,6 +245,26 @@ describe("AddWorkspaceSourcesDialog", () => {
     openRepositoryMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
     expect(form.querySelectorAll('[role="alert"]')).toHaveLength(2);
+  });
+
+  it.each([null, undefined])(
+    "shows Add folder disabled with a touch-visible reason while the executor is unresolved (%s)",
+    async (executorType) => {
+      render(<Harness executorType={executorType} />);
+
+      fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+      const addFolder = screen.getByRole("button", { name: /Add folder/ }) as HTMLButtonElement;
+      expect(addFolder.disabled).toBe(true);
+      const hint = screen.getByText("Waiting to confirm this task's executor supports folders");
+      expect(hint.className).toContain("text-xs");
+    },
+  );
+
+  it("keeps Add folder absent once the executor is known not to support folders", async () => {
+    render(<Harness executorType="local_docker" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByRole("button", { name: /Add folder/ })).toBeNull();
   });
 
   it.each([
@@ -273,12 +341,12 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     await waitFor(() => expect(discoverRepositoriesAction).toHaveBeenCalledWith("workspace-1"));
     openRepositoryMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
 
     expect(await screen.findByText("discovered-project")).toBeTruthy();
-    expect(screen.getByText("on disk")).toBeTruthy();
-    expect(screen.getByTestId("create-local-repository-button")).toBeTruthy();
+    expect(await screen.findByText("on disk")).toBeTruthy();
+    expect(await screen.findByTestId("create-local-repository-button")).toBeTruthy();
     fireEvent.click(screen.getByTestId("repo-refresh-button"));
     await waitFor(() => expect(refreshRepositories).toHaveBeenCalledOnce());
   });

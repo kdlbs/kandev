@@ -1,4 +1,5 @@
 import type { Task, TaskState } from "@/lib/types/http";
+import type { TaskListFacetValue } from "@/lib/plugins/types";
 
 // Values only. These carried a parallel `label: "Updated newest"` alongside the
 // key maps below, described as a "fallback/debug value" — but the mobile menu
@@ -27,6 +28,13 @@ export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
 
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
 export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
+
+// i18n-exempt: internal client-only option namespace, never rendered as copy.
+export const TASK_LIST_FACET_PREFIX = "facet:";
+
+export function isTaskListFacetOption(value: string): boolean {
+  return value.startsWith(TASK_LIST_FACET_PREFIX);
+}
 
 // The only source of display copy for these options; resolved at render against
 // the `tasks:` catalog.
@@ -96,4 +104,34 @@ export function compareTasksForList(a: Task, b: Task, sort: TasksListSort): numb
 
 function compareDate(a: string, b: string): number {
   return Date.parse(a) - Date.parse(b);
+}
+
+export function sortTasksByFacet(
+  tasks: Task[],
+  facetKey: string,
+  values: Record<string, readonly TaskListFacetValue[]>,
+): Task[] {
+  return tasks
+    .map((task, index) => ({
+      task,
+      index,
+      label: firstFacetLabel(values[`${facetKey}:${task.id}`] ?? []),
+    }))
+    .sort((a, b) => {
+      if (!a.label && !b.label) return a.index - b.index;
+      if (!a.label) return 1;
+      if (!b.label) return -1;
+      return (
+        a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) || a.index - b.index
+      );
+    })
+    .map(({ task }) => task);
+}
+
+export function firstFacetLabel(values: readonly TaskListFacetValue[]): string | null {
+  return (
+    values
+      .map((value) => value.label)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))[0] ?? null
+  );
 }

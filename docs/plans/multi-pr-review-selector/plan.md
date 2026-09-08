@@ -1,6 +1,6 @@
 # Multi-PR Review selector
 
-**Spec:** [Multi-branch tasks](../../specs/tasks/multi-branch/spec.md)
+**Spec:** [Multi-branch tasks](../../specs/tasks/requirements/multi-branch.md)
 
 ## Outcome
 

@@ -209,6 +209,79 @@ func TestStopInstanceRetainsPortAfterProcessTeardownFailure(t *testing.T) {
 	require.Equal(t, port, reusedPort)
 }
 
+func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 12345, Max: 12345},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
+
+	port, err := mgr.portAlloc.Allocate("duplicate-stop")
+	require.NoError(t, err)
+	stopStarted := make(chan struct{})
+	releaseStop := make(chan struct{})
+	var releaseStopOnce sync.Once
+	releaseStopFn := func() {
+		releaseStopOnce.Do(func() { close(releaseStop) })
+	}
+	t.Cleanup(releaseStopFn)
+	procMgr := &fakeProcessManager{
+		stopStarted: stopStarted,
+		stopRelease: releaseStop,
+	}
+	inst := &Instance{
+		ID:        "duplicate-stop",
+		Port:      port,
+		Status:    "running",
+		CreatedAt: time.Now(),
+		manager:   procMgr,
+	}
+	mgr.mu.Lock()
+	mgr.instances[inst.ID] = inst
+	mgr.mu.Unlock()
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- mgr.stopInstance(context.Background(), inst.ID, inst) }()
+	select {
+	case <-stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first stop did not reach process teardown")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- mgr.stopInstance(context.Background(), inst.ID, inst) }()
+	releaseStopFn()
+
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	_, ok := mgr.GetInstance(inst.ID)
+	require.False(t, ok, "duplicate stop must leave the instance removed")
+	reusedPort, err := mgr.portAlloc.Allocate("replacement-instance")
+	require.NoError(t, err)
+	require.Equal(t, port, reusedPort, "duplicate stop must release the port once")
+}
+
+func TestStopInstanceRejectsReplacementForCapturedInstance(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 12345, Max: 12345},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	oldInst := &Instance{ID: "reused-id", Status: "stopping"}
+	newInst := &Instance{ID: "reused-id", Status: "running"}
+	mgr.mu.Lock()
+	mgr.instances[newInst.ID] = newInst
+	mgr.mu.Unlock()
+
+	err := mgr.stopInstance(context.Background(), oldInst.ID, oldInst)
+	require.ErrorContains(t, err, "instance reused-id not found")
+	_, ok := mgr.GetInstance(newInst.ID)
+	require.True(t, ok, "replacement instance must remain tracked")
+	require.Equal(t, "running", newInst.Info().Status)
+}
+
 func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{
@@ -241,8 +314,11 @@ func (s *fakeHTTPServer) Close() error {
 }
 
 type fakeProcessManager struct {
-	stopErr error
-	stopped bool
+	stopErr       error
+	stopped       bool
+	stopStarted   chan<- struct{}
+	stopRelease   <-chan struct{}
+	stopStartOnce sync.Once
 }
 
 // legacyResourceReleaseError proves a process teardown error cannot authorize
@@ -261,5 +337,11 @@ func (m *fakeProcessManager) CloseAdmission() {}
 
 func (m *fakeProcessManager) StopForTeardown(context.Context) error {
 	m.stopped = true
+	if m.stopStarted != nil {
+		m.stopStartOnce.Do(func() { close(m.stopStarted) })
+	}
+	if m.stopRelease != nil {
+		<-m.stopRelease
+	}
 	return m.stopErr
 }

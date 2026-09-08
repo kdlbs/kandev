@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { t } from "@/lib/i18n";
-import { pickRepoLabel } from "./vcs-dialogs";
+import { pickRepoLabel, resolvePullRequestBaseBranch } from "./vcs-dialogs";
 
 /**
  * `pickRepoLabel` feeds the commit and change-request dialog titles, which
@@ -39,5 +39,29 @@ describe("pickRepoLabel", () => {
 
   it("prefers the primary repo's display name over the translated fallback", () => {
     expect(pickRepoLabel("", false, () => "kdlbs/kandev", t)).toBe("kdlbs/kandev");
+  });
+});
+
+describe("resolvePullRequestBaseBranch", () => {
+  it("uses the selected repository policy target in a multi-repo task", () => {
+    expect(
+      resolvePullRequestBaseBranch("frontend", { backend: "develop", frontend: "main" }, "develop"),
+    ).toBe("main");
+  });
+
+  it("uses the selected repository policy target for a branch worktree label", () => {
+    expect(
+      resolvePullRequestBaseBranch("frontend · branch-2", { frontend: "main" }, "develop"),
+    ).toBe("main");
+  });
+
+  it("falls back to the task target when the selected repository has no policy", () => {
+    expect(resolvePullRequestBaseBranch("frontend", { backend: "main" }, "develop")).toBe(
+      "develop",
+    );
+  });
+
+  it("does not use a policy from a repository with a shared name prefix", () => {
+    expect(resolvePullRequestBaseBranch("api-gateway-x", { api: "develop" }, "main")).toBe("main");
   });
 });

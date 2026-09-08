@@ -1,63 +1,27 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
 import { IconArrowRight } from "@tabler/icons-react";
-import { moveTask } from "@/lib/api";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
-import { useAppStore } from "@/components/state-provider";
-import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { useLayoutStore } from "@/lib/state/layout-store";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
-import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
+import {
+  usePresentationToken,
+  useWorkflowStepMove,
+} from "@/hooks/domains/kanban/use-workflow-step-move";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useTranslation } from "react-i18next";
+import {
+  MinimalWorkflowStepper,
+  StepCircleIndicator,
+  canMoveToStep,
+  getStepLabelClass,
+  type WorkflowStepperStep,
+} from "./workflow-step-disclosure";
 
-type Step = {
-  id: string;
-  name: string;
-  color: string;
-  position: number;
-  events?: KanbanStepEvents;
-  allow_manual_move?: boolean;
-  prompt?: string;
-  is_start_step?: boolean;
-  agent_profile_id?: string;
-};
-
-const PLAN_CONTEXT_PATH = "plan:context";
-
-/** Returns a callback that disables plan mode for the active session of a task. */
-function useDisablePlanMode() {
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const planModeEnabled = useAppStore((s) =>
-    activeSessionId ? (s.chatInput.planModeBySessionId[activeSessionId] ?? false) : false,
-  );
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument);
-  const closeDocument = useLayoutStore((s) => s.closeDocument);
-  const removeContextFile = useContextFilesStore((s) => s.removeFile);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
-
-  return useCallback(() => {
-    if (!activeSessionId || !planModeEnabled) return;
-    applyBuiltInPreset("default");
-    closeDocument(activeSessionId);
-    setActiveDocument(activeSessionId, null);
-    setPlanMode(activeSessionId, false);
-    removeContextFile(activeSessionId, PLAN_CONTEXT_PATH);
-  }, [
-    activeSessionId,
-    planModeEnabled,
-    setPlanMode,
-    setActiveDocument,
-    closeDocument,
-    removeContextFile,
-    applyBuiltInPreset,
-  ]);
-}
+type Step = WorkflowStepperStep;
 
 type WorkflowStepperProps = {
   steps: Step[];
@@ -65,6 +29,8 @@ type WorkflowStepperProps = {
   taskId?: string | null;
   workflowId?: string | null;
   isArchived?: boolean;
+  onMoveStart?: () => void;
+  onMoveError?: (error: unknown) => void;
 };
 
 const WorkflowStepper = memo(function WorkflowStepper({
@@ -73,36 +39,28 @@ const WorkflowStepper = memo(function WorkflowStepper({
   taskId,
   workflowId,
   isArchived,
+  onMoveStart,
+  onMoveError,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
-  const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
-  const disablePlanMode = useDisablePlanMode();
+  // The task route's continuous presentation of this task: a navigation away
+  // and back changes taskId and back, which must invalidate a request left
+  // over from the earlier presentation the same way a preview close-and-reopen
+  // does for the kanban preview header.
+  const presentationToken = usePresentationToken(taskId ?? null);
+  const { movingToStepId, handleMove } = useWorkflowStepMove({
+    taskId,
+    workflowId,
+    presentationToken,
+    onMoveStart,
+    onMoveError,
+  });
 
-  const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
+  const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
 
   const currentIndex = useMemo(
     () => sortedSteps.findIndex((s) => s.id === currentStepId),
     [sortedSteps, currentStepId],
-  );
-
-  const handleMove = useCallback(
-    async (stepId: string) => {
-      if (!taskId || !workflowId) return;
-      disablePlanMode();
-      setMovingToStepId(stepId);
-      try {
-        await moveTask(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: stepId,
-          position: 0,
-        });
-      } catch (err) {
-        console.error("[WorkflowStepper] Failed to move task:", err);
-      } finally {
-        setMovingToStepId(null);
-      }
-    },
-    [taskId, workflowId, disablePlanMode],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
@@ -122,6 +80,10 @@ const WorkflowStepper = memo(function WorkflowStepper({
           sortedSteps={sortedSteps}
           currentIndex={currentIndex}
           isArchived={isArchived}
+          taskId={taskId}
+          workflowId={workflowId}
+          movingToStepId={movingToStepId}
+          onMove={handleMove}
         />
       ) : (
         <>
@@ -153,68 +115,6 @@ const WorkflowStepper = memo(function WorkflowStepper({
     </div>
   );
 });
-
-/** Minimal stepper: current step only (or archived badge), keeping the per-step test id + aria-current. */
-function MinimalWorkflowStepper({
-  sortedSteps,
-  currentIndex,
-  isArchived,
-}: {
-  sortedSteps: Step[];
-  currentIndex: number;
-  isArchived?: boolean;
-}) {
-  const { t } = useTranslation();
-  if (isArchived) {
-    return (
-      <span
-        data-testid="workflow-stepper-minimal"
-        className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap"
-      >
-        {t("task:filterDimensionArchived")}
-      </span>
-    );
-  }
-
-  const current = currentIndex >= 0 ? sortedSteps[currentIndex] : sortedSteps[0];
-  if (!current) return null;
-
-  return (
-    <div
-      data-testid="workflow-stepper-minimal"
-      className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
-    >
-      <div
-        data-testid={`workflow-step-${current.name}`}
-        aria-current={currentIndex >= 0 ? "step" : undefined}
-        className="flex min-w-0 items-center gap-1.5 text-xs"
-      >
-        <StepCircleIndicator isCurrent isCompleted={false} />
-        <span className="truncate text-xs font-medium leading-none text-foreground">
-          {current.name}
-        </span>
-      </div>
-      {sortedSteps.length > 1 && (
-        <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
-          {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Check if a step can be moved to */
-function canMoveToStep(params: {
-  isArchived: boolean | undefined;
-  isCurrent: boolean;
-  taskId: string | null | undefined;
-  workflowId: string | null | undefined;
-  isAdjacent: boolean;
-  allowManualMove: boolean | undefined;
-}): boolean {
-  if (params.isArchived || params.isCurrent || !params.taskId || !params.workflowId) return false;
-  return params.isAdjacent || !!params.allowManualMove;
-}
 
 /** Individual step in the workflow stepper */
 function WorkflowStepItem({
@@ -328,42 +228,5 @@ function StepHoverContent({
   );
 }
 
-/** Circle indicator for step state */
-function StepCircleIndicator({
-  isCurrent,
-  isCompleted,
-}: {
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
-  if (isCurrent) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
-        <span className="h-2 w-2 rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isCompleted) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-      </span>
-    );
-  }
-  return (
-    <span className="relative flex items-center justify-center shrink-0">
-      <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
-    </span>
-  );
-}
-
-/** Get CSS class for step label based on state */
-function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {
-  if (isCurrent) return "text-foreground font-medium";
-  if (isCompleted) return "text-muted-foreground";
-  return "text-muted-foreground/60";
-}
-
 export { WorkflowStepper };
-export type { Step as WorkflowStepperStep };
+export type { WorkflowStepperStep } from "./workflow-step-disclosure";

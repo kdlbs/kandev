@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
 
@@ -21,8 +24,15 @@ import (
 // declared in dto.go).
 
 func (h *Handler) listComments(c *gin.Context) {
+	taskID := c.Param("id")
+
+	if claims := agents.ClaimsFromContext(c); claims != nil {
+		h.listCommentsForAgent(c, taskID, claims)
+		return
+	}
+
 	ctx := c.Request.Context()
-	comments, err := h.svc.ListComments(ctx, c.Param("id"))
+	comments, err := h.svc.ListComments(ctx, taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -39,6 +49,29 @@ func (h *Handler) listComments(c *gin.Context) {
 		dtos[i] = dto
 	}
 	c.JSON(http.StatusOK, CommentListResponse{Comments: dtos})
+}
+
+// listCommentsForAgent serves the guarded, bounded, reduced-projection
+// comment window for an in-sandbox agent caller
+// (REQ-OFFICE-AGENT-COMMENT-READS-001/002/003/004/005). The caller task
+// identity comes only from the validated JWT claims, never from the
+// request path or query string.
+func (h *Handler) listCommentsForAgent(c *gin.Context, taskID string, claims *agents.AgentClaims) {
+	if h.handoff == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "comment reads not configured"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	window, err := h.handoff.ListCommentsForCaller(c.Request.Context(), claims.TaskID, taskID, limit)
+	if err != nil {
+		if errors.Is(err, taskservice.ErrAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, window)
 }
 
 // fetchRunStatusForComments batches a per-comment run-status lookup.

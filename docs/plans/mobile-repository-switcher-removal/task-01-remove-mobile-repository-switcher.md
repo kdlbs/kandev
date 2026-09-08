@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 ---
 
 # Task 01: Remove Mobile Repository Switcher
@@ -69,7 +69,7 @@ Sequential. Production removal and its browser regression own the same interacti
 
 ## Inputs
 
-- `docs/specs/ui/mobile-task-navigation.md` — mobile Dockview behavior and resilience scenario.
+- `docs/specs/ui/requirements/mobile-task-navigation.md` — mobile Dockview behavior and resilience scenario.
 - `plan.md` — scoped frontend removal and mobile design contract.
 - `apps/web/components/task/mobile/mobile-sessions-section.tsx` — retained session-picker behavior.
 - `apps/web/e2e/tests/layout/mobile-spa-resilience.spec.ts` — existing multi-repository hydration-failure setup.

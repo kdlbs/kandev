@@ -1,12 +1,15 @@
 import { useCallback, useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 const setQuickChatInitialPrompt = vi.fn();
+const quickChatSessionItems: Record<string, { state: string; task_id: string }> = {};
+const quickChatPrepareProgress: Record<string, { status: string }> = {};
 const handleActivateTerminal = vi.fn();
 const handleNewTerminal = vi.fn();
 const handleCloseTerminal = vi.fn();
+const persistTabOrder = vi.fn();
 const handleOpenChange = vi.fn();
 const handleNewChat = vi.fn();
 const escapePreventDefault = vi.fn();
@@ -15,11 +18,25 @@ const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
 const FIRE_ESCAPE_TESTID = "fire-escape";
 const TOGGLE_ESCAPE_GUARD_TESTID = "toggle-escape-guard";
+const responsiveMock = vi.hoisted(() => ({ isFinePointer: true }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsiveMock,
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (
-    selector: (state: { setQuickChatInitialPrompt: typeof setQuickChatInitialPrompt }) => unknown,
-  ) => selector({ setQuickChatInitialPrompt }),
+    selector: (state: {
+      setQuickChatInitialPrompt: typeof setQuickChatInitialPrompt;
+      taskSessions: { items: typeof quickChatSessionItems };
+      prepareProgress: { bySessionId: typeof quickChatPrepareProgress };
+    }) => unknown,
+  ) =>
+    selector({
+      setQuickChatInitialPrompt,
+      taskSessions: { items: quickChatSessionItems },
+      prepareProgress: { bySessionId: quickChatPrepareProgress },
+    }),
 }));
 
 vi.mock("@/lib/routing/client-dynamic", () => ({
@@ -176,13 +193,21 @@ const defaultQuickChatModalState = {
   handleCloseTerminal,
   handleConfirmClose: vi.fn(),
   handleRename: vi.fn(),
+  tabOrder: ["conversation:chat-1", "terminal:terminal-1"],
+  persistTabOrder,
+  tabOrderSyncError: null,
 };
 
 import { QuickChatModal } from "./quick-chat-modal";
 
 afterEach(() => {
   cleanup();
+  for (const key of Object.keys(quickChatSessionItems)) delete quickChatSessionItems[key];
+  for (const key of Object.keys(quickChatPrepareProgress)) delete quickChatPrepareProgress[key];
   vi.clearAllMocks();
+  useQuickChatModalMock.mockReset();
+  useQuickChatModalMock.mockReturnValue(defaultQuickChatModalState);
+  responsiveMock.isFinePointer = true;
 });
 
 describe("QuickChatModal mixed tabs", () => {
@@ -201,6 +226,52 @@ describe("QuickChatModal mixed tabs", () => {
     expect(screen.getByText("Terminals")).toBeTruthy();
     expect(screen.queryByTestId("quick-chat-menu-session-chat-1")).toBeNull();
     expect(screen.queryByTestId("quick-chat-menu-terminal-terminal-1")).toBeNull();
+  });
+
+  it("shows a spinner only for working conversation tabs", () => {
+    quickChatSessionItems["chat-1"] = { state: "RUNNING", task_id: "task-1" };
+    quickChatSessionItems["quick-chat-setup:ws-1:chat"] = {
+      state: "RUNNING",
+      task_id: "task-setup",
+    };
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      activeKind: "conversation",
+      activeSessionNeedsAgent: false,
+      terminalTabs: [],
+      sessions: [
+        ...defaultQuickChatModalState.sessions,
+        { sessionId: "quick-chat-setup:ws-1:chat", workspaceId: WORKSPACE_ID, kind: "chat" },
+      ],
+    });
+
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    const tabs = screen.getAllByTestId("quick-chat-tab");
+    expect(within(tabs[0]).getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(tabs[1].querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("uses the same persisted order callback for coarse-pointer moves", () => {
+    responsiveMock.isFinePointer = false;
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Terminal 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Terminal 1 left" }));
+
+    expect(persistTabOrder).toHaveBeenCalledWith(["terminal:terminal-1", "conversation:chat-1"]);
+  });
+
+  it("gives coarse-pointer close controls a 44px target", () => {
+    responsiveMock.isFinePointer = false;
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    expect(screen.getByRole("button", { name: `Actions for ${CHAT_NAME}` }).className).toContain(
+      "h-11 w-11",
+    );
+    expect(screen.getByRole("button", { name: "Actions for Terminal 1" }).className).toContain(
+      "h-11 w-11",
+    );
   });
 });
 

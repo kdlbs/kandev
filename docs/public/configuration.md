@@ -11,7 +11,7 @@ Kandev has three distinct configuration surfaces:
 - persistent product settings edited in the web UI and stored in the database; and
 - executor, agent, repository, and workflow profiles stored through their own Settings pages.
 
-This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](./executors.md), and deployment examples are in [Docker](./docker.md), [Kubernetes](./k8s.md), and [Run as a service](./run-as-a-service.md).
+This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](executors.md), and deployment examples are in [Docker](docker.md), [Kubernetes](k8s.md), and [Run as a service](run-as-a-service.md).
 
 ## Quick path
 
@@ -19,6 +19,14 @@ This page is the startup-configuration reference. Executor-specific fields are c
 2. Add `config.yaml` only for stable operator-wide settings.
 3. Use environment variables for deployment-specific overrides and secrets.
 4. Use the web UI for persistent product settings, agents, executors, and workflows.
+
+![Configuration precedence showing embedded defaults, the first existing config.yaml, environment variables, and separate persistent web settings.](../screenshots/configuration.svg)
+
+[Open full-size SVG diagram][configuration-diagram]
+
+[configuration-diagram]: ../../docs/screenshots/configuration.svg
+
+Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
 ## Load order and lifecycle
 
@@ -64,7 +72,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `homeDir` | `KANDEV_HOME_DIR` | `~/.kandev` | Root for data, tasks, worktrees, cloned repositories, sessions, and logs. A leading `~/` expands. |
-| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. Use `127.0.0.1` for local-only access. |
+| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. It accepts one hostname/IP or a comma-separated list. Use `127.0.0.1` for local-only access. |
 | `server.port` | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429` | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port. |
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
@@ -72,7 +80,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 | `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES` | empty list | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for). |
 
-The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
+When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
 ### Database
 
@@ -93,9 +101,24 @@ SQLite is the supported default and enables WAL mode. PostgreSQL deployments mus
 
 `database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
+### Default SQLite continuity
+
+When `database.path` is empty, startup checks both `<home>/data/kandev.db` and
+the legacy default `<home>/kandev.db` before it opens a writable database. If
+only the legacy database exists and is valid, Kandev copies it to the current
+default with a validated SQLite snapshot. The legacy database and its `-wal`
+and `-shm` files remain available for recovery.
+
+If the current default has no task history but the legacy default has task
+history, startup stops and names both paths. Kandev does not modify either
+database. Preserve both files, then select the intended database explicitly
+with `database.path` or `KANDEV_DATABASE_PATH` before restarting. If both
+defaults contain task history, Kandev keeps the current default and does not
+merge the databases. An explicit database path bypasses legacy discovery.
+
 One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
 
-Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](./operations.md).
+Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](operations.md).
 
 ### Event bus and NATS
 
@@ -120,7 +143,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](docker.md) and [Executors](executors.md).
 
 ### Core agent service
 
@@ -207,14 +230,27 @@ ignored and the TCP peer address is used. The resolved IP feeds the login
 session record (Settings > Account > Security) and the login rate-limiter
 key.
 
-For a reverse proxy, use a narrow list of proxy addresses:
+For one stable reverse proxy, list its immediate TCP peer as an exact IP:
 
 ```yaml
 server:
   trustedProxies:
     - 10.0.0.5
-    - 192.168.0.0/16
 ```
+
+For a controlled proxy network whose address changes, use the narrowest CIDR
+that contains the proxy peers:
+
+```yaml
+server:
+  trustedProxies:
+    - 10.0.0.0/28
+```
+
+Use the proxy `peer` address named in the warning. Do not list the browser's
+client network. A trusted CIDR lets every directly connected host in that
+range supply forwarded identity headers, so use an exact IP when the proxy
+address is stable and never trust a broad private-network range by default.
 
 Default: unset, meaning no trusted proxies. Forwarded headers are ignored
 entirely and the recorded client IP is always the TCP peer. This is the
@@ -255,7 +291,9 @@ launch and is not an environment configuration source.
 | `logging.level` | `KANDEV_LOG_LEVEL` | `info` | File threshold: `debug`, `info`, `warn`, or `error`. `--debug` selects `debug`; normal and `--verbose` launches select `info`. |
 | `logging.format` | `KANDEV_LOGGING_FORMAT` | `text`, or `json` in production/Kubernetes | `text` or `json`; `auto` is not accepted. |
 
-Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 256 MiB; later entries are dropped until the next UTC day rather than allowing diagnostics to fill the disk. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
+Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 16 MiB. Before a new entry would exceed that limit, Kandev closes the file as `backend-logs-YYYY-MM-DD-NNNNNN.log` and opens a new active file.
+
+Active and closed backend files use at most 256 MiB in total. Kandev removes the oldest closed segments when needed, so high-volume periods keep the newest evidence instead of stopping file logging. Three UTC days is the maximum file age, not a reserved allocation for each day. The segment size, total budget, and maximum age are fixed and are not configurable. Legacy `backend-logs-YYYY-MM-DD.log` files remain readable during upgrades and count toward the total budget. Files are owner-only (`0600`) on Unix.
 
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
@@ -274,7 +312,21 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 | `worktree.pullTimeoutSeconds` | `KANDEV_WORKTREE_PULLTIMEOUTSECONDS` | `60` | Git pull timeout during worktree preparation. |
 | `repoClone.basePath` | `KANDEV_REPOCLONE_BASEPATH` | `<home>/repos` | Base directory for provider-backed clones. A leading `~/` expands. |
 
-Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
+Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](git-operations.md).
+
+The `repositoryDiscovery.roots` setting belongs to the backend process. A
+server-launched backend uses these configured roots and, when no configured
+root is available, its server user's Home directory. A desktop-launched
+backend keeps the configured roots but does not use Home as an implicit
+fallback. In Desktop, use **Add Local Repository** to choose one or more
+install-wide discovery folders. Those selections are stored in Kandev's
+database, not copied into `config.yaml`, and are shared by workspaces in that
+desktop installation. See [Desktop app repository discovery](desktop-app.md#repository-discovery-and-macos-access).
+
+The desktop process marker and native picker capability are internal launch
+details. A browser can connect to a desktop backend and use the HTTP folder
+picker; the browser's picker capability does not change the backend's
+discovery policy.
 
 ### Debug configuration
 
@@ -442,7 +494,11 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
+| `features.auth` | `KANDEV_FEATURES_AUTH` | off | Experimental authentication, users, per-user workspaces, and team access. |
+| `features.multiTenancy` | `KANDEV_FEATURES_MULTI_TENANCY` | off | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise. |
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
+| `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
+| `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | off | Experimental Office participant sessions. Enable only after the `(task_id, agent_profile_id)` unique index is available. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -452,6 +508,14 @@ Feature Toggles** for persistent product changes.
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
+`features.canvases` is off in the `prod`, `dev`, and `e2e` profiles. Restart Kandev
+after enabling or disabling it. The restart is required because Kandev registers
+canvas MCP tools and composes the canvas backend at startup. With the flag off,
+Kandev exposes no canvas tools, routes, events, background work, or navigation.
+The database can contain canvas migrations, but Kandev does not read or change
+canvas data while the flag is off. See [Agent-authored Canvases](canvases.md)
+for the experimental user workflow.
+
 For a risky release feature, keep the flag off in the shipped profiles, enable it
 only on a selected install through an admin override or explicit environment,
 restart, and test it there. Promote the `prod` profile default only after the
@@ -460,10 +524,10 @@ the rollout is complete, then remove the live flag and move its key and
 environment variable to the runtime registry's append-only retired identities.
 Plugins are part of the base product and are not a runtime toggle.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication, organizations, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
-The **Unread Messages** preference in **Settings > General > Task Actions** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
+The **Unread Messages** preference in **Settings > Preferences > Task Behavior** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
 
 
 Most integrations, executor profiles, agent profiles, MCP servers, repository settings, and UI preferences are persistent database records edited under **Settings**. They are not fields in `config.yaml`. Secret values use an encrypted secret store backed by `<home>/data/master.key`; filesystem permissions, database backups, and key backup are part of the security boundary.
@@ -546,6 +610,7 @@ no public YAML key:
   `KANDEV_MOCK_LINEAR`, and `AGENTCTL_AUTO_APPROVE_PERMISSIONS`.
 - Runtime flags and diagnostics: `KANDEV_FEATURES_OFFICE`,
   `KANDEV_FEATURES_AUTH`,
+  `KANDEV_FEATURES_MULTI_TENANCY`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,
@@ -579,4 +644,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](cli.md); end users should still let the installer set it.

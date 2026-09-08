@@ -7,9 +7,16 @@ import type { ExecutorProfile, LocalRepository, Repository } from "@/lib/types/h
 // before it can be saved) or the single-picker's "Auto" fallback when the
 // executor doesn't support multiple repositories.
 export type RepositorySelection =
-  | { kind: "none" }
-  | { kind: "registered"; id: string }
-  | { kind: "discovered"; path: string; name: string; defaultBranch: string };
+  | { kind: "none"; key?: string; branch?: string }
+  | { kind: "registered"; id: string; key?: string; branch?: string }
+  | {
+      kind: "discovered";
+      path: string;
+      name: string;
+      defaultBranch: string;
+      key?: string;
+      branch?: string;
+    };
 
 export const REPO_NONE_OPTION_ID = "__none__";
 const DISCOVERED_PREFIX = "path:";
@@ -113,18 +120,17 @@ export function resolveExecutorType(
 }
 
 // normalizeRepositorySelections enforces the single-repository invariant at
-// the save boundary: the picker only *renders* repositorySelections[0] once
-// the executor stops supporting multi-repo or a github_pr trigger is active
-// (see RepositoryPickerField in config-section.tsx), but doesn't itself
+// the save boundary: the picker only accepts one row once the executor stops
+// supporting multi-repo, but doesn't itself
 // truncate the underlying selections array — a user who adds 2+ repos, then
-// switches to an incompatible executor or trigger without touching the
+// switches to an incompatible executor without touching the
 // picker again, would otherwise still save every stale entry. Called right
 // before resolveRepositoryIds so the persisted repository_ids always match
 // what's actually rendered.
 export function normalizeRepositorySelections(
   selections: RepositorySelection[],
-  options: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+  options: { supportsMultiRepo: boolean },
 ): RepositorySelection[] {
-  if (options.supportsMultiRepo && !options.isPRTrigger) return selections;
+  if (options.supportsMultiRepo) return selections;
   return selections.slice(0, 1);
 }

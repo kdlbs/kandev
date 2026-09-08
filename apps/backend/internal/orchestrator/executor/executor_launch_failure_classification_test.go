@@ -3,8 +3,10 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -18,6 +20,15 @@ func TestClassifyLaunchFailureUsesTypedBaseBranchCategory(t *testing.T) {
 	}
 	if classification.message == "" || classification.message == "environment preparation failed" {
 		t.Fatalf("classification message = %q, want safe user message", classification.message)
+	}
+}
+
+func TestClassifyLaunchFailureUsesWorkspaceCheckoutCategory(t *testing.T) {
+	classification := classifyLaunchFailure(errors.Join(
+		errors.New("PR ref could not be materialized"), worktree.ErrWorkspaceCheckoutFailed,
+	))
+	if classification.code != models.LaunchErrorCategoryWorkspaceCheckoutFailed {
+		t.Fatalf("classification code = %q, want %q", classification.code, models.LaunchErrorCategoryWorkspaceCheckoutFailed)
 	}
 }
 
@@ -56,21 +67,39 @@ func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *test
 	}
 }
 
-func TestLaunchFailureReviewActionRequiresSuccessfulEligibilityResolver(t *testing.T) {
+func TestGenericLaunchFailureAlwaysOffersRetryLaunch(t *testing.T) {
 	exec := &Executor{}
 	exec.launchFailureReviewEligibility = func(context.Context, string) (bool, error) {
 		return true, nil
 	}
 	errorValue := exec.buildLastAgentError(context.Background(), "task-1", "", errors.New("start failed"))
-	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionMarkReviewDone {
-		t.Fatalf("eligible recovery actions = %#v, want mark_review_done", errorValue.RecoveryActions)
+	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
+		t.Fatalf("eligible recovery actions = %#v, want retry_launch", errorValue.RecoveryActions)
 	}
 
 	exec.launchFailureReviewEligibility = func(context.Context, string) (bool, error) {
 		return false, errors.New("lookup failed")
 	}
 	errorValue = exec.buildLastAgentError(context.Background(), "task-1", "", errors.New("start failed"))
-	if len(errorValue.RecoveryActions) != 0 {
+	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
 		t.Fatalf("failed eligibility lookup exposed recovery actions = %#v", errorValue.RecoveryActions)
+	}
+}
+
+func TestBuildLastAgentErrorSanitizesRepositoryPreparationDetails(t *testing.T) {
+	exec := &Executor{}
+	launchErr := &lifecycle.RepositoryPreparationError{
+		RepositoryID:   "repo-back",
+		RepositoryName: "backend",
+		Cause:          errors.New("fatal: https://user:ghp_abcdefghijklmnopqrstuvwxyz1234567890AB@example.com/repo.git"),
+	}
+
+	errorValue := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-2", launchErr)
+	if !strings.Contains(errorValue.Details, "repo-back") || !strings.Contains(errorValue.Details, "backend") {
+		t.Fatalf("launch details = %q, want repository identity", errorValue.Details)
+	}
+	if strings.Contains(errorValue.Details, "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB") ||
+		strings.Contains(errorValue.Details, "user:") {
+		t.Fatalf("launch details exposed credential-bearing URL: %q", errorValue.Details)
 	}
 }

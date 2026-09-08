@@ -9,7 +9,7 @@ depends_on:
   - "03-responsive-task-menu-context"
   - "04-bounded-mobile-plugin-panels"
 plan: "plan.md"
-spec: "../../specs/plugins/spec.md"
+spec: "../../specs/plugins/requirements/plugins.md"
 ---
 
 # Task 05: Plugin hook E2E regressions
@@ -51,7 +51,7 @@ mobile scenarios.
 
 ## Inputs
 
-- Every plugin-hook scenario added to `docs/specs/plugins/spec.md`.
+- Every plugin-hook scenario added to `docs/specs/plugins/requirements/plugins.md`.
 - Existing real fixture install helpers and plugin-user-state E2E patterns.
 
 ## Risks

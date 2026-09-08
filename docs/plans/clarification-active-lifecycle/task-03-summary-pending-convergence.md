@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-current-turn-backend-authority"]
 plan: "plan.md"
-spec: "../../specs/clarification-active-lifecycle/spec.md"
+spec: "../../specs/tasks/requirements/clarification-active-lifecycle.md"
 ---
 
 # Task 03: Summary pending convergence

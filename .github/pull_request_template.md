@@ -8,6 +8,19 @@ SUMMARY (required)
   Lead with the problem or goal, end with the outcome.
   Say WHY, not what. No filler phrases ("This PR...", "In order to...", "As part of...").
 
+LANGUAGE
+  Write the PR title, body, captions, and review-facing prose in English.
+  Translate non-English task text before recording it. Do not include the original wording in the PR body.
+  Keep non-English text only for intentional product localization or exact product data required by the diff.
+  Keep the surrounding explanation in English.
+
+ARCHITECTURE AND SCOPE
+  For contributors without repository write access, if the change is large or architectural, require a linked issue with maintainer discussion before opening the PR. Maintainers and collaborators with `push`, `maintain`, or `admin` permission may open the PR directly; verify the authenticated actor's repository permission before applying this gate.
+  Large changes include new subsystems, public API or protocol changes, persistence changes, new execution boundaries,
+  authentication or permission-model changes, and cross-cutting changes across subsystems.
+  If a non-write contributor is missing the issue or discussion, stop and report the blocker. Do not open a PR to start the discussion.
+  Prefer one logical change and the smallest practical diff. Split unrelated cleanup, refactoring, and feature work.
+
 IMPORTANT CHANGES (optional)
   Include only for significant architectural changes. Skip for small or straightforward changes.
   Very short bullet list. Each bullet says WHAT changed and why (very short).
@@ -52,6 +65,8 @@ RULES
 
 ## Checklist
 
+- [ ] If I do not have repository write access and this is a large architectural change, I discussed the direction in a linked issue before opening this PR.
+- [ ] This PR contains one logical change; unrelated work is split into separate PRs.
 - [ ] I have performed a self-review of my code.
 - [ ] I have manually tested my changes and they work as expected.
 - [ ] My changes have tests that cover the new functionality and edge cases.

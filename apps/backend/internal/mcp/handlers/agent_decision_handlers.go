@@ -63,6 +63,7 @@ func (h *Handlers) handleRecordStepDecision(ctx context.Context, msg *ws.Message
 		AgentProfileID: session.AgentProfileID,
 		Decision:       req.Decision,
 		Reason:         req.Reason,
+		SessionID:      req.SessionID,
 	})
 	if err != nil {
 		if !errors.Is(err, shared.ErrForbidden) && !dashboard.IsAgentDecisionValidationError(err) {

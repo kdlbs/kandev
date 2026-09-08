@@ -23,6 +23,7 @@ import type {
   SlotComponent,
   TaskActionRegistration,
   TaskFilterRegistration,
+  TaskListFacetRegistration,
   TaskMenuActionRegistration,
   TaskPanelRegistration,
   WsHandler,
@@ -49,6 +50,7 @@ import type {
   PluginTaskActionRegistration,
   PluginTaskFilterRegistration,
   PluginTaskMenuActionRegistration,
+  PluginTaskListFacetRegistration,
   PluginTaskPanelRegistration,
   RouteRegistration,
 } from "./registry-registration-types";
@@ -111,6 +113,7 @@ class PluginRegistryStore {
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private taskFilters: Owned<TaskFilterRegistration>[] = [];
+  private taskListFacets: Owned<TaskListFacetRegistration>[] = [];
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
@@ -305,6 +308,23 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  registerTaskListFacet(pluginId: string, registration: TaskListFacetRegistration): void {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(registration.id)) {
+      throw new Error(`[plugins] task-list facet id "${registration.id}" must be URL-safe`);
+    }
+    if (
+      this.taskListFacets.some(
+        (entry) => entry.pluginId === pluginId && entry.value.id === registration.id,
+      )
+    ) {
+      throw new Error(
+        `[plugins] task-list facet "${registration.id}" is already registered by "${pluginId}"`,
+      );
+    }
+    this.taskListFacets.push({ pluginId, value: registration });
+    this.notify();
+  }
+
   /**
    * Records the keybinding ids declared in `pluginId`'s `ui.keybindings`
    * manifest, so `registerKeybinding` can warn on an undeclared id. Safe to
@@ -395,6 +415,7 @@ class PluginRegistryStore {
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
+    this.taskListFacets = removeByPlugin(this.taskListFacets, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
     const removedEnabledState = removedIntegrationIds.reduce(
@@ -555,6 +576,10 @@ class PluginRegistryStore {
     return this.taskFilters.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
+  getTaskListFacets(): PluginTaskListFacetRegistration[] {
+    return this.taskListFacets.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
@@ -576,6 +601,7 @@ class PluginRegistryStore {
       registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
       registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
       registerTaskFilter: (registration) => this.registerTaskFilter(pluginId, registration),
+      registerTaskListFacet: (registration) => this.registerTaskListFacet(pluginId, registration),
     };
   }
 
@@ -617,7 +643,8 @@ class PluginRegistryStore {
       this.reviewProviders.size +
       this.taskPanels.length +
       this.taskMenuActions.length +
-      this.taskFilters.length
+      this.taskFilters.length +
+      this.taskListFacets.length
     );
   }
 

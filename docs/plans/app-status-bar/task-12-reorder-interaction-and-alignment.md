@@ -5,14 +5,14 @@ status: done
 wave: 7
 depends_on: [app-status-bar-10, app-status-bar-11]
 plan: docs/plans/app-status-bar/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # Reorder interaction and alignment
 
 ## Inputs
 
-[Spec: What](../../specs/ui/app-status-bar.md#what), tasks 10-11, and the live
+[Spec: What](../../specs/ui/requirements/app-status-bar.md#what), tasks 10-11, and the live
 geometry diagnosis: `border-top` currently leaves a 23 px content box and puts
 12 px plugin text at a half-pixel vertical position.
 

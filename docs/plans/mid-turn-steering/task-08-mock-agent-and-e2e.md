@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-adapter-steer-admission", "05-orchestrator-steer-admission", "07-composer-steer-affordance"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 08: Replay steering in the mock agent and cover it end to end

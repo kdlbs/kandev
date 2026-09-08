@@ -62,7 +62,7 @@ const subagentContextSourceLive = "live"
 // invocation. It returns nothing: that is the mechanism by which AC-27
 // holds — a writer with no error return cannot fail the enclosing message
 // write, turn, or agent stream, and no future caller can accidentally
-// propagate one. See docs/specs/subagent-context-persistence/spec.md.
+// propagate one. See docs/specs/agents/requirements/subagent-context-persistence.md.
 func (s *Service) RecordSubagentContext(ctx context.Context, req RecordSubagentContextRequest) {
 	if s.subagentContexts == nil {
 		return

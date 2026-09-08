@@ -210,3 +210,30 @@ func TestExecutionStore_OwnsPromptActivityRejectsChangedEpoch(t *testing.T) {
 		t.Fatal("changed activity epoch should invalidate the snapshot")
 	}
 }
+
+func TestExecutionStore_ClaimPromptActivityRequiresCurrentIdentity(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1", promptGeneration: 4}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	exec.armPromptActivity()
+
+	claimed, err := store.ClaimPromptActivity(exec.SessionID, exec.ID, 4, 1)
+	if err != nil {
+		t.Fatalf("ClaimPromptActivity: %v", err)
+	}
+	if claimed != exec {
+		t.Fatal("ClaimPromptActivity returned a different execution pointer")
+	}
+
+	exec.markAgentActivity()
+	if _, err := store.ClaimPromptActivity(exec.SessionID, exec.ID, 4, 1); !errors.Is(err, ErrPromptActivityNotOwned) {
+		t.Fatalf("ClaimPromptActivity after activity change = %v, want ErrPromptActivityNotOwned", err)
+	}
+
+	store.Remove(exec.ID)
+	if _, err := store.ClaimPromptActivity(exec.SessionID, exec.ID, 4, 2); !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("ClaimPromptActivity after removal = %v, want ErrExecutionNotFound", err)
+	}
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 type Workflow = { id: string; workspaceId: string; name: string };
 type SnapshotTask = {
@@ -7,7 +7,8 @@ type SnapshotTask = {
   workflowStepId: string;
   title: string;
   position: number;
-  state: "IN_PROGRESS";
+  state: "IN_PROGRESS" | "REVIEW";
+  updatedAt?: string;
   autoStartFailed?: boolean;
   parentTaskId?: string;
   statusSummary?: {
@@ -46,6 +47,8 @@ const LIVE_STEP_ID = "step-2";
 const PARENT_TASK_ID = "parent-task";
 const LIVE_PLACEMENT_TASK_ID = "task-with-live-placement";
 const INVALIDATED_STATUS_TASK_ID = "task-with-invalidated-status";
+const LIVE_STATE_TASK_ID = "task-with-live-state";
+const LIVE_TASK_UPDATED_AT = "2026-08-29T09:14:02Z";
 
 const mocks = vi.hoisted(() => ({
   clearKanbanMulti: vi.fn(),
@@ -240,6 +243,174 @@ describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
         ],
       }),
     );
+  });
+});
+
+describe("useAllWorkflowSnapshots task state races", () => {
+  it("keeps a newer live task state when an older snapshot finishes later", async () => {
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.3
+    resetState();
+    let resolveFetch: (value: unknown) => void = () => {};
+    mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    setLightweightSnapshot({
+      id: LIVE_STATE_TASK_ID,
+      workflowStepId: STEP_ID,
+      title: "Live state",
+      position: 0,
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:00Z",
+    });
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
+    );
+
+    setLightweightSnapshot({
+      id: LIVE_STATE_TASK_ID,
+      workflowStepId: STEP_ID,
+      title: "Live state",
+      position: 0,
+      state: "IN_PROGRESS",
+      updatedAt: LIVE_TASK_UPDATED_AT,
+    });
+    resolveFetch({
+      steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+      tasks: [
+        {
+          id: LIVE_STATE_TASK_ID,
+          workflow_step_id: STEP_ID,
+          title: "Live state",
+          position: 0,
+          state: "REVIEW",
+          updated_at: "2026-08-29T09:14:01Z",
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: LIVE_STATE_TASK_ID,
+            state: "IN_PROGRESS",
+            updatedAt: LIVE_TASK_UPDATED_AT,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("accepts a newer snapshot task state", async () => {
+    resetState();
+    setLightweightSnapshot({
+      id: "task-with-newer-snapshot-state",
+      workflowStepId: STEP_ID,
+      title: "Newer snapshot state",
+      position: 0,
+      state: "IN_PROGRESS",
+      updatedAt: LIVE_TASK_UPDATED_AT,
+    });
+    mocks.fetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+      tasks: [
+        {
+          id: "task-with-newer-snapshot-state",
+          workflow_step_id: STEP_ID,
+          title: "Newer snapshot state",
+          position: 0,
+          state: "REVIEW",
+          updated_at: "2026-08-29T09:14:03Z",
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: "task-with-newer-snapshot-state",
+            state: "REVIEW",
+            updatedAt: "2026-08-29T09:14:03Z",
+          }),
+        ],
+      }),
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots failed refreshes", () => {
+  it("keeps the current task projection usable when a snapshot refresh fails", async () => {
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.7
+    resetState();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setLightweightSnapshot({
+      id: LIVE_STATE_TASK_ID,
+      workflowStepId: STEP_ID,
+      title: "Current live state",
+      position: 0,
+      state: "IN_PROGRESS",
+      updatedAt: LIVE_TASK_UPDATED_AT,
+    });
+    mocks.fetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        isPlaceholder: false,
+        tasks: [
+          expect.objectContaining({
+            id: LIVE_STATE_TASK_ID,
+            state: "IN_PROGRESS",
+          }),
+        ],
+      }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("keeps a resolved task projection when a snapshot refresh fails", async () => {
+    resetState();
+    const resolvedSnapshot: MockState["kanbanMulti"]["snapshots"][string] = {
+      workflowId: WORKFLOW_ID,
+      workflowName: "A",
+      steps: [],
+      tasks: [
+        {
+          id: LIVE_STATE_TASK_ID,
+          workflowStepId: STEP_ID,
+          title: "Current resolved state",
+          position: 0,
+          state: "IN_PROGRESS" as const,
+          updatedAt: LIVE_TASK_UPDATED_AT,
+        },
+      ],
+      isPlaceholder: false,
+    };
+    mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID] = resolvedSnapshot;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.fetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID]).toBe(resolvedSnapshot);
+    errorSpy.mockRestore();
   });
 });
 

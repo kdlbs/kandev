@@ -36,6 +36,27 @@ func seedSummaryRun(
 	}
 }
 
+// seedSummaryRunWithOutcome is seedSummaryRun plus an explicit outcome
+// value, for the task-delivery-ledger Office run outcome bucketing tests.
+// outcome == "" writes SQL NULL (pre-activation / failed-path shape).
+func seedSummaryRunWithOutcome(
+	t *testing.T, repo *sqlite.Repository,
+	id, agentID, status, requestedAt, outcome string,
+) {
+	t.Helper()
+	var outcomeArg interface{}
+	if outcome != "" {
+		outcomeArg = outcome
+	}
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO runs
+			(id, agent_profile_id, reason, payload, status, error_message, outcome, requested_at)
+		VALUES (?, ?, 'test', '{}', ?, '', ?, ?)
+	`, id, agentID, status, outcomeArg, requestedAt); err != nil {
+		t.Fatalf("seed run %s: %v", id, err)
+	}
+}
+
 // seedCostEvent inserts an office_cost_events row with every summed column set.
 func seedCostEvent(
 	t *testing.T, repo *sqlite.Repository,
@@ -64,20 +85,29 @@ func seedActivity(t *testing.T, repo *sqlite.Repository, id, actorID, targetType
 	}
 }
 
+// TestRunCountsByDayForAgent_BucketsStatuses covers the five-bucket
+// contract in docs/specs/task-delivery-ledger/spec.md, "Office run
+// outcome § Repository query": succeeded requires status='finished' AND
+// outcome='processed'; any other non-NULL outcome on a finished run is
+// skipped; a finished run with outcome IS NULL (pre-activation, or a
+// terminal path with no established semantic label) is unclassified;
+// failed/other are unchanged by this card.
 func TestRunCountsByDayForAgent_BucketsStatuses(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Now().UTC()
 
 	today, yday, ancient := dayStamp(base, 0, 10), dayStamp(base, 1, 10), dayStamp(base, 60, 10)
-	seedSummaryRun(t, repo, "r-fin", "agent-a", "finished", today, "", "", "")
+	seedSummaryRunWithOutcome(t, repo, "r-fin", "agent-a", "finished", today, "processed")
+	seedSummaryRunWithOutcome(t, repo, "r-skip", "agent-a", "finished", today, "budget_blocked")
+	seedSummaryRunWithOutcome(t, repo, "r-unclassified", "agent-a", "finished", today, "")
 	seedSummaryRun(t, repo, "r-fail", "agent-a", "failed", today, "", "", "")
 	seedSummaryRun(t, repo, "r-timeout", "agent-a", "timed_out", today, "", "", "")
 	seedSummaryRun(t, repo, "r-queued", "agent-a", "queued", today, "", "", "")
 	seedSummaryRun(t, repo, "r-cancel", "agent-a", "cancelled", today, "", "", "")
-	seedSummaryRun(t, repo, "r-yday", "agent-a", "finished", yday, "", "", "")
-	seedSummaryRun(t, repo, "r-old", "agent-a", "finished", ancient, "", "", "")
-	seedSummaryRun(t, repo, "r-other", "agent-b", "finished", today, "", "", "")
+	seedSummaryRunWithOutcome(t, repo, "r-yday", "agent-a", "finished", yday, "")
+	seedSummaryRunWithOutcome(t, repo, "r-old", "agent-a", "finished", ancient, "processed")
+	seedSummaryRunWithOutcome(t, repo, "r-other", "agent-b", "finished", today, "processed")
 
 	rows, err := repo.RunCountsByDayForAgent(ctx, "agent-a", 14)
 	if err != nil {
@@ -90,12 +120,39 @@ func TestRunCountsByDayForAgent_BucketsStatuses(t *testing.T) {
 	if rows[0].Date != dayDate(base, 1) {
 		t.Errorf("rows[0].Date = %q, want %q (ORDER BY date ascending)", rows[0].Date, dayDate(base, 1))
 	}
-	if want := (sqlite.AgentRunDayRow{Date: dayDate(base, 1), Succeeded: 1}); rows[0] != want {
-		t.Errorf("yesterday = %+v, want %+v", rows[0], want)
+	if want := (sqlite.AgentRunDayRow{Date: dayDate(base, 1), Unclassified: 1}); rows[0] != want {
+		t.Errorf("yesterday = %+v, want %+v (NULL outcome is unclassified, not succeeded)", rows[0], want)
 	}
-	want := sqlite.AgentRunDayRow{Date: dayDate(base, 0), Succeeded: 1, Failed: 2, Other: 2}
+	want := sqlite.AgentRunDayRow{
+		Date: dayDate(base, 0), Succeeded: 1, Skipped: 1, Unclassified: 1, Failed: 2, Other: 2,
+	}
 	if rows[1] != want {
 		t.Errorf("today = %+v, want %+v (timed_out counts as failed; queued+cancelled as other)", rows[1], want)
+	}
+}
+
+// TestRunCountsByDayForAgent_UnrecognisedOutcomeCountsSkipped covers the
+// bucketing-is-total scenario: a finished run whose outcome holds a value
+// outside the eight named ones still counts in skipped, and the query
+// never errors.
+func TestRunCountsByDayForAgent_UnrecognisedOutcomeCountsSkipped(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Now().UTC()
+	today := dayStamp(base, 0, 10)
+
+	seedSummaryRunWithOutcome(t, repo, "r-weird", "agent-a", "finished", today, "some_future_value")
+
+	rows, err := repo.RunCountsByDayForAgent(ctx, "agent-a", 14)
+	if err != nil {
+		t.Fatalf("RunCountsByDayForAgent: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1: %+v", len(rows), rows)
+	}
+	want := sqlite.AgentRunDayRow{Date: dayDate(base, 0), Skipped: 1}
+	if rows[0] != want {
+		t.Errorf("today = %+v, want %+v", rows[0], want)
 	}
 }
 

@@ -4,7 +4,7 @@ package sqlite
 // subagentPreciseTimestamp builds a SQL expression that evaluates to a value
 // safe to compare with plain >= / < against another such expression, at no
 // coarser than microsecond precision and monotonically across the whole
-// range (AC-24e in docs/specs/subagent-context-persistence/spec.md). expr may
+// range (AC-24e in docs/specs/agents/requirements/subagent-context-persistence.md). expr may
 // be a TIMESTAMP column reference or a bind-parameter placeholder carrying an
 // RFC3339(Nano) string (an activation key from kandev_meta).
 //

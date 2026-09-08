@@ -11,6 +11,20 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/hooks/use-visual-viewport-offset", () => ({
   useVisualViewportOffset: () => ({ bottomOffset: 0, keyboardOpen: false, viewportBottom: 0 }),
+  resolveVisualViewportPosition: ({
+    keyboardOpen,
+    viewportBottom,
+    barHeight,
+    baseBottomOffset,
+  }: {
+    keyboardOpen: boolean;
+    viewportBottom: number;
+    barHeight: number;
+    baseBottomOffset?: string;
+  }) =>
+    keyboardOpen
+      ? { top: `${viewportBottom - barHeight}px`, bottom: "auto" }
+      : { bottom: baseBottomOffset ?? "env(safe-area-inset-bottom)" },
 }));
 
 const KEYBAR_ROOT = "mobile-terminal-keybar";
@@ -229,6 +243,18 @@ describe("MobileTerminalKeybar positioning", () => {
         keyboardOpen: true,
         viewportBottom: 500,
       }),
+      resolveVisualViewportPosition: ({
+        keyboardOpen,
+        viewportBottom,
+        barHeight,
+      }: {
+        keyboardOpen: boolean;
+        viewportBottom: number;
+        barHeight: number;
+      }) =>
+        keyboardOpen
+          ? { top: `${viewportBottom - barHeight}px`, bottom: "auto" }
+          : { bottom: "env(safe-area-inset-bottom)" },
     }));
     vi.resetModules();
     const { MobileTerminalKeybar: Reloaded } = await import("./mobile-terminal-keybar");

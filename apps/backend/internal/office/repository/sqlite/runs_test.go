@@ -242,7 +242,7 @@ func TestCleanExpired(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	// Finish it.
-	if err := repo.FinishRun(ctx, req.ID, "finished"); err != nil {
+	if err := repo.FinishRun(ctx, req.ID, "finished", strPtr("processed")); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 

@@ -47,7 +47,7 @@ export function formatShortDate(iso: string): string {
  * Renders an int64 subcents (hundredths of a cent) value as USD. The
  * backend ships every cost figure as a subcents integer so we don't
  * carry float drift; the formatter just divides by 10000 at the edge.
- * See docs/specs/office-costs/spec.md for the unit contract.
+ * See docs/specs/office/requirements/costs.md for the unit contract.
  */
 export function formatSubcents(subcents: number): string {
   if (!Number.isFinite(subcents)) return "$0.00";

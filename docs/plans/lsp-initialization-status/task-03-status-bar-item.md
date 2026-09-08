@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-initialization-stage", "02-placement-setting"]
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 03: Active-Editor Status-Bar Item

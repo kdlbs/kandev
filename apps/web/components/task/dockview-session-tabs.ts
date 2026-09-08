@@ -611,6 +611,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
+  const dockviewApi = useDockviewStore((state) => state.api);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -629,5 +630,5 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       prevTaskIdRef,
       prevSessionIdRef,
     });
-  }, [effectiveSessionId, sessionIdsKey, appStore]);
+  }, [appStore, dockviewApi, effectiveSessionId, sessionIdsKey]);
 }

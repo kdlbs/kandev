@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,32 +22,37 @@ import (
 )
 
 const (
-	ciAutomationOrigin           = "ci_automation"
-	ciAutomationCheckSuccess     = "success"
-	ciAutomationCheckFailure     = "failure"
-	ciAutomationCheckError       = "error"
-	ciAutomationCheckCompleted   = "completed"
-	ciAutomationCheckPending     = "pending"
-	ciAutomationChangesRequested = "changes_requested"
-	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
-	ciAutomationFixBlockWindow   = time.Hour
-	ciAutomationMaxFixRounds     = github.TaskCIAutoFixMaxRounds
-	ciAutomationKindAutoFix      = "ci_auto_fix"
-	ciAutomationStateEventSource = "ci_automation_state"
+	ciAutomationOrigin              = "ci_automation"
+	ciAutomationCheckSuccess        = "success"
+	ciAutomationCheckFailure        = "failure"
+	ciAutomationCheckError          = "error"
+	ciAutomationCheckCompleted      = "completed"
+	ciAutomationCheckPending        = "pending"
+	ciAutomationChangesRequested    = "changes_requested"
+	ciAutomationMergeableStateDirty = "dirty"
+	ciAutomationPRFeedbackToken     = "{{pr.feedback}}"
+	ciAutomationFixBlockWindow      = time.Hour
+	ciAutomationMaxFixRounds        = github.TaskCIAutoFixMaxRounds
+	ciAutomationKindAutoFix         = "ci_auto_fix"
+	ciAutomationStateEventSource    = "ci_automation_state"
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
 
 type ciAutomationCheckpoint struct {
-	FailedChecks []ciAutomationCheckSnapshot   `json:"failed_checks"`
-	Comments     []ciAutomationCommentSnapshot `json:"comments"`
+	FailedChecks  []ciAutomationCheckSnapshot            `json:"failed_checks"`
+	Comments      []ciAutomationCommentSnapshot          `json:"comments"`
+	Conflict      *ciAutomationConflictSnapshot          `json:"conflict,omitempty"`
+	QueueRemovals []ciAutomationQueueRemovalSnapshotData `json:"queue_removals,omitempty"`
 }
 
 type ciAutomationCheckSnapshot struct {
-	Name       string `json:"name"`
-	Conclusion string `json:"conclusion"`
-	HTMLURL    string `json:"html_url"`
-	Output     string `json:"output,omitempty"`
+	Name        string     `json:"name"`
+	Conclusion  string     `json:"conclusion"`
+	HTMLURL     string     `json:"html_url"`
+	Output      string     `json:"output,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 type ciAutomationCommentSnapshot struct {
@@ -54,6 +60,32 @@ type ciAutomationCommentSnapshot struct {
 	Body string `json:"body,omitempty"`
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
+}
+
+type ciAutomationConflictSnapshot struct {
+	MergeableState string `json:"mergeable_state"`
+	HeadSHA        string `json:"head_sha,omitempty"`
+	HeadBranch     string `json:"head_branch,omitempty"`
+	BaseBranch     string `json:"base_branch,omitempty"`
+}
+
+const (
+	ciAutomationQueueRemovalCauseChecksFailed     = "checks_failed"
+	ciAutomationQueueRemovalCauseChecksTimedOut   = "checks_timed_out"
+	ciAutomationQueueRemovalCauseConflict         = "conflict"
+	ciAutomationQueueRemovalCauseManual           = "manual"
+	ciAutomationQueueRemovalCauseBranchProtection = "branch_protection"
+	ciAutomationQueueRemovalCauseUnknown          = "unknown"
+)
+
+type ciAutomationQueueRemovalSnapshotData struct {
+	EventID      string    `json:"event_id"`
+	Cause        string    `json:"cause"`
+	Reason       string    `json:"reason,omitempty"`
+	RemovedAt    time.Time `json:"removed_at,omitempty"`
+	BeforeCommit string    `json:"before_commit,omitempty"`
+	CheckCommit  string    `json:"check_commit,omitempty"`
+	Conflict     bool      `json:"conflict,omitempty"`
 }
 
 func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) error {
@@ -92,15 +124,18 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		pr = refreshed
 		freshlySynced = synced
 	}
+	if options.AutoFixEnabled || options.AutoMergeEnabled {
+		s.recordTaskPRMergeQueueObservation(ctx, pr)
+	}
 	autoFixBlockedMerge := false
 	autoFixError := ""
 	if options.AutoFixEnabled && ciAutomationCanAutoFixFromFeedback(pr) {
 		autoFixBlockedMerge, autoFixError = s.handleTaskPRCIAutoFix(ctx, pr, options)
 	}
-	ciError := ""
+	ciError := ciAutomationMergeOutcome{}
 	if !autoFixBlockedMerge && options.AutoMergeEnabled && ciAutomationReadyToMerge(pr) {
 		if !freshlySynced {
-			ciError = "PR status is not freshly synced for auto-merge"
+			ciError = ciAutomationMergeOutcome{message: "PR status is not freshly synced for auto-merge"}
 		} else {
 			ciError = s.handleTaskPRCIAutoMerge(ctx, pr)
 		}
@@ -110,8 +145,8 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		s.recordCIAutomationError(ctx, pr, autoFixError)
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
-	if ciError != "" {
-		s.recordCIAutomationError(ctx, pr, ciError)
+	if ciError.message != "" && !ciError.journaled {
+		s.recordCIAutoMergeError(ctx, pr, ciError.message)
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return nil
@@ -259,6 +294,10 @@ func ciAutomationHasFreshPRStatusAt(pr *github.TaskPR, now time.Time) bool {
 }
 
 func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) (bool, string) {
+	attemptService, supportsAttempts := s.githubCIAutoFixAttemptService()
+	if !supportsAttempts {
+		return s.handleTaskPRCIAutoFixLegacy(ctx, pr, options)
+	}
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
 		return true, fmt.Sprintf("load CI automation state: %v", err)
@@ -276,11 +315,162 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		return false, ""
 	}
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
+	providerGeneration := ciAutomationProviderGeneration(pr, feedback)
+	if state != nil && state.AutoFixAttemptState == github.TaskCIAutoFixAttemptAwaitingProviderProgress {
+		if progressErr := attemptService.ReconcileTaskCIAutoFixProviderProgress(
+			context.WithoutCancel(ctx), github.TaskCIAutoFixProviderProgress{
+				TaskID:             pr.TaskID,
+				RepositoryID:       pr.RepositoryID,
+				PRNumber:           pr.PRNumber,
+				Signature:          state.AutoFixAttemptSignature,
+				ProviderGeneration: providerGeneration,
+				ObservedAt:         time.Now().UTC(),
+			},
+		); progressErr != nil && !errors.Is(progressErr, github.ErrTaskCIAutoFixAttemptNotFound) {
+			s.logger.Debug("reconcile CI auto-fix provider progress failed", zap.String("task_id", pr.TaskID), zap.Error(progressErr))
+		}
+		if refreshed, refreshErr := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber); refreshErr == nil {
+			state = refreshed
+		}
+	}
 	previous := decodeCIAutomationCheckpoint(state)
-	delta := ciAutomationBuildDelta(feedback, previous)
-	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	delta := ciAutomationBuildDeltaForPR(pr, feedback, previous)
+	checkpoint := ciAutomationCurrentCheckpointForPR(pr, feedback, previous)
+	queueRemoval, queueRecovery := ciAutomationNewQueueRemoval(pr, state)
+	if queueRecovery {
+		delta.QueueRemovals = append(delta.QueueRemovals, *queueRemoval)
+		checkpoint.QueueRemovals = append(checkpoint.QueueRemovals, *queueRemoval)
+	}
 	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
-	if len(delta.FailedChecks) == 0 && len(delta.Comments) == 0 {
+	attemptRetryable := state != nil && state.AutoFixAttemptState == github.TaskCIAutoFixAttemptRetryable &&
+		(state.AutoFixAttemptSignature == signature || state.LastFixSignature == signature)
+	if ciAutomationCheckpointEmpty(delta) && !attemptRetryable {
+		return s.handleTaskPRCIAutoFixEmptyDelta(ctx, pr, state, previous, signature, checkpointJSON), ""
+	}
+	if state != nil && state.LastFixSignature == signature && !attemptRetryable {
+		return ciAutomationDuplicateFixAttemptBlocksMerge(state), ""
+	}
+	allowNewRound := !ciAutomationFixRoundsExhausted(state)
+	promptDelta := delta
+	if attemptRetryable && ciAutomationCheckpointEmpty(promptDelta) {
+		// A retry must carry the unchanged settled snapshot because no new
+		// provider feedback is required to rearm an undispositioned turn.
+		promptDelta = checkpoint
+	}
+	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, promptDelta)
+	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
+	if err != nil || session == nil {
+		return s.handleCIAutoFixWithoutSession(ctx, pr, allowNewRound)
+	}
+	prompt = s.expandPromptReferences(ctx, prompt, session.IsPassthrough)
+	prompt = ciAutomationAppendOutcomeProtocol(prompt, session.IsPassthrough)
+	queueRemovalEventID, queueRemovalCause := "", ""
+	if queueRecovery {
+		queueRemovalEventID = queueRemoval.EventID
+		queueRemovalCause = queueRemoval.Cause
+	}
+	recordAttempt := func(attemptState github.TaskCIAutoFixAttemptState, queueEntryID, turnID string, incrementRound bool) error {
+		return s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
+			TaskID:              pr.TaskID,
+			RepositoryID:        pr.RepositoryID,
+			PRNumber:            pr.PRNumber,
+			Signature:           signature,
+			CheckpointJSON:      checkpointJSON,
+			SessionID:           session.ID,
+			QueueEntryID:        queueEntryID,
+			TurnID:              turnID,
+			State:               attemptState,
+			ProviderGeneration:  providerGeneration,
+			EnqueuedAt:          time.Now().UTC(),
+			IncrementRound:      incrementRound,
+			QueueRemovalEventID: queueRemovalEventID,
+			QueueRemovalCause:   queueRemovalCause,
+		})
+	}
+	params := ciAutomationDispatchParams{
+		ChatPrompt:    ciAutomationChatPrompt(prompt),
+		CoalesceKey:   ciAutomationCoalesceKey(pr),
+		Metadata:      ciAutomationMessageMetadataForPR(pr, signature),
+		AllowNewRound: allowNewRound,
+		OnDirectAdmission: func(turnID string) error {
+			return recordAttempt(github.TaskCIAutoFixAttemptRunning, "", turnID, true)
+		},
+		OnQueued: func(queueEntryID string, replaced bool) error {
+			return recordAttempt(github.TaskCIAutoFixAttemptQueued, queueEntryID, "", !replaced)
+		},
+		OnAccepted: func(turnID, queueEntryID string) {
+			s.bindCIAutoFixAttemptTurnWithRecovery(ctx, github.TaskCIAutoFixAttemptBinding{
+				TaskID:       pr.TaskID,
+				RepositoryID: pr.RepositoryID,
+				PRNumber:     pr.PRNumber,
+				SessionID:    session.ID,
+				QueueEntryID: queueEntryID,
+				Signature:    signature,
+				TurnID:       turnID,
+			})
+		},
+		OnRejected: func(turnID, _ string) {
+			if strings.TrimSpace(turnID) == "" {
+				return
+			}
+			reconcileErr := attemptService.ReconcileTaskCIAutoFixTurnCompletion(
+				context.WithoutCancel(ctx), pr.TaskID, session.ID, turnID,
+			)
+			if reconcileErr != nil && !errors.Is(reconcileErr, github.ErrTaskCIAutoFixAttemptNotFound) {
+				s.logger.Debug("reconcile failed CI auto-fix turn failed", zap.String("task_id", pr.TaskID), zap.Error(reconcileErr))
+			}
+		},
+	}
+	_, err = s.dispatchCIAutomationPrompt(ctx, session, params)
+	if errors.Is(err, errCIAutoFixRoundCapReached) {
+		s.markCIAutoFixExhausted(ctx, pr)
+		return true, ""
+	}
+	if err != nil {
+		return true, err.Error()
+	}
+	s.publishTaskCIOptionsState(ctx, pr.TaskID)
+	return true, ""
+}
+
+func (s *Service) handleTaskPRCIAutoFixLegacy(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) (bool, string) {
+	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		return true, fmt.Sprintf("load CI automation state: %v", err)
+	}
+	if state != nil && state.AutoFixExhaustedAt != nil {
+		return !ciAutomationReadyToMerge(pr), ""
+	}
+	feedback, err := s.githubService.GetPRFeedbackForAutomation(
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber,
+	)
+	if err != nil {
+		return true, fmt.Sprintf("fetch PR feedback: %v", err)
+	}
+	if !ciAutomationCanPromptForFeedback(pr, feedback) {
+		return false, ""
+	}
+	return s.handleTaskPRCIAutoFixLegacyAttempt(ctx, pr, options, state, feedback)
+}
+
+func (s *Service) handleTaskPRCIAutoFixLegacyAttempt(
+	ctx context.Context,
+	pr *github.TaskPR,
+	options *github.TaskCIOptionsResponse,
+	state *github.TaskCIPRAutomationState,
+	feedback *github.PRFeedback,
+) (bool, string) {
+	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
+	previous := decodeCIAutomationCheckpoint(state)
+	delta := ciAutomationBuildDeltaForPR(pr, feedback, previous)
+	checkpoint := ciAutomationCurrentCheckpointForPR(pr, feedback, previous)
+	queueRemoval, queueRecovery := ciAutomationNewQueueRemoval(pr, state)
+	if queueRecovery {
+		delta.QueueRemovals = append(delta.QueueRemovals, *queueRemoval)
+		checkpoint.QueueRemovals = append(checkpoint.QueueRemovals, *queueRemoval)
+	}
+	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
+	if ciAutomationCheckpointEmpty(delta) {
 		return s.handleTaskPRCIAutoFixEmptyDelta(ctx, pr, state, previous, signature, checkpointJSON), ""
 	}
 	if state != nil && state.LastFixSignature == signature {
@@ -304,15 +494,22 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if err != nil {
 		return true, err.Error()
 	}
+	queueRemovalEventID, queueRemovalCause := "", ""
+	if queueRecovery {
+		queueRemovalEventID = queueRemoval.EventID
+		queueRemovalCause = queueRemoval.Cause
+	}
 	if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
-		TaskID:         pr.TaskID,
-		RepositoryID:   pr.RepositoryID,
-		PRNumber:       pr.PRNumber,
-		Signature:      signature,
-		CheckpointJSON: checkpointJSON,
-		SessionID:      session.ID,
-		EnqueuedAt:     time.Now().UTC(),
-		IncrementRound: result.consumesRound(),
+		TaskID:              pr.TaskID,
+		RepositoryID:        pr.RepositoryID,
+		PRNumber:            pr.PRNumber,
+		Signature:           signature,
+		CheckpointJSON:      checkpointJSON,
+		SessionID:           session.ID,
+		EnqueuedAt:          time.Now().UTC(),
+		IncrementRound:      result.consumesRound(),
+		QueueRemovalEventID: queueRemovalEventID,
+		QueueRemovalCause:   queueRemovalCause,
 	}); err != nil {
 		s.logger.Debug("record CI auto-fix attempt failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	} else {
@@ -347,7 +544,7 @@ func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *githu
 	if state != nil && state.LastFixSignature == signature && ciAutomationDuplicateFixAttemptBlocksMerge(state) {
 		return true
 	}
-	if state != nil && len(previous.FailedChecks)+len(previous.Comments) > 0 {
+	if state != nil && !ciAutomationCheckpointEmpty(previous) {
 		if err := s.githubService.RefreshTaskCIFixCheckpoint(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, signature, checkpointJSON); err != nil {
 			s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
@@ -355,29 +552,132 @@ func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *githu
 	return false
 }
 
-func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) string {
+type ciAutomationMergeOutcome struct {
+	message   string
+	journaled bool
+}
+
+func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) ciAutomationMergeOutcome {
+	if ciAutomationHasActiveMergeQueueEntry(pr) {
+		return ciAutomationMergeOutcome{}
+	}
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
-		s.logger.Debug("load CI automation merge state failed; attempting merge without dedupe", zap.String("task_id", pr.TaskID), zap.Error(err))
-	} else if state != nil && state.LastMergeSignature == signature {
-		return ""
+		s.logger.Debug("load CI automation merge state failed; durable reservation will decide", zap.String("task_id", pr.TaskID), zap.Error(err))
+	} else if state != nil {
+		if outcome, handled := s.ciAutomationExistingMergeOutcome(ctx, pr, signature, state); handled {
+			return outcome
+		}
 	}
 	attempt := github.TaskCIMergeAttempt{
-		TaskID:       pr.TaskID,
-		RepositoryID: pr.RepositoryID,
-		PRNumber:     pr.PRNumber,
-		Signature:    signature,
-		AttemptedAt:  time.Now().UTC(),
+		TaskID:           pr.TaskID,
+		RepositoryID:     pr.RepositoryID,
+		PRNumber:         pr.PRNumber,
+		Signature:        signature,
+		AttemptedAt:      time.Now().UTC(),
+		AttemptedHeadSHA: pr.HeadSHA,
 	}
+	if err := s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt); err != nil {
+		if errors.Is(err, github.ErrTaskCIMergeAttemptAlreadyReserved) {
+			return ciAutomationMergeOutcome{}
+		}
+		return ciAutomationMergeOutcome{message: fmt.Sprintf("reserve merge PR attempt: %v", err)}
+	}
+	return s.executeCIAutoMerge(ctx, pr, signature)
+}
+
+func (s *Service) ciAutomationExistingMergeOutcome(
+	ctx context.Context,
+	pr *github.TaskPR,
+	signature string,
+	state *github.TaskCIPRAutomationState,
+) (ciAutomationMergeOutcome, bool) {
+	if state.LastMergeSignature != signature {
+		return ciAutomationQueueAttemptOutcome(pr, state)
+	}
+	if state.LastMergeResult == github.TaskCIMergeResultInFlight &&
+		state.LastMergeAttemptAt != nil && time.Since(*state.LastMergeAttemptAt) > ciAutomationDetachedTimeout {
+		message := "merge PR: previous automatic merge attempt did not reach a terminal state"
+		if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
+			context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+			signature, github.TaskCIMergeResultFailed, message,
+		); recordErr != nil {
+			return ciAutomationMergeOutcome{message: fmt.Sprintf("%s; record expired merge attempt: %v", message, recordErr)}, true
+		}
+		if !state.MergeRetryPending {
+			return ciAutomationMergeOutcome{message: message, journaled: true}, true
+		}
+	}
+	if !state.MergeRetryPending {
+		return ciAutomationMergeOutcome{}, true
+	}
+	return ciAutomationQueueAttemptOutcome(pr, state)
+}
+
+func ciAutomationQueueAttemptOutcome(
+	pr *github.TaskPR,
+	state *github.TaskCIPRAutomationState,
+) (ciAutomationMergeOutcome, bool) {
+	if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA && !state.MergeRetryPending {
+		return ciAutomationMergeOutcome{}, true
+	}
+	return ciAutomationMergeOutcome{}, false
+}
+
+func (s *Service) executeCIAutoMerge(
+	ctx context.Context,
+	pr *github.TaskPR,
+	signature string,
+) ciAutomationMergeOutcome {
 	if err := s.githubService.MergePRForAutomation(
-		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "",
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "", pr.HeadSHA,
 	); err != nil {
-		return fmt.Sprintf("merge PR: %v", err)
+		message := fmt.Sprintf("merge PR: %v", err)
+		if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
+			context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+			signature, github.TaskCIMergeResultFailed, message,
+		); recordErr != nil {
+			return ciAutomationMergeOutcome{message: fmt.Sprintf("%s; record failed merge attempt: %v", message, recordErr)}
+		}
+		return ciAutomationMergeOutcome{message: message, journaled: true}
 	}
-	_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
-	_ = s.githubService.ClearTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber)
-	return ""
+	if err := s.githubService.RecordTaskCIMergeAttemptResult(
+		context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		signature, github.TaskCIMergeResultAccepted, "",
+	); err != nil {
+		return ciAutomationMergeOutcome{message: fmt.Sprintf("record accepted merge PR attempt: %v", err)}
+	}
+	return ciAutomationMergeOutcome{}
+}
+
+func (s *Service) recordTaskPRMergeQueueObservation(ctx context.Context, pr *github.TaskPR) {
+	if pr == nil || (pr.MergeQueueLastRemovalID == "" && !ciAutomationHasActiveMergeQueueEntry(pr) && pr.State != githubPRStateMerged) {
+		return
+	}
+	removal, _ := ciAutomationQueueRemovalSnapshot(pr)
+	observation := github.TaskCIMergeQueueObservation{
+		TaskID:                 pr.TaskID,
+		RepositoryID:           pr.RepositoryID,
+		PRNumber:               pr.PRNumber,
+		RemovalEventID:         pr.MergeQueueLastRemovalID,
+		RemovalObservedHeadSHA: pr.HeadSHA,
+		Accepted:               pr.State == githubPRStateMerged,
+	}
+	if ciAutomationHasActiveMergeQueueEntry(pr) {
+		observation.ActiveQueueHeadSHA = pr.MergeQueueEntryHeadSHA
+		if observation.ActiveQueueHeadSHA == "" {
+			observation.ActiveQueueHeadSHA = pr.HeadSHA
+		}
+		observation.MergeSignature = ciAutomationMergeSignature(pr)
+	}
+	if removal != nil {
+		observation.RemovalCause = removal.Cause
+	}
+	if err := s.githubService.RecordTaskCIMergeQueueObservation(context.WithoutCancel(ctx), observation); err != nil {
+		s.logger.Debug("record merge queue observation failed",
+			zap.String("task_id", pr.TaskID), zap.Int("pr_number", pr.PRNumber), zap.Error(err))
+	}
 }
 
 // dispatchCIAutomationPromptForPR adapts the provider-agnostic
@@ -443,6 +743,19 @@ func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR
 		zap.String("error", message))
 	if err := s.githubService.RecordTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
 		s.logger.Debug("record CI automation error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+	}
+}
+
+func (s *Service) recordCIAutoMergeError(ctx context.Context, pr *github.TaskPR, message string) {
+	s.logger.Warn("CI auto-merge error",
+		zap.String("task_id", pr.TaskID),
+		zap.String("repository_id", pr.RepositoryID),
+		zap.Int("pr_number", pr.PRNumber),
+		zap.String("error", message))
+	if err := s.githubService.RecordTaskCIAutoMergeError(
+		context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message,
+	); err != nil {
+		s.logger.Debug("record CI auto-merge error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	}
 }
 
@@ -550,7 +863,14 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		if check.Status != ciAutomationCheckCompleted || !ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
 			continue
 		}
-		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
+		snap := ciAutomationCheckSnapshot{
+			Name:        check.Name,
+			Conclusion:  check.Conclusion,
+			HTMLURL:     check.HTMLURL,
+			Output:      check.Output,
+			StartedAt:   check.StartedAt,
+			CompletedAt: check.CompletedAt,
+		}
 		if _, seen := prevChecks[ciAutomationCheckKey(snap)]; !seen {
 			delta.FailedChecks = append(delta.FailedChecks, snap)
 		}
@@ -563,6 +883,15 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 			continue
 		}
 		delta.Comments = append(delta.Comments, snap)
+	}
+	return delta
+}
+
+func ciAutomationBuildDeltaForPR(pr *github.TaskPR, feedback *github.PRFeedback, previous ciAutomationCheckpoint) ciAutomationCheckpoint {
+	delta := ciAutomationBuildDelta(feedback, previous)
+	currentConflict := ciAutomationCurrentConflictSnapshot(pr, previous.Conflict)
+	if !ciAutomationConflictSnapshotEqual(currentConflict, previous.Conflict) && currentConflict != nil {
+		delta.Conflict = currentConflict
 	}
 	return delta
 }
@@ -625,11 +954,225 @@ func ciAutomationDuplicateFixAttemptBlocksMergeAt(state *github.TaskCIPRAutomati
 }
 
 func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {
-	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output
+	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output + "|" +
+		ciAutomationProviderTime(check.StartedAt) + "|" + ciAutomationProviderTime(check.CompletedAt)
+}
+
+// ciAutomationProviderGeneration captures provider-visible execution state
+// separately from the feedback checkpoint. A rerun of the same named check
+// therefore re-arms an action_taken attempt even when its output is unchanged.
+func ciAutomationProviderGeneration(pr *github.TaskPR, feedback *github.PRFeedback) string {
+	type checkGeneration struct {
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		Conclusion  string `json:"conclusion"`
+		StartedAt   string `json:"started_at,omitempty"`
+		CompletedAt string `json:"completed_at,omitempty"`
+	}
+	type generation struct {
+		HeadSHA                 string            `json:"head_sha,omitempty"`
+		Checks                  []checkGeneration `json:"checks"`
+		ReviewState             string            `json:"review_state,omitempty"`
+		PendingReviewCount      int               `json:"pending_review_count,omitempty"`
+		UnresolvedReviewThreads int               `json:"unresolved_review_threads,omitempty"`
+		MergeableState          string            `json:"mergeable_state,omitempty"`
+		QueueEntryID            string            `json:"queue_entry_id,omitempty"`
+		QueueRemovalID          string            `json:"queue_removal_id,omitempty"`
+	}
+	current := generation{}
+	if pr != nil {
+		current.HeadSHA = strings.TrimSpace(pr.HeadSHA)
+		current.ReviewState = strings.TrimSpace(pr.ReviewState)
+		current.PendingReviewCount = pr.PendingReviewCount
+		current.UnresolvedReviewThreads = pr.UnresolvedReviewThreads
+		current.MergeableState = strings.TrimSpace(pr.MergeableState)
+		current.QueueEntryID = strings.TrimSpace(pr.MergeQueueEntryID)
+		current.QueueRemovalID = strings.TrimSpace(pr.MergeQueueLastRemovalID)
+	}
+	if feedback != nil {
+		current.Checks = make([]checkGeneration, 0, len(feedback.Checks))
+		for _, check := range feedback.Checks {
+			current.Checks = append(current.Checks, checkGeneration{
+				Name:        strings.TrimSpace(check.Name),
+				Status:      strings.TrimSpace(check.Status),
+				Conclusion:  strings.TrimSpace(check.Conclusion),
+				StartedAt:   ciAutomationProviderTime(check.StartedAt),
+				CompletedAt: ciAutomationProviderTime(check.CompletedAt),
+			})
+		}
+	}
+	sort.Slice(current.Checks, func(i, j int) bool {
+		if current.Checks[i].Name != current.Checks[j].Name {
+			return current.Checks[i].Name < current.Checks[j].Name
+		}
+		if current.Checks[i].StartedAt != current.Checks[j].StartedAt {
+			return current.Checks[i].StartedAt < current.Checks[j].StartedAt
+		}
+		if current.Checks[i].CompletedAt != current.Checks[j].CompletedAt {
+			return current.Checks[i].CompletedAt < current.Checks[j].CompletedAt
+		}
+		if current.Checks[i].Status != current.Checks[j].Status {
+			return current.Checks[i].Status < current.Checks[j].Status
+		}
+		return current.Checks[i].Conclusion < current.Checks[j].Conclusion
+	})
+	encoded, _ := json.Marshal(current)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+func ciAutomationProviderTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationCheckpoint {
 	return ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
+}
+
+func ciAutomationCurrentCheckpointForPR(pr *github.TaskPR, feedback *github.PRFeedback, previous ciAutomationCheckpoint) ciAutomationCheckpoint {
+	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	checkpoint.Conflict = ciAutomationCurrentConflictSnapshot(pr, previous.Conflict)
+	return checkpoint
+}
+
+func ciAutomationCheckpointEmpty(checkpoint ciAutomationCheckpoint) bool {
+	return len(checkpoint.FailedChecks) == 0 && len(checkpoint.Comments) == 0 && checkpoint.Conflict == nil && len(checkpoint.QueueRemovals) == 0
+}
+
+func ciAutomationCurrentConflictSnapshot(pr *github.TaskPR, previous *ciAutomationConflictSnapshot) *ciAutomationConflictSnapshot {
+	if pr == nil {
+		return previous
+	}
+	mergeableState := strings.ToLower(strings.TrimSpace(pr.MergeableState))
+	switch mergeableState {
+	case ciAutomationMergeableStateDirty:
+		return &ciAutomationConflictSnapshot{
+			MergeableState: mergeableState,
+			HeadSHA:        strings.TrimSpace(pr.HeadSHA),
+			HeadBranch:     strings.TrimSpace(pr.HeadBranch),
+			BaseBranch:     strings.TrimSpace(pr.BaseBranch),
+		}
+	case "", ciAutomationQueueRemovalCauseUnknown:
+		return previous
+	default:
+		return nil
+	}
+}
+
+func ciAutomationConflictSnapshotEqual(left, right *ciAutomationConflictSnapshot) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func ciAutomationNewQueueRemoval(pr *github.TaskPR, state *github.TaskCIPRAutomationState) (*ciAutomationQueueRemovalSnapshotData, bool) {
+	snapshot, actionable := ciAutomationQueueRemovalSnapshot(pr)
+	if !actionable || snapshot == nil || !ciAutomationQueueRemovalBelongsToCurrentHead(pr, state) {
+		return nil, false
+	}
+	if state != nil && state.LastQueueFixEventID == snapshot.EventID {
+		return nil, false
+	}
+	return snapshot, true
+}
+
+func ciAutomationQueueRemovalBelongsToCurrentHead(pr *github.TaskPR, state *github.TaskCIPRAutomationState) bool {
+	if pr == nil || strings.TrimSpace(pr.HeadSHA) == "" || state == nil {
+		return false
+	}
+	attemptHead := strings.TrimSpace(state.LastQueueAttemptHeadSHA)
+	// A removal-only observation can establish a passive same-head baseline,
+	// but it does not prove which pull-request head produced the removal. Auto-
+	// fix therefore requires the merge signature written by an attempted or
+	// adopted queue entry in addition to the matching durable head.
+	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) &&
+		strings.TrimSpace(state.LastMergeSignature) != ""
+}
+
+func ciAutomationHasActiveMergeQueueEntry(pr *github.TaskPR) bool {
+	if pr == nil || (pr.State != "" && !strings.EqualFold(strings.TrimSpace(pr.State), "open")) {
+		return false
+	}
+	return strings.TrimSpace(pr.MergeQueueState) != ""
+}
+
+func ciAutomationQueueRemovalSnapshot(pr *github.TaskPR) (*ciAutomationQueueRemovalSnapshotData, bool) {
+	if pr == nil || strings.TrimSpace(pr.MergeQueueLastRemovalID) == "" {
+		return nil, false
+	}
+	cause := ciAutomationQueueRemovalCause(pr.MergeQueueLastRemovalReason, pr)
+	return &ciAutomationQueueRemovalSnapshotData{
+		EventID:      pr.MergeQueueLastRemovalID,
+		Cause:        cause,
+		Reason:       ciAutomationSanitizeSnapshotField(pr.MergeQueueLastRemovalReason),
+		RemovedAt:    valueOrZeroTime(pr.MergeQueueLastRemovedAt),
+		BeforeCommit: ciAutomationSanitizeSnapshotField(pr.MergeQueueLastRemovalBeforeSHA),
+		Conflict:     ciAutomationQueueRemovalConflictEvidence(pr),
+	}, ciAutomationQueueRemovalCauseActionable(cause)
+}
+
+func valueOrZeroTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return value.UTC()
+}
+
+func ciAutomationQueueRemovalCause(reason string, pr *github.TaskPR) string {
+	normalized := normalizeCIAutomationQueueRemovalReason(reason)
+	switch normalized {
+	case "checks_failed", "check_failed", "checks_failure", "ci_checks_failed", "ci_check_failed", "checks_failed_on_merge_group", "checks_failed_on_merge_queue":
+		return ciAutomationQueueRemovalCauseChecksFailed
+	case "checks_timed_out", "check_timed_out", "checks_timeout", "timeout", "timed_out", "checks_timed_out_on_merge_group":
+		return ciAutomationQueueRemovalCauseChecksTimedOut
+	case "merge_conflict", "merge_conflicts", "conflict", "unmergeable":
+		return ciAutomationQueueRemovalCauseConflict
+	case "manual", "removed_manually", "user_removed":
+		return ciAutomationQueueRemovalCauseManual
+	case "branch_protection", "branch_protection_failed", "required_branch_protection":
+		return ciAutomationQueueRemovalCauseBranchProtection
+	}
+	if ciAutomationQueueRemovalConflictEvidence(pr) {
+		return ciAutomationQueueRemovalCauseConflict
+	}
+	return ciAutomationQueueRemovalCauseUnknown
+}
+
+func normalizeCIAutomationQueueRemovalReason(reason string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.ToLower(strings.TrimSpace(reason)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func ciAutomationQueueRemovalConflictEvidence(pr *github.TaskPR) bool {
+	if pr == nil {
+		return false
+	}
+	mergeable := strings.ToLower(strings.TrimSpace(pr.MergeableState))
+	queueState := strings.ToLower(strings.TrimSpace(pr.MergeQueueState))
+	return mergeable == ciAutomationMergeableStateDirty || strings.Contains(mergeable, "conflict") ||
+		queueState == "unmergeable" || strings.Contains(queueState, "unmergeable")
+}
+
+func ciAutomationQueueRemovalCauseActionable(cause string) bool {
+	return cause == ciAutomationQueueRemovalCauseChecksFailed ||
+		cause == ciAutomationQueueRemovalCauseChecksTimedOut ||
+		cause == ciAutomationQueueRemovalCauseConflict
 }
 
 func ciAutomationRenderPrompt(base string, pr *github.TaskPR, delta ciAutomationCheckpoint) string {
@@ -656,6 +1199,21 @@ func ciAutomationRenderPromptTemplate(base, snapshot string) string {
 	return strings.Join(parts, "\n\n")
 }
 
+const ciAutomationOutcomeProtocol = `Kandev PR auto-fix outcome protocol:
+Before this turn ends, call report_pr_auto_fix_outcome_kandev exactly once with one of these outcomes:
+- action_taken: you made or requested a concrete provider-visible change and want Kandev to wait for CI or PR progress.
+- non_actionable: the current feedback does not identify a change this task can make.
+- blocked: a concrete change is needed, but an external condition prevents it. Include a short reason.
+Do not claim action_taken from a plan or an attempted command alone. If the tool is unavailable, continue the repair work and explain that the outcome could not be recorded.`
+
+func ciAutomationAppendOutcomeProtocol(prompt string, passthrough bool) string {
+	prompt = strings.TrimSpace(prompt)
+	if passthrough {
+		return strings.TrimSpace(prompt + "\n\n" + ciAutomationOutcomeProtocol)
+	}
+	return strings.TrimSpace(prompt + "\n\n" + sysprompt.Wrap(ciAutomationOutcomeProtocol))
+}
+
 func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint) string {
 	if pr == nil {
 		return ""
@@ -678,6 +1236,42 @@ func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint)
 		b.WriteString("\n\nNew or changed review comments:")
 		for _, comment := range delta.Comments {
 			b.WriteString(fmt.Sprintf("\n- %s:%d %s", ciAutomationSanitizeSnapshotField(comment.Path), comment.Line, ciAutomationSanitizeSnapshotField(strings.TrimSpace(comment.Body))))
+		}
+	}
+	if delta.Conflict != nil {
+		b.WriteString("\n\nMerge conflict:")
+		b.WriteString("\n- mergeability: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.MergeableState))
+		b.WriteString("; head branch: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.HeadBranch))
+		b.WriteString("; base branch: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.BaseBranch))
+		b.WriteString("; head commit: ")
+		b.WriteString(ciAutomationSanitizeSnapshotField(delta.Conflict.HeadSHA))
+	}
+	if len(delta.QueueRemovals) > 0 {
+		b.WriteString("\n\nMerge queue removal recovery:")
+		for _, removal := range delta.QueueRemovals {
+			b.WriteString("\n- event ")
+			b.WriteString(ciAutomationSanitizeSnapshotField(removal.EventID))
+			b.WriteString(": cause ")
+			b.WriteString(ciAutomationSanitizeSnapshotField(removal.Cause))
+			if removal.Reason != "" {
+				b.WriteString("; reason ")
+				b.WriteString(ciAutomationSanitizeSnapshotField(removal.Reason))
+			}
+			if removal.Conflict {
+				b.WriteString("; conflict state observed")
+			}
+			if !removal.RemovedAt.IsZero() {
+				b.WriteString("; removed at ")
+				b.WriteString(removal.RemovedAt.UTC().Format(time.RFC3339))
+			}
+			if removal.BeforeCommit != "" {
+				b.WriteString("; beforeCommit ")
+				b.WriteString(ciAutomationSanitizeSnapshotField(removal.BeforeCommit))
+				b.WriteString(" (not used as check identity)")
+			}
 		}
 	}
 	return b.String()
@@ -703,7 +1297,30 @@ func encodeCIAutomationCheckpoint(checkpoint ciAutomationCheckpoint) (string, st
 }
 
 func ciAutomationMergeSignature(pr *github.TaskPR) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadBranch, pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
-	sum := sha256.Sum256([]byte(payload))
+	requiredReviews := 0
+	requiredReviewsObserved := pr.RequiredReviews != nil
+	if pr.RequiredReviews != nil {
+		requiredReviews = *pr.RequiredReviews
+	}
+	payload, _ := json.Marshal(struct {
+		TaskID, RepositoryID, HeadSHA, HeadBranch, State string
+		PRNumber, Additions, Deletions                   int
+		ChecksState, ReviewState, MergeableState         string
+		ReviewCount, PendingReviewCount                  int
+		RequiredReviewsObserved                          bool
+		RequiredReviews, ChecksTotal, ChecksPassing      int
+		UnresolvedReviewThreads                          int
+	}{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		HeadSHA: pr.HeadSHA, HeadBranch: pr.HeadBranch,
+		State:     pr.State,
+		Additions: pr.Additions, Deletions: pr.Deletions,
+		ChecksState: pr.ChecksState, ReviewState: pr.ReviewState, MergeableState: pr.MergeableState,
+		ReviewCount: pr.ReviewCount, PendingReviewCount: pr.PendingReviewCount,
+		RequiredReviewsObserved: requiredReviewsObserved, RequiredReviews: requiredReviews,
+		ChecksTotal: pr.ChecksTotal, ChecksPassing: pr.ChecksPassing,
+		UnresolvedReviewThreads: pr.UnresolvedReviewThreads,
+	})
+	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

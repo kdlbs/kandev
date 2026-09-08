@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/merge-commit-details/spec.md
+spec: docs/specs/ui/requirements/merge-commit-details.md
 created: 2026-08-02
 status: completed
 ---

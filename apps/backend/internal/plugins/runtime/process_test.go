@@ -19,6 +19,33 @@ type fakeSpawnedProcess struct {
 	killed  bool
 }
 
+type blockingPingProcess struct {
+	pingStarted chan struct{}
+	releasePing chan struct{}
+	killOnce    sync.Once
+}
+
+func newBlockingPingProcess() *blockingPingProcess {
+	return &blockingPingProcess{
+		pingStarted: make(chan struct{}),
+		releasePing: make(chan struct{}),
+	}
+}
+
+func (f *blockingPingProcess) Ping() error {
+	close(f.pingStarted)
+	<-f.releasePing
+	return nil
+}
+
+func (f *blockingPingProcess) Exited() bool { return false }
+
+func (f *blockingPingProcess) Kill() {
+	f.killOnce.Do(func() { close(f.releasePing) })
+}
+
+func (f *blockingPingProcess) Remote() *pluginsdk.RemotePlugin { return nil }
+
 func (f *fakeSpawnedProcess) Ping() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -255,6 +282,35 @@ func TestProcess_HandleFailureAndRestart_StopDuringBackoffSkipsSpawn(t *testing.
 	}
 	if spawnCalls != 0 {
 		t.Fatalf("spawnFn called %d times, want 0: stop should short-circuit before any spawn attempt", spawnCalls)
+	}
+}
+
+func TestProcess_StopKillsProcessBeforeWaitingForBlockedPing(t *testing.T) {
+	blocked := newBlockingPingProcess()
+	p := newProcess("test-plugin", testLogger(t), func() (spawnedProcess, error) {
+		return blocked, nil
+	}, nil)
+	p.pingInterval = 0
+
+	if err := p.start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-blocked.pingStarted
+
+	stopped := make(chan struct{})
+	go func() {
+		p.stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		// Release the test double so the old wait-before-kill implementation
+		// cannot leak its supervisor goroutine after this assertion fails.
+		blocked.Kill()
+		<-stopped
+		t.Fatal("stop waited for a blocked ping before killing the plugin process")
 	}
 }
 

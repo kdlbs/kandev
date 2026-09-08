@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-versioned-policy-document", "03-durable-policy-evaluator"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 08: Dynamic policy settings UI

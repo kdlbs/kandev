@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 01: Recover Provider Commit Evidence

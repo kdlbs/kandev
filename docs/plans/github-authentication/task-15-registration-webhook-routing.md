@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["13-registration-onboarding-protocol"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 15: Registration Webhook Routing

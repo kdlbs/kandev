@@ -76,11 +76,13 @@ function defaultDisplaySettings() {
     eligibleWorkflows: [],
     snapshots: {},
     hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
     onWorkflowChange: vi.fn(),
     onRepositoryChange: vi.fn(),
     onTogglePreviewOnClick: vi.fn(),
     onToggleTasksListShowDetails: vi.fn(),
     onToggleStepVisibility: vi.fn(),
+    onToggleAutoHideEmpty: vi.fn(),
     effectiveTaskListingView: "kanban",
     onViewModeChange: vi.fn(),
   };
@@ -151,5 +153,18 @@ describe("MobileMenuSheet — Columns control for the focused workflow", () => {
     renderSheet({ currentPage: "tasks" });
 
     expect(screen.queryByTestId(/columns-menu-/)).toBeNull();
+  });
+
+  it("hides controls that Threads does not apply", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultDisplaySettings(),
+      repositories: [{ id: "repo-1", name: "Repository 1" }],
+    });
+
+    renderSheet({ currentPage: "threads" });
+
+    expect(screen.queryByText("Repository")).toBeNull();
+    expect(screen.queryByText("Preview panel")).toBeNull();
+    expect(screen.getByText("Workflow")).not.toBeNull();
   });
 });

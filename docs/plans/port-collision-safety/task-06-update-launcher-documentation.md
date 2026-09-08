@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-cli-explicit-port-preflight", "02-native-launcher-port-preflight", "03-cli-health-ownership", "04-native-health-ownership", "05-cross-platform-address-in-use"]
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 06: Update launcher documentation

@@ -35,6 +35,18 @@ const state = {
     workflowId: "wf-1" as string | null,
     steps: [{ id: "s1", title: "Todo" }],
   },
+  quickChat: {
+    isOpen: false,
+    sessions: [] as Array<{
+      sessionId: string;
+      workspaceId: string;
+      kind: "chat";
+      taskId?: string;
+    }>,
+    unseenIdleByWorkspace: {} as Record<string, Record<string, true>>,
+  },
+  taskSessions: { items: {} as Record<string, { state: string; task_id: string }> },
+  prepareProgress: { bySessionId: {} as Record<string, { status: string }> },
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
   setImproveDialogOpen: mocks.setImproveDialogOpen,
@@ -133,6 +145,11 @@ function resetTestState() {
   state.appSidebar.improveDialogOpen = false;
   state.kanban.workflowId = "wf-1";
   state.kanban.steps = [{ id: "s1", title: "Todo" }];
+  state.quickChat.isOpen = false;
+  state.quickChat.sessions = [];
+  state.quickChat.unseenIdleByWorkspace = {};
+  state.taskSessions.items = {};
+  state.prepareProgress.bySessionId = {};
   mocks.routerPush.mockClear();
   mocks.setActiveTask.mockClear();
   mocks.setActiveSession.mockClear();
@@ -270,6 +287,43 @@ describe("AppSidebarNewTaskItem row actions", () => {
     renderItem(false);
     screen.getByTestId(QUICK_CHAT_TEST_ID).click();
     expect(mocks.openQuickChat).toHaveBeenCalledOnce();
+  });
+
+  it("shows a running activity bubble on the Quick Chat shortcut", () => {
+    state.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+    ];
+    state.taskSessions.items = {
+      "session-1": { state: "RUNNING", task_id: "task-1" },
+    };
+
+    renderItem(false);
+
+    const quickChat = screen.getByRole("button", { name: "Quick Chat, agent working" });
+    expect(
+      quickChat
+        .querySelector('[data-testid="quick-chat-activity-indicator"]')
+        ?.getAttribute("data-state"),
+    ).toBe("running");
+  });
+
+  it("shows a finished activity bubble for an unseen response", () => {
+    state.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+    ];
+    state.taskSessions.items = {
+      "session-1": { state: "COMPLETED", task_id: "task-1" },
+    };
+    state.quickChat.unseenIdleByWorkspace = { [WORKSPACE_ID]: { "session-1": true } };
+
+    renderItem(false);
+
+    const quickChat = screen.getByRole("button", { name: "Quick Chat, new response" });
+    expect(
+      quickChat
+        .querySelector('[data-testid="quick-chat-activity-indicator"]')
+        ?.getAttribute("data-state"),
+    ).toBe("finished");
   });
 
   it("hides the quick chat shortcut when the rail is collapsed", () => {

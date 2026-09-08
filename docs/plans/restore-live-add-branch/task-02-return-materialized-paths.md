@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-restore-live-materialization"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 02: Return materialized paths from the MCP tool

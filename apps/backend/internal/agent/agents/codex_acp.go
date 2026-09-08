@@ -100,7 +100,7 @@ func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: codexACPPackage}
+	return newManagedNPMRuntimeSpec(codexACPPackage)
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {

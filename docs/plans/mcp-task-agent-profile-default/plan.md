@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/mcp-task-agent-profile-default/spec.md
+spec: docs/specs/tasks/requirements/mcp-task-agent-profile-default.md
 created: 2026-07-19
 status: complete
 ---

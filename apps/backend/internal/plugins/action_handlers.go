@@ -48,6 +48,9 @@ func (c *Controller) action(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{actionErrorField: "plugin action not found"})
 		return
 	}
+	if !authorizeActionAccess(ctx, declared) {
+		return
+	}
 
 	envelope, ok := readActionEnvelope(ctx, declared.MaxBodyBytes)
 	if !ok {
@@ -90,6 +93,27 @@ func (c *Controller) action(ctx *gin.Context) {
 		return
 	}
 	c.writeActionResponse(ctx, resp)
+}
+
+func authorizeActionAccess(ctx *gin.Context, action manifest.Action) bool {
+	identity, authenticated := authn.FromGin(ctx)
+	if !authenticated || identity.UserID == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: authenticationRequiredMessage})
+		return false
+	}
+	switch action.EffectiveAccess() {
+	case manifest.ActionAccessAuthenticated:
+		return true
+	case manifest.ActionAccessAdmin:
+		if identity.IsAdmin() {
+			return true
+		}
+		ctx.JSON(http.StatusForbidden, gin.H{actionErrorField: "admin role required"})
+		return false
+	default:
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action has invalid access"})
+		return false
+	}
 }
 
 func manifestAction(record *store.Record, key string) (manifest.Action, bool) {

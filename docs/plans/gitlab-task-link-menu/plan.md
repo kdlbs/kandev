@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/gitlab-integration/spec.md
+spec: docs/specs/integrations/requirements/gitlab-integration.md
 created: 2026-07-22
 status: approved
 ---

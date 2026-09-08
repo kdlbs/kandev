@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,10 +44,33 @@ type CloudClient struct {
 	siteURL      string
 	email        string
 	secret       string
+	secretMu     sync.RWMutex // guards secret for concurrent read/write
 	authMethod   string
 	instanceType string
 	apiBase      string // "/rest/api/3" for cloud, "/rest/api/2" for server.
 	maxBodySize  int64
+	// refresher enables on-demand token refresh for OAuth. When non-nil and a
+	// request gets 401, the client refreshes the access token and retries once.
+	refresher TokenRefresher
+	// workspaceID identifies the workspace for token refresh.
+	workspaceID string
+}
+
+// TokenRefresher is implemented by the Service to allow CloudClient to refresh
+// OAuth access tokens on-demand when a request hits a 401.
+type TokenRefresher interface {
+	// staleToken is the access token that just hit a 401; the refresher skips
+	// rotation if the stored token already changed (another goroutine won the
+	// race). Pass "" to force a refresh.
+	RefreshOAuthToken(ctx context.Context, workspaceID, staleToken string) error
+	RevealAccessToken(ctx context.Context, workspaceID string) (string, error)
+}
+
+// SetRefresher wires the OAuth token refresher. Called by the service after
+// constructing the client so the client can trigger a refresh on 401.
+func (c *CloudClient) SetRefresher(workspaceID string, r TokenRefresher) {
+	c.workspaceID = workspaceID
+	c.refresher = r
 }
 
 // NewCloudClient builds a client from a JiraConfig + secret. siteURL is
@@ -97,14 +121,19 @@ const userAgent = "kandev/1.0 (+https://github.com/kdlbs/kandev)"
 func (c *CloudClient) authorize(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
+	c.secretMu.RLock()
+	secret := c.secret
+	c.secretMu.RUnlock()
 	switch c.authMethod {
 	case AuthMethodAPIToken:
-		basic := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + c.secret))
+		basic := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + secret))
 		req.Header.Set("Authorization", "Basic "+basic)
 	case AuthMethodPAT:
-		req.Header.Set("Authorization", "Bearer "+c.secret)
+		req.Header.Set("Authorization", "Bearer "+secret)
 	case AuthMethodSessionCookie:
-		req.Header.Set("Cookie", buildSessionCookieHeader(c.secret))
+		req.Header.Set("Cookie", buildSessionCookieHeader(secret))
+	case AuthMethodOAuth:
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 }
 
@@ -118,7 +147,46 @@ func buildSessionCookieHeader(secret string) string {
 
 // do executes a request and decodes a 2xx JSON body into out (may be nil).
 // Non-2xx responses are returned as *APIError so callers can switch on status.
+// For OAuth auth, a 401 triggers an automatic token refresh and single retry.
 func (c *CloudClient) do(ctx context.Context, method, path string, body interface{}, out interface{}) error {
+	err := c.doOnce(ctx, method, path, body, out)
+	if err == nil {
+		return nil
+	}
+	if c.tryRefreshOn401(ctx, err) {
+		return c.doOnce(ctx, method, path, body, out)
+	}
+	return err
+}
+
+// tryRefreshOn401 checks if the error is a 401 and refreshes the OAuth token.
+// Returns true if the token was refreshed and the caller should retry.
+func (c *CloudClient) tryRefreshOn401(ctx context.Context, err error) bool {
+	if c.authMethod != AuthMethodOAuth || c.refresher == nil {
+		return false
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	c.secretMu.RLock()
+	stale := c.secret
+	c.secretMu.RUnlock()
+	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID, stale); refreshErr != nil {
+		return false
+	}
+	newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
+	if revealErr != nil {
+		return false
+	}
+	c.secretMu.Lock()
+	c.secret = newToken
+	c.secretMu.Unlock()
+	return true
+}
+
+// doOnce executes a single request attempt without retry logic.
+func (c *CloudClient) doOnce(ctx context.Context, method, path string, body interface{}, out interface{}) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -457,6 +525,11 @@ var searchFields = []string{
 	"priority", "assignee", "reporter", jiraFieldUpdated,
 }
 
+var watcherSearchFields = []string{
+	"summary", "status", "project", "issuetype",
+	"priority", "assignee", "reporter", jiraFieldUpdated, "description",
+}
+
 // SearchTickets runs a JQL search and returns a page of tickets. The transport
 // branches on instance type because Cloud and Server/DC expose different
 // search endpoints with incompatible pagination shapes:
@@ -470,6 +543,17 @@ var searchFields = []string{
 // pageToken is the cursor returned in the previous page's NextPageToken;
 // pass "" for the first page. maxResults is capped at 100.
 func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return c.searchTickets(ctx, jql, pageToken, maxResults, searchFields)
+}
+
+// SearchTicketsForWatch runs a JQL search with the description field included
+// for watcher-created task prompts. It uses the same endpoint and pagination
+// behavior as SearchTickets while keeping the interactive field set compact.
+func (c *CloudClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return c.searchTickets(ctx, jql, pageToken, maxResults, watcherSearchFields)
+}
+
+func (c *CloudClient) searchTickets(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 25
 	}
@@ -477,16 +561,16 @@ func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, 
 		maxResults = 100
 	}
 	if c.instanceType == InstanceTypeServer {
-		return c.searchTicketsServer(ctx, jql, pageToken, maxResults)
+		return c.searchTicketsServer(ctx, jql, pageToken, maxResults, fields)
 	}
-	return c.searchTicketsCloud(ctx, jql, pageToken, maxResults)
+	return c.searchTicketsCloud(ctx, jql, pageToken, maxResults, fields)
 }
 
-func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	body := map[string]interface{}{
 		"jql":        jql,
 		"maxResults": maxResults,
-		"fields":     searchFields,
+		"fields":     fields,
 	}
 	if pageToken != "" {
 		body["nextPageToken"] = pageToken
@@ -507,7 +591,7 @@ func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken str
 	return out, nil
 }
 
-func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	startAt := 0
 	if pageToken != "" {
 		// A malformed token is fixed by starting over from the first page —
@@ -520,7 +604,7 @@ func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken st
 		"jql":        jql,
 		"startAt":    startAt,
 		"maxResults": maxResults,
-		"fields":     searchFields,
+		"fields":     fields,
 	}
 	var resp serverSearchResponse
 	if err := c.do(ctx, http.MethodPost, c.apiBase+"/search", body, &resp); err != nil {

@@ -5,7 +5,9 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/unread-divider.md, ../../specs/ui/transcript-navigation-settings.md"
+spec: "../../specs/office/requirements/unread-divider.md"
+related_specs:
+  - "../../specs/ui/requirements/transcript-navigation-settings.md"
 ---
 
 # Task 01: Centralize portable user-setting defaults

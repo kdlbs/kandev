@@ -182,6 +182,9 @@ func TestAddBranchToTask_RejectsNonWorktreeExecutor(t *testing.T) {
 		Status:       "ready",
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-1", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -231,6 +234,9 @@ func TestAddBranchToTask_AllowsWorktreeExecutor(t *testing.T) {
 		Status:        "ready",
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-1", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -591,6 +597,9 @@ func TestAddBranchToTask_RejectsNonWorktreeExecutor_NoOrphanRepo(t *testing.T) {
 		Status:       "ready",
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-primary", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -693,14 +702,32 @@ func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ stri
 
 // seedWorktreeTaskEnv attaches a worktree-executor task_environments row so
 // requireWorktreeExecutorForBranchAdd permits the call and taskAlreadyLaunched
-// reports the task as live.
+// reports the task as live. The environment carries inventory rows mirroring
+// the task's existing task_repositories, since CreateTaskEnvironment now
+// requires a ready environment to carry inventory for a repo-backed task.
 func seedWorktreeTaskEnv(t *testing.T, repo interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 }, taskID, id string,
 ) {
 	t.Helper()
+	ctx := context.Background()
 	now := time.Now().UTC()
-	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+	taskRepos, err := repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskRepositories: %v", err)
+	}
+	envRepos := make([]*models.TaskEnvironmentRepo, len(taskRepos))
+	for i, tr := range taskRepos {
+		envRepos[i] = &models.TaskEnvironmentRepo{
+			ID:           fmt.Sprintf("%s-repo-%d", id, i),
+			WorktreeID:   fmt.Sprintf("%s-worktree-%d", id, i),
+			RepositoryID: tr.RepositoryID,
+			BranchSlug:   tr.CheckoutBranch,
+			CreatedAt:    now,
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID:            id,
 		TaskID:        taskID,
 		ExecutorType:  string(models.ExecutorTypeWorktree),
@@ -708,6 +735,7 @@ func seedWorktreeTaskEnv(t *testing.T, repo interface {
 		Status:        "ready",
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		Repos:         envRepos,
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}

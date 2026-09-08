@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -23,6 +24,9 @@ func newTestHomeDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	previousSystemConfig := sshSystemConfigPath
+	sshSystemConfigPath = filepath.Join(home, "missing-system-ssh-config")
+	t.Cleanup(func() { sshSystemConfigPath = previousSystemConfig })
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatalf("create fake ~/.ssh: %v", err)
 	}
@@ -651,5 +655,200 @@ func writeKnownHosts(t *testing.T, home, host string, key ssh.PublicKey) {
 		strings.TrimSpace(strings.TrimPrefix(string(ssh.MarshalAuthorizedKey(key)), key.Type()+" ")))
 	if err := os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(line), 0o600); err != nil {
 		t.Fatalf("write known_hosts: %v", err)
+	}
+}
+
+func TestIdentityAgentInheritanceAndPrecedence(t *testing.T) {
+	home := newTestHomeDir(t)
+	writeSSHConfig(t, home, `Host agent-host
+  HostName target.internal
+  User deploy
+  IdentityAgent ~/.agents/%n.sock
+Host file-host
+  HostName target.internal
+  User deploy
+  IdentityAgent /tmp/config-agent.sock
+`)
+
+	t.Run("explicit agent selection still inherits IdentityAgent", func(t *testing.T) {
+		target, err := ResolveSSHTarget(SSHConnConfig{
+			HostAlias: "agent-host", IdentitySource: SSHIdentitySourceAgent,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(home, ".agents", "agent-host.sock")
+		if target.IdentityAgent != want {
+			t.Fatalf("IdentityAgent = %q, want %q", target.IdentityAgent, want)
+		}
+	})
+
+	t.Run("configured IdentityAgent selects agent without global socket", func(t *testing.T) {
+		t.Setenv("SSH_AUTH_SOCK", "")
+		target, err := ResolveSSHTarget(SSHConnConfig{HostAlias: "agent-host"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target.IdentitySource != SSHIdentitySourceAgent {
+			t.Fatalf("IdentitySource = %q, want agent", target.IdentitySource)
+		}
+	})
+
+	t.Run("explicit file source ignores IdentityAgent", func(t *testing.T) {
+		key := writeTestIdentityFile(t)
+		target, err := ResolveSSHTarget(SSHConnConfig{
+			HostAlias: "file-host", IdentitySource: SSHIdentitySourceFile, IdentityFile: key,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target.IdentityAgent != "" || target.IdentityFile != key {
+			t.Fatalf("target auth = %+v", target)
+		}
+	})
+}
+
+func TestBuildAuthMethodsIdentityAgentOverridesEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	configuredPath := filepath.Join(dir, "configured.sock")
+	envPath := filepath.Join(dir, "env.sock")
+	configured, err := net.Listen("unix", configuredPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = configured.Close() })
+	envListener, err := net.Listen("unix", envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = envListener.Close() })
+	t.Setenv("SSH_AUTH_SOCK", envPath)
+
+	_, cleanup, err := buildAuthMethods(&SSHTarget{
+		IdentitySource: SSHIdentitySourceAgent,
+		IdentityAgent:  configuredPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+
+	_ = configured.(*net.UnixListener).SetDeadline(time.Now().Add(time.Second))
+	conn, err := configured.Accept()
+	if err != nil {
+		t.Fatalf("configured IdentityAgent was not dialed: %v", err)
+	}
+	_ = conn.Close()
+	_ = envListener.(*net.UnixListener).SetDeadline(time.Now().Add(20 * time.Millisecond))
+	if conn, err := envListener.Accept(); err == nil {
+		_ = conn.Close()
+		t.Fatal("SSH_AUTH_SOCK was dialed instead of IdentityAgent")
+	}
+}
+
+func TestIdentityAgentNoneDisablesEnvironmentFallback(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/should-not-be-used.sock")
+	_, cleanup, err := buildAuthMethods(&SSHTarget{
+		IdentitySource: SSHIdentitySourceAgent,
+		IdentityAgent:  "none",
+	})
+	cleanup()
+	if err == nil || !strings.Contains(err.Error(), "IdentityAgent is set to none") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveBastionAuthPrecedence(t *testing.T) {
+	home := newTestHomeDir(t)
+	jumpKey := writeTestIdentityFile(t)
+	writeSSHConfig(t, home, fmt.Sprintf(`Host jump-agent
+  HostName jump.internal
+  User jumper
+  IdentityAgent ~/.agents/jump.sock
+Host jump-file
+  HostName jump.internal
+  User jumper
+  IdentityFile %s
+Host jump-fallback
+  HostName jump.internal
+  User jumper
+`, jumpKey))
+
+	t.Run("jump alias IdentityAgent overrides target socket", func(t *testing.T) {
+		bastion, err := resolveBastion(&SSHTarget{ProxyJump: "jump-agent", IdentitySource: SSHIdentitySourceAgent, IdentityAgent: "/target.sock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(home, ".agents", "jump.sock")
+		if bastion.IdentitySource != SSHIdentitySourceAgent || bastion.IdentityAgent != want {
+			t.Fatalf("bastion auth = %+v, want agent %q", bastion, want)
+		}
+	})
+
+	t.Run("jump alias IdentityFile overrides target agent", func(t *testing.T) {
+		bastion, err := resolveBastion(&SSHTarget{ProxyJump: "jump-file", IdentitySource: SSHIdentitySourceAgent, IdentityAgent: "/target.sock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bastion.IdentitySource != SSHIdentitySourceFile || bastion.IdentityFile != jumpKey {
+			t.Fatalf("bastion auth = %+v", bastion)
+		}
+	})
+
+	t.Run("alias without auth falls back to target", func(t *testing.T) {
+		bastion, err := resolveBastion(&SSHTarget{ProxyJump: "jump-fallback", IdentitySource: SSHIdentitySourceAgent, IdentityAgent: "/target.sock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bastion.IdentityAgent != "/target.sock" {
+			t.Fatalf("bastion auth = %+v", bastion)
+		}
+	})
+
+	t.Run("literal jump falls back to target", func(t *testing.T) {
+		bastion, err := resolveBastion(&SSHTarget{ProxyJump: "jumper@jump.internal:22", IdentitySource: SSHIdentitySourceAgent, IdentityAgent: "/target.sock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bastion.IdentityAgent != "/target.sock" {
+			t.Fatalf("bastion auth = %+v", bastion)
+		}
+	})
+}
+
+func TestEffectiveSSHConfigReadsUserAndSystemFresh(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	systemPath := filepath.Join(t.TempDir(), "ssh_config")
+	previousSystemConfig := sshSystemConfigPath
+	sshSystemConfigPath = systemPath
+	t.Cleanup(func() { sshSystemConfigPath = previousSystemConfig })
+	if err := os.WriteFile(systemPath, []byte("Host system-only\n  HostName from-system.internal\n  User system-user\n  IdentityAgent /system-agent.sock\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSSHConfig(t, home, "Host shared\n  HostName first-user.internal\n  User user-one\n")
+
+	systemTarget, err := ResolveSSHTarget(SSHConnConfig{HostAlias: "system-only", IdentitySource: SSHIdentitySourceAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if systemTarget.Host != "from-system.internal" || systemTarget.User != "system-user" || systemTarget.IdentityAgent != "/system-agent.sock" {
+		t.Fatalf("system target = %+v", systemTarget)
+	}
+
+	first, err := ResolveSSHTarget(SSHConnConfig{HostAlias: "shared", IdentitySource: SSHIdentitySourceAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSSHConfig(t, home, "Host shared\n  HostName second-user.internal\n  User user-two\n")
+	second, err := ResolveSSHTarget(SSHConnConfig{HostAlias: "shared", IdentitySource: SSHIdentitySourceAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Host != "first-user.internal" || second.Host != "second-user.internal" || second.User != "user-two" {
+		t.Fatalf("fresh config results = first:%+v second:%+v", first, second)
 	}
 }

@@ -52,12 +52,18 @@ export function RemoteContributionResolutionDialog({
         </DialogHeader>
         {errorKey && <p className="text-sm text-destructive">{t(errorKey)}</p>}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 md:h-9"
+            onClick={() => onOpenChange(false)}
+          >
             {t("common:cancel")}
           </Button>
           <Button
             type="button"
             variant="destructive"
+            className="h-11 md:h-9"
             data-testid="remote-contribution-confirm"
             disabled={isLoading}
             onClick={onConfirm}

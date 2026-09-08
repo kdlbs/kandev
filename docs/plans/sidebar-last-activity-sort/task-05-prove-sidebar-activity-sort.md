@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["01-stabilize-github-pr-refresh", "04-add-sidebar-sort"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-last-activity-sort.md"
+spec: "../../specs/ui/requirements/sidebar-last-activity-sort.md"
 ---
 
 # Task 05: Prove sidebar activity sorting
