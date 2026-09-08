@@ -45,7 +45,8 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
 	}
 	specSchedule, _ := schedule.(*cron.SpecSchedule)
-	candidate := schedule.Next(after.In(loc))
+	start := after.In(loc)
+	candidate := schedule.Next(start)
 	if candidate.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
 	}
@@ -55,7 +56,64 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 			return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
 		}
 	}
+	if earlier, ok := findEarlierMatchAcrossSubHourTransition(specSchedule, loc, start, candidate); ok {
+		candidate = earlier
+	}
 	return candidate.UTC(), nil
+}
+
+// findEarlierMatchAcrossSubHourTransition recovers a fire that
+// schedule.Next skipped over because its hour-advancing loop steps by an
+// absolute 1h and desynchronizes from a zone transition whose offset delta
+// is not a whole hour (only Australia/Lord_Howe, +10:30<->+11:00, does this
+// among IANA zones): the loop can jump straight past a day that has a
+// genuinely matching slot. matchesWallClock cannot recover this on its own
+// because it only validates candidates schedule.Next actually returns.
+//
+// This rescans (after, candidate) at minute granularity, but only when that
+// interval contains such a transition, so no other zone's candidate path
+// pays for the scan.
+func findEarlierMatchAcrossSubHourTransition(spec *cron.SpecSchedule, loc *time.Location, after, candidate time.Time) (time.Time, bool) {
+	if spec == nil || !intervalHasSubHourTransition(loc, after, candidate) {
+		return time.Time{}, false
+	}
+	t := after.Truncate(time.Minute)
+	if !t.After(after) {
+		t = t.Add(time.Minute)
+	}
+	for t.Before(candidate) {
+		if !isAmbiguousFallBack(t) && matchesWallClock(spec, t) {
+			return t, true
+		}
+		t = t.Add(time.Minute)
+	}
+	return time.Time{}, false
+}
+
+// intervalHasSubHourTransition reports whether (after, candidate) contains a
+// zone transition whose offset delta is not a whole number of hours, e.g.
+// the 30-minute Australia/Lord_Howe shift.
+func intervalHasSubHourTransition(loc *time.Location, after, candidate time.Time) bool {
+	t := after.In(loc)
+	for {
+		_, end := t.ZoneBounds()
+		if end.IsZero() || !end.Before(candidate) {
+			return false
+		}
+		delta := zoneOffsetAt(end) - zoneOffsetAt(end.Add(-time.Second))
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta%3600 != 0 {
+			return true
+		}
+		t = end
+	}
+}
+
+func zoneOffsetAt(t time.Time) int {
+	_, offset := t.Zone()
+	return offset
 }
 
 // matchesWallClock reports whether candidate's local wall-clock fields

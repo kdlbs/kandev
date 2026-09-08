@@ -392,10 +392,9 @@ func TestNextCronTime_LordHoweSpringForward_MatchesWallClock(t *testing.T) {
 // TestNextCronTime_LordHoweSweep_WallClockMatchesExpression sweeps every fire
 // of several hour/minute expressions across calendar 2026 in
 // Australia/Lord_Howe and asserts each fire's local wall clock actually
-// satisfies the expression. It does not assert every slot fires (a separate,
-// documented limitation: robfig's day-loop DST correction only nudges by
-// whole hours, so some genuinely-existing slots are still skipped around the
-// 30-minute transition).
+// satisfies the expression. Fire completeness (every genuinely-existing slot
+// is returned) is covered separately by
+// TestNextCronTime_LordHoweDailyExpression_FiresEveryDay.
 func TestNextCronTime_LordHoweSweep_WallClockMatchesExpression(t *testing.T) {
 	loc, err := time.LoadLocation("Australia/Lord_Howe")
 	if err != nil {
@@ -442,39 +441,61 @@ func TestNextCronTime_LordHoweSweep_WallClockMatchesExpression(t *testing.T) {
 	}
 }
 
-// TestNextCronTime_LordHoweDailyExpression_LosesWholeTransitionDay pins the
-// real scope of the Lord_Howe limitation: robfig/cron/v3's day-loop DST
-// correction nudges by whole hours, so in this single 30-minute-shift IANA
-// zone it skips every fire scheduled anywhere on the transition day, not
-// merely fires inside the 30-minute transition window. Noon is 9.5 hours from
-// the window and is still skipped on both transition days.
-func TestNextCronTime_LordHoweDailyExpression_LosesWholeTransitionDay(t *testing.T) {
+// TestNextCronTime_LordHoweDailyExpression_FiresEveryDay is the regression
+// test for the sub-hour-transition rescan: robfig/cron/v3's day-loop DST
+// correction nudges by whole hours, so in Australia/Lord_Howe (the only IANA
+// zone with a 30-minute DST shift) it can skip every fire scheduled anywhere
+// on the transition day, not merely fires inside the 30-minute transition
+// window. NextCronTime recovers those fires with a minute-granularity rescan
+// gated on the sub-hour transition, so "0 12 * * *" now fires on every day of
+// 2026, including both transition days, matching the
+// TestNextCronTime_ChathamDailyExpression_FiresEveryDay control below.
+func TestNextCronTime_LordHoweDailyExpression_FiresEveryDay(t *testing.T) {
 	loc, err := time.LoadLocation("Australia/Lord_Howe")
 	if err != nil {
 		t.Fatalf("load location: %v", err)
 	}
 
-	fallBack, err := NextCronTime("0 12 * * *", "Australia/Lord_Howe", time.Date(2026, 10, 3, 13, 0, 0, 0, loc))
+	fallBack, err := NextCronTime("0 12 * * *", "Australia/Lord_Howe", time.Date(2026, 10, 3, 12, 0, 0, 0, loc))
 	if err != nil {
 		t.Fatalf("fall-back: unexpected error: %v", err)
 	}
-	if got := fallBack.In(loc); got.Year() != 2026 || got.Month() != time.October || got.Day() != 5 || got.Hour() != 12 || got.Minute() != 0 {
-		t.Errorf("fall-back: got %v, want 2026-10-05 12:00 (2026-10-04 skipped entirely)", got)
+	if got := fallBack.In(loc); got.Year() != 2026 || got.Month() != time.October || got.Day() != 4 || got.Hour() != 12 || got.Minute() != 0 {
+		t.Errorf("fall-back: got %v, want 2026-10-04 12:00", got)
 	}
 
-	springForward, err := NextCronTime("0 12 * * *", "Australia/Lord_Howe", time.Date(2026, 4, 4, 13, 0, 0, 0, loc))
+	springForward, err := NextCronTime("0 12 * * *", "Australia/Lord_Howe", time.Date(2026, 4, 4, 12, 0, 0, 0, loc))
 	if err != nil {
 		t.Fatalf("spring-forward: unexpected error: %v", err)
 	}
-	if got := springForward.In(loc); got.Year() != 2026 || got.Month() != time.April || got.Day() != 6 || got.Hour() != 12 || got.Minute() != 0 {
-		t.Errorf("spring-forward: got %v, want 2026-04-06 12:00 (2026-04-05 skipped entirely)", got)
+	if got := springForward.In(loc); got.Year() != 2026 || got.Month() != time.April || got.Day() != 5 || got.Hour() != 12 || got.Minute() != 0 {
+		t.Errorf("spring-forward: got %v, want 2026-04-05 12:00", got)
+	}
+
+	cursor := time.Date(2026, 1, 1, 0, 0, 0, 0, loc)
+	yearEnd := time.Date(2027, 1, 1, 0, 0, 0, 0, loc)
+	days := 0
+	for {
+		next, err := NextCronTime("0 12 * * *", "Australia/Lord_Howe", cursor)
+		if err != nil {
+			t.Fatalf("unexpected error at %v: %v", cursor, err)
+		}
+		if !next.Before(yearEnd) {
+			break
+		}
+		days++
+		cursor = next
+	}
+	if days != 365 {
+		t.Errorf("expected a fire on every one of 2026's 365 days, got %d", days)
 	}
 }
 
 // TestNextCronTime_ChathamDailyExpression_FiresEveryDay is the control for
-// TestNextCronTime_LordHoweDailyExpression_LosesWholeTransitionDay: Pacific/Chatham
-// has a whole-hour DST shift, so unlike Lord_Howe it loses no day at all —
-// "0 12 * * *" fires on every day of 2026, including both transition days.
+// TestNextCronTime_LordHoweDailyExpression_FiresEveryDay: Pacific/Chatham
+// has a whole-hour DST shift, so it never needed the sub-hour-transition
+// rescan — "0 12 * * *" fires on every day of 2026, including both
+// transition days.
 func TestNextCronTime_ChathamDailyExpression_FiresEveryDay(t *testing.T) {
 	loc, err := time.LoadLocation("Pacific/Chatham")
 	if err != nil {
