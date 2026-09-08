@@ -66,8 +66,10 @@ type ServiceConfig struct {
 	ClaudeMidTurnSteering bool
 
 	// OfficeSessionIdentity keys an Office task's session identity on the
-	// run's own agent instead of the task's runner seat. Off by default; a
-	// live (task_id, agent_profile_id) pair is guarded in-transaction on the
+	// run's own agent instead of the task's runner seat. Off by default
+	// because it is an experimental, high-risk, path-scoped change to durable
+	// session identity and existing rows are not migrated. A live
+	// (task_id, agent_profile_id) pair is guarded in-transaction on the
 	// office session creation path, and pre-existing duplicate rows are
 	// deliberately retained and resolved by selection.
 	OfficeSessionIdentity bool
