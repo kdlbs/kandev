@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/events/bus"
@@ -335,18 +336,55 @@ type oneShotFailureDispatcher struct {
 	failTrigger engine.Trigger
 	failArmed   bool
 	failErr     error
-	calls       []dispatcherCall
+
+	mu    sync.Mutex
+	calls []dispatcherCall
 }
 
 func (d *oneShotFailureDispatcher) HandleTrigger(
 	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
 ) error {
+	d.mu.Lock()
 	d.calls = append(d.calls, dispatcherCall{taskID, trigger, payload, opID})
+	d.mu.Unlock()
 	if d.failArmed && trigger == d.failTrigger {
 		d.failArmed = false
 		return d.failErr
 	}
 	return d.inner.HandleTrigger(ctx, taskID, trigger, payload, opID)
+}
+
+func (d *oneShotFailureDispatcher) Calls() []dispatcherCall {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]dispatcherCall, len(d.calls))
+	copy(out, d.calls)
+	return out
+}
+
+// countingDispatcher wraps a queueRunDispatcher and counts every call it
+// sees, so a test can assert the reconciler never even attempted a
+// dispatch instead of only checking the resulting run count.
+type countingDispatcher struct {
+	inner *queueRunDispatcher
+
+	mu sync.Mutex
+	n  int
+}
+
+func (d *countingDispatcher) HandleTrigger(
+	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) error {
+	d.mu.Lock()
+	d.n++
+	d.mu.Unlock()
+	return d.inner.HandleTrigger(ctx, taskID, trigger, payload, opID)
+}
+
+func (d *countingDispatcher) Count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.n
 }
 
 // publishChildDone publishes the task.moved event that fires
@@ -386,7 +424,7 @@ func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
 		inner:       &queueRunDispatcher{svc: svc},
 		failTrigger: engine.TriggerOnChildrenCompleted,
 		failArmed:   true,
-		failErr:     fmt.Errorf("injected get child set key failure"),
+		failErr:     fmt.Errorf("injected on_children_completed dispatch failure"),
 	}
 	svc.SetWorkflowEngineDispatcher(dispatcher)
 
@@ -398,11 +436,12 @@ func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
 	// on the injected dispatcher error and is swallowed at Warn.
 	publishChildDone(t, eb, "parent-1", "worker-1")
 
-	if len(dispatcher.calls) != 1 {
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
 		t.Fatalf("want exactly one dispatch attempt after the failed edge publish, got %d: %#v",
-			len(dispatcher.calls), dispatcher.calls)
+			len(calls), calls)
 	}
-	edgeOpID := dispatcher.calls[0].opID
+	edgeOpID := calls[0].opID
 	if edgeOpID == "" {
 		t.Fatal("failed edge dispatch attempt carried an empty operation id")
 	}
@@ -428,11 +467,12 @@ func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
 		t.Fatalf("tick: %v", err)
 	}
 
-	if len(dispatcher.calls) != 2 {
+	calls = dispatcher.Calls()
+	if len(calls) != 2 {
 		t.Fatalf("want a second dispatch attempt from the reconciler, got %d: %#v",
-			len(dispatcher.calls), dispatcher.calls)
+			len(calls), calls)
 	}
-	reconcilerOpID := dispatcher.calls[1].opID
+	reconcilerOpID := calls[1].opID
 	if reconcilerOpID != edgeOpID {
 		t.Fatalf("reconciler recovery used a different operation id than the failed edge attempt: edge=%q reconciler=%q",
 			edgeOpID, reconcilerOpID)
@@ -468,6 +508,9 @@ func TestParentWakeReconciler_DoesNotDoubleQueueASuccessfulEdgeDispatch(t *testi
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
 
+	dispatcher := &countingDispatcher{inner: &queueRunDispatcher{svc: svc}}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
 	adoptOffice(t, svc, "ws-1")
 	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
 
@@ -480,10 +523,17 @@ func TestParentWakeReconciler_DoesNotDoubleQueueASuccessfulEdgeDispatch(t *testi
 	if len(runs) != 1 {
 		t.Fatalf("successful edge dispatch did not queue a run: %#v", runs)
 	}
+	if dispatcher.Count() != 1 {
+		t.Fatalf("want exactly one dispatch attempt from the successful edge publish, got %d", dispatcher.Count())
+	}
 
 	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
 	if err := handler.Tick(ctx); err != nil {
 		t.Fatalf("tick: %v", err)
+	}
+
+	if dispatcher.Count() != 1 {
+		t.Fatalf("want the reconciler to skip dispatch entirely behind a successful edge delivery, got %d attempts", dispatcher.Count())
 	}
 
 	runsAfter, err := svc.ListRuns(ctx, "ws-1")
