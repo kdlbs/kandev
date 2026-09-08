@@ -1111,8 +1111,7 @@ func (s *Service) lookupChildPRLinks(
 }
 
 // queueChildrenCompletedRun checks if all children of a parent are terminal
-// and, if so, dispatches an on_children_completed trigger to the engine
-// with child summaries in the payload.
+// and, if so, dispatches an on_children_completed trigger to the engine.
 func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string) error {
 	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
 	if err != nil || !allDone {
@@ -1129,25 +1128,13 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return fmt.Errorf("get child set key: %w", err)
 	}
 
-	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
-	if err != nil {
-		s.logger.Error("get child summaries failed", zap.Error(err))
-		children = nil
-	}
-
+	// No child summaries are assembled here. The prompt path derives the
+	// child list at assembly time from the parent's current children, so a
+	// summary read at this point would pay for data that is discarded and
+	// would make the wake's content depend on which producer won the race.
 	key := wakeOperationID(parentID, childSetKey)
-	summaries := make([]engine.ChildSummary, 0, len(children))
-	prsByTask := s.lookupChildPRLinks(ctx, children)
-	for _, c := range children {
-		summaries = append(summaries, engine.ChildSummary{
-			TaskID:  c.TaskID,
-			Status:  c.State,
-			Summary: c.LastComment,
-			PRLinks: prsByTask[c.TaskID],
-		})
-	}
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
+		engine.OnChildrenCompletedPayload{}, key)
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.
