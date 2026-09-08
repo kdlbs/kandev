@@ -23,10 +23,11 @@ type WorkflowStepLister interface {
 }
 
 type WorkflowHandlers struct {
-	service            *service.Service
-	workflowStepLister WorkflowStepLister
-	foregroundActivity dto.ForegroundActivityProvider
-	logger             *logger.Logger
+	service              *service.Service
+	workflowStepLister   WorkflowStepLister
+	foregroundActivity   dto.ForegroundActivityProvider
+	taskParkedProjection dto.TaskParkedProvider
+	logger               *logger.Logger
 }
 
 func NewWorkflowHandlers(svc *service.Service, stepLister WorkflowStepLister, log *logger.Logger) *WorkflowHandlers {
@@ -53,6 +54,12 @@ func RegisterWorkflowRoutes(
 // SetForegroundActivityProvider wires live session activity into task snapshots.
 func (h *WorkflowHandlers) SetForegroundActivityProvider(provider dto.ForegroundActivityProvider) {
 	h.foregroundActivity = provider
+}
+
+// SetTaskParkedProvider wires the task-level parked_on_background_work
+// OR-aggregate into task snapshots (spec: docs/specs/disambiguate-waiting/spec.md).
+func (h *WorkflowHandlers) SetTaskParkedProvider(provider dto.TaskParkedProvider) {
+	h.taskParkedProjection = provider
 }
 
 func (h *WorkflowHandlers) registerHTTP(router *gin.Engine) {
@@ -621,5 +628,5 @@ func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
 	ctx context.Context,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, tasks)
 }

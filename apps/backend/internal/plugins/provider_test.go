@@ -126,3 +126,25 @@ func TestProvideCleanupDoesNotError(t *testing.T) {
 		t.Fatalf("cleanup() unexpected error: %v", err)
 	}
 }
+
+func TestProvideWithStoreErrorsKeepsRequiredStoreResultsIndependent(t *testing.T) {
+	cfg := &config.Config{HomeDir: t.TempDir()}
+
+	svc, cleanup, storeErrors := ProvideWithStoreErrors(cfg, nil, newFakeSecretRevealer(), nil, testLogger(t))
+	if svc == nil {
+		t.Fatal("ProvideWithStoreErrors() service = nil, want partially initialized service")
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	wantIDs := []string{
+		"plugin-instances", "plugin-marketplace", "plugin-settings",
+		"plugin-state", "plugin-instance-state", "plugin-user-state",
+	}
+	if len(storeErrors) != len(wantIDs) {
+		t.Fatalf("store error set has %d entries, want %d: %v", len(storeErrors), len(wantIDs), storeErrors)
+	}
+	for _, id := range wantIDs {
+		if err := storeErrors[id]; err == nil {
+			t.Errorf("%s error = nil, want independent database-pool error", id)
+		}
+	}
+}

@@ -312,7 +312,7 @@ func (h *Handlers) wsRecoverTaskLaunch(ctx context.Context, msg *ws.Message) (*w
 	if req.ErrorStamp == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required", nil)
 	}
-	if req.Action != "mark_review_done" && req.TaskRepositoryID == "" {
+	if req.Action != "mark_review_done" && req.Action != "retry_launch" && req.TaskRepositoryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required for branch recovery", nil)
 	}
 	if req.Action == "pick_base_branch" && req.BaseBranch == "" {

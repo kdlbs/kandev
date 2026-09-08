@@ -30,7 +30,8 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // /sleep 30 keeps the backend cancellation alive long enough for a task switch and reload.
+    // Reload hydration is covered independently by mobile-cancel-progress-reload.spec.ts.
+    // /sleep keeps this regression focused on the task-navigation remounts with stable cancellation.
     await session.sendMessage("/sleep 30");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");

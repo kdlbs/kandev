@@ -643,6 +643,7 @@ export function useAutoScroll(params: {
     scrollRef,
     messages,
     isWorking,
+    sessionId,
     enabled,
     hasUnreadDivider,
     isNearBottomRef,
@@ -803,6 +804,7 @@ function useAutoScrollOnContent({
   scrollRef,
   messages,
   isWorking,
+  sessionId,
   enabled,
   hasUnreadDivider,
   isNearBottomRef,
@@ -814,6 +816,7 @@ function useAutoScrollOnContent({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   messages: Message[];
   isWorking: boolean;
+  sessionId: string | null;
   enabled: boolean;
   hasUnreadDivider: boolean;
   isNearBottomRef: React.RefObject<boolean>;
@@ -822,6 +825,8 @@ function useAutoScrollOnContent({
   prevIsWorkingRef: React.MutableRefObject<boolean>;
   initialPlacementPending: boolean;
 }) {
+  const lastLoggedMessageCountRef = useRef(messages.length);
+
   // When isWorking transitions to true, force scroll to bottom (unless
   // disabled, locked, or a layout rebuild scroll restore is pending).
   useEffect(() => {
@@ -841,12 +846,14 @@ function useAutoScrollOnContent({
       if (el) {
         scrollNativeToBottom(el);
         isNearBottomRef.current = true;
+        placementDebug("work-start bottom", { sessionId });
       }
     }
     prevIsWorkingRef.current = isWorking;
   }, [
     hasUnreadDivider,
     isWorking,
+    sessionId,
     scrollRef,
     enabled,
     isProgrammaticScrollLocked,
@@ -867,8 +874,22 @@ function useAutoScrollOnContent({
       enabled
     ) {
       scrollNativeToBottom(el);
+      if (messages.length !== lastLoggedMessageCountRef.current) {
+        placementDebug("message-update bottom", {
+          sessionId,
+          messageCount: messages.length,
+        });
+      }
     }
-  }, [messages, scrollRef, enabled, isProgrammaticScrollLocked, initialPlacementPending]);
+    lastLoggedMessageCountRef.current = messages.length;
+  }, [
+    messages,
+    sessionId,
+    scrollRef,
+    enabled,
+    isProgrammaticScrollLocked,
+    initialPlacementPending,
+  ]);
 }
 
 function useCatchUpOnVisible({
@@ -1180,18 +1201,23 @@ function isCurrentEnvSwitchPlacement(
   return pending?.token === token && pending.sessionId === sessionId;
 }
 
-function hasCompetingInitialScrollOwner(params: {
+type CompetingInitialScrollOwner =
+  | "layout-restore"
+  | "explicit-target"
+  | "unread-divider"
+  | "programmatic-scroll";
+
+function resolveCompetingInitialScrollOwner(params: {
   hasPendingLayoutRestore: boolean;
   hasExplicitScrollTarget: boolean;
   hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
-}): boolean {
-  return (
-    params.hasPendingLayoutRestore ||
-    params.hasExplicitScrollTarget ||
-    params.hasUnreadDivider ||
-    params.isProgrammaticScrollLocked()
-  );
+}): CompetingInitialScrollOwner | null {
+  if (params.hasPendingLayoutRestore) return "layout-restore";
+  if (params.hasExplicitScrollTarget) return "explicit-target";
+  if (params.hasUnreadDivider) return "unread-divider";
+  if (params.isProgrammaticScrollLocked()) return "programmatic-scroll";
+  return null;
 }
 
 function reportInitialPlacement(
@@ -1268,15 +1294,19 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
   const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
   const hasExplicitScrollTarget =
     sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
-  if (
-    hasCompetingInitialScrollOwner({
-      hasPendingLayoutRestore,
-      hasExplicitScrollTarget,
-      hasUnreadDivider,
-      isProgrammaticScrollLocked,
-    })
-  ) {
+  const competingOwner = resolveCompetingInitialScrollOwner({
+    hasPendingLayoutRestore,
+    hasExplicitScrollTarget,
+    hasUnreadDivider,
+    isProgrammaticScrollLocked,
+  });
+  if (competingOwner) {
     if (phase === "provisional") return;
+    placementDebug(`${phase} placement delegated`, {
+      sessionId,
+      owner: competingOwner,
+      token: envSwitchPlacementToken,
+    });
     markInitialScrollConsumed(didInitialScroll, activationPendingRef);
     completeEnvSwitchPlacement(envSwitchPlacementToken);
     return;

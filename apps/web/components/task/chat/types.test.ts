@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
-import { isRichOutputMessage, kandevToolStemOf, type ToolCallMetadata } from "./types";
+import {
+  isLaunchErrorSurfaceMessage,
+  isMatchingTaskLaunchError,
+  isTaskLaunchErrorOwnedBySession,
+  isRichOutputMessage,
+  kandevToolStemOf,
+  type ToolCallMetadata,
+} from "./types";
 
 function toolCall(rawName: string, field: "tool_name" | "title" | "content" = "title"): Message {
   const metadata: Record<string, unknown> = {
@@ -63,5 +70,67 @@ describe("isRichOutputMessage", () => {
     expect(isRichOutputMessage({ ...toolCall("show_rich_output_kandev"), type: "message" })).toBe(
       false,
     );
+  });
+});
+
+describe("task launch error presentation predicates", () => {
+  it("matches a summary error only by session and stamp", () => {
+    const activeError = { session_id: "session-1", stamp: "stamp-1" };
+
+    expect(
+      isMatchingTaskLaunchError(activeError, {
+        sessionId: "session-1",
+        errorStamp: "stamp-1",
+      }),
+    ).toBe(true);
+    expect(
+      isMatchingTaskLaunchError(activeError, {
+        sessionId: "session-2",
+        errorStamp: "stamp-1",
+      }),
+    ).toBe(false);
+    expect(
+      isMatchingTaskLaunchError(activeError, {
+        sessionId: "session-1",
+        errorStamp: "old-stamp",
+      }),
+    ).toBe(false);
+  });
+
+  it("matches task-level errors only when the candidate has no session", () => {
+    const activeError = { stamp: "stamp-1" };
+
+    expect(isMatchingTaskLaunchError(activeError, { errorStamp: "stamp-1" })).toBe(true);
+    expect(
+      isMatchingTaskLaunchError(activeError, {
+        sessionId: "session-1",
+        errorStamp: "stamp-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a task-wide card visible without giving it ownership of a prior session", () => {
+    const activeError = { stamp: "stamp-1" };
+
+    expect(isTaskLaunchErrorOwnedBySession(activeError, null)).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, undefined)).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "prior-session")).toBe(false);
+  });
+
+  it("gives a session-owned error ownership only of its exact session", () => {
+    const activeError = { session_id: "session-1", stamp: "stamp-1" };
+
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "session-1")).toBe(true);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, null)).toBe(false);
+    expect(isTaskLaunchErrorOwnedBySession(activeError, "session-2")).toBe(false);
+  });
+
+  it.each([
+    { metadata: { empty_turn: true }, expected: true },
+    { metadata: { failure_kind: "missing_pr_branch" }, expected: true },
+    { metadata: { failure_kind: "provider_quota_limited" }, expected: false },
+    { metadata: undefined, expected: false },
+  ])("classifies launch-only message noise", ({ metadata, expected }) => {
+    expect(isLaunchErrorSurfaceMessage({ id: "message-1", metadata } as never)).toBe(expected);
   });
 });

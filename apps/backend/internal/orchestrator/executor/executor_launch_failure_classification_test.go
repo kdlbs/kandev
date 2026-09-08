@@ -23,6 +23,15 @@ func TestClassifyLaunchFailureUsesTypedBaseBranchCategory(t *testing.T) {
 	}
 }
 
+func TestClassifyLaunchFailureUsesWorkspaceCheckoutCategory(t *testing.T) {
+	classification := classifyLaunchFailure(errors.Join(
+		errors.New("PR ref could not be materialized"), worktree.ErrWorkspaceCheckoutFailed,
+	))
+	if classification.code != models.LaunchErrorCategoryWorkspaceCheckoutFailed {
+		t.Fatalf("classification code = %q, want %q", classification.code, models.LaunchErrorCategoryWorkspaceCheckoutFailed)
+	}
+}
+
 func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-1"] = &models.TaskSession{
@@ -58,21 +67,21 @@ func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *test
 	}
 }
 
-func TestLaunchFailureReviewActionRequiresSuccessfulEligibilityResolver(t *testing.T) {
+func TestGenericLaunchFailureAlwaysOffersRetryLaunch(t *testing.T) {
 	exec := &Executor{}
 	exec.launchFailureReviewEligibility = func(context.Context, string) (bool, error) {
 		return true, nil
 	}
 	errorValue := exec.buildLastAgentError(context.Background(), "task-1", "", errors.New("start failed"))
-	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionMarkReviewDone {
-		t.Fatalf("eligible recovery actions = %#v, want mark_review_done", errorValue.RecoveryActions)
+	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
+		t.Fatalf("eligible recovery actions = %#v, want retry_launch", errorValue.RecoveryActions)
 	}
 
 	exec.launchFailureReviewEligibility = func(context.Context, string) (bool, error) {
 		return false, errors.New("lookup failed")
 	}
 	errorValue = exec.buildLastAgentError(context.Background(), "task-1", "", errors.New("start failed"))
-	if len(errorValue.RecoveryActions) != 0 {
+	if len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
 		t.Fatalf("failed eligibility lookup exposed recovery actions = %#v", errorValue.RecoveryActions)
 	}
 }

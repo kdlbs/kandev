@@ -1,7 +1,16 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
+
+const responsive = vi.hoisted(() => ({
+  usesDesktopWorkbench: true,
+  isFinePointer: true,
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
 
 const VIEW: SidebarView = {
   id: "view-all",
@@ -16,6 +25,12 @@ const VIEW: SidebarView = {
     visibleDetails: ["relative_time", "repository", "pull_request_number"],
     trailing: "git_changes",
   },
+};
+
+const SECOND_VIEW: SidebarView = {
+  ...VIEW,
+  id: "view-review",
+  name: "Needs review",
 };
 
 const state = {
@@ -47,9 +62,58 @@ vi.mock("@/components/state-provider", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  state.sidebarViews.views = [VIEW];
+  state.sidebarViews.activeViewId = VIEW.id;
+  responsive.usesDesktopWorkbench = true;
+  responsive.isFinePointer = true;
 });
 
 describe("SidebarFilterPopover task-row editor", () => {
+  it("waits for named confirmation before deleting the active view", async () => {
+    state.sidebarViews.views = [VIEW, SECOND_VIEW];
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("view-delete-button"));
+
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+    const confirmation = await screen.findByRole("dialog", { name: "Delete All tasks?" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(confirmation.isConnected).toBe(false);
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("view-delete-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete All tasks" }));
+
+    await waitFor(() => expect(state.deleteSidebarView).toHaveBeenCalledWith(VIEW.id));
+    expect(state.deleteSidebarView).toHaveBeenCalledOnce();
+  });
+
+  it("keeps deletion touch-reachable in a phone drawer with a fine pointer", async () => {
+    responsive.usesDesktopWorkbench = false;
+    responsive.isFinePointer = true;
+    state.sidebarViews.views = [VIEW, SECOND_VIEW];
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const deleteButton = screen.getByTestId("view-delete-button");
+    expect(deleteButton.className).toContain("min-h-11");
+    fireEvent.click(deleteButton);
+
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+    expect(await screen.findByRole("group", { name: "Delete All tasks?" })).toBeTruthy();
+  });
+
   it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
@@ -94,7 +158,9 @@ describe("SidebarFilterPopover task-row editor", () => {
       "border-t",
     );
   });
+});
 
+describe("SidebarFilterPopover option details", () => {
   it("removes the popover primitive's default section gap", () => {
     render(
       <SidebarFilterPopover
