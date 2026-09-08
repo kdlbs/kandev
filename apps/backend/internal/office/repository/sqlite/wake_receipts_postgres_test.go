@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
 // TestPostgresListStuckParents is the PostgreSQL twin of the SQLite
@@ -121,13 +123,24 @@ func TestPostgresListStuckParentsExcludesCoveredParent(t *testing.T) {
 }
 
 // newPostgresWakeRepo opens an isolated Postgres schema and initialises the
-// task repository before the office one, mirroring production boot order (the
-// tasks and runs tables belong to the task repository's schema init).
+// settings, task, and workflow repositories before the office one, mirroring
+// production boot order: agent_profiles belongs to the settings store schema,
+// tasks and runs belong to the task repository's schema init, and
+// workflow_step_participants.created_at (which RunnerProjection's third
+// COALESCE arm orders by) is added by the workflow repository's migration —
+// see participant_claim_postgres_test.go's newPostgresWakeRepo-equivalent
+// setup for the same ordering contract.
 func newPostgresWakeRepo(t *testing.T) (*sqlite.Repository, context.Context) {
 	t.Helper()
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
+	}
+	if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init workflow repo: %v", err)
 	}
 	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
@@ -157,16 +170,23 @@ func seedPostgresStuckParent(
 	return childID + ":COMPLETED"
 }
 
-// seedPostgresRunner inserts the agent_profiles row and the
-// workflow_step_participants runner row that RunnerProjection resolves through.
+// seedPostgresRunner inserts the backing agents row, the agent_profiles row,
+// and the workflow_step_participants runner row that RunnerProjection
+// resolves through. The agents row is required because Postgres enforces
+// agent_profiles.agent_id's foreign key, unlike the SQLite test harness's
+// default connection.
 func seedPostgresRunner(t *testing.T, ctx context.Context, repo *sqlite.Repository, parentID string) {
 	t.Helper()
 	agentID := parentID + "-agent"
 	now := time.Now().UTC()
 	execPostgres(t, ctx, repo, `
+		INSERT INTO agents (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, agentID, agentID, now, now)
+	execPostgres(t, ctx, repo, `
 		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, status, created_at, updated_at)
-		VALUES (?, '', ?, ?, 'idle', ?, ?)
-	`, agentID, agentID, agentID, now, now)
+		VALUES (?, ?, ?, ?, 'idle', ?, ?)
+	`, agentID, agentID, agentID, agentID, now, now)
 	execPostgres(t, ctx, repo, `
 		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
 		VALUES (?, '', ?, 'runner', ?)
