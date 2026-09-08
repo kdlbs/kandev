@@ -8,6 +8,8 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -46,6 +48,31 @@ func (f *fakeBudgetEvaluator) EvaluateDefaultCeiling(
 	context.Context, string, time.Time,
 ) (models.PreLaunchPolicyResult, error) {
 	return f.defaultResult, f.defaultErr
+}
+
+// deferralAttempts returns the "attempt" field of every activity entry for
+// runID matching action, sorted ascending. Sorted rather than
+// created_at-ordered because repeated deferrals in a test can land within
+// the same timestamp resolution.
+func deferralAttempts(t *testing.T, svc *service.Service, wsID, runID, action string) []string {
+	t.Helper()
+	entries, err := svc.ListActivity(context.Background(), wsID, 50)
+	if err != nil {
+		t.Fatalf("list activity: %v", err)
+	}
+	var attempts []string
+	for _, e := range entries {
+		if e.RunID != runID || string(e.Action) != action {
+			continue
+		}
+		var fields map[string]string
+		if err := json.Unmarshal([]byte(e.Details), &fields); err != nil {
+			t.Fatalf("unmarshal activity details %q: %v", e.Details, err)
+		}
+		attempts = append(attempts, fields["attempt"])
+	}
+	sort.Strings(attempts)
+	return attempts
 }
 
 func hasActivityAction(t *testing.T, svc *service.Service, wsID, action string) bool {
@@ -211,6 +238,50 @@ func TestAdmitRun_UnevaluatedPolicy_NamesPolicyInDeferral(t *testing.T) {
 	}
 	if hasActivityAction(t, svc, "ws-1", "run_budget_evaluator_fault_deferred") {
 		t.Error("unevaluated-policy fault must not also fire the generic evaluator-fault action")
+	}
+}
+
+// TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity covers
+// AC-OFFICE-BUDGET-005.6: each deferral of the same run writes its own
+// activity entry -- never coalesced into a single running total -- and each
+// entry's "attempt" field tracks that call's run.RetryCount+1.
+func TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity(t *testing.T) {
+	svc := newTestService(t)
+	fake := &fakeBudgetEvaluator{
+		preLaunchErr: &models.UnevaluatedPolicyError{PolicyID: "policy-attempt", Err: context.DeadlineExceeded},
+	}
+	svc.SetBudgetChecker(fake)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-attempt-increments", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	insertTestTask(t, svc, "task-attempt-increments", "ws-1")
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-attempt-increments"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		service.AdmitRunForTest(svc, ctx, run, agent)
+		run.RetryCount++
+	}
+
+	got := deferralAttempts(t, svc, "ws-1", run.ID, "run_budget_unevaluated_policy_deferred")
+	want := []string{"1", "2", "3"}
+	if len(got) != len(want) {
+		t.Fatalf("attempts = %v, want %v (one entry per deferral, not coalesced)", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("attempts = %v, want %v", got, want)
+			break
+		}
 	}
 }
 

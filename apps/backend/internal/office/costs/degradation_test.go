@@ -1,6 +1,7 @@
 package costs
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/shared"
@@ -60,6 +61,16 @@ func TestDegradationBlocks(t *testing.T) {
 		{
 			name:     "odd limit: priced at the true (non-truncating) half blocks",
 			degraded: true, pricedSubcents: 501, limitSubcents: 1001,
+			provenance: shared.RunProvenanceUnattended, want: true,
+		},
+		// A doubling form (2*pricedSubcents >= limitSubcents) overflows
+		// int64 and wraps negative once pricedSubcents exceeds ~half of
+		// MaxInt64, silently failing open at exactly the inputs this check
+		// exists to catch. pricedSubcents here is just past MaxInt64's true
+		// (non-truncating) half, so the correct answer is still "blocks".
+		{
+			name:     "near MaxInt64: priced just past the true half still blocks (regression for doubling overflow)",
+			degraded: true, pricedSubcents: math.MaxInt64/2 + 1, limitSubcents: math.MaxInt64,
 			provenance: shared.RunProvenanceUnattended, want: true,
 		},
 	}

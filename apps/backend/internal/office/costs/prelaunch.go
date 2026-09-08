@@ -187,13 +187,16 @@ func workspaceDailyBlockingSuperseded(survivors []*PreLaunchPolicyResult) bool {
 // fired. Every survivor's tests were computed up front, so this is a
 // selection over an already-fully-evaluated slice, never a
 // short-circuiting loop (AC-OFFICE-BUDGET-001.9/AC-OFFICE-BUDGET-006.1).
+// Within one policy, the limit test is checked before the degradation test:
+// LimitExceeded implies DegradationBlocked can also be true for the same
+// policy, and that combination still reports BlockedByLimit.
 func selectPreLaunchDecision(survivors []*PreLaunchPolicyResult) (PreLaunchDecision, *PreLaunchPolicyResult) {
 	for _, r := range survivors {
 		switch {
-		case r.DegradationBlocked:
-			return PreLaunchDecisionBlockedByDegradation, r
 		case r.LimitExceeded:
 			return PreLaunchDecisionBlockedByLimit, r
+		case r.DegradationBlocked:
+			return PreLaunchDecisionBlockedByDegradation, r
 		}
 	}
 	return PreLaunchDecisionLaunch, nil

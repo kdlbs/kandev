@@ -79,3 +79,21 @@ func TestWindowStart_DailyConvertsToUTCFirst(t *testing.T) {
 		t.Errorf("windowStart(daily) start = %v, want %v", start, want)
 	}
 }
+
+// TestSelectPreLaunchDecision_LimitTestedBeforeDegradation pins the
+// within-policy precedence: LimitExceeded implies DegradationBlocked can
+// also be true for the same policy (priced>=limit algebraically implies
+// 2*priced>=limit), so a survivor with both set must still report
+// BlockedByLimit, never BlockedByDegradation.
+func TestSelectPreLaunchDecision_LimitTestedBeforeDegradation(t *testing.T) {
+	both := &PreLaunchPolicyResult{PolicyID: "policy-both", LimitExceeded: true, DegradationBlocked: true}
+
+	decision, deciding := selectPreLaunchDecision([]*PreLaunchPolicyResult{both})
+
+	if decision != PreLaunchDecisionBlockedByLimit {
+		t.Errorf("decision = %v, want BlockedByLimit when a survivor has both LimitExceeded and DegradationBlocked set", decision)
+	}
+	if deciding != both {
+		t.Errorf("deciding policy = %+v, want %+v", deciding, both)
+	}
+}

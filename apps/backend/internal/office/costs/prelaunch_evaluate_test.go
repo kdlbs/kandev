@@ -324,6 +324,31 @@ func TestEvaluatePreLaunch_WorkspaceDailyBlockingSupersededIgnoresWhetherItFired
 	}
 }
 
+// TestEvaluatePreLaunch_WorkspaceDailyNotifyOnly_DoesNotSupersedeDefault pins
+// AC-OFFICE-BUDGET-003.4's negative case: supersession requires a
+// blocking-capable action (pause_agent or block_new_tasks). A workspace-scoped
+// daily policy configured notify_only cannot block on its own, so it must not
+// suppress the built-in default ceiling either.
+func TestEvaluatePreLaunch_WorkspaceDailyNotifyOnly_DoesNotSupersedeDefault(t *testing.T) {
+	svc, repo, execSQL := newBudgetTestService(t)
+	ctx := context.Background()
+	at := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+
+	createBudgetTestAgent(t, repo, "ws-1", "agent-1")
+	mustCreateCostEvent(t, repo, "agent-1", "", 10, at.Add(-30*time.Minute), nil)
+
+	insertRawBudgetPolicy(t, execSQL, "ws-1", models.BudgetScopeWorkspace, "", 1_000_000,
+		models.BudgetPeriodDaily, models.BudgetActionNotifyOnly, at.Add(-time.Hour))
+
+	got, err := svc.EvaluatePreLaunch(ctx, "ws-1", "agent-1", "", false, shared.RunProvenanceUnattended, at)
+	if err != nil {
+		t.Fatalf("EvaluatePreLaunch: %v", err)
+	}
+	if got.WorkspaceDailyBlockingSuperseded {
+		t.Error("WorkspaceDailyBlockingSuperseded = true, want false: a notify_only daily policy cannot block, so it must not supersede the default")
+	}
+}
+
 // TestEvaluatePreLaunch_DegradationBlocksEvenNotifyOnly pins
 // AC-OFFICE-BUDGET-004.3: pricing degradation applies regardless of the
 // policy's configured action, and only for an unattended run.
