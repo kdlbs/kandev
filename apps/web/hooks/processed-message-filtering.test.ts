@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
   dropSupersededEmptyTurnNotices,
+  filterVisibleMessages,
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
@@ -192,6 +193,42 @@ describe("dropSupersededEmptyTurnNotices", () => {
     ];
     const result = dropSupersededEmptyTurnNotices(messages);
     expect(result.map((m) => m.id)).toEqual(["tc1"]);
+  });
+});
+
+describe("filterVisibleMessages empty-turn notice supersession", () => {
+  it("drops an empty-turn notice once an approved permission_request lands on its turn, even though approval hides that request from the visible list", () => {
+    const notice = emptyTurnNotice("turn-1");
+    const approvedPermission = baseMessage({
+      id: "perm-1",
+      turn_id: "turn-1",
+      type: "permission_request",
+      metadata: { status: "approved" },
+    });
+
+    expect(
+      filterVisibleMessages([notice, approvedPermission], new Set<string>(), new Set<string>()).map(
+        (message) => message.id,
+      ),
+    ).toEqual([]);
+  });
+
+  it("drops an empty-turn notice once a permission_request tied to a visible tool call lands on its turn", () => {
+    const notice = emptyTurnNotice("turn-2");
+    const linkedPermission = baseMessage({
+      id: "perm-2",
+      turn_id: "turn-2",
+      type: "permission_request",
+      metadata: { tool_call_id: "call-1" },
+    });
+
+    expect(
+      filterVisibleMessages(
+        [notice, linkedPermission],
+        new Set<string>(["call-1"]),
+        new Set<string>(),
+      ).map((message) => message.id),
+    ).toEqual([]);
   });
 });
 

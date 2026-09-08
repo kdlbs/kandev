@@ -289,10 +289,17 @@ function isEmptyTurnNotice(message: Message): boolean {
 /** Drops an empty-turn notice once its turn has since received real agent output —
  *  the notice is emitted once at turn-completion time and nothing else retracts it,
  *  so a late-arriving reply (e.g. a subagent race) would otherwise render alongside
- *  its own "no output" contradiction. */
-export function dropSupersededEmptyTurnNotices(messages: Message[]): Message[] {
+ *  its own "no output" contradiction. `outputSourceMessages` defaults to `messages`
+ *  for standalone use, but the visibility pipeline passes the pre-filter array: a
+ *  superseding permission_request or clarification_request can already be hidden by
+ *  `filterVisibleMessages` (approved/denied/cancelled, or not the active one) by the
+ *  time it would otherwise reach this step. */
+export function dropSupersededEmptyTurnNotices(
+  messages: Message[],
+  outputSourceMessages: Message[] = messages,
+): Message[] {
   const turnsWithOutput = new Set<string>();
-  for (const message of messages) {
+  for (const message of outputSourceMessages) {
     if (message.turn_id && isRealAgentOutput(message)) {
       turnsWithOutput.add(message.turn_id);
     }
@@ -351,6 +358,7 @@ export function filterVisibleMessages(
   return collapseTodoSnapshotsPerTurn(
     dropSupersededEmptyTurnNotices(
       deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+      messages,
     ),
   );
 }
