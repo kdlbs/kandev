@@ -252,6 +252,17 @@ type TaskDTO struct {
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
 
+	// RunnerEditable and RunnerIneligibleReason are the runner-mutability
+	// verdict (models.EvaluateRunnerMutability), derived on every read and
+	// never persisted. Always serialized, never omitted: a stale cached
+	// `true` would offer an action the server refuses, while a missing key
+	// is indistinguishable from false, so both fields are always present.
+	// Stamped by EnrichTaskRunnerMutability.
+	RunnerEditable bool `json:"runner_editable"`
+	// RunnerIneligibleReason is always a member of the closed reason
+	// vocabulary (models.RunnerReason*), never empty.
+	RunnerIneligibleReason string `json:"runner_ineligible_reason"`
+
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
 	// AssigneeUserID is the human assignee, independent of the agent one.
@@ -980,6 +991,12 @@ func FromTaskWithSessionInfo(
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		// RunnerEditable/RunnerIneligibleReason default fail-closed: a caller
+		// that builds a DTO through this path without running
+		// EnrichTaskRunnerMutability never evaluated the verdict, and the
+		// empty string is outside the closed reason vocabulary.
+		RunnerEditable:         false,
+		RunnerIneligibleReason: models.RunnerReasonEvaluationUnavailable,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
