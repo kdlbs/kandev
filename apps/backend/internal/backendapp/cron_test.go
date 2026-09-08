@@ -28,11 +28,11 @@ func newTestOfficeRepoForCron(t *testing.T) (*officesqlite.Repository, *sqlx.DB)
 	}
 	database := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = database.Close() })
-	if _, cleanup, err := store.Provide(database, database, nil); err != nil {
+	_, cleanup, err := store.Provide(database, database, nil)
+	if err != nil {
 		t.Fatalf("agent settings store migrations: %v", err)
-	} else {
-		t.Cleanup(func() { _ = cleanup() })
 	}
+	t.Cleanup(func() { _ = cleanup() })
 	repo, err := officesqlite.NewWithDB(database, database, nil)
 	if err != nil {
 		t.Fatalf("office migrations: %v", err)
