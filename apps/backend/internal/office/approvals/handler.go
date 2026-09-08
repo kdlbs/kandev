@@ -14,7 +14,12 @@ import (
 type ServiceIface interface {
 	GetApproval(ctx context.Context, id string) (*Approval, error)
 	ListApprovals(ctx context.Context, wsID string) ([]*Approval, error)
-	DecideApproval(ctx context.Context, approvalID, status, decidedBy, note string) (*Approval, error)
+	DecideApproval(
+		ctx context.Context,
+		approvalID, status, decidedBy string,
+		actorKind models.ActorKind,
+		note string,
+	) (*Approval, error)
 }
 
 // Handler provides HTTP handlers for approval routes.
@@ -63,14 +68,14 @@ func (h *Handler) decideApproval(c *gin.Context) {
 	// requests, and a caller in workspace A must not be able to decide
 	// workspace B's approvals).
 	caller := agents.CallerFromContext(c)
-	decidedBy, err := resolveDecider(c, caller, approval, req.DecidedBy)
+	decidedBy, actorKind, err := resolveDecider(c, caller, approval, req.DecidedBy)
 	if err != nil {
 		return
 	}
 
 	decided, err := h.svc.DecideApproval(
 		c.Request.Context(), approval.ID,
-		req.Status, decidedBy, req.DecisionNote,
+		req.Status, decidedBy, actorKind, req.DecisionNote,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -79,37 +84,40 @@ func (h *Handler) decideApproval(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"approval": decided})
 }
 
-// resolveDecider returns the trusted "decided_by" identifier and performs
-// the agent-caller authorization checks. Writes the HTTP error response
-// directly on rejection and returns a non-nil error so the handler stops.
+// resolveDecider returns the trusted "decided_by" identifier and its actor
+// kind, and performs the agent-caller authorization checks. Writes the HTTP
+// error response directly on rejection and returns a non-nil error so the
+// handler stops.
 //
 // For UI callers (no agent JWT) the request body's DecidedBy is still
 // accepted for now — the dashboard does not yet ship a real user-session
 // auth layer; once it does, this branch should derive the identity from
-// the session instead.
+// the session instead. Either way, an unauthenticated caller is not a
+// verified agent, so it is attributed as ActorKindUser
+// (AC-OFFICE-RUN-CAUSATION-001.15).
 func resolveDecider(
 	c *gin.Context, caller *models.AgentInstance, approval *Approval, requestedDecidedBy string,
-) (string, error) {
+) (string, models.ActorKind, error) {
 	if caller == nil {
 		if requestedDecidedBy != "" {
-			return requestedDecidedBy, nil
+			return requestedDecidedBy, models.ActorKindUser, nil
 		}
-		return "ui", nil
+		return "ui", models.ActorKindUser, nil
 	}
 	if caller.WorkspaceID != approval.WorkspaceID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot decide approvals from another workspace"})
-		return "", shared.ErrForbidden
+		return "", "", shared.ErrForbidden
 	}
 	perms := shared.ResolvePermissions(shared.AgentRole(caller.Role), caller.Permissions)
 	if !shared.HasPermission(perms, shared.PermCanApprove) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: missing can_approve"})
-		return "", shared.ErrForbidden
+		return "", "", shared.ErrForbidden
 	}
 	// Prevent self-approval of one's own hire/request approvals.
 	if approval.RequestedByAgentProfileID != "" &&
 		approval.RequestedByAgentProfileID == caller.ID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot decide an approval you requested"})
-		return "", shared.ErrForbidden
+		return "", "", shared.ErrForbidden
 	}
-	return caller.ID, nil
+	return caller.ID, models.ActorKindAgent, nil
 }
