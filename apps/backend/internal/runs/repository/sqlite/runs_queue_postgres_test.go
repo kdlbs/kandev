@@ -95,6 +95,47 @@ func TestPostgresCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.
 	checkString(t, "payload", got.Payload, `{"task_id":"pg-task-c"}`)
 }
 
+// TestPostgresCoalesceRun_MergesTasklessIntoTasklessRun is the Postgres
+// twin of TestCoalesceRun_MergesTasklessIntoTasklessRun: the ->>'task_id'
+// IS NULL fragment must still merge a taskless incoming payload into a
+// taskless queued row, not just reject a task-carrying one. Untested,
+// this fragment could be silently rewritten to always-false (e.g. an
+// extra AND clause) and every other Postgres coalesce test would still
+// pass, since none of them assert a taskless merge succeeds.
+func TestPostgresCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"empty object", `{}`},
+		{"other field set", `{"routine_id":"r1"}`},
+		{"explicit null task_id", `{"task_id":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newTestRepoPostgres(t)
+			ctx := context.Background()
+
+			queued := mustCreateRun(t, repo, &models.Run{
+				ID: "pg-taskless", AgentProfileID: "a1", Reason: "heartbeat",
+				Payload: tc.payload, Status: "queued", CoalescedCount: 1,
+			})
+			setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+			merged, err := repo.CoalesceRun(ctx, "a1", "heartbeat", 3600, `{"merged":true}`)
+			if err != nil {
+				t.Fatalf("coalesce: %v", err)
+			}
+			if !merged {
+				t.Fatalf("coalesce = false for taskless into taskless, want true")
+			}
+
+			got := mustGetRun(t, repo, queued.ID)
+			checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+			checkString(t, "payload", got.Payload, `{"merged":true}`)
+		})
+	}
+}
+
 // TestPostgresCoalesceRun_MergesSameTask is the positive-path twin: a
 // same-task, same-agent, same-reason request still merges, proving the
 // Postgres JSONExtract fragment is not just "always false" (which would

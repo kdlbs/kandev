@@ -185,6 +185,45 @@ func TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.T) {
 	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
 }
 
+// TestCoalesceRun_MergesTasklessIntoTasklessRun pins the positive half of
+// the taskless guarantee that TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun
+// only pins negatively: a taskless incoming payload must still merge into a
+// taskless queued run, so heartbeat, routine_dispatch_* and agent_error wakes
+// keep coalescing instead of growing the queue unboundedly.
+func TestCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"empty object", `{}`},
+		{"other field set", `{"routine_id":"r1"}`},
+		{"explicit null task_id", `{"task_id":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			ctx := context.Background()
+
+			queued := mustCreateRun(t, repo, &models.Run{
+				ID: "taskless", AgentProfileID: "a1", Reason: "heartbeat",
+				Payload: tc.payload, Status: "queued", CoalescedCount: 1,
+			})
+			setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+			merged, err := repo.CoalesceRun(ctx, "a1", "heartbeat", 3600, `{"merged":true}`)
+			if err != nil {
+				t.Fatalf("coalesce: %v", err)
+			}
+			if !merged {
+				t.Fatalf("coalesce = false for taskless into taskless, want true")
+			}
+
+			got := mustGetRun(t, repo, queued.ID)
+			checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+			checkString(t, "payload", got.Payload, `{"merged":true}`)
+		})
+	}
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
