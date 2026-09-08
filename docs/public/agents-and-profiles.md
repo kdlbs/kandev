@@ -354,7 +354,13 @@ Profile environment rules are:
 - `TASK_DESCRIPTION` and every `KANDEV_*` key are reserved;
 - an entry must use either a literal value or a secret reference, never both.
 
-Secret references are resolved at process launch. A deleted, missing, or unreadable secret causes that environment entry to be omitted; Kandev does not fall back to an old value. Empty resolved values are also omitted. Profile values fill missing environment keys but do not overwrite environment supplied by the executor or Kandev runtime.
+Kandev resolves secret references at process launch and cold resume. A deleted, missing, or unreadable secret blocks launch before the agent starts. The error identifies the environment key and its source.
+
+Secret deletion is blocked while an agent profile, executor profile, or repository environment references the secret. The error lists the affected references. Remove or replace those references before deleting the secret.
+
+If a reference is already broken, open the named profile or repository environment editor. Select the replacement secret for the affected key, save, and retry. Creating a secret with the same name does not repair the reference because each secret has a separate ID.
+
+API clients can explicitly force deletion. This leaves broken references and blocks future launches until those references are repaired. See the [secret deletion API contract](websocket-api.md#settings-secrets-and-automations).
 
 Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 

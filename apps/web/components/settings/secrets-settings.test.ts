@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
 import type { SecretListItem } from "@/lib/types/http-secrets";
+import { ApiError } from "@/lib/api/client";
 
 const mocks = vi.hoisted(() => ({
   deleteSecret: vi.fn(),
@@ -92,6 +93,31 @@ describe("getSecretDraftMeta", () => {
 });
 
 describe("SecretsSettings deletion lifecycle", () => {
+  it("shows affected references and retains the secret on an in-use conflict", async () => {
+    mocks.deleteSecret.mockRejectedValue(
+      new ApiError("private server details", 409, {
+        code: "secret_in_use",
+        references: [
+          { kind: "agent_profile", id: "profile-1", name: "Claude review", key: "MY_TOKEN" },
+        ],
+      }),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    fireEvent.click(
+      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(CONFIRM_TEST_ID),
+    );
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith({
+        description:
+          'This secret is in use by: Agent profile "Claude review" (MY_TOKEN). Remove or replace these references before deleting it.',
+        variant: "error",
+      }),
+    );
+    expect(mocks.removeSecret).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.toast.mock.calls)).not.toContain("private server details");
+  });
+
   it("cancels locally without dispatching deletion", () => {
     renderSettings();
 

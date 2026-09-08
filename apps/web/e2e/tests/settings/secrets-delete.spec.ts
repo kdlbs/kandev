@@ -55,7 +55,11 @@ test.describe("Secret deletion", () => {
     }
   });
 
-  test("keeps the target row and reports localized failure", async ({ testPage, apiClient }) => {
+  test("keeps the target row and explains an in-use conflict", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
     const name = `E2E Failed Delete Secret ${runToken()}`;
     const secret = await apiClient.createSecret(name, SECRET_VALUE);
 
@@ -69,18 +73,42 @@ test.describe("Secret deletion", () => {
       const row = testPage.getByTestId(`secret-row-${secret.id}`);
       await testPage.route(`**/api/v1/secrets/${secret.id}`, async (route) => {
         await route.fulfill({
-          status: 500,
+          status: 409,
           contentType: "application/json",
-          body: JSON.stringify({ error: "synthetic delete failure" }),
+          body: JSON.stringify({
+            code: "secret_in_use",
+            references: [
+              {
+                kind: "agent_profile",
+                name: "E2E review profile",
+                key: "E2E_TOKEN",
+              },
+            ],
+          }),
         });
       });
       await row.getByRole("button", { name: `Delete secret ${name}` }).click();
+      const confirmation = testPage.getByTestId("secret-delete-confirm-popover");
       await testPage.getByTestId("secret-delete-confirm").click();
+      await expect(confirmation).toBeHidden();
 
-      await expect(testPage.getByTestId("toast-message")).toContainText("Couldn't delete secret");
+      const toast = testPage.getByTestId("toast-message");
+      await expect(toast).toContainText(
+        'This secret is in use by: Agent profile "E2E review profile" (E2E_TOKEN). Remove or replace these references before deleting it.',
+      );
+      await expect
+        .poll(async () => {
+          const box = await toast.boundingBox();
+          const viewport = testPage.viewportSize();
+          return Boolean(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width);
+        })
+        .toBe(true);
+      await prCapture.screenshot("desktop-secrets-delete-conflict", {
+        caption: "Desktop secret deletion conflict toast",
+      });
       await expect(row).toBeVisible();
       await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
-      await expect(testPage.locator("body")).not.toContainText("synthetic delete failure");
+      await expect(testPage.locator("body")).not.toContainText("secret_in_use");
     } finally {
       await testPage.unroute(`**/api/v1/secrets/${secret.id}`);
       await apiClient.deleteSecretIfPresent(secret.id);

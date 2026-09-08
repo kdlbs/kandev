@@ -75,4 +75,64 @@ test.describe("mobile-secrets-delete", () => {
       await apiClient.deleteSecretIfPresent(secret.id).catch(() => undefined);
     }
   });
+
+  test("keeps the target row and explains an in-use conflict", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const name = `E2E Mobile Failed Delete Secret ${runToken()}`;
+    const secret = await apiClient.createSecret(name, SECRET_VALUE);
+
+    try {
+      await expect
+        .poll(async () => (await apiClient.listSecrets()).some((item) => item.id === secret.id), {
+          timeout: 30_000,
+        })
+        .toBe(true);
+      await testPage.goto("/settings/general/secrets");
+      const row = testPage.getByTestId(`secret-row-${secret.id}`);
+      await testPage.route(`**/api/v1/secrets/${secret.id}`, async (route) => {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "secret_in_use",
+            references: [
+              {
+                kind: "agent_profile",
+                name: "E2E mobile review profile",
+                key: "E2E_MOBILE_TOKEN",
+              },
+            ],
+          }),
+        });
+      });
+
+      await row.getByRole("button", { name: `Delete secret ${name}` }).tap();
+      const inline = row.getByTestId("secret-delete-inline-confirmation");
+      await inline.getByTestId("secret-delete-confirm").tap();
+
+      const toast = testPage.getByTestId("toast-message");
+      await expect(toast).toContainText(
+        'This secret is in use by: Agent profile "E2E mobile review profile" (E2E_MOBILE_TOKEN). Remove or replace these references before deleting it.',
+      );
+      await expect
+        .poll(async () => {
+          const box = await toast.boundingBox();
+          const viewport = testPage.viewportSize();
+          return Boolean(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width);
+        })
+        .toBe(true);
+      await prCapture.screenshot("mobile-secrets-delete-conflict", {
+        caption: "Mobile secret deletion conflict toast",
+      });
+      await expect(row).toBeVisible();
+      await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
+      await expect(testPage.locator("body")).not.toContainText("secret_in_use");
+    } finally {
+      await testPage.unroute(`**/api/v1/secrets/${secret.id}`);
+      await apiClient.deleteSecretIfPresent(secret.id).catch(() => undefined);
+    }
+  });
 });

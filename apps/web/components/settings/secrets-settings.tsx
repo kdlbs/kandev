@@ -15,6 +15,7 @@ import { useRequest } from "@/lib/http/use-request";
 import type { SecretListItem, SecretScope, UpdateSecretRequest } from "@/lib/types/http-secrets";
 import { SecretForm, defaultFormState, type SecretFormState } from "./secret-form";
 import { SecretListItemRow } from "./secrets-list-item-row";
+import { secretDeleteErrorMessage } from "./secret-delete-error";
 import { CopyMoveSecretDialog, type CopyMoveMode } from "./copy-move-secret-dialog";
 
 /* ------------------------------------------------------------------ */
@@ -215,8 +216,8 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       if (!deleteTarget) return;
       const id = deleteTarget.id;
       setDeleteTarget(null);
-      return deleteRequest.run(id).catch(() => {
-        toast({ description: t("settings:secretDeleteFailed"), variant: "error" });
+      return deleteRequest.run(id).catch((error: unknown) => {
+        toast({ description: secretDeleteErrorMessage(error, t), variant: "error" });
       });
     },
     openTransfer: (secret: SecretListItem) => {

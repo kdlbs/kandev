@@ -14,6 +14,7 @@ type Service struct {
 	logger              *logger.Logger
 	workspaceAuthorizer func(context.Context, string) error
 	workspaceExistence  func(context.Context, string) error
+	referenceChecker    func(context.Context, string) ([]Reference, error)
 }
 
 // NewService creates a new secrets service.
@@ -239,28 +240,28 @@ func (s *Service) UpdateWorkspaceSecret(ctx context.Context, id, workspaceID str
 }
 
 // Delete removes a secret.
-func (s *Service) Delete(ctx context.Context, id string) error {
+func (s *Service) Delete(ctx context.Context, id string, force ...bool) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	return s.deleteChecked(ctx, id, "", force)
 }
 
 // DeleteForWorkspace deletes a Global or same-workspace secret.
-func (s *Service) DeleteForWorkspace(ctx context.Context, id, workspaceID string) error {
+func (s *Service) DeleteForWorkspace(ctx context.Context, id, workspaceID string, force ...bool) error {
 	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	return s.deleteChecked(ctx, id, workspaceID, force)
 }
 
 // DeleteWorkspaceSecret deletes a Workspace secret after checking the
 // caller's workspace access.
-func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID string) error {
+func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID string, force ...bool) error {
 	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	return s.deleteChecked(ctx, id, workspaceID, force)
 }
 
 // List returns all secrets without values.
