@@ -219,3 +219,79 @@ func TestHandleHandshakeRenewsOwnership(t *testing.T) {
 		t.Fatalf("UnownedFor after handshake = %v, want well under the backdated hour (handshake should have renewed)", elapsed)
 	}
 }
+
+// TestNonRenewingControlOperationsDoNotRenewOwnership pins the negative
+// clause of AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: beyond the claim, the
+// bootstrap handshake and a successful credential rotation, "no operation
+// shall renew ownership: neither an instance operation, nor an open stream,
+// nor enumeration". Only the three renewing operations are pinned
+// positively elsewhere, which leaves the clause that actually carries the
+// guarantee unguarded -- a renewal added to the shared credential
+// middleware, or to any instance route, would make a backend that is busy
+// but has stopped renewing look present forever and defeat the unowned
+// shutdown entirely. Every case drives real HTTP through the router, so the
+// middleware is on the path under test rather than bypassed.
+//
+// The clause's "open stream" arm is structural rather than testable here:
+// the streaming routes live on the per-instance Server (server.go), which
+// holds no ownership state at all, so no stream can reach this clock.
+func TestNonRenewingControlOperationsDoNotRenewOwnership(t *testing.T) {
+	const backdate = time.Hour
+
+	cfg := &config.Config{AuthToken: "test-token"}
+	log := logger.Default()
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("test-token"))
+
+	// Each call asserts its own outcome before ownership is examined. A
+	// request that never reached the handler would also leave ownership
+	// unrenewed, so without these the test would pass vacuously against a
+	// server that was not listening at all.
+	cases := []struct {
+		name string
+		call func(t *testing.T)
+	}{
+		{"enumeration", func(t *testing.T) {
+			if _, err := client.ListInstances(t.Context()); err != nil {
+				t.Fatalf("ListInstances: %v", err)
+			}
+		}},
+		{"instance operation", func(t *testing.T) {
+			_, err := client.GetInstance(t.Context(), "no-such-instance")
+			// The not-found wording is the handler's 404, distinct from the
+			// "failed to get instance" a transport error produces, so this
+			// asserts the request was served rather than merely refused.
+			if err == nil || err.Error() != `instance "no-such-instance" not found` {
+				t.Fatalf("GetInstance error = %v, want the handler's not-found response", err)
+			}
+		}},
+		{"ownership details read", func(t *testing.T) {
+			if _, err := client.GetServerDetails(t.Context()); err != nil {
+				t.Fatalf("GetServerDetails: %v", err)
+			}
+		}},
+		{"health", func(t *testing.T) {
+			if err := client.Health(t.Context()); err != nil {
+				t.Fatalf("Health: %v", err)
+			}
+		}},
+		{"identity", func(t *testing.T) {
+			if _, err := client.GetIdentity(t.Context()); err != nil {
+				t.Fatalf("GetIdentity: %v", err)
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backdateOwnership(cs, backdate)
+			tc.call(t)
+			if elapsed := cs.ownership.UnownedFor(); elapsed < backdate {
+				t.Fatalf("UnownedFor() after %s = %v, want >= %v (this operation must not renew ownership)", tc.name, elapsed, backdate)
+			}
+		})
+	}
+}
