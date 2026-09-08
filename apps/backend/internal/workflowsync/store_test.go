@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/github"
 )
 
@@ -172,6 +173,7 @@ func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
 	require.NoError(t, store.RecordSyncFailure(ctx, "ws-1", "rate limited", failureDirective{
 		class: string(github.FailureSecondaryRateLimit), consecutive: 3,
 		nextAttemptAt: &nextAttempt,
+		suspended:     true,
 	}, now))
 
 	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
@@ -180,6 +182,7 @@ func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
 	require.NotNil(t, cfg.NextAttemptAt)
 	assert.Equal(t, nextAttempt, *cfg.NextAttemptAt)
 	assert.Equal(t, string(github.FailureSecondaryRateLimit), cfg.LastErrorClass)
+	assert.True(t, cfg.PollSuspended)
 
 	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
 	require.NoError(t, err)
@@ -188,4 +191,12 @@ func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
 	assert.Empty(t, cfg.LastErrorClass)
 	assert.False(t, cfg.PollSuspended)
 	assert.Empty(t, cfg.PollSuspensionReason)
+}
+
+func TestSchemaSQLForDriverRendersBooleanDefaultsForPostgres(t *testing.T) {
+	schema := "poll_suspended BOOLEAN NOT NULL DEFAULT 0, next_attempt_at DATETIME"
+	assert.Equal(t,
+		"poll_suspended BOOLEAN NOT NULL DEFAULT FALSE, next_attempt_at TIMESTAMPTZ",
+		schemaSQLForDriver(schema, dialect.PGX),
+	)
 }
