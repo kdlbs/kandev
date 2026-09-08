@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -286,6 +287,12 @@ func (r *Repository) UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, 
 
 // AddWorkspaceGroupMember inserts a membership row. role defaults to "member"
 // when empty. INSERT OR IGNORE: re-adding the same task is a no-op.
+//
+// Takes the shared task-row lock (AC-TASKS-RUNNER-SWITCH-002.3a class-2
+// writer) before writing: office and the task package share the same tasks
+// table through the same SQLite writer pool, so this membership insert and a
+// concurrent runner switch on taskID must resolve to exactly one of two
+// outcomes rather than each proceeding unaware of the other.
 func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error {
 	if groupID == "" || taskID == "" {
 		return errors.New("workspace group member: groupID and taskID required")
@@ -293,7 +300,18 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 	if role == "" {
 		role = models.WorkspaceMemberRoleMember
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskID); lockErr != nil &&
+		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+		return lockErr
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT OR IGNORE INTO task_workspace_group_members (
 			workspace_group_id, task_id, role, created_at
 		)
@@ -308,7 +326,7 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 		return err
 	} else if rows == 0 {
 		var exists bool
-		if err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 			SELECT EXISTS (
 				SELECT 1 FROM task_workspace_group_members
 				WHERE workspace_group_id = ? AND task_id = ?
@@ -317,11 +335,11 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 			return err
 		}
 		if exists {
-			return nil
+			return tx.Commit()
 		}
 		return fmt.Errorf("workspace group %s is not accepting members", groupID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ReleaseWorkspaceGroupMember stamps released_at + release_reason and
