@@ -162,6 +162,22 @@ type TaskRepository interface {
 	// and bumps updated_at. Returns the task as it exists immediately after
 	// the update, or nil if no task held the identity.
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
+
+	// SwitchTaskRunner re-evaluates AC-TASKS-RUNNER-SWITCH-001.3's ten
+	// mutability conditions inside a single task-row-locked transaction,
+	// confirms the compatibility gate's pre-transaction repository snapshot
+	// (req.ResolvedRepositoryID / ResolvedRepositoryUpdatedAt) is still
+	// current, and — only when every check passes — writes
+	// req.ExecutorProfileID as the task's sole metadata change. It never
+	// evaluates the compatibility gate itself; that runs before this call,
+	// outside any transaction, per AC-TASKS-RUNNER-SWITCH-002.7b.
+	//
+	// Returns *repoerrors.ErrRunnerMutabilityConflict when the mutability
+	// gate fails, repoerrors.ErrRunnerCompatibilityConflict when the
+	// compatibility gate fails, and repoerrors.ErrRunnerEvaluationUnavailable
+	// for a failed read, a stale compatibility snapshot, a failed lock, a
+	// failed write, or a failed commit.
+	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
 }
 
 // TaskPriorityRepository updates a task's priority without replacing the

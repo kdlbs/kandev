@@ -1,6 +1,10 @@
 package models
 
-import "strings"
+import (
+	"context"
+	"strings"
+	"time"
+)
 
 // Runner mutability reason codes. This is the closed vocabulary
 // AC-TASKS-RUNNER-SWITCH-001.1 requires runner_ineligible_reason to be a
@@ -111,4 +115,68 @@ func runnerWorkspaceBindingIndependent(hasParent bool, mode string) bool {
 		return mode != WorkspaceModeSharedGroup
 	}
 	return mode == WorkspaceModeNewWorkspace
+}
+
+// RunnerSignalsFromTask fills the fields of RunnerMutabilitySignals that
+// live on the task row itself (archived, declared workspace path, declared
+// workspace mode, has-parent) rather than in another table. The caller
+// fills in RepositoryCount and the four row-existence checks, which the
+// task row does not carry.
+func RunnerSignalsFromTask(task *Task) RunnerMutabilitySignals {
+	return RunnerMutabilitySignals{
+		Archived:      task.ArchivedAt != nil,
+		WorkspacePath: runnerWorkspacePathFromMetadata(task.Metadata),
+		HasParent:     task.ParentID != "",
+		WorkspaceMode: runnerWorkspaceModeFromMetadata(task.Metadata),
+	}
+}
+
+func runnerWorkspacePathFromMetadata(metadata map[string]interface{}) string {
+	if v, ok := metadata[MetaKeyWorkspacePath].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// runnerWorkspaceModeFromMetadata reads the nested "workspace"."mode" block
+// WorkspacePolicy.MetadataBlock (internal/task/service/handoff_service.go)
+// writes onto the task row.
+func runnerWorkspaceModeFromMetadata(metadata map[string]interface{}) string {
+	ws, ok := metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	mode, _ := ws["mode"].(string)
+	return mode
+}
+
+// RunnerSwitchRequest bundles a runner-switch write's inputs: the target
+// profile, the compatibility gate's pre-transaction resolution
+// (AC-TASKS-RUNNER-SWITCH-002.7b), and the office-owned workspace-group
+// membership check (mutability condition 9) that the task repository cannot
+// reach directly — GroupMembershipChecker is called after the task row lock
+// is acquired, so its answer is as current as every other condition's.
+type RunnerSwitchRequest struct {
+	TaskID            string
+	ExecutorProfileID string
+	// CompatibilityChecked is true when the target executor requires a
+	// clone URL at all (so a resolution actually ran). When false, the
+	// compatibility gate is inapplicable and ResolvedRepository* are unused.
+	CompatibilityChecked bool
+	// CompatibilityCloneURLFound is meaningful only when CompatibilityChecked
+	// is true: whether resolution found a usable clone URL for
+	// ResolvedRepositoryID.
+	CompatibilityCloneURLFound  bool
+	ResolvedRepositoryID        string
+	ResolvedRepositoryUpdatedAt time.Time
+	GroupMembershipChecker      func(ctx context.Context, taskID string) (bool, error)
+}
+
+// RunnerSwitchResult is SwitchTaskRunner's success outcome.
+type RunnerSwitchResult struct {
+	Task *Task
+	// Changed is false for the no-op success case of
+	// AC-TASKS-RUNNER-SWITCH-002.11: the requested profile already equals
+	// the stored one, both gates still passed, but nothing was written.
+	Changed bool
 }

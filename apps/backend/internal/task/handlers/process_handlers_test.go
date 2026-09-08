@@ -187,6 +187,9 @@ func (m *mockRepository) SettleTaskExternalID(_ context.Context, _, _ string, _ 
 func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	return nil, nil
+}
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }

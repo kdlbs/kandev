@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func eligibleSignals() RunnerMutabilitySignals {
 	return RunnerMutabilitySignals{RepositoryCount: 1}
@@ -140,4 +143,54 @@ func TestEvaluateRunnerMutability_WorkspacePathBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunnerSignalsFromTask(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("archived", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{ArchivedAt: &now})
+		if !s.Archived {
+			t.Fatalf("Archived = false, want true")
+		}
+	})
+
+	t.Run("not archived", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{})
+		if s.Archived {
+			t.Fatalf("Archived = true, want false")
+		}
+	})
+
+	t.Run("workspace path from metadata", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{Metadata: map[string]interface{}{
+			MetaKeyWorkspacePath: "/host/path",
+		}})
+		if s.WorkspacePath != "/host/path" {
+			t.Fatalf("WorkspacePath = %q, want /host/path", s.WorkspacePath)
+		}
+	})
+
+	t.Run("has parent", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{ParentID: "parent-1"})
+		if !s.HasParent {
+			t.Fatalf("HasParent = false, want true")
+		}
+	})
+
+	t.Run("workspace mode from nested metadata block", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "new_workspace"},
+		}})
+		if s.WorkspaceMode != "new_workspace" {
+			t.Fatalf("WorkspaceMode = %q, want new_workspace", s.WorkspaceMode)
+		}
+	})
+
+	t.Run("no metadata block", func(t *testing.T) {
+		s := RunnerSignalsFromTask(&Task{})
+		if s.WorkspaceMode != "" || s.WorkspacePath != "" {
+			t.Fatalf("expected empty mode/path, got %+v", s)
+		}
+	})
 }

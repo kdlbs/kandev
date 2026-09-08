@@ -183,6 +183,10 @@ func (r *idempotentCreateTaskRepo) ReleaseTaskExternalID(_ context.Context, work
 	return nil, nil
 }
 
+func (r *idempotentCreateTaskRepo) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	return nil, nil
+}
+
 func (r *idempotentCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
 	return &models.Workflow{ID: id, WorkspaceID: "ws-1"}, nil
 }
