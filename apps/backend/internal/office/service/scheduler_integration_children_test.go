@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -37,13 +36,12 @@ func (c *countingPRLister) ListTaskPRsByTaskIDs(
 // childFixture seeds a parent and its children on the service's repository.
 type childFixture struct {
 	svc *service.Service
-	si  *service.SchedulerIntegration
 }
 
 func newChildFixture(t *testing.T, prs service.TaskPRLister) *childFixture {
 	t.Helper()
 	svc := newTestService(t, service.ServiceOptions{TaskPRs: prs})
-	return &childFixture{svc: svc, si: service.NewSchedulerIntegration(svc, time.Minute)}
+	return &childFixture{svc: svc}
 }
 
 func (f *childFixture) exec(t *testing.T, query string, args ...any) {
@@ -73,7 +71,7 @@ func (f *childFixture) seedComment(t *testing.T, id, taskID, body, createdAt str
 // between the lead-in and the closing instruction.
 func (f *childFixture) section(t *testing.T, reason, payload string) string {
 	t.Helper()
-	pc := f.si.BuildPromptContextForTest(context.Background(), reason, payload)
+	pc := service.BuildPromptContextForTest(f.svc, context.Background(), reason, payload)
 	prompt := service.BuildPrompt(pc)
 	body, ok := strings.CutSuffix(prompt, "\nReview their output and determine next steps.")
 	if !ok {
@@ -179,7 +177,7 @@ func TestNonChildrenReasonPerformsNoChildRead(t *testing.T) {
 	f.seedParent(t, "p1", "Parent")
 	f.seedChild(t, "c1", "p1", "Auth", "COMPLETED", "KAN-2", "2026-01-01 00:00:01")
 
-	pc := f.si.BuildPromptContextForTest(
+	pc := service.BuildPromptContextForTest(f.svc,
 		context.Background(), service.RunReasonTaskAssigned, `{"task_id":"p1"}`)
 	if len(pc.ChildSummaries) != 0 {
 		t.Errorf("task_assigned gained %d child summaries", len(pc.ChildSummaries))
@@ -212,7 +210,7 @@ func TestChildReadFailureStillLaunches(t *testing.T) {
 	// The last-comment subquery cannot run without this table.
 	f.exec(t, `DROP TABLE task_comments`)
 
-	pc := f.si.BuildPromptContextForTest(
+	pc := service.BuildPromptContextForTest(f.svc,
 		context.Background(), service.RunReasonTaskChildrenCompleted, `{"task_id":"p1"}`)
 	prompt := service.BuildPrompt(pc)
 
@@ -253,7 +251,7 @@ func TestRunWithoutTaskIDSkipsChildRead(t *testing.T) {
 	prs := &countingPRLister{}
 	f := newChildFixture(t, prs)
 
-	pc := f.si.BuildPromptContextForTest(
+	pc := service.BuildPromptContextForTest(f.svc,
 		context.Background(), service.RunReasonTaskChildrenCompleted, `{}`)
 	prompt := service.BuildPrompt(pc)
 

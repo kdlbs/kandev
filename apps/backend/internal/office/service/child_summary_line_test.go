@@ -197,6 +197,32 @@ func TestChildSummaryLine_TitleCap(t *testing.T) {
 	}
 }
 
+func TestChildSummaryLine_IdentifierAndStateCaps(t *testing.T) {
+	got := line(t, service.ChildSummaryPrompt{
+		Identifier: strings.Repeat("界", 51), Title: "Auth", State: strings.Repeat("界", 51)})
+
+	identifier := strings.Repeat("界", 38) + " [truncated]"
+	state := strings.Repeat("界", 38) + " [truncated]"
+	if !strings.Contains(got, "- "+identifier+" (Auth) [") {
+		t.Errorf("identifier was not capped: %q", got)
+	}
+	if !strings.HasSuffix(got, "["+state+"]") {
+		t.Errorf("state was not capped: %q", got)
+	}
+	if n := utf8.RuneCountInString(identifier); n != 50 {
+		t.Errorf("identifier = %d code points, want 50 including the marker", n)
+	}
+	if n := utf8.RuneCountInString(state); n != 50 {
+		t.Errorf("state = %d code points, want 50 including the marker", n)
+	}
+
+	exact := line(t, service.ChildSummaryPrompt{
+		Identifier: strings.Repeat("界", 50), Title: "Auth", State: strings.Repeat("界", 50)})
+	if strings.Contains(exact, "[truncated]") {
+		t.Errorf("identifier or state exactly at the cap was marked truncated: %q", exact)
+	}
+}
+
 func TestChildSummaryLine_PRSegment(t *testing.T) {
 	t.Run("sorted ascending by url", func(t *testing.T) {
 		got := line(t, service.ChildSummaryPrompt{

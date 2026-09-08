@@ -94,7 +94,8 @@ introduced.
 ### Renderer (Task 02)
 
 `apps/backend/internal/office/service/prompt_builder.go`. `ChildSummaryPrompt`
-gains `PRLinks []string`. `writeChildSummaryLine` renders four shapes — the two
+gains `PRLinks []string`. `writeChildSummaryLine` caps identifiers and states at
+50 code points, titles and URLs at 200 code points, and renders four shapes — the two
 optional segments, comment then pull requests, are each self-delimiting and carry
 their own leading ` — `. Every interpolated field has each rune rejected by
 `strconv.IsPrint` replaced with a single space, before any cap and before `%q`
@@ -142,8 +143,8 @@ which strictly increases delivery of a wake already judged due
 | --- | --- |
 | 001.1, 001.2 | `prompt_builder_test.go` `TestBuildPrompt_ChildrenCompleted_WithSummaries`; `scheduler_integration_children_test.go` `TestEnrichChildrenContext_ListsLiveChildren` |
 | 001.3, 001.4 | `prompt_builder_test.go` `TestWriteChildSummaryLine_CommentSegment` (no comment and empty comment render identically) |
-| 001.5 | `prompt_builder_test.go` `TestTruncateComment_CountsRunes` (501 runes marked, 500 not, multibyte body stays valid UTF-8); `blockers_test.go` `TestGetChildSummaries_ReadsOneCharPastCommentCap` |
-| 001.6 | `prompt_builder_test.go` `TestWriteChildSummaryLine_IsSingleLine` (CR, LF, U+2028, tab in title and comment) |
+| 001.5 | `prompt_builder_test.go` `TestTruncateComment_CountsRunes` (501 runes marked, 500 not, multibyte body stays valid UTF-8); `child_summaries_test.go` `TestGetChildSummaries_ReadsOneCodePointPastCommentCap` |
+| 001.6 | `prompt_builder_test.go` `TestWriteChildSummaryLine_IsSingleLine` (CR, LF, U+2028, tab in title and comment); `child_summary_line_test.go` `TestChildSummaryLine_IdentifierAndStateCaps` |
 | 001.7, 001.8, 003.7 | `prompt_builder_test.go` `TestWriteChildSummaryLine_PRSegment` (sorted, ten rendered, `(+N more)` is the unrendered count, clamped at `(+999+ more)`, per-URL cap) |
 | 001.9 | `prompt_builder_test.go` `TestWriteChildSummaryLine_MissingIdentifier` |
 | 001.10, 001.11, 001.12 | `prompt_builder_test.go` `TestBuildPrompt_ChildrenCompleted_NoSummaries`, `TestBuildPrompt_ChildrenCompleted_HeadingIsNeutral` |
@@ -153,12 +154,12 @@ which strictly increases delivery of a wake already judged due
 | 002.6 | `scheduler_integration_children_test.go` `TestChildSectionRendersForLegacyReason` |
 | 002.7 | `prompt_reason_contract_test.go` stays green; `scheduler_integration_children_test.go` `TestNonChildrenReasonPerformsNoChildRead` |
 | 002.8 | `scheduler_integration_children_test.go` `TestChildStateIsReportedAsStored` (child in a terminal workflow step but non-terminal task state renders its task state) |
-| 003.1, 003.1a, 003.6 | `blockers_test.go` `TestGetChildSummaries_ExcludesArchived`, `TestGetChildSummaries_IncludesNonTerminalChild`, `TestGetChildSummaries_ArchivedChildCannotTriggerTruncation` |
-| 003.2, 003.3, 003.4, 003.5 | `blockers_test.go` `TestGetChildSummaries_OrdersByCreatedAtThenID`, `TestGetChildSummaries_LastCommentTiebreak`, `TestGetChildSummaries_CapsAtTwenty` |
+| 003.1, 003.1a, 003.6 | `child_summaries_test.go` `TestGetChildSummaries_ExcludesArchived`, `TestGetChildSummaries_IncludesNonTerminalChild`, `TestGetChildSummaries_ArchivedChildCannotTriggerTruncation` |
+| 003.2, 003.3, 003.4, 003.5 | `child_summaries_test.go` `TestGetChildSummaries_OrdersByCreatedAtThenID`, `TestGetChildSummaries_LastCommentTiebreak`, `TestGetChildSummaries_CapsAtTwenty` |
 | 003.9 | `child_summaries_postgres_test.go` `TestPostgresGetChildSummaries` (membership, order, cap, truncation on PostgreSQL) |
 | 004.1, 004.4 | `scheduler_integration_children_test.go` `TestChildReadFailureStillLaunches` |
 | 004.2 | `scheduler_integration_children_test.go` `TestPRLookupFailureStillRendersLine` (lister unwired, and lister erroring) |
-| 004.3 | `blockers_test.go` `TestGetChildSummaries_DeletedParentYieldsNoRows` (orphaned child rows present) |
+| 004.3 | `child_summaries_test.go` `TestGetChildSummaries_DeletedParentYieldsNoRows` (orphaned child rows present) |
 | 004.3a | `scheduler_integration_children_test.go` `TestRunWithoutTaskIDSkipsChildRead` |
 | 004.5, 004.6 | `scheduler_integration_children_test.go` `TestSectionReflectsAssemblyTimeValues` (child mutated between queue and assembly; two assemblies of one run) |
 | 004.7 | Covered by construction, not by a race test: each read reports one snapshot and neither can fail assembly. Asserted as the pairing rule in `TestSectionReflectsAssemblyTimeValues`. |
@@ -211,8 +212,8 @@ Two deviations from the plan as written, both deliberate:
   Persistence ceiling is computed from 497. The explicit per-field figure wins,
   so `truncateComment` survives as its own helper alongside `capRunes` and
   `childCommentKeepRunes` records why.
-- **Task 03's tests reuse the existing `ExecSQL`/`RepoForTest` helpers** rather
-  than adding new ones; only `BuildPromptContextForTest` was added.
+- **Task 03's tests reuse the existing `ExecSQL`/`RepoForTest` and
+  `BuildPromptContextForTest` helpers** rather than adding duplicate test seams.
   `applyServiceOverrides` in `base_test.go` did not forward `TaskPRs`, so a
   wired PR lister was silently dropped in every test; that gap is fixed.
 

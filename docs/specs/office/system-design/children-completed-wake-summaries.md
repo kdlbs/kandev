@@ -41,8 +41,8 @@ The four producers, named here so this design stands on its own:
 | Producer | Queues through | Assembles child summaries today |
 | --- | --- | --- |
 | `office/scheduler/reactivity.go` `cascadeChildrenCompleted` | `scheduler.RunContext` | No — that struct has no child-list field |
-| `office/service/event_subscribers.go` `queueChildrenCompletedRun` | workflow engine trigger | Yes, from a database read, then discarded |
-| `office/service/scheduler_wake_reconciler.go` `ParentWakeReconciler.buildPayload` | workflow engine trigger | Yes, from a database read, then discarded |
+| `office/service/event_subscribers.go` `queueChildrenCompletedRun` | workflow engine trigger | No — dispatches an empty payload |
+| `office/service/scheduler_wake_reconciler.go` `ParentWakeReconciler.buildPayload` | workflow engine trigger | No — dispatches an empty payload |
 | `orchestrator/event_handlers_children_completed.go` `childCompletionPayload` | workflow engine trigger | Yes, from rows already in memory |
 
 ## Requirement mapping
@@ -210,6 +210,10 @@ slice operate on runes.
   its first 188 code points followed by ` [truncated]`. The task system does not
   bound title length, so without a cap neither the one-line shape nor the
   section's size ceiling means anything.
+- The identifier and state are each capped at 50 code points: a longer value
+  renders as its first 38 code points followed by ` [truncated]`. The task
+  system does not bound either field, so both need display caps for the same
+  one-line and persistence guarantees.
 - The pull-request segment is present only when the child has at least one link.
   URLs are sorted ascending by URL string, then joined by `, `
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7). At most 10 render; a child
@@ -306,16 +310,17 @@ correlated subqueries — is common to SQLite and PostgreSQL, and it performs no
 JSON extraction and no window function, so no dialect branch is introduced
 (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.9).
 
-**This section's incremental read cost** is fixed at **two** database round
-trips: this one statement, and one `ListTaskPRsByTaskIDs` call for the returned
-ids. Two is what the child list section adds, not the total for an assembled
-prompt — `buildPromptContext` already reads for other sections before it reaches
-the child enricher, so a test asserting an absolute query count for the whole
-assembly is testing the wrong thing. What AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8
-constrains is growth: neither read grows with the number of live direct children,
-so the observable is an equal query count for a parent with 3 children and one
-with 30. Both run only for the two children-completed reasons
-(AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6, -002.7).
+**This section's incremental read cost** is at most **two child-enrichment
+operations** on a successful non-empty path: this repository statement, and one
+`ListTaskPRsByTaskIDs` call for the returned ids. The second operation is reached
+only when the child read returns children, and it is a port call, not necessarily
+a database round trip. No-child and child-read failure paths return earlier.
+These are additions to the prompt's existing reads, not the total for an
+assembled prompt. AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8 constrains growth:
+neither operation grows with the number of live direct children, so a parent with
+3 children and one with 30 have the same child-enrichment query count. Both run
+only for the two children-completed reasons (AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6,
+-002.7).
 
 ## Producer changes
 

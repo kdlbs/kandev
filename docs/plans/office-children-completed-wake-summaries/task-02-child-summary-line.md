@@ -41,9 +41,9 @@ it does not assert completion for a list that may contain a restarted child.
   and an omitted segment takes that delimiter with it.
 - Replace every rune rejected by `strconv.IsPrint` with a single space in every
   interpolated field, before any cap and before `%q` quotes the comment.
-- Count every cap in Unicode code points: comment 500, title 200, each URL 200.
-  A value over its cap renders as a leading slice plus ` [truncated]`, with slice
-  and marker together never exceeding the cap.
+- Count every cap in Unicode code points: identifier and state 50, comment 500,
+  title 200, and each URL 200. A value over its cap renders as a leading slice
+  plus ` [truncated]`, with slice and marker together never exceeding the cap.
 - Render at most ten URLs, sorted ascending by URL string before capping, with
   ` (+N more)` carrying the count *not* rendered, clamped to ` (+999+ more)`.
 - Change the heading from `"\nCompleted children:\n"` to `"\nChild tasks:\n"`;
@@ -117,4 +117,4 @@ None.
 
 ## Results
 
-Implemented. `ChildSummaryPrompt.PRLinks` added; `sanitizePromptField` (via `strconv.IsPrint`), `capRunes`, `truncateComment` and `renderChildPRLinks` added; heading is now `Child tasks:`. Deviation: the comment keeps 485 code points rather than the maximal 488, per the design's explicit per-field figure and its Persistence ceiling of 497. The stale `"Completed children:"` assertion in `prompt_builder_test.go` was re-pointed.
+Implemented. `ChildSummaryPrompt.PRLinks` added; `sanitizePromptField` (via `strconv.IsPrint`), `capRunes`, `truncateComment` and `renderChildPRLinks` added; identifier and state are capped at 50 code points; heading is now `Child tasks:`. Deviation: the comment keeps 485 code points rather than the maximal 488, per the design's explicit per-field figure and its Persistence ceiling of 497. The stale `"Completed children:"` assertion in `prompt_builder_test.go` was re-pointed, and multibyte identifier and state cap coverage is in `child_summary_line_test.go`.

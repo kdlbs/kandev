@@ -51,8 +51,6 @@ source of the wake prompt's child list section.
 
 - Rendering. This work order changes what the rows are, not how they read.
 - The `PRLinks` data, which comes from `ListTaskPRsByTaskIDs`, not this query.
-- Removing `ChildSummary.AssigneeAgentProfileID` or its `RunnerProjection` join.
-  It has no consumer after Task 04, but deleting it is unrelated churn.
 - Any change to `AreAllChildrenTerminal`, `GetChildSetKey`, or `ListChildStates`.
 
 ## Acceptance
@@ -84,7 +82,7 @@ gofmt -l internal/office/repository/sqlite/blockers.go
 ## Files likely touched
 
 - `apps/backend/internal/office/repository/sqlite/blockers.go`
-- `apps/backend/internal/office/repository/sqlite/blockers_test.go`
+- `apps/backend/internal/office/repository/sqlite/child_summaries_test.go`
 - new: `apps/backend/internal/office/repository/sqlite/child_summaries_postgres_test.go`
 
 ## Dependencies
@@ -114,10 +112,10 @@ comment limit, stated in both work orders.
 ## Inputs
 
 - System design, [Child query contract](../../specs/office/system-design/children-completed-wake-summaries.md#child-query-contract).
-- `apps/backend/internal/office/repository/sqlite/blockers.go:287-336`.
+- `apps/backend/internal/office/repository/sqlite/blockers.go:324-360`.
 - Postgres test pattern: `apps/backend/internal/office/repository/sqlite/runs_inflight_postgres_test.go`.
 - Ordering precedent: `RunnerProjection` callers tiebreaking `position ASC, id ASC`.
 
 ## Results
 
-Implemented. `GetChildSummaries` is one statement with a scalar live-child count, `archived_at IS NULL` in both terms, an `EXISTS` parent guard, `created_at ASC, t.id ASC` ordering, a `created_at DESC, c.id DESC` comment tiebreak, and `SUBSTR(c.body, 1, maxCommentChars+1)`. Eight SQLite tests in `child_summaries_test.go`; the PostgreSQL twin `TestPostgresGetChildSummaries` skips without `KANDEV_TEST_POSTGRES_DSN`.
+Implemented. `GetChildSummaries` is one statement with a scalar live-child count, `archived_at IS NULL` in both terms, an `EXISTS` parent guard, `created_at ASC, t.id ASC` ordering, a `created_at DESC, c.id DESC` comment tiebreak, and `SUBSTR(c.body, 1, maxCommentChars+1)`. The SQLite coverage is in `child_summaries_test.go`; the PostgreSQL twin `TestPostgresGetChildSummaries` skips without `KANDEV_TEST_POSTGRES_DSN`.

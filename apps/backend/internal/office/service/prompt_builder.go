@@ -373,10 +373,12 @@ const (
 	// three short of the maximal 488 because the comment carries this length
 	// forward from before the cap rule was generalized; the section's size
 	// ceiling is computed from the resulting 497.
-	childCommentKeepRunes = 485
-	maxChildTitleRunes    = 200
-	maxChildPRURLRunes    = 200
-	maxChildPRLinks       = 10
+	childCommentKeepRunes   = 485
+	maxChildIdentifierRunes = 50
+	maxChildTitleRunes      = 200
+	maxChildStateRunes      = 50
+	maxChildPRURLRunes      = 200
+	maxChildPRLinks         = 10
 	// maxChildPRElided bounds the numeral in the "(+N more)" marker, which is
 	// otherwise derived from an unbounded link count.
 	maxChildPRElided = 999
@@ -407,14 +409,14 @@ func buildChildrenCompletedPrompt(pc *PromptContext) string {
 // segments carry their own leading delimiter, so an omitted segment takes its
 // delimiter with it.
 func writeChildSummaryLine(b *strings.Builder, c *ChildSummaryPrompt) {
-	ref := sanitizePromptField(c.Identifier)
+	ref := capRunes(sanitizePromptField(c.Identifier), maxChildIdentifierRunes)
 	if ref == "" {
 		ref = "?"
 	}
 	fmt.Fprintf(b, "- %s (%s) [%s]",
 		ref,
 		capRunes(sanitizePromptField(c.Title), maxChildTitleRunes),
-		sanitizePromptField(c.State),
+		capRunes(sanitizePromptField(c.State), maxChildStateRunes),
 	)
 	// Sanitizing before %q leaves it nothing to expand but a quote or a
 	// backslash, so a control character cannot become a two-character escape

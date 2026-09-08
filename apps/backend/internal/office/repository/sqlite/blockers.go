@@ -286,12 +286,11 @@ func (r *Repository) ListChildStates(ctx context.Context, parentID string) ([]Ch
 
 // ChildSummary holds summary data for a completed child task.
 type ChildSummary struct {
-	TaskID                 string `db:"id" json:"id"`
-	Identifier             string `db:"identifier" json:"identifier"`
-	Title                  string `db:"title" json:"title"`
-	State                  string `db:"state" json:"state"`
-	AssigneeAgentProfileID string `db:"assignee_agent_profile_id" json:"assignee_agent_profile_id"`
-	LastComment            string `db:"last_comment" json:"last_comment,omitempty"`
+	TaskID      string `db:"id" json:"id"`
+	Identifier  string `db:"identifier" json:"identifier"`
+	Title       string `db:"title" json:"title"`
+	State       string `db:"state" json:"state"`
+	LastComment string `db:"last_comment" json:"last_comment,omitempty"`
 }
 
 // maxChildSummaries is the maximum number of child summaries returned.
@@ -329,7 +328,6 @@ func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]
 			COALESCE(t.identifier, '') AS identifier,
 			COALESCE(t.title, '') AS title,
 			COALESCE(t.state, '') AS state,
-			`+RunnerProjection("t")+` AS assignee_agent_profile_id,
 			COALESCE((
 				SELECT SUBSTR(c.body, 1, ?) FROM task_comments c
 				WHERE c.task_id = t.id
