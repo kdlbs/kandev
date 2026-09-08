@@ -76,6 +76,8 @@ func newTasklessAnnotationHandlerHarness(t *testing.T, claimWorkspaceID string) 
 		nil,
 		runEvents,
 		nil,
+		nil,
+		nil,
 	))
 	return &tasklessAnnotationHandlerHarness{
 		router: router, token: token, comments: comments, tasks: tasks, runEvents: runEvents,

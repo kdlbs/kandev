@@ -126,12 +126,14 @@ func (b *ContextBuilder) build(ctx context.Context, run *models.Run) (RunContext
 		return RunContext{}, scopeDerivation{}, fmt.Errorf("resolve runtime agent: %w", err)
 	}
 	payload := parsePayload(run.Payload)
+	// A wildcard payload task_id is left task-bound rather than promoted to
+	// taskless: reclassifying it would trade WithTaskScope's fail-closed
+	// empty scope for the wider runner-set/workspace-annotation grant, and
+	// no AC sanctions that widening. WithTaskScope already strips the
+	// sentinel from AllowedTaskIDs below, so the run ends up with an empty,
+	// permanently-non-matching scope either way — this only decides which
+	// (narrower) branch it takes to get there.
 	taskID := strings.TrimSpace(payload["task_id"])
-	if taskID == WildcardTaskScope {
-		// The reserved wildcard sentinel can never bind a run to a task; an
-		// untrusted payload naming it is treated as if no task_id were given.
-		taskID = ""
-	}
 	sessionID := firstNonEmpty(run.SessionID, payload["session_id"])
 
 	caps, derivation := b.deriveScope(ctx, run, agent, taskID)

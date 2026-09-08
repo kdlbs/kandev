@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -1030,9 +1031,13 @@ func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run
 	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
-// extractTaskID parses the task_id from a run payload.
+// extractTaskID parses the task_id from a run payload, trimmed so a
+// whitespace-only value is treated as absent — the same "taskless" test
+// officeruntime.ContextBuilder applies, so checkoutTask's task-bound/
+// taskless branch and the runtime's scope-derivation branch never disagree
+// on which run has a task.
 func (si *SchedulerIntegration) extractTaskID(payload string) string {
-	return ParseRunPayload(payload)["task_id"]
+	return strings.TrimSpace(ParseRunPayload(payload)["task_id"])
 }
 
 // extractProjectID looks up the project ID for a task in the payload.

@@ -84,7 +84,7 @@ func (c Capabilities) WithTaskScope(taskIDs ...string) Capabilities {
 	for _, id := range taskIDs {
 		trimmed := strings.TrimSpace(id)
 		if trimmed != "" && trimmed != WildcardTaskScope {
-			filtered = append(filtered, id)
+			filtered = append(filtered, trimmed)
 		}
 	}
 	next.AllowedTaskIDs = filtered

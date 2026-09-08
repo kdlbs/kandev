@@ -130,6 +130,22 @@ func TestWithTaskScope_AllWhitespaceArgumentsYieldEmptyScope(t *testing.T) {
 	}
 }
 
+func TestWithTaskScope_TrimsSurvivingEntries(t *testing.T) {
+	caps := Capabilities{}.WithTaskScope(" task-1 ", "\ttask-2\t")
+	want := []string{"task-1", "task-2"}
+	if len(caps.AllowedTaskIDs) != len(want) {
+		t.Fatalf("AllowedTaskIDs = %v, want %v", caps.AllowedTaskIDs, want)
+	}
+	for i, id := range want {
+		if caps.AllowedTaskIDs[i] != id {
+			t.Fatalf(
+				"AllowedTaskIDs = %q, want %q — a surviving entry must be stored trimmed so it can still match the real task id",
+				caps.AllowedTaskIDs, want,
+			)
+		}
+	}
+}
+
 func TestWithTaskScope_RejectsWildcardSentinel(t *testing.T) {
 	caps := Capabilities{}.WithTaskScope(WildcardTaskScope, "task-1")
 	want := []string{"task-1"}

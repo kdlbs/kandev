@@ -73,21 +73,27 @@ func TestPostComment_TasklessRunAnnotatesTaskInWorkspace(t *testing.T) {
 
 func TestPostComment_TasklessRunRefusesCrossWorkspaceTarget(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{"task-x": "ws-2"}}
-	runCtx, actions := tasklessAnnotationRunCtx("ws-1", tasks)
+	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("ws-1", tasks)
 
 	err := actions.PostComment(context.Background(), runCtx, "task-x", "blocker found")
 	if !errors.Is(err, ErrTaskOutOfScope) {
 		t.Fatalf("error = %v, want ErrTaskOutOfScope", err)
 	}
+	if len(writer.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", writer.comments)
+	}
 }
 
 func TestPostComment_TasklessRunRefusesNonexistentTargetWithSameSentinelAsCrossWorkspace(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{}}
-	runCtx, actions := tasklessAnnotationRunCtx("ws-1", tasks)
+	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("ws-1", tasks)
 
 	err := actions.PostComment(context.Background(), runCtx, "no-such-task", "blocker found")
 	if !errors.Is(err, ErrTaskOutOfScope) {
 		t.Fatalf("error = %v, want ErrTaskOutOfScope (anti-oracle: same sentinel as cross-workspace)", err)
+	}
+	if len(writer.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", writer.comments)
 	}
 }
 
@@ -107,7 +113,7 @@ func TestPostComment_TasklessRunFailedLookupReturnsErrorNotRefusal(t *testing.T)
 
 func TestPostComment_TasklessRunEmptyWorkspaceClaimRefusesBeforeResolvingTarget(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{"task-x": ""}}
-	runCtx, actions := tasklessAnnotationRunCtx("", tasks)
+	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("", tasks)
 
 	err := actions.PostComment(context.Background(), runCtx, "task-x", "blocker found")
 	if !errors.Is(err, ErrWorkspaceOutOfScope) {
@@ -115,6 +121,9 @@ func TestPostComment_TasklessRunEmptyWorkspaceClaimRefusesBeforeResolvingTarget(
 	}
 	if len(tasks.lookups) != 0 {
 		t.Fatalf("target should not be resolved when the run's own workspace claim is empty: %v", tasks.lookups)
+	}
+	if len(writer.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", writer.comments)
 	}
 }
 
@@ -158,6 +167,9 @@ func TestPostComment_TaskBoundRunRefusesAnyOtherTarget(t *testing.T) {
 	if len(tasks.lookups) != 0 {
 		t.Fatalf("task-bound annotation must not consult workspace lookups: %v", tasks.lookups)
 	}
+	if len(comments.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", comments.comments)
+	}
 }
 
 func TestPostComment_EmptyBodyRefusedBeforeBranch(t *testing.T) {
@@ -178,15 +190,21 @@ func TestPostComment_EmptyBodyRefusedBeforeBranch(t *testing.T) {
 	if len(tasks.lookups) != 0 {
 		t.Fatalf("body validation must precede target resolution: %v", tasks.lookups)
 	}
+	if len(comments.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", comments.comments)
+	}
 }
 
 func TestPostComment_NoTargetAndNoBoundTaskRefuses(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{}}
-	runCtx, actions := tasklessAnnotationRunCtx("ws-1", tasks)
+	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("ws-1", tasks)
 
 	err := actions.PostComment(context.Background(), runCtx, "", "blocker found")
 	if !errors.Is(err, ErrTaskOutOfScope) {
 		t.Fatalf("error = %v, want ErrTaskOutOfScope", err)
+	}
+	if len(writer.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", writer.comments)
 	}
 }
 

@@ -15,12 +15,23 @@ type stubRunnerLister struct {
 	total int
 	err   error
 	calls int
+
+	// gotAgentID, gotWorkspaceID, and gotCapAt record the arguments passed to
+	// the most recent call, so tests can assert ListRunnerSetTaskIDs is
+	// invoked with the run's own agent/workspace and the package's cap
+	// rather than some other value that happens to still compile.
+	gotAgentID     string
+	gotWorkspaceID string
+	gotCapAt       int
 }
 
 func (s *stubRunnerLister) ListRunnerSetTaskIDs(
-	_ context.Context, _ string, _ string, _ int,
+	_ context.Context, agentID, workspaceID string, capAt int,
 ) ([]string, int, error) {
 	s.calls++
+	s.gotAgentID = agentID
+	s.gotWorkspaceID = workspaceID
+	s.gotCapAt = capAt
 	if s.err != nil {
 		return nil, 0, s.err
 	}
@@ -82,6 +93,18 @@ func TestBuild_TasklessRunMaterializesRunnerSet(t *testing.T) {
 	if lister.calls != 1 {
 		t.Fatalf("expected 1 runner-set query, got %d", lister.calls)
 	}
+	if lister.gotAgentID != "agent-1" {
+		t.Fatalf("gotAgentID = %q, want %q — the query must scope to the run's own agent, "+
+			"not an arbitrary one", lister.gotAgentID, "agent-1")
+	}
+	if lister.gotWorkspaceID != "ws-1" {
+		t.Fatalf("gotWorkspaceID = %q, want %q — the query must scope to the agent's own "+
+			"workspace, not an arbitrary one", lister.gotWorkspaceID, "ws-1")
+	}
+	if lister.gotCapAt != scopeRunnerSetCap {
+		t.Fatalf("gotCapAt = %d, want %d — the query must use the package's runner-set cap",
+			lister.gotCapAt, scopeRunnerSetCap)
+	}
 }
 
 func TestBuild_NilListerYieldsUnavailableProvisionalScope(t *testing.T) {
@@ -137,7 +160,17 @@ func TestBuild_RunnerSetQueryErrorFailsClosed(t *testing.T) {
 	}
 }
 
-func TestBuild_WildcardPayloadTaskIDIsTreatedAsTaskless(t *testing.T) {
+// TestBuild_WildcardPayloadTaskIDStaysTaskBoundWithEmptyScope is the Review
+// round 3 regression test (R3REV-03). A run injecting task_id="*" must NOT
+// be reclassified as taskless: doing so would grant it the runner-set
+// mutation scope (up to 500 tasks) plus workspace-wide annotation, which is
+// strictly MORE authority than the correct outcome — staying task-bound
+// with an empty, permanently-non-matching scope, since WithTaskScope
+// already strips the sentinel from AllowedTaskIDs. No AC sanctions
+// promoting a wildcard payload to the wider taskless class; AC-003.10 only
+// forbids assigning the wildcard scope, which the fail-closed empty scope
+// here satisfies without needing the reclassification.
+func TestBuild_WildcardPayloadTaskIDStaysTaskBoundWithEmptyScope(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
 	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"*"}`}
@@ -146,11 +179,15 @@ func TestBuild_WildcardPayloadTaskIDIsTreatedAsTaskless(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if runCtx.TaskID != "" {
-		t.Fatalf("TaskID = %q, want empty — the wildcard sentinel must never bind a run to a task", runCtx.TaskID)
+	if runCtx.Capabilities.TaskScopeSource != TaskScopeSourcePayload {
+		t.Fatalf(
+			"TaskScopeSource = %q, want %q — a wildcard payload must stay task-bound, not fall "+
+				"through to the taskless runner-set derivation",
+			runCtx.Capabilities.TaskScopeSource, TaskScopeSourcePayload,
+		)
 	}
-	if runCtx.Capabilities.TaskScopeSource == TaskScopeSourcePayload {
-		t.Fatalf("TaskScopeSource = %q, want a taskless derivation, not payload", runCtx.Capabilities.TaskScopeSource)
+	if lister.calls != 0 {
+		t.Fatalf("expected no runner-set query for a wildcard payload task_id, got %d calls", lister.calls)
 	}
 	for _, id := range runCtx.Capabilities.AllowedTaskIDs {
 		if id == WildcardTaskScope {
@@ -160,8 +197,15 @@ func TestBuild_WildcardPayloadTaskIDIsTreatedAsTaskless(t *testing.T) {
 			)
 		}
 	}
+	if len(runCtx.Capabilities.AllowedTaskIDs) != 0 {
+		t.Fatalf("AllowedTaskIDs = %v, want empty — the stripped wildcard must not be replaced "+
+			"by any wider grant", runCtx.Capabilities.AllowedTaskIDs)
+	}
 	if runCtx.CanMutateTask("some-other-task") {
 		t.Fatal("a run injecting task_id=\"*\" must not gain authority over an arbitrary task")
+	}
+	if runCtx.CanMutateTask("t1") {
+		t.Fatal("a run injecting task_id=\"*\" must not gain authority over the agent's own runner-set tasks either")
 	}
 }
 
@@ -334,6 +378,54 @@ func TestBuildAndPersist_TruncationEmitsScopeTruncatedEvent(t *testing.T) {
 	}
 	if events.events[0].payload["total"] != scopeRunnerSetCap+7 {
 		t.Fatalf("payload total = %v, want %d", events.events[0].payload["total"], scopeRunnerSetCap+7)
+	}
+}
+
+// TestBuildAndPersist_EmptyRunnerSetIsFinalAndNotReDerived is the Review
+// round 3 regression test (R3REV-06, AC-003.7/AC-003.9): an agent with no
+// tasks in its runner set at all is a legitimate, final outcome — the
+// resulting empty AllowedTaskIDs marked TaskScopeSourceRunnerSet must be
+// treated the same as any other final scope (reused verbatim on the next
+// build, not re-queried), not conflated with the provisional "unavailable"
+// marker that legitimately retries.
+func TestBuildAndPersist_EmptyRunnerSetIsFinalAndNotReDerived(t *testing.T) {
+	lister := &stubRunnerLister{ids: nil, total: 0}
+	store := &recordingRunSnapshotStore{casWins: true}
+	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+
+	runCtx, err := builder.BuildAndPersist(context.Background(), run)
+	if err != nil {
+		t.Fatalf("BuildAndPersist: %v", err)
+	}
+	if runCtx.Capabilities.TaskScopeSource != TaskScopeSourceRunnerSet {
+		t.Fatalf("TaskScopeSource = %q, want %q — an empty runner set is still a final "+
+			"derivation, not unavailable", runCtx.Capabilities.TaskScopeSource, TaskScopeSourceRunnerSet)
+	}
+	if len(runCtx.Capabilities.AllowedTaskIDs) != 0 {
+		t.Fatalf("AllowedTaskIDs = %v, want empty", runCtx.Capabilities.AllowedTaskIDs)
+	}
+	if runCtx.CanMutateTask("any-task") {
+		t.Fatal("an empty runner set must refuse mutation authority over any task")
+	}
+	if lister.calls != 1 {
+		t.Fatalf("expected exactly 1 runner-set query for the first build, got %d", lister.calls)
+	}
+
+	// A second build on the same (now-persisted) run must reuse the final
+	// empty scope rather than re-querying the runner set.
+	runCtx2, err := builder.BuildAndPersist(context.Background(), run)
+	if err != nil {
+		t.Fatalf("second BuildAndPersist: %v", err)
+	}
+	if lister.calls != 1 {
+		t.Fatalf("expected no additional runner-set query on reuse, got %d total calls", lister.calls)
+	}
+	if runCtx2.Capabilities.TaskScopeSource != TaskScopeSourceRunnerSet {
+		t.Fatalf("reused TaskScopeSource = %q, want %q", runCtx2.Capabilities.TaskScopeSource, TaskScopeSourceRunnerSet)
+	}
+	if len(runCtx2.Capabilities.AllowedTaskIDs) != 0 {
+		t.Fatalf("reused AllowedTaskIDs = %v, want empty", runCtx2.Capabilities.AllowedTaskIDs)
 	}
 }
 
