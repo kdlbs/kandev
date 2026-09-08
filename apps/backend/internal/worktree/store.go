@@ -559,9 +559,17 @@ func (s *SQLiteStore) ListArchivedBranchCandidates(
 		  AND ter.worktree_branch_owner = ?
 		  AND ter.worktree_branch_compacted_at IS NULL
 		  AND COALESCE(ter.worktree_id, '') <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_sessions active_session
+			WHERE active_session.task_id = t.id
+			  AND active_session.state IN (?, ?, ?, ?)
+		  )
 		ORDER BY ter.updated_at ASC, ter.worktree_id ASC
 		LIMIT ?
-	`), StatusDeleted, BranchOwnerManaged, limit)
+	`), StatusDeleted, BranchOwnerManaged,
+		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput,
+		limit)
 	if err != nil {
 		return nil, err
 	}
@@ -583,8 +591,15 @@ func (s *SQLiteStore) IsArchivedBranchCandidate(ctx context.Context, worktreeID 
 			  AND ter.deleted_at IS NOT NULL
 			  AND ter.worktree_branch_owner = ?
 			  AND ter.worktree_branch_compacted_at IS NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM task_sessions active_session
+				WHERE active_session.task_id = t.id
+				  AND active_session.state IN (?, ?, ?, ?)
+			  )
 		)
-	`), worktreeID, StatusDeleted, BranchOwnerManaged).Scan(&eligible)
+	`), worktreeID, StatusDeleted, BranchOwnerManaged,
+		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput).Scan(&eligible)
 	return eligible, err
 }
 
@@ -606,9 +621,16 @@ func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
 			INNER JOIN tasks t ON te.task_id = t.id
 			WHERE te.id = task_environment_repos.task_environment_id
 			  AND t.archived_at IS NOT NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM task_sessions active_session
+				WHERE active_session.task_id = t.id
+				  AND active_session.state IN (?, ?, ?, ?)
+			  )
 		  )
 	`), recoveryHead, time.Now().UTC(), worktreeID, StatusDeleted, BranchOwnerManaged,
-		expected, recoveryHead)
+		expected, recoveryHead,
+		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput)
 	if err != nil {
 		return false, err
 	}
@@ -635,8 +657,15 @@ func (s *SQLiteStore) PersistArchivedBranchCompactionComplete(
 			INNER JOIN tasks t ON te.task_id = t.id
 			WHERE te.id = task_environment_repos.task_environment_id
 			  AND t.archived_at IS NOT NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM task_sessions active_session
+				WHERE active_session.task_id = t.id
+				  AND active_session.state IN (?, ?, ?, ?)
+			  )
 		  )
-	`), now, now, worktreeID, StatusDeleted, BranchOwnerManaged, expectedRecoveryHead)
+	`), now, now, worktreeID, StatusDeleted, BranchOwnerManaged, expectedRecoveryHead,
+		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput)
 	if err != nil {
 		return false, err
 	}

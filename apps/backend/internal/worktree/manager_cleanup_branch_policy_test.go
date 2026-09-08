@@ -23,6 +23,25 @@ type unarchivingMaintenanceStore struct {
 	checks int
 }
 
+type activatingSessionMaintenanceStore struct {
+	*SQLiteStore
+	sessionID string
+	checks    int
+}
+
+func (s *activatingSessionMaintenanceStore) IsArchivedBranchCandidate(
+	ctx context.Context, worktreeID string,
+) (bool, error) {
+	s.checks++
+	if s.checks == 2 {
+		if _, err := s.db.ExecContext(ctx, `UPDATE task_sessions SET state = ? WHERE id = ?`,
+			models.TaskSessionStateRunning, s.sessionID); err != nil {
+			return false, err
+		}
+	}
+	return s.SQLiteStore.IsArchivedBranchCandidate(ctx, worktreeID)
+}
+
 func (s *unarchivingMaintenanceStore) IsArchivedBranchCandidate(
 	ctx context.Context, worktreeID string,
 ) (bool, error) {
@@ -499,6 +518,44 @@ func TestMaintainArchivedBranches_UnarchiveAfterSelectionRetainsBranch(t *testin
 	}
 	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", wt.Branch)); got != wantHead {
 		t.Fatalf("unarchive race changed branch head = %q, want %q", got, wantHead)
+	}
+}
+
+func TestMaintainArchivedBranches_ActiveSessionAfterSelectionRetainsBranch(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "session-active-race")
+	mgr.store = &activatingSessionMaintenanceStore{
+		SQLiteStore: store,
+		sessionID:   wt.SessionID,
+	}
+
+	receipt, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("maintenance during session activation: %v", err)
+	}
+	if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedArchiveStateChanged] != 1 {
+		t.Fatalf("maintenance receipt = %+v, want archive-state retention", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
+		t.Fatalf("branch head after session activation = %q, want %q", got, wantHead)
+	}
+}
+
+func TestMaintainArchivedBranches_DoesNotSelectActiveSession(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "session-already-active")
+	if _, err := store.db.ExecContext(context.Background(), `UPDATE task_sessions SET state = ? WHERE id = ?`,
+		models.TaskSessionStateRunning, wt.SessionID); err != nil {
+		t.Fatalf("activate archived task session: %v", err)
+	}
+
+	receipt, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("maintenance with active session: %v", err)
+	}
+	if receipt.Attempted != 0 || receipt.Deleted != 0 {
+		t.Fatalf("maintenance receipt = %+v, want active session excluded from selection", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
+		t.Fatalf("branch head with active session = %q, want %q", got, wantHead)
 	}
 }
 
