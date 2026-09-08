@@ -98,7 +98,7 @@ function GrantFormFields(props: GrantFormFieldsProps) {
             onCheckedChange={(v) => props.setCapInsp(v === true)}
             data-testid="grant-cap-inspect"
           />
-          <Label htmlFor="cap-inspect">inspect</Label>
+          <Label htmlFor="cap-inspect">{t("workspaces:capabilityInspect")}</Label>
         </div>
         <div className="flex items-center gap-2">
           <Checkbox
@@ -107,7 +107,7 @@ function GrantFormFields(props: GrantFormFieldsProps) {
             onCheckedChange={(v) => props.setCapOrch(v === true)}
             data-testid="grant-cap-orchestrate"
           />
-          <Label htmlFor="cap-orchestrate">orchestrate</Label>
+          <Label htmlFor="cap-orchestrate">{t("workspaces:capabilityOrchestrate")}</Label>
         </div>
         <div className="flex items-center gap-2">
           <Checkbox

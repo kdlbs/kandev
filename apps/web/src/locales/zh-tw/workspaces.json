@@ -175,6 +175,8 @@
   "workflow": "工作流",
   "selectWorkflow": "選择工作流",
   "capabilities": "能力",
+  "capabilityInspect": "檢查",
+  "capabilityOrchestrate": "協調",
   "capabilityExecute": "執行租約",
   "capabilitiesDescription": "檢查允許讀取文件和關係；協調允許停止、中斷和附加工作區來源；執行租約允許主機執行一項受限的儲存庫操作。",
   "grantNote": "備註（可選）",
