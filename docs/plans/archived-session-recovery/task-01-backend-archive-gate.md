@@ -1,7 +1,7 @@
 ---
 id: "01-backend-archive-gate"
 title: "Gate backend recovery on archive state"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -80,9 +80,9 @@ to the actual added name before recording GREEN.
 - `apps/backend/internal/orchestrator/task_session_archive_status_test.go` (new)
 - `apps/backend/internal/orchestrator/task_operations_unarchive_resume_test.go`
 - `apps/backend/internal/orchestrator/session_launch.go`
-- `apps/backend/internal/orchestrator/session_launch_archive_test.go` (new)
+- `apps/backend/internal/orchestrator/task_session_archive_status_test.go` (new)
 - `apps/backend/internal/orchestrator/handlers/handlers.go`
-- `apps/backend/internal/orchestrator/handlers/handlers_archive_test.go` (new)
+- `apps/backend/internal/orchestrator/handlers/session_archive_conflict_test.go` (new)
 
 ## Dependencies
 
@@ -108,4 +108,20 @@ None.
 
 ## Results
 
-Pending. Record RED failure, GREEN commands and counts, and any scope changes.
+RED evidence:
+
+- `rtk go test -tags fts5 ./internal/orchestrator -run 'Test(GetTaskSessionStatus_ArchivedTaskDisablesRecovery|RecoverSession_ArchivedTaskDoesNotClearResumeToken|LaunchRestoreWorkspace_ArchivedTask)' -count=1` failed in 5 subtests. Archived status advertised recovery, fresh start cleared the resume token, and direct restore returned nil.
+- `rtk go test -tags fts5 ./internal/orchestrator/handlers -run 'TestWSLaunchSession_ArchivedConflict' -count=1` failed with `INTERNAL_ERROR` instead of `CONFLICT`.
+
+GREEN evidence:
+
+- `rtk go test -tags fts5 ./internal/orchestrator -run 'Test(GetTaskSessionStatus_ArchivedTaskDisablesRecovery|RecoverSession_ArchivedTaskDoesNotClearResumeToken|LaunchRestoreWorkspace_ArchivedTask)' -count=1`: 6 passed.
+- `rtk go test -tags fts5 ./internal/orchestrator -run 'Test(GetTaskSessionStatus|LaunchRestoreWorkspace|ResumeTaskSession_(Archive|RecreatesMissingWorktreeAfterUnarchive)|RecoverSession)' -count=1 -race`: 33 passed.
+- `rtk go test -tags fts5 ./internal/orchestrator/handlers -run 'TestWSLaunchSession_ArchivedConflict' -count=1 -race`: 1 passed.
+- `rtk go test -tags fts5 ./internal/orchestrator/executor -run 'TestResumeSession_(RejectsArchivedTask|ArchiveCancelled)|TestWorkspaceReuseAllowed' -count=1 -race`: 22 passed.
+- `rtk go test -tags fts5 ./internal/worktree -run 'TestCreate_RestoresReleasedWorktreeAfterArchive' -count=1 -race`: 1 passed.
+
+Scope notes:
+
+- The status regression uses the planned focused sibling file and covers archive cancellation, retained resumable runtime, ordinary cancellation, completed state, and a stopping runtime row. Existing authorization and active unarchived archive-cancelled tests remain unchanged.
+- The implementation reuses `executor.ErrTaskArchived`, checks the owning task after authorization and session binding, prevents fresh-start token clearing, guards direct workspace restore, and maps the sentinel to a typed WS conflict.

@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import type { SessionRecoveryFailure } from "@/hooks/domains/session/use-session-resumption";
 
 // EnsureSessionErrorInfo wraps a parsed ensure error so UI can offer a targeted action for the missing-agent-profile case.
 export type EnsureSessionErrorInfo = {
@@ -62,9 +63,34 @@ type BannerProps = {
   action?: RecoveryAction;
   secondaryAction?: RecoveryAction;
   retryDisabled?: boolean;
+  recoveryFailure?: SessionRecoveryFailure | null;
   testId?: string;
   compact?: boolean;
 };
+
+function RecoveryFailureDetails({ failure }: { failure: SessionRecoveryFailure }) {
+  const { t } = useTranslation();
+  return (
+    <details className="mt-2 min-w-0 text-xs" data-testid="session-recovery-details">
+      <summary
+        className="block min-h-11 max-w-full cursor-pointer select-none rounded-sm py-3 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="session-recovery-details-summary"
+      >
+        {t("task:sessionRecoveryDetails")}
+      </summary>
+      <dl className="mt-2 grid min-w-0 gap-2">
+        <div className="min-w-0">
+          <dt className="font-medium">{t("task:sessionRecoveryResumeAttempt")}</dt>
+          <dd className="mt-0.5 break-words text-muted-foreground">{failure.resumeError}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="font-medium">{t("task:sessionRecoveryRestoreAttempt")}</dt>
+          <dd className="mt-0.5 break-words text-muted-foreground">{failure.restoreError}</dd>
+        </div>
+      </dl>
+    </details>
+  );
+}
 
 /** Slim banner for the task page, rendered above the layout. */
 export function EnsureSessionErrorBanner({
@@ -74,6 +100,7 @@ export function EnsureSessionErrorBanner({
   action,
   secondaryAction,
   retryDisabled,
+  recoveryFailure,
   testId = "ensure-session-error-banner",
   compact = false,
 }: BannerProps) {
@@ -84,9 +111,10 @@ export function EnsureSessionErrorBanner({
     <div className={cn(!compact && "px-3 pt-2")} data-testid={testId}>
       <Alert variant="destructive">
         <IconAlertTriangle />
-        <AlertTitle>{info.title}</AlertTitle>
+        <AlertTitle>{recoveryFailure ? t("task:sessionRecoveryFailed") : info.title}</AlertTitle>
         <AlertDescription>
-          <span>{info.detail}</span>
+          <span>{recoveryFailure ? t("task:sessionRecoveryFailedDetail") : info.detail}</span>
+          {recoveryFailure && <RecoveryFailureDetails failure={recoveryFailure} />}
           <span className="mt-1 flex flex-wrap items-center gap-2">
             {info.action ? (
               <Link
@@ -160,6 +188,7 @@ export function SessionRecoveryFeedback({
   action,
   secondaryAction,
   retryDisabled,
+  recoveryFailure,
   testId = "session-recovery-error",
 }: {
   error: string | null;
@@ -169,6 +198,7 @@ export function SessionRecoveryFeedback({
   action?: RecoveryAction;
   secondaryAction?: RecoveryAction;
   retryDisabled?: boolean;
+  recoveryFailure?: SessionRecoveryFailure | null;
   testId?: string;
 }) {
   return (
@@ -180,6 +210,7 @@ export function SessionRecoveryFeedback({
         action={action}
         secondaryAction={secondaryAction}
         retryDisabled={retryDisabled}
+        recoveryFailure={recoveryFailure}
         testId={testId}
       />
       {notice ? <SessionRecoveryNotice message={notice} /> : null}

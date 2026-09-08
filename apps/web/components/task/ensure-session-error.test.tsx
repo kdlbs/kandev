@@ -5,9 +5,12 @@ import {
   describeEnsureError,
   EnsureSessionErrorBanner,
   EnsureSessionErrorEmptyState,
+  SessionRecoveryFeedback,
 } from "./ensure-session-error";
 
 afterEach(cleanup);
+
+const ENSURE_RETRY_TEST_ID = "ensure-session-error-retry";
 
 describe("describeEnsureError", () => {
   it("returns null when there is no error", () => {
@@ -79,7 +82,7 @@ describe("EnsureSessionErrorBanner", () => {
     render(
       <EnsureSessionErrorBanner error={new Error("websocket disconnected")} onRetry={onRetry} />,
     );
-    fireEvent.click(screen.getByTestId("ensure-session-error-retry"));
+    fireEvent.click(screen.getByTestId(ENSURE_RETRY_TEST_ID));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
@@ -92,11 +95,51 @@ describe("EnsureSessionErrorBanner", () => {
         retryDisabled
       />,
     );
-    const retry = screen.getByTestId("ensure-session-error-retry") as HTMLButtonElement;
+    const retry = screen.getByTestId(ENSURE_RETRY_TEST_ID) as HTMLButtonElement;
     expect(retry.disabled).toBe(true);
 
     fireEvent.click(retry);
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("keeps automatic recovery causes behind a collapsed labeled disclosure", () => {
+    render(
+      <EnsureSessionErrorBanner
+        error={new Error("Recovery could not complete")}
+        onRetry={() => {}}
+        recoveryFailure={{
+          resumeError: "resume failed: provider request abc-123",
+          restoreError: "restore failed: workspace /tmp/task-123",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Session recovery failed")).toBeTruthy();
+    expect(screen.getByText("The session could not be recovered.")).toBeTruthy();
+    const details = screen.getByTestId("session-recovery-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+
+    fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
+
+    expect(details.open).toBe(true);
+    expect(screen.getByText("Resume attempt")).toBeTruthy();
+    expect(screen.getByText("resume failed: provider request abc-123")).toBeTruthy();
+    expect(screen.getByText("Workspace restore attempt")).toBeTruthy();
+    expect(screen.getByText("restore failed: workspace /tmp/task-123")).toBeTruthy();
+  });
+
+  it("disables retry while automatic recovery is in flight", () => {
+    render(
+      <SessionRecoveryFeedback
+        error="Recovery could not complete"
+        notice={null}
+        onRetry={() => {}}
+        recoveryFailure={{ resumeError: "resume failed", restoreError: "restore failed" }}
+        retryDisabled
+      />,
+    );
+
+    expect((screen.getByTestId(ENSURE_RETRY_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -111,7 +154,7 @@ describe("EnsureSessionErrorEmptyState", () => {
       />,
     );
     expect(screen.getByTestId("preview-ensure-error")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("ensure-session-error-retry"));
+    fireEvent.click(screen.getByTestId(ENSURE_RETRY_TEST_ID));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

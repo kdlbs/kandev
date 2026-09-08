@@ -40,6 +40,7 @@ const PREVIEW_TAB_CLASS_NAME =
 type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
+  isArchived?: boolean;
   ensureSession?: UseEnsureTaskSessionResult;
   workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
@@ -253,6 +254,7 @@ function PreviewSessionTabDialogHost({
 export function PreviewSessionTabs({
   taskId,
   sessionId,
+  isArchived,
   ensureSession,
   workspaceId,
   onSessionChange,
@@ -292,7 +294,7 @@ export function PreviewSessionTabs({
   // Mirrors the full-page task view: ensure the backend execution for the
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
-  const resumption = useSessionResumption(taskId, activeSessionId);
+  const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
 
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
@@ -355,7 +357,11 @@ export function PreviewSessionTabs({
       <SessionRecoveryFeedback
         error={resumption.error}
         notice={resumption.notice}
+        recoveryFailure={resumption.recoveryFailure}
         onRetry={() => void resumption.resumeSession()}
+        retryDisabled={
+          resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+        }
         workspaceId={workspaceId ?? null}
       />
       <div className="border-b px-2 py-1">
@@ -595,7 +601,11 @@ function PreviewNoSessionsState({
         <SessionRecoveryFeedback
           error={resumption.error}
           notice={resumption.notice}
+          recoveryFailure={resumption.recoveryFailure}
           onRetry={() => void resumption.resumeSession()}
+          retryDisabled={
+            resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+          }
           workspaceId={workspaceId ?? null}
         />
         <EnsureSessionErrorEmptyState

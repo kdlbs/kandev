@@ -49,6 +49,10 @@ type SetterCalls = {
   resumptionStates: ResumptionState[];
   errors: (string | null)[];
   notices: (string | null)[];
+  recoveryFailures: Array<{
+    resumeError: string;
+    restoreError: string;
+  } | null>;
   worktreePaths: (string | null)[];
   worktreeBranches: (string | null)[];
   taskSessionStates: string[];
@@ -59,6 +63,7 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
     resumptionStates: [],
     errors: [],
     notices: [],
+    recoveryFailures: [],
     worktreePaths: [],
     worktreeBranches: [],
     taskSessionStates: [],
@@ -72,6 +77,9 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
     },
     setNotice: (notice: string | null) => {
       calls.notices.push(notice);
+    },
+    setRecoveryFailure: (failure) => {
+      calls.recoveryFailures.push(failure);
     },
     setWorktreePath: (p: string | null) => {
       calls.worktreePaths.push(p);
@@ -199,9 +207,11 @@ describe("resumeWithSilentFallback", () => {
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
-    expect(calls.errors.at(-1)).toBe(
-      "Resume failed: Resume transport failed. Workspace restore failed: Workspace restore failed.",
-    );
+    expect(calls.errors.at(-1)).toBe("Session recovery failed");
+    expect(calls.recoveryFailures.at(-1)).toEqual({
+      resumeError: "Resume transport failed",
+      restoreError: "Workspace restore failed",
+    });
   });
 
   it("surfaces an error when both resume and restore_workspace throw", async () => {
@@ -214,9 +224,11 @@ describe("resumeWithSilentFallback", () => {
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
-    expect(calls.errors.at(-1)).toBe(
-      "Resume failed: ws closed. Workspace restore failed: still closed.",
-    );
+    expect(calls.errors.at(-1)).toBe("Session recovery failed");
+    expect(calls.recoveryFailures.at(-1)).toEqual({
+      resumeError: "ws closed",
+      restoreError: "still closed",
+    });
   });
 
   it("seeds agentctl ready when restore_workspace fallback succeeds", async () => {

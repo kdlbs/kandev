@@ -2,6 +2,7 @@
 
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
+import { useTask } from "@/hooks/use-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
@@ -26,6 +27,14 @@ type QuickChatSessionViewProps = {
   onInitialPromptSent?: () => void;
 };
 
+function resolveTaskArchiveState(
+  taskId: string | null,
+  task: { isArchived?: boolean } | null,
+): boolean | null {
+  if (!taskId || !task) return null;
+  return task.isArchived === true;
+}
+
 export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
@@ -33,13 +42,19 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
   useEnsureTaskSession(session.sessionId);
   const taskSession = useAppStore((state) => state.taskSessions.items[session.sessionId] ?? null);
   const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : null;
-  const resumption = useSessionResumption(taskId, session.sessionId);
+  const task = useTask(taskId);
+  const taskArchiveState = resolveTaskArchiveState(taskId, task);
+  const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState);
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   const recoveryFeedback = (
     <SessionRecoveryFeedback
       error={resumption.error}
       notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
       onRetry={() => void resumption.resumeSession()}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
     />
   );
   if (isPassthrough) {

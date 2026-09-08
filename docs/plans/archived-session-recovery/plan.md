@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-status: draft
+status: complete
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
@@ -142,9 +142,9 @@ production path. Do not grow oversized Go test files; use focused siblings.
 
 ## Work orders
 
-- [ ] [Task 01: Gate backend recovery on archive state](task-01-backend-archive-gate.md)
-- [ ] [Task 02: Reconcile recovery across archive transitions](task-02-client-archive-lifecycle.md)
-- [ ] [Task 03: Present compact recovery feedback](task-03-recovery-feedback.md)
+- [x] [Task 01: Gate backend recovery on archive state](task-01-backend-archive-gate.md)
+- [x] [Task 02: Reconcile recovery across archive transitions](task-02-client-archive-lifecycle.md)
+- [x] [Task 03: Present compact recovery feedback](task-03-recovery-feedback.md)
 
 Each work order contains exact commands and must record its red/green results.
 Managed E2E commands build the current backend and web artifacts and run
@@ -152,14 +152,16 @@ sequentially. Install workspace dependencies once before package commands.
 
 ## Verification results
 
-Planning only. No production or permanent test changes have been made.
-
-- `python3 scripts/lint-spec-files.test.py`: passed, 30 tests.
-- `python3 scripts/lint-spec-files.py --all`: passed. Removed the legacy
-  Expected behavior subsection that duplicated existing acceptance criteria
-  to keep the requirement document within its size limit.
-- `git diff --check`: passed.
-- Implementation tests and browser checks remain pending in the work orders.
+- Backend focused archive and recovery checks passed: 36 orchestrator tests, 1
+  handler test, 22 executor tests, and 1 worktree test, all with `-race`.
+- Web focused tests passed: 9 files, 103 tests. Typecheck, lint, i18n checks,
+  and the new-code ratchet passed.
+- Managed browser checks passed: 3 Chromium tests and 2 mobile-Chromium tests.
+  They cover archived history, in-place recovery, prevent-auto-start, typed
+  failure details, retry, touch targets, and overflow.
+- Public documentation validation passed: 61 validator tests and 46 published
+  pages.
+- `rtk gofmt -l` reported no Go files. `git diff --check` passed.
 
 ## Risks
 

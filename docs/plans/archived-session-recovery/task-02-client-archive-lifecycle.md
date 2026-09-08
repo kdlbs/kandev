@@ -1,7 +1,7 @@
 ---
 id: "02-client-archive-lifecycle"
 title: "Reconcile recovery across archive transitions"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-backend-archive-gate"
@@ -131,4 +131,20 @@ Task 01 supplies authoritative eligibility and the typed archive conflict.
 
 ## Results
 
-Pending. Record RED/GREEN results, preference variants, and mobile screenshots.
+RED evidence:
+
+- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts`: 6 of 8 archive lifecycle cases failed before the client correction. Unknown and archived states did not defer recovery, and stale operations could continue after archive changes.
+- The first managed mobile run exposed that the mobile task layout had no Unarchive action. Both mobile cases could not complete the unarchive transition.
+
+GREEN evidence:
+
+- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.navigation.test.ts components/task/preview-session-tabs.test.tsx components/quick-chat/quick-chat-session-view.test.tsx`: 5 files, 68 passed.
+- `rtk pnpm run typecheck`: passed.
+- `rtk pnpm run lint`: passed with zero warnings after the final test cleanup.
+- `rtk pnpm e2e:run --project=chromium tests/task/archived-session-recovery.spec.ts`: 3 passed. This covers archived read-only history, in-place same-session recovery, the prevent-auto-start preference, and the automatic recovery failure path.
+- `rtk pnpm e2e:run --project=mobile-chrome tests/task/mobile-archived-session-recovery.spec.ts`: 2 passed. This covers the touch-sized mobile Unarchive action, same-session recovery, touch disclosure, retry, and overflow checks.
+
+Scope notes:
+
+- The hook now defers unknown and archived states, invalidates all downstream work across archive generations, consumes typed archive conflicts, and refreshes through the existing task data layer.
+- The existing `TaskUnarchiveButton` is also rendered in the mobile top bar with a 44px hit area. No new navigation or drawer was added.
