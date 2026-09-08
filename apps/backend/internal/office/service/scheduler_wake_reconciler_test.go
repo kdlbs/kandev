@@ -410,8 +410,8 @@ func publishChildDone(t *testing.T, eb bus.EventBus, parentID, workerID string) 
 
 // TestParentWakeReconciler_RecoversFailedEdgeDispatch is the regression test
 // requested on PR #3271's review (discussion r3909576685): queueChildrenCompletedRun
-// can fail after AreAllChildrenTerminal succeeds (for example when
-// GetChildSetKey errors), and finalizeDone only logs that failure at Warn
+// can fail after AreAllChildrenTerminal succeeds, including when the workflow
+// dispatcher returns an error, and finalizeDone only logs that failure at Warn
 // because ParentWakeReconciler is the documented recovery path. This proves
 // the recovery actually happens: the edge-triggered dispatch is made to fail
 // once, then a reconciler Tick must re-deliver the same wake (same operation
@@ -440,6 +440,10 @@ func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("want exactly one dispatch attempt after the failed edge publish, got %d: %#v",
 			len(calls), calls)
+	}
+	if calls[0].taskID != "parent-1" || calls[0].trigger != engine.TriggerOnChildrenCompleted {
+		t.Fatalf("failed edge dispatch = task %q, trigger %q; want task parent-1, trigger %q",
+			calls[0].taskID, calls[0].trigger, engine.TriggerOnChildrenCompleted)
 	}
 	edgeOpID := calls[0].opID
 	if edgeOpID == "" {
@@ -471,6 +475,10 @@ func TestParentWakeReconciler_RecoversFailedEdgeDispatch(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("want a second dispatch attempt from the reconciler, got %d: %#v",
 			len(calls), calls)
+	}
+	if calls[1].taskID != "parent-1" || calls[1].trigger != engine.TriggerOnChildrenCompleted {
+		t.Fatalf("reconciler dispatch = task %q, trigger %q; want task parent-1, trigger %q",
+			calls[1].taskID, calls[1].trigger, engine.TriggerOnChildrenCompleted)
 	}
 	reconcilerOpID := calls[1].opID
 	if reconcilerOpID != edgeOpID {
