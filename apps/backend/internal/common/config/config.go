@@ -478,9 +478,10 @@ type FeaturesConfig struct {
 	// OfficeSessionIdentity keys an Office task's session identity on the run's
 	// own agent instead of the task's runner seat, and binds an agent's
 	// decision re-evaluation to its own calling session instead of the task's
-	// most-recently-started session. Off in every embedded profile: enabling it
-	// exposes pre-existing duplicate (task_id, agent_profile_id) rows until the
-	// companion unique-index fix has shipped.
+	// most-recently-started session. On in every embedded profile;
+	// pre-existing duplicate (task_id, agent_profile_id) rows stay safe by
+	// selection, not migration. The toggle remains a kill switch that restores
+	// runner-seat binding when disabled.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
 }
 

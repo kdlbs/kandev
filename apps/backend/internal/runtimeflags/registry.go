@@ -168,7 +168,7 @@ var registrations = []runtimeFlagRegistration{
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
-				"Enable only after the companion (task_id, agent_profile_id) unique-index fix has shipped, since pre-existing duplicate rows are otherwise exposed.",
+				"Pre-existing duplicate (task_id, agent_profile_id) rows stay safe by selection, not migration. Disabling this toggle and restarting reverts to runner-seat binding.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

@@ -92,14 +92,16 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # High-risk Office per-agent session identity experiment: keys an Office
-  # task's session on the run's own agent instead of the runner seat. Off in
-  # every profile until the companion (task_id, agent_profile_id) unique-index
-  # fix has shipped, since pre-existing duplicate rows would otherwise be exposed.
+  # High-risk Office per-agent session identity: keys an Office task's session
+  # on the run's own agent instead of the runner seat, and binds an agent's
+  # decision re-evaluation to its own calling session. Default-on in every
+  # profile; pre-existing duplicate (task_id, agent_profile_id) rows stay safe
+  # by selection, not migration. Disabling this toggle and restarting reverts
+  # to runner-seat binding.
   KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
