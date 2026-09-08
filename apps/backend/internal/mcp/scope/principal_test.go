@@ -141,7 +141,7 @@ func TestScopePrincipalDoesNotResurrectRevokedTaskPrincipal(t *testing.T) {
 	require.True(t, lookup.principal.RevokedAt.Equal(revokedAt))
 }
 
-func TestScopePrincipalUsesExistingCustomTaskPrincipal(t *testing.T) {
+func TestScopePrincipalPreservesExistingCustomTaskPrincipal(t *testing.T) {
 	lookup := &lifecyclePrincipalLookup{
 		principalLookup: principalLookup{
 			task:      &models.Task{ID: "task-1", WorkspaceID: "workspace-1"},
@@ -159,9 +159,13 @@ func TestScopePrincipalUsesExistingCustomTaskPrincipal(t *testing.T) {
 	}
 	resolver := &Resolver{tasks: lookup}
 
-	_, err := resolver.ScopePrincipal(context.Background(), "task-1", "session-1")
+	ctx, err := resolver.ScopePrincipal(context.Background(), "task-1", "session-1")
 	require.NoError(t, err)
 	require.Equal(t, "custom-principal", lookup.principal.ID)
+	principal, ok := PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, "task-1", principal.CallerTaskID)
+	require.Equal(t, "session-1", principal.CallerSessionID)
 }
 
 func TestScopePrincipalRejectsExistingCustomTaskPrincipalOnAnotherSession(t *testing.T) {

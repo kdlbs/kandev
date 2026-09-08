@@ -59,12 +59,8 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		return nil, err
 	}
 	if lifecycle, ok := r.tasks.(coordinator.PrincipalLifecycleStore); ok {
-		principal, err := coordinator.EnsureTaskPrincipal(ctx, lifecycle, workspaceID, taskID, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("bind MCP task principal: %w", err)
-		}
-		if principal == nil {
-			return nil, fmt.Errorf("bind MCP task principal: principal is revoked")
+		if err := r.bindTaskPrincipal(ctx, lifecycle, workspaceID, taskID, sessionID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -79,6 +75,27 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		CallerSessionID: sessionID,
 		Surface:         surface,
 	}), nil
+}
+
+func (r *Resolver) bindTaskPrincipal(ctx context.Context, lifecycle coordinator.PrincipalLifecycleStore, workspaceID, taskID, sessionID string) error {
+	principal, err := lifecycle.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, taskID)
+	if err != nil {
+		return fmt.Errorf("resolve MCP task principal: %w", err)
+	}
+	if principal != nil && !coordinator.IsTaskPrincipal(principal, workspaceID, taskID) {
+		if principal.BackingSessionID != sessionID {
+			return fmt.Errorf("bind MCP task principal: task is bound to another session")
+		}
+		return nil
+	}
+	principal, err = coordinator.EnsureTaskPrincipal(ctx, lifecycle, workspaceID, taskID, sessionID)
+	if err != nil {
+		return fmt.Errorf("bind MCP task principal: %w", err)
+	}
+	if principal == nil {
+		return fmt.Errorf("bind MCP task principal: principal is revoked")
+	}
+	return nil
 }
 
 func (r *Resolver) resolvePrincipalTask(ctx context.Context, taskID string) (*models.Task, error) {
