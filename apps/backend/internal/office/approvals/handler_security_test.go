@@ -83,7 +83,7 @@ func (s *silentActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _,
 type silentRunQueuer struct{}
 
 func (s *silentRunQueuer) QueueRunWithActor(
-	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string,
+	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
 ) error {
 	return nil
 }

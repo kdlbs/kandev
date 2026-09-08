@@ -992,7 +992,10 @@ func TestActionsSpawnAgentRunDeniesCrossWorkspaceTarget(t *testing.T) {
 // actor-blind QueueRun, so a run spawned by one agent for another was
 // silently attributed to the system actor even though the invoking agent's
 // identity (runCtx.AgentID) was already known. It must now reach
-// QueueRunWithActor as (ActorKindAgent, runCtx.AgentID).
+// QueueRunWithActor as (ActorKindAgent, runCtx.AgentID), and additionally
+// carry runCtx.RunID as the causing run id (AC-OFFICE-RUN-CAUSATION-001.3/.4)
+// so the spawned run chains off the run that spawned it instead of rooting
+// its own causation chain.
 func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
 	agents := &recordingAgentModifier{
 		agents: map[string]*models.AgentInstance{
@@ -1004,6 +1007,7 @@ func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
 	runCtx := RunContext{
 		AgentID:     "agent-1",
 		WorkspaceID: "ws-1",
+		RunID:       "run-1",
 		Capabilities: Capabilities{
 			CanSpawnAgentRun: true,
 		},
@@ -1028,6 +1032,9 @@ func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
 	}
 	if call.ActorID != "agent-1" {
 		t.Errorf("actorID = %q, want agent-1 (the invoking agent)", call.ActorID)
+	}
+	if call.CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", call.CausingRunID)
 	}
 }
 
@@ -1282,12 +1289,14 @@ type spawnRunCall struct {
 	IdempotencyKey string
 	ActorKind      models.ActorKind
 	ActorID        string
+	CausingRunID   string
 }
 
 func (r *recordingRunSpawner) QueueRunWithActor(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 	actorKind models.ActorKind, actorID string,
+	causingRunID string,
 ) error {
 	r.calls = append(r.calls, spawnRunCall{
 		AgentID:        agentInstanceID,
@@ -1296,6 +1305,7 @@ func (r *recordingRunSpawner) QueueRunWithActor(
 		IdempotencyKey: idempotencyKey,
 		ActorKind:      actorKind,
 		ActorID:        actorID,
+		CausingRunID:   causingRunID,
 	})
 	return nil
 }

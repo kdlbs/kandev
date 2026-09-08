@@ -75,20 +75,25 @@ const CoalesceWindowSeconds = 5
 const IdempotencyWindowHours = 24
 
 // QueueRun enqueues a run request for an agent instance, attributed to
-// the system actor. It exists for the RunQueuer/RunSpawner shared
-// interfaces and their existing callers/mocks, which predate the actor
-// contract (AC-OFFICE-RUN-CAUSATION-001.15) and are out of scope to
-// widen here. New call sites that know their actor should call
-// QueueRunWithActor directly instead.
+// the system actor and rooting a new causation chain. It exists for the
+// RunQueuer/RunSpawner shared interfaces and their existing callers/mocks,
+// which predate the actor contract (AC-OFFICE-RUN-CAUSATION-001.15) and are
+// out of scope to widen here. New call sites that know their actor and/or
+// causing run should call QueueRunWithActor directly instead.
 func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
-	return s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+	return s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "", "")
 }
 
 // QueueRunWithActor enqueues a run request for an agent instance.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
+//
+// causingRunID is the run this enqueue happened inside, empty for a root
+// cause (AC-OFFICE-RUN-CAUSATION-001.2/.3): when set, the resolved
+// causation identifier, parent run identifier, and depth chain from that
+// run instead of rooting a new one.
 //
 // When a runs service is wired (via SetRunsService) the insert +
 // publish + scheduler signal are delegated to it so the engine and
@@ -98,6 +103,7 @@ func (s *Service) QueueRunWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 	actorKind models.ActorKind, actorID string,
+	causingRunID string,
 ) error {
 	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
 		return err
@@ -110,6 +116,7 @@ func (s *Service) QueueRunWithActor(
 			Payload:        PayloadWithAgent(payload, agentInstanceID),
 			ActorKind:      actorKind,
 			ActorID:        actorID,
+			CausingRunID:   causingRunID,
 		})
 		return err
 	}

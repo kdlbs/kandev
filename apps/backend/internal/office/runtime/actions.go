@@ -250,6 +250,7 @@ type RunSpawner interface {
 		ctx context.Context,
 		agentInstanceID, reason, payload, idempotencyKey string,
 		actorKind models.ActorKind, actorID string,
+		causingRunID string,
 	) error
 }
 
@@ -563,11 +564,16 @@ type SpawnAgentRunInput struct {
 
 // SpawnAgentRun queues a run for an agent in the same workspace, attributed
 // to the invoking agent (runCtx.AgentID) as the actor
-// (AC-OFFICE-RUN-CAUSATION-001.15). This is always a genuine agent actor:
+// (AC-OFFICE-RUN-CAUSATION-001.15) and chained to the invoking run
+// (runCtx.RunID) as its causing run (AC-OFFICE-RUN-CAUSATION-001.3/.4): a
+// run queued by a runtime action is attributed to the run that performed
+// it, and inherits its causation depth plus one rather than rooting a new
+// chain. This is always a genuine agent actor and a genuine causing run:
 // this method only runs inside an already-executing agent's own tool-call
-// session, so runCtx.AgentID is never empty or unverified. When the target
-// agent is the invoking agent itself, this is exactly the self-trigger case
-// REQ-OFFICE-LAUNCH-SAFETY-004's refusal gate exists to bound.
+// session, so runCtx.AgentID/RunID are never empty or unverified. When the
+// target agent is the invoking agent itself, this is exactly the
+// self-trigger case REQ-OFFICE-LAUNCH-SAFETY-004's refusal gate exists to
+// bound.
 func (a *Actions) SpawnAgentRun(
 	ctx context.Context,
 	runCtx RunContext,
@@ -595,7 +601,7 @@ func (a *Actions) SpawnAgentRun(
 		return err
 	}
 	return a.deps.Runs.QueueRunWithActor(ctx, target.ID, input.Reason, string(payload),
-		input.IdempotencyKey, models.ActorKindAgent, runCtx.AgentID)
+		input.IdempotencyKey, models.ActorKindAgent, runCtx.AgentID, runCtx.RunID)
 }
 
 // ModifyAgentInput contains agent fields an authorized runtime may update.

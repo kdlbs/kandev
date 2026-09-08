@@ -24,7 +24,7 @@ func (n *noopActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _, _
 type noopRunQueuer struct{}
 
 func (n *noopRunQueuer) QueueRunWithActor(
-	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string,
+	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
 ) error {
 	return nil
 }
@@ -38,17 +38,19 @@ type capturingRunQueuer struct {
 	reason          string
 	actorKind       models.ActorKind
 	actorID         string
+	causingRunID    string
 }
 
 func (c *capturingRunQueuer) QueueRunWithActor(
 	_ context.Context, agentInstanceID, reason, _, _ string,
-	actorKind models.ActorKind, actorID string,
+	actorKind models.ActorKind, actorID string, causingRunID string,
 ) error {
 	c.called = true
 	c.agentInstanceID = agentInstanceID
 	c.reason = reason
 	c.actorKind = actorKind
 	c.actorID = actorID
+	c.causingRunID = causingRunID
 	return nil
 }
 
@@ -336,6 +338,10 @@ func TestQueueApprovalRun_AgentActorThreadedToQueueRun(t *testing.T) {
 	}
 	if queuer.actorID != "ceo-1" {
 		t.Errorf("actorID = %q, want ceo-1", queuer.actorID)
+	}
+	if queuer.causingRunID != "" {
+		t.Errorf("causingRunID = %q, want empty (an approval decision has no live causing run"+
+			" to chain from; it always roots a new causation chain)", queuer.causingRunID)
 	}
 }
 

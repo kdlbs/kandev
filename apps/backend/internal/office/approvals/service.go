@@ -34,6 +34,7 @@ type RunQueuer interface {
 		ctx context.Context,
 		agentInstanceID, reason, payload, idempotencyKey string,
 		actorKind models.ActorKind, actorID string,
+		causingRunID string,
 	) error
 }
 
@@ -230,6 +231,10 @@ func (s *ApprovalService) queueApprovalRun(
 		approval.ID, approval.Type, approval.Status, approval.DecisionNote,
 	)
 	idempotencyKey := "approval:" + approval.ID
+	// An approval decision is triggered by an HTTP request (a human or an
+	// authenticated agent deciding it), not from within an agent's own
+	// run, so there is no live causing run to chain from: this always
+	// roots a new causation chain (AC-OFFICE-RUN-CAUSATION-001.2).
 	return s.runs.QueueRunWithActor(ctx, approval.RequestedByAgentProfileID,
-		"approval_resolved", payload, idempotencyKey, actorKind, approval.DecidedBy)
+		"approval_resolved", payload, idempotencyKey, actorKind, approval.DecidedBy, "")
 }
