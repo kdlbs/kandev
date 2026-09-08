@@ -207,3 +207,13 @@ func BuildSkillManifestForTest(
 func (s *Service) GetWakeReceiptForTest(ctx context.Context, parentTaskID string) (*sqlite.WakeReceipt, error) {
 	return s.repo.GetWakeReceipt(ctx, parentTaskID)
 }
+
+// BuildPromptContextForTest exposes SchedulerIntegration's private
+// buildPromptContext so tests can drive the real assembly path (as
+// assembleAgentPrompt calls it) rather than constructing a PromptContext by
+// hand, which would not exercise the claim-time reads behind it.
+func (si *SchedulerIntegration) BuildPromptContextForTest(
+	ctx context.Context, reason, payload string,
+) *PromptContext {
+	return si.buildPromptContext(ctx, reason, payload)
+}
