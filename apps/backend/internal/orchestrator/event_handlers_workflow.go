@@ -827,11 +827,13 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 			zap.String("task_id", task.ID), zap.Error(sessionErr))
 		return
 	}
-	if session == nil && s.dependencyBlocksAutoStart(ctx, task.ID, "task.queue_promoted") {
-		// Promotion controls WIP admission, not dependency readiness. Keep both
-		// the promotion lifecycle token and deferred launch intent intact so the
-		// dependency-resolution path can start the task once its blockers clear.
-		return
+	if session == nil {
+		if blocked, _ := s.dependencyBlocksAutoStart(ctx, task.ID, "task.queue_promoted"); blocked {
+			// Promotion controls WIP admission, not dependency readiness. Keep both
+			// the promotion lifecycle token and deferred launch intent intact so the
+			// dependency-resolution path can start the task once its blockers clear.
+			return
+		}
 	}
 	// Read the source descriptor before claiming the one-shot promotion token.
 	// The claim removes the marker durably and a repository implementation may
@@ -1542,8 +1544,15 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	// Dependency gate. Sits here — the single automated-launch chokepoint — so
 	// one check covers task.moved, task.queue_promoted, watcher auto-start and
 	// dependency resolution itself. Placed BEFORE launchDeferredTask so a
-	// blocked task neither starts a session nor consumes its launch intent.
-	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
+	// blocked task never starts a session. A genuine block still consumes the
+	// caller's launch intent: evaluateDependentAfterPredecessorChange and
+	// reconcileDependencyLaunchesOnStartup independently launch this task once
+	// its dependency resolves. A failed dependency read has no such fallback,
+	// so it restores the token instead of stranding it.
+	if blocked, gateErrored := s.dependencyBlocksAutoStart(ctx, taskID, eventName); blocked {
+		if gateErrored && autoStartOnCreateClaimed {
+			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
+		}
 		return
 	}
 	if hasQueuePromotionPending(task) {

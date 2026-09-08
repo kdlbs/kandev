@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -416,5 +417,130 @@ func TestHandleTaskCreatedWithQueuePromotionPendingRestoresAutoStartOnCreateOnPr
 	requireNoError(t, err)
 	if len(sessions) != 0 {
 		t.Fatalf("ListTaskSessions = %d, want 0 (the injected failure must happen before session persistence)", len(sessions))
+	}
+}
+
+// erroringDependencyReader models a transient DependencyGate read failure,
+// distinct from a genuine dependency block: DependencyGate itself errors, so
+// dependencyBlocksAutoStart fails closed with gateErrored=true regardless of
+// whether the task has any dependency edges at all.
+type erroringDependencyReader struct {
+	err error
+}
+
+func (r *erroringDependencyReader) DependencyGate(context.Context, string) (bool, string, error) {
+	return false, "", r.err
+}
+
+func (r *erroringDependencyReader) ListDependentTaskIDs(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (r *erroringDependencyReader) ListPendingDependencyLaunches(context.Context) ([]taskservice.PendingDependencyLaunch, error) {
+	return nil, nil
+}
+
+// TestAutoStartTaskForStepRestoresAutoStartOnCreateOnDependencyGateError covers
+// Review Round 2's F4: autoStartTaskForStep's dependency gate is its third
+// early return, and unlike the other two (GetTask, GetStep failures, both
+// already fixed), it did not restore MetaKeyAutoStartOnCreate when
+// autoStartOnCreateClaimed was true. handleTaskCreated already removes the key
+// before dispatching here, and the startup sweep discovers candidates only by
+// that key's existence — so a DependencyGate read failure (not a genuine
+// block) stranded the task permanently: it has no dependency edge for
+// reconcileDependencyLaunchesOnStartup to find, and no other path re-lists it.
+//
+// A genuine block is deliberately NOT covered by this restore (see
+// dependencyBlocksAutoStart's gateErrored split): it is already covered by
+// evaluateDependentAfterPredecessorChange / reconcileDependencyLaunchesOnStartup
+// once the dependency resolves, so restoring there would only burn
+// recoverTaskLifecycleAttempt's bounded retry budget on every startup for as
+// long as the task stays blocked.
+func TestAutoStartTaskForStepRestoresAutoStartOnCreateOnDependencyGateError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "t-dependency-gate-error",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Routine run",
+		Description:    "prompt",
+		State:          v1.TaskStateCreated,
+		Metadata:       metadata,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+
+	launched := make(chan string, 2)
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			agentProfileID, _ := req.Metadata[models.MetaKeyAgentProfileID].(string)
+			launched <- agentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-dependency-gate-error"] = &v1.Task{
+		ID:          "t-dependency-gate-error",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Description: "prompt",
+		State:       v1.TaskStateCreated,
+		Metadata:    metadata,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.SetTaskDependencyReader(&erroringDependencyReader{err: errors.New("boom: transient dependency gate failure")})
+
+	svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t-dependency-gate-error"})
+
+	select {
+	case got := <-launched:
+		t.Fatalf("unexpected launch despite dependency gate error: %q", got)
+	default:
+	}
+
+	reloaded, err := repo.GetTask(ctx, "t-dependency-gate-error")
+	requireNoError(t, err)
+	if !models.HasAutoStartOnCreateIntent(reloaded.Metadata) {
+		t.Fatal("MetaKeyAutoStartOnCreate was not restored after a DependencyGate error; the task is stranded with no dependency edge for reconcileDependencyLaunchesOnStartup to find and no other marker for the next sweep")
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "t-dependency-gate-error")
+	requireNoError(t, err)
+	if len(sessions) != 0 {
+		t.Fatalf("ListTaskSessions = %d, want 0 (the dependency gate must block before any session is created)", len(sessions))
+	}
+
+	// Clear the injected failure and let a subsequent startup sweep retry using
+	// the restored token.
+	svc.SetTaskDependencyReader(&resolvedDependencyReader{})
+
+	svc.reconcileTaskLifecycleTokens(ctx)
+
+	select {
+	case got := <-launched:
+		if got != "routine-assignee" {
+			t.Fatalf("AgentProfileID = %q, want routine-assignee", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the retried auto-start launch")
 	}
 }
