@@ -171,12 +171,12 @@ func (r *executorLookupErrorRepo) GetExecutorRunningBySessionID(context.Context,
 }
 
 // TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable pins a
-// second negative case for Review round 1's F2 finding, raised again in PR
-// fixup review: a genuine executor-lookup failure (DB error, context
-// cancellation, metadata deserialization) is not the "no row yet" shape
-// errSessionAwaitingRuntimeLaunch exists for. It must stay visible instead of
-// being classified as ErrSessionRuntimeUnavailable and silently queued with
-// no future agent.boot_ready to drain it.
+// second negative case alongside TestPromptTask_ExhaustedColdResumeNotClassifiedRuntimeUnavailable:
+// a genuine executor-lookup failure (DB error, context cancellation, metadata
+// deserialization) is not the "no row yet" shape errSessionAwaitingRuntimeLaunch
+// exists for. It must stay visible instead of being classified as
+// ErrSessionRuntimeUnavailable and silently queued with no future
+// agent.boot_ready to drain it.
 func TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

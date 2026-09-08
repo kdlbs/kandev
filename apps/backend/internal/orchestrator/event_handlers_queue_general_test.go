@@ -153,13 +153,12 @@ func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) 
 	}
 }
 
-// TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed is the
-// regression test for the PR-fixup-round finding raised independently by two
-// automated reviewers: wsAddMessage's queuePromptIfRuntimeUnavailable path
-// queues a prompt after ProcessOnTurnStart already ran synchronously for it,
-// so the queued-dispatch path must not fire on_turn_start a second time.
-// Without the metaKeyTurnStartAlreadyProcessed guard, this drain would move
-// the task's step twice for one prompt.
+// TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed pins the
+// double-fire fix: wsAddMessage's queuePromptIfRuntimeUnavailable path queues
+// a prompt after ProcessOnTurnStart already ran synchronously for it, so the
+// queued-dispatch path must not fire on_turn_start a second time. Without the
+// MetaKeyTurnStartAlreadyProcessed guard, this drain would move the task's
+// step twice for one prompt.
 func TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
