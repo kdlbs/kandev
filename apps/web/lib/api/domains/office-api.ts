@@ -437,6 +437,35 @@ export function deleteBudget(id: string, options?: ApiRequestOptions) {
   });
 }
 
+// --- Built-in default spend ceiling (AC-OFFICE-BUDGET-003.5) ---
+
+// DefaultCeilingRaw is the wire shape of GET/PUT .../budgets/default
+// (internal/office/costs/dto.go's DefaultCeilingResponse /
+// SetDefaultCeilingRequest, both `{"limit_subcents": ...}`). Named "Raw"
+// and read as snake_case directly by the caller, matching this file's
+// existing CostBreakdownItemRaw convention, rather than assuming a
+// camelCase field the backend does not send.
+type DefaultCeilingRaw = { limit_subcents: number };
+
+export function getDefaultCeiling(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, options);
+}
+
+export function setDefaultCeiling(
+  workspaceId: string,
+  limitSubcents: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, {
+    ...options,
+    init: {
+      method: "PUT",
+      body: JSON.stringify({ limit_subcents: limitSubcents }),
+      ...options?.init,
+    },
+  });
+}
+
 // --- Routines ---
 
 export function listRoutines(workspaceId: string, options?: ApiRequestOptions) {
