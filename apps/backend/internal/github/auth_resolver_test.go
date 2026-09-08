@@ -321,6 +321,52 @@ func TestCredentialResolverLegacyIdentityProbeErrors(t *testing.T) {
 	})
 }
 
+func TestCredentialResolverLegacyIdentityProbeTransientFailureUsesConfiguredLogin(t *testing.T) {
+	tests := []struct {
+		name   string
+		client func(*testing.T) Client
+	}{
+		{
+			name: "PAT client",
+			client: func(t *testing.T) Client {
+				client := NewPATClient("legacy-token")
+				client.httpClient.Transport = legacyIdentityRoundTripper(func(*http.Request) (*http.Response, error) {
+					return nil, errors.New("dial tcp: network is unreachable")
+				})
+				return client
+			},
+		},
+		{
+			name: "gh client",
+			client: func(t *testing.T) Client {
+				newFakeGH(t, ghResponse{Prefix: "api user", Stderr: "error connecting to github.com", Exit: 1})
+				return NewGHClient()
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := NewCredentialResolver(nil, nil)
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				return test.client(t), AuthMethodPAT, nil
+			})
+
+			resolved, err := resolver.resolveLegacy(context.Background(), &WorkspaceConnection{
+				WorkspaceID: "legacy-workspace",
+				GitHubHost:  defaultGitHubHost,
+				Login:       "configured-user",
+			}, CredentialPurposeAutomation)
+			if err != nil {
+				t.Fatalf("resolve legacy credential: %v", err)
+			}
+			if resolved == nil || resolved.Principal.Login != "configured-user" {
+				t.Fatalf("resolved principal = %+v, want configured login", resolved)
+			}
+		})
+	}
+}
+
 func TestCredentialResolverLegacyIdentityProbeCancellation(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -86,6 +86,45 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWithoutHoldingWorker
 	}
 }
 
+func TestRateCoordinatorNonBlockingBackgroundAdmissionWaitsForLocalPacing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		coordinator := NewRateCoordinator(nil, nil)
+		_, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+			Kind: AuthPrincipalHuman, Login: "paced-user",
+		}, nil)
+		ctx := WithNonBlockingGitHubAdmission(
+			WithGitHubWorkClass(context.Background(), WorkClassBackground),
+		)
+
+		firstRelease, err := admission.acquire(ctx, ResourceCore)
+		if err != nil {
+			t.Fatalf("first acquire: %v", err)
+		}
+		firstRelease()
+
+		secondResult := make(chan error, 1)
+		go func() {
+			release, acquireErr := admission.acquire(ctx, ResourceCore)
+			if acquireErr == nil {
+				release()
+			}
+			secondResult <- acquireErr
+		}()
+		synctest.Wait()
+		select {
+		case acquireErr := <-secondResult:
+			t.Fatalf("second acquire returned before pacing elapsed: %v", acquireErr)
+		default:
+		}
+
+		time.Sleep(defaultBackgroundPace)
+		synctest.Wait()
+		if acquireErr := <-secondResult; acquireErr != nil {
+			t.Fatalf("second acquire: %v", acquireErr)
+		}
+	})
+}
+
 func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)

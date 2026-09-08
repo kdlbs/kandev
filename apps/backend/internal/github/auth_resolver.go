@@ -477,7 +477,10 @@ func (r *CredentialResolver) resolveLegacy(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, fmt.Errorf("resolve legacy GitHub identity: %w", err)
+		if strings.TrimSpace(connection.Login) == "" || FailureKindOf(err) != FailureTransient {
+			return nil, fmt.Errorf("resolve legacy GitHub identity: %w", err)
+		}
+		login = connection.Login
 	}
 	tracker, admission = r.coordinateLegacyClient(
 		connection.GitHubHost,

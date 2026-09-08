@@ -213,7 +213,7 @@ func (a *RateAdmission) acquire(ctx context.Context, resource Resource) (func(),
 	return a.acquireInteractive(ctx, resource)
 }
 
-func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resource) (func(), error) {
+func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resource) (func(), error) {
 	now := time.Now()
 	trackerChanged := a.principal.tracker.Changed()
 	decision := a.snapshot(resource, now)
@@ -247,6 +247,9 @@ func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resourc
 		}
 	}
 	retryAt, retrySource := a.retryBoundary(resource, reason, now, wait)
+	if reason == rateLimitBlockBackgroundPacing {
+		return a.acquireBackground(ctx, resource)
+	}
 	incGitHubBackgroundDeferral(resource, reason)
 	return nil, &AdmissionDeferredError{
 		Resource: resource, Delay: wait, RetryAt: retryAt, RetrySource: retrySource, Changed: changed,
