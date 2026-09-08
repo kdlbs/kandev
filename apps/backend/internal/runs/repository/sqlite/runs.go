@@ -452,19 +452,28 @@ func (r *Repository) CoalesceRun(
 	ctx context.Context, agentInstanceID, reason string, windowSecs int, payload string,
 ) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
-	taskID := taskIDFromPayload(payload)
+	taskID, invalidTaskID := taskIDFromPayload(payload)
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
 	// A payload's task_id identifies which launch it belongs to: merging
 	// across two different task_ids (present or absent) would replace one
 	// launch's payload with an unrelated one and silently drop it. The
-	// check is symmetric so both directions are covered.
+	// check is symmetric so both directions are covered. json_extract (and
+	// its Postgres ->> equivalent) yields NULL for both an absent key and
+	// an explicit JSON null, and '' for a present-but-empty string, so the
+	// taskless branch coalesces all three shapes together via COALESCE.
 	jsonExtract := dialect.JSONExtract(r.db.DriverName(), "payload", "task_id")
 	var taskPredicate string
-	if taskID != "" {
+	switch {
+	case invalidTaskID:
+		// task_id is present but not a string (e.g. a number): it names a
+		// task we can't compare textually, so it must not be treated as
+		// taskless and must not match any queued row at all.
+		taskPredicate = " AND 1 = 0"
+	case taskID != "":
 		taskPredicate = fmt.Sprintf(" AND %s = ?", jsonExtract)
 		args = append(args, taskID)
-	} else {
-		taskPredicate = fmt.Sprintf(" AND %s IS NULL", jsonExtract)
+	default:
+		taskPredicate = fmt.Sprintf(" AND COALESCE(%s, '') = ''", jsonExtract)
 	}
 	query := fmt.Sprintf(`
 		UPDATE runs
@@ -490,13 +499,25 @@ func (r *Repository) CoalesceRun(
 	return rows > 0, nil
 }
 
-func taskIDFromPayload(payload string) string {
+// taskIDFromPayload extracts payload.task_id for CoalesceRun's task-scoping
+// predicate. invalidTaskID is true only when the key is present with a
+// non-string value: that shape names some task_id, just not one comparable
+// as a string, so it must be kept out of the taskless bucket (an absent key,
+// a JSON null, or a present empty string all return "", invalidTaskID=false).
+func taskIDFromPayload(payload string) (taskID string, invalidTaskID bool) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return ""
+		return "", false
 	}
-	taskID, _ := raw["task_id"].(string)
-	return taskID
+	v, present := raw["task_id"]
+	if !present || v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", true
+	}
+	return s, false
 }
 
 // ClaimNextEligibleRun atomically claims the next queued run,

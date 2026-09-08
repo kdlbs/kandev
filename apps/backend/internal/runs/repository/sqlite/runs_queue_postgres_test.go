@@ -110,6 +110,7 @@ func TestPostgresCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
 		{"empty object", `{}`},
 		{"other field set", `{"routine_id":"r1"}`},
 		{"explicit null task_id", `{"task_id":null}`},
+		{"present empty string task_id", `{"task_id":""}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newTestRepoPostgres(t)
@@ -134,6 +135,33 @@ func TestPostgresCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
 			checkString(t, "payload", got.Payload, `{"merged":true}`)
 		})
 	}
+}
+
+// TestPostgresCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun is the
+// Postgres twin of TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun:
+// a payload with a present, non-string task_id must not be classified
+// taskless and must not absorb a genuinely taskless queued run's payload.
+func TestPostgresCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testing.T) {
+	repo := newTestRepoPostgres(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &models.Run{
+		ID: "pg-taskless-real", AgentProfileID: "a1", Reason: "custom_reason",
+		Payload: `{"note":"real taskless launch"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "custom_reason", 3600, `{"task_id":42}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a non-string task_id into a taskless run, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"note":"real taskless launch"}`)
 }
 
 // TestPostgresCoalesceRun_MergesSameTask is the positive-path twin: a
