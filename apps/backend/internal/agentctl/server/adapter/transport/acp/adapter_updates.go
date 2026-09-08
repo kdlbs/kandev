@@ -634,7 +634,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
-		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: text})
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-

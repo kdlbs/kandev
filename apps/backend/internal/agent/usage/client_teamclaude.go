@@ -87,6 +87,14 @@ func (c *TeamClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage,
 			available++
 		}
 	}
+	if available == 0 {
+		// An empty pool (or one where every account is disabled, throttled, or
+		// unavailable) means TeamClaude cannot route a request at all. Returning
+		// a success with zero windows here would cache that as "not limited" —
+		// IsPotentiallyRateLimited finds nothing to compare against an empty
+		// Windows slice — masking a total outage as healthy capacity.
+		return nil, fmt.Errorf("teamclaude usage: no usable account in pool of %d", len(status.Accounts))
+	}
 	return &ProviderUsage{
 		Provider:  "teamclaude",
 		Plan:      fmt.Sprintf("pool (%d available of %d)", available, len(status.Accounts)),

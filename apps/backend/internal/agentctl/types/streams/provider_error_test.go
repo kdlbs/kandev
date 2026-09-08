@@ -34,3 +34,29 @@ func TestSanitizeProviderMessageRedactsMixedCaseURLsAndIdentifiers(t *testing.T)
 		})
 	}
 }
+
+// TestSanitizeProviderMessageRedactsCredentials pins that a raw ACP
+// RequestError.Message routed through providerErrorFromACPPrompt cannot leak
+// a credential embedded by an adapter-defined error shape: the message text
+// gets the same routingerr.Redact pass as error.data, not just URL/identifier
+// stripping.
+func TestSanitizeProviderMessageRedactsCredentials(t *testing.T) {
+	cases := []struct {
+		name           string
+		message        string
+		forbiddenLower string
+	}{
+		{"bearer token", "Request failed: Bearer sk-abcdefghijklmnopqrstuvwx1234567890 rejected.", "sk-abcdefghijklmnopqrstuvwx1234567890"},
+		{"api key literal", "sk-abcdefghijklmnop invalid", "sk-abcdefghijklmnop"},
+		{"token key value", "auth failed token: supersecrettokenvalue", "supersecrettokenvalue"},
+		{"password key value", "login rejected password=hunter2verylong", "hunter2verylong"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.ToLower(SanitizeProviderMessage(tc.message))
+			if strings.Contains(got, strings.ToLower(tc.forbiddenLower)) {
+				t.Fatalf("sanitized message still contains unredacted credential %q: %q", tc.forbiddenLower, got)
+			}
+		})
+	}
+}

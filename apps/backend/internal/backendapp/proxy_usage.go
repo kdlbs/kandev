@@ -11,6 +11,7 @@ import (
 
 const teamClaudeBaseURLEnv = "ANTHROPIC_BASE_URL"
 const usageProxyVendorEnv = "USAGE_PROXY_VENDOR"
+const claudeACPAgentID = "claude-acp"
 
 // usageProxyResolver recognizes a profile that is served by a proxy and
 // returns a proxy-native usage client. Resolvers own their protocol and never
@@ -56,7 +57,7 @@ func (teamClaudeUsageResolver) Resolve(profile *settingsmodels.AgentProfile) (ag
 }
 
 func teamClaudeStatusURL(profile *settingsmodels.AgentProfile) (string, bool) {
-	if profile == nil || profile.AgentID != "claude-acp" {
+	if profile == nil || profile.AgentID != claudeACPAgentID {
 		return "", false
 	}
 	if profileEnvValue(profile, usageProxyVendorEnv) != "teamclaude" {
@@ -70,6 +71,9 @@ func teamClaudeStatusURL(profile *settingsmodels.AgentProfile) (string, bool) {
 		if err != nil || base.Scheme != "http" || base.Host == "" || base.User != nil || !isLoopbackHost(base.Hostname()) {
 			return "", false
 		}
+		// TeamClaude always serves its control-plane status at
+		// /teamclaude/status regardless of any path prefix in the configured
+		// ANTHROPIC_BASE_URL; only the host:port is used.
 		return "http://" + base.Host + "/teamclaude/status", true
 	}
 	return "", false

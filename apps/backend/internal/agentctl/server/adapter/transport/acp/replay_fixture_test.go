@@ -122,15 +122,16 @@ func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adap
 	a := newTestAdapterForAgent(fx.AgentID)
 	fake := &replayFakeAgent{fixture: fx}
 
-	if err := a.Connect(clientToAgentW, agentToClientR); err != nil {
-		t.Fatalf("connect adapter: %v", err)
-	}
-	fake.conn = acp.NewAgentSideConnection(fake, agentToClientW, clientToAgentR)
 	t.Cleanup(func() {
 		_ = a.Close()
 		_ = clientToAgentW.Close()
 		_ = agentToClientW.Close()
 	})
+
+	if err := a.Connect(clientToAgentW, agentToClientR); err != nil {
+		t.Fatalf("connect adapter: %v", err)
+	}
+	fake.conn = acp.NewAgentSideConnection(fake, agentToClientW, clientToAgentR)
 
 	ctx := context.Background()
 	if err := a.Initialize(ctx); err != nil {

@@ -32,3 +32,32 @@ func TestConvertMessageChunk_ProviderDiagnosticCandidateAssistantRoleOnly(t *tes
 		t.Fatal("user chunk must never carry the provider diagnostic marker")
 	}
 }
+
+// TestConvertMessageChunk_ProviderDiagnosticCandidateUsesAdapterProviderID pins
+// that classification is scoped to the adapter's own agent ID: a
+// provider-specific high-confidence rule (claude-acp's
+// claude.proxy.credentials_refused.v1) only fires when that identity reaches
+// routingerr.Classify. Without it, providerRules["claude-acp"] is never
+// consulted and the chunk is left unmarked even though the text matches.
+func TestConvertMessageChunk_ProviderDiagnosticCandidateUsesAdapterProviderID(t *testing.T) {
+	const credentialsRefusedText = `{"type":"error","error":{"type":"proxy_error","message":` +
+		`"All account credentials were refused by the upstream provider. Check your OAuth entitlement."}}`
+
+	claudeAdapter := newTestAdapterForAgent("claude-acp")
+	claudeEvent := claudeAdapter.convertMessageChunk("session-1", acp.TextBlock(credentialsRefusedText), "assistant")
+	if claudeEvent == nil {
+		t.Fatal("expected converted assistant event")
+	}
+	if !claudeEvent.ProviderDiagnosticCandidate {
+		t.Fatal("claude-acp adapter must classify its own provider-scoped credentials-refused rule as a diagnostic candidate")
+	}
+
+	unscoped := newTestAdapterForAgent("")
+	unscopedEvent := unscoped.convertMessageChunk("session-1", acp.TextBlock(credentialsRefusedText), "assistant")
+	if unscopedEvent == nil {
+		t.Fatal("expected converted assistant event")
+	}
+	if unscopedEvent.ProviderDiagnosticCandidate {
+		t.Fatal("an adapter with no provider identity must not match claude-acp's provider-scoped rule")
+	}
+}

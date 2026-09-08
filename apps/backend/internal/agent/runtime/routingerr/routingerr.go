@@ -163,6 +163,8 @@ const exitCodeBinaryMissing = 127
 const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
+// Classify always returns a non-nil *Error, even for an unmatched or empty
+// input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
 	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
 	if e := classifyInjection(in, excerpt); e != nil {

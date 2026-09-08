@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
 // MaxProviderMessageBytes bounds a sanitized provider diagnostic message.
@@ -14,13 +16,17 @@ var (
 	providerMessageIdentifierPattern = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
 )
 
-// SanitizeProviderMessage strips URLs, redacts workspace/session/run
-// identifiers, collapses internal whitespace, and trims trailing punctuation
-// from a raw provider-supplied error string, bounding it to
-// MaxProviderMessageBytes. It is the single sanitized-projection transform
-// the ACP transport layer and the recovery-evidence layer must observe
-// identically, so both call this rather than each keeping their own copy.
+// SanitizeProviderMessage redacts likely credentials (via routingerr.Redact),
+// strips URLs, redacts workspace/session/run identifiers, collapses internal
+// whitespace, and trims trailing punctuation from a raw provider-supplied
+// error string, bounding it to MaxProviderMessageBytes. It is the single
+// sanitized-projection transform the ACP transport layer and the
+// recovery-evidence layer must observe identically, so both call this rather
+// than each keeping their own copy. A raw ACP RequestError.Message is
+// adapter-defined and may itself embed a credential the same way error.data
+// can, so credential redaction runs before any other transform.
 func SanitizeProviderMessage(message string) string {
+	message = routingerr.Redact(message)
 	message = providerMessageURLPattern.ReplaceAllString(message, "")
 	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
 	message = strings.Join(strings.Fields(message), " ")

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -33,15 +34,17 @@ type promptAttemptEvidence struct {
 	dynamic                bool
 }
 
-// normalizeDiagnosticText collapses internal whitespace and trims trailing
-// punctuation, mirroring sanitizeProviderMessage's cosmetic trim so a raw
-// diagnostic chunk and the sanitized terminal failure message it precedes
-// normalize to the same text when their content is otherwise identical.
-// Applied to both sides of the containment check, so it never introduces an
-// asymmetry of its own.
+// normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw
+// diagnostic chunk and the already-sanitized terminal failure message it
+// precedes normalize to the same text when their content is otherwise
+// identical. The terminal ProviderError.Message reaches this comparison
+// already sanitized (URLs/identifiers/credentials stripped) by the adapter
+// extractor that built it; applying the same transform here, rather than
+// only a cosmetic whitespace/punctuation trim, keeps both sides of the
+// containment check symmetric instead of leaving raw content on the
+// diagnostic side that the terminal side has already redacted.
 func normalizeDiagnosticText(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	return strings.TrimSpace(strings.TrimRight(s, ".:;,-"))
+	return streams.SanitizeProviderMessage(s)
 }
 
 func (s *Service) beginPromptAttempt(

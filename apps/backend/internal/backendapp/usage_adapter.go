@@ -61,7 +61,7 @@ func (a *usageProviderAdapter) ensureRegistered(profileID, agentName string) {
 		return
 	}
 	switch agentName {
-	case "claude-acp":
+	case claudeACPAgentID:
 		credPath := filepath.Join(home, ".claude", ".credentials.json")
 		client := agentusage.NewClaudeUsageClientWithPath(credPath)
 		key := agentusage.CacheKey("anthropic", credPath)

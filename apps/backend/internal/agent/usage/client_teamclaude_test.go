@@ -53,6 +53,36 @@ func TestTeamClaudeFetchUsageRejectsNonSuccess(t *testing.T) {
 	}
 }
 
+// TestTeamClaudeFetchUsageRejectsEmptyPool pins that an empty accounts array
+// fails rather than reporting a healthy "0 available of 0" usage snapshot: an
+// empty Windows slice would let IsPotentiallyRateLimited read a total outage
+// as "not limited".
+func TestTeamClaudeFetchUsageRejectsEmptyPool(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"accounts":[]}`))
+	}))
+	defer srv.Close()
+	if _, err := NewTeamClaudeUsageClient(srv.URL).FetchUsage(context.Background()); err == nil {
+		t.Fatal("FetchUsage succeeded for an empty account pool")
+	}
+}
+
+// TestTeamClaudeFetchUsageRejectsAllUnavailablePool is the non-empty
+// counterpart: every account present is disabled, throttled, or unavailable,
+// so the pool still cannot route a request even though accounts exist.
+func TestTeamClaudeFetchUsageRejectsAllUnavailablePool(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"accounts":[
+			{"disabled":true,"status":"active","quota":{"unified5h":0.1}},
+			{"status":"throttled","unavailable":"rate-limited","quota":{"unified5h":0.2}}
+		]}`))
+	}))
+	defer srv.Close()
+	if _, err := NewTeamClaudeUsageClient(srv.URL).FetchUsage(context.Background()); err == nil {
+		t.Fatal("FetchUsage succeeded for a pool with no usable account")
+	}
+}
+
 func TestTeamClaudeFetchUsageRejectsNonStatusPayload(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"not_accounts":[]}`))
