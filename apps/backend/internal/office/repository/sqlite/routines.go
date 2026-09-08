@@ -60,7 +60,9 @@ func (r *Repository) GetTriggerByPublicID(ctx context.Context, publicID string) 
 	return &t, err
 }
 
-// GetDueTriggers returns cron triggers that are due to fire.
+// GetDueTriggers returns cron triggers that are due to fire, ordered by
+// next_run_at then id so that TickScheduledTriggers processes the same
+// trigger set in a stable order across ticks (AC-OFFICE-ROUTINE-CATCHUP-001.7).
 // Routine status filtering is done in the service layer via ConfigLoader.
 func (r *Repository) GetDueTriggers(ctx context.Context, now time.Time) ([]*models.RoutineTrigger, error) {
 	var triggers []*models.RoutineTrigger
@@ -68,6 +70,7 @@ func (r *Repository) GetDueTriggers(ctx context.Context, now time.Time) ([]*mode
 		SELECT * FROM office_routine_triggers
 		WHERE kind = 'cron' AND enabled = 1
 		  AND next_run_at IS NOT NULL AND next_run_at <= ?
+		ORDER BY next_run_at ASC, id ASC
 	`), now)
 	if err != nil {
 		return nil, err
@@ -103,6 +106,48 @@ func (r *Repository) UpdateTriggerNextRun(ctx context.Context, triggerID string,
 	return err
 }
 
+// ListStrandedTriggers returns enabled cron triggers whose next_run_at is
+// null (a claim was taken via ClaimTrigger) and whose updated_at is older
+// than olderThan. A claim taken this tick or the previous one is never
+// returned; only a claim abandoned before that — a process that stopped
+// between ClaimTrigger and the re-arm write — is stale
+// (AC-OFFICE-ROUTINE-CATCHUP-001.9).
+func (r *Repository) ListStrandedTriggers(ctx context.Context, olderThan time.Time) ([]*models.RoutineTrigger, error) {
+	var triggers []*models.RoutineTrigger
+	err := r.ro.SelectContext(ctx, &triggers, r.ro.Rebind(`
+		SELECT * FROM office_routine_triggers
+		WHERE kind = 'cron' AND enabled = 1
+		  AND next_run_at IS NULL AND updated_at < ?
+		ORDER BY id ASC
+	`), olderThan)
+	if err != nil {
+		return nil, err
+	}
+	if triggers == nil {
+		triggers = []*models.RoutineTrigger{}
+	}
+	return triggers, nil
+}
+
+// ReconcileTriggerNextRun arms a stranded trigger's next_run_at. Unlike
+// UpdateTriggerNextRun (the live claimant's own unconditional re-arm), this
+// write is a CAS on `next_run_at IS NULL AND enabled = 1`: a second
+// reconciling processor affects zero rows, and a trigger disabled or armed
+// between the read and this write is left alone. Returns true if this call
+// won the CAS.
+func (r *Repository) ReconcileTriggerNextRun(ctx context.Context, triggerID string, nextRunAt time.Time) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routine_triggers
+		SET next_run_at = ?, updated_at = ?
+		WHERE id = ? AND next_run_at IS NULL AND enabled = 1
+	`), nextRunAt, time.Now().UTC(), triggerID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
+}
+
 // DeleteRoutineTrigger deletes a trigger by ID.
 func (r *Repository) DeleteRoutineTrigger(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(
@@ -118,13 +163,6 @@ func (r *Repository) CreateRoutine(ctx context.Context, routine *models.Routine)
 	now := time.Now().UTC()
 	routine.CreatedAt = now
 	routine.UpdatedAt = now
-
-	if routine.CatchUpPolicy == "" {
-		routine.CatchUpPolicy = "enqueue_missed_with_cap"
-	}
-	if routine.CatchUpMax <= 0 {
-		routine.CatchUpMax = 25
-	}
 	return r.insertRoutine(ctx, r.db, routine)
 }
 
@@ -138,16 +176,19 @@ func (r *Repository) CreateRoutineTx(ctx context.Context, tx *sqlx.Tx, routine *
 	now := time.Now().UTC()
 	routine.CreatedAt = now
 	routine.UpdatedAt = now
-	if routine.CatchUpPolicy == "" {
-		routine.CatchUpPolicy = "enqueue_missed_with_cap"
-	}
-	if routine.CatchUpMax <= 0 {
-		routine.CatchUpMax = 25
-	}
 	return r.insertRoutine(ctx, tx, routine)
 }
 
+// insertRoutine is the single write-time normalization funnel for
+// catch_up_policy and catch_up_max: it reassigns both fields on the
+// passed-in struct, before the statement binds them, so a handler that
+// serializes the same *Routine back to the caller reports the normalized
+// value rather than the submitted one (AC-OFFICE-ROUTINE-CATCHUP-001.13,
+// AC-OFFICE-ROUTINE-CATCHUP-003.1). See
+// docs/specs/office/system-design/routine-catch-up-01.md.
 func (r *Repository) insertRoutine(ctx context.Context, ext sqlx.ExtContext, routine *models.Routine) error {
+	routine.CatchUpPolicy = models.NormaliseCatchUpPolicy(string(routine.CatchUpPolicy))
+	routine.CatchUpMax = models.NormaliseCatchUpMax(routine.CatchUpMax)
 	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_routines (
 			id, workspace_id, name, description, task_template,
@@ -196,9 +237,15 @@ func (r *Repository) ListRoutines(ctx context.Context, workspaceID string) ([]*m
 	return routines, nil
 }
 
-// UpdateRoutine updates an existing routine.
+// UpdateRoutine updates an existing routine. It applies the same write-time
+// catch_up_policy/catch_up_max normalization funnel as insertRoutine, on the
+// passed-in struct, so this second, independent writer of both columns
+// cannot diverge from the create path (AC-OFFICE-ROUTINE-CATCHUP-001.13,
+// AC-OFFICE-ROUTINE-CATCHUP-003.1).
 func (r *Repository) UpdateRoutine(ctx context.Context, routine *models.Routine) error {
 	routine.UpdatedAt = time.Now().UTC()
+	routine.CatchUpPolicy = models.NormaliseCatchUpPolicy(string(routine.CatchUpPolicy))
+	routine.CatchUpMax = models.NormaliseCatchUpMax(routine.CatchUpMax)
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_routines SET
 			name = ?, description = ?, task_template = ?,
@@ -268,7 +315,11 @@ func (r *Repository) deleteRoutine(ctx context.Context, ext sqlx.ExtContext, id 
 	return err
 }
 
-// CreateRoutineRun creates a new routine run record.
+// CreateRoutineRun creates a new routine run record. The three catch-up
+// gap-summary columns are written once, here, from whatever the caller set
+// on run (nil when the claim measured no gap); nothing updates them
+// afterward, so a run that later transitions to coalesced or failed keeps
+// the gap that was measured for its tick (AC-OFFICE-ROUTINE-CATCHUP-002.10).
 func (r *Repository) CreateRoutineRun(ctx context.Context, run *models.RoutineRun) error {
 	if run.ID == "" {
 		run.ID = uuid.New().String()
@@ -279,11 +330,13 @@ func (r *Repository) CreateRoutineRun(ctx context.Context, run *models.RoutineRu
 		INSERT INTO office_routine_runs (
 			id, routine_id, trigger_id, source, status, trigger_payload,
 			linked_task_id, coalesced_into_run_id, dispatch_fingerprint,
+			catch_up_missed_ticks, catch_up_first_missed_at, catch_up_truncated,
 			started_at, completed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), run.ID, run.RoutineID, run.TriggerID, run.Source, run.Status,
 		run.TriggerPayload, run.LinkedTaskID, run.CoalescedIntoRunID,
-		run.DispatchFingerprint, run.StartedAt, run.CompletedAt, run.CreatedAt)
+		run.DispatchFingerprint, run.CatchUpMissedTicks, run.CatchUpFirstMissedAt,
+		run.CatchUpTruncated, run.StartedAt, run.CompletedAt, run.CreatedAt)
 	return err
 }
 

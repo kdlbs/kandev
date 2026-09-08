@@ -66,7 +66,7 @@ func (h *Handler) createRoutine(c *gin.Context) {
 	}
 	catchUpPolicy := models.RoutineCatchUpPolicy(req.CatchUpPolicy)
 	if catchUpPolicy == "" {
-		catchUpPolicy = models.CatchUpPolicyEnqueueMissedWithCap
+		catchUpPolicy = models.CatchUpPolicySummarizeMissed
 	}
 	if !concurrencyPolicy.Valid() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid concurrency_policy: " + req.ConcurrencyPolicy})
