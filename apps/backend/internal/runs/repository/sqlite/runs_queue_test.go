@@ -107,10 +107,10 @@ func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testin
 	ctx := context.Background()
 	queued := mustCreateRun(t, repo, &models.Run{
 		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
-		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+		Payload: `{"task_id":"task-a","attempt":1}`, Status: "queued", CoalescedCount: 1,
 	})
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-a"}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-a","attempt":2}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testin
 
 	got := mustGetRun(t, repo, queued.ID)
 	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
-	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a","attempt":2}`)
 	if n := countRuns(t, repo); n != 1 {
 		t.Errorf("%d rows after coalescing, want 1 (no new run may be created)", n)
 	}
