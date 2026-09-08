@@ -124,6 +124,81 @@ func TestCreateWorkspacePauseWithActivity_RejectsSecondPause(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspacePauseWithActivity_ActivityWriteFailureRollsBackPauseInsert
+// proves the two writes commit or fail together: when the paired
+// activity-log insert fails (here, by dropping its table so the second
+// statement in the transaction errors while the first would otherwise
+// succeed), the whole transaction rolls back and the workspace is left
+// exactly as it was, not paused with an audit gap.
+func TestCreateWorkspacePauseWithActivity_ActivityWriteFailureRollsBackPauseInsert(t *testing.T) {
+	repo := newPauseTestRepo(t)
+	ctx := context.Background()
+
+	mustExec(t, repo, `DROP TABLE office_activity_log`)
+
+	pause := &models.WorkspacePause{
+		WorkspaceID:   "ws-1",
+		Reason:        "incident",
+		CreatedBy:     "user-1",
+		CreatedByKind: "user",
+	}
+	activity := &models.ActivityEntry{
+		WorkspaceID: "ws-1",
+		ActorType:   models.ActivityActorUser,
+		ActorID:     "user-1",
+		Action:      models.ActivityActionWorkspacePaused,
+		TargetType:  models.ActivityTargetWorkspace,
+		TargetID:    "ws-1",
+	}
+	err := repo.CreateWorkspacePauseWithActivity(ctx, pause, activity)
+	if err == nil {
+		t.Fatal("expected an error when the paired activity-log write fails")
+	}
+	if errors.Is(err, sqlite.ErrWorkspaceAlreadyPaused) {
+		t.Fatalf("expected a plain write failure, not ErrWorkspaceAlreadyPaused: %v", err)
+	}
+
+	active, getErr := repo.GetActiveWorkspacePause(ctx, "ws-1")
+	if getErr != nil {
+		t.Fatalf("get active pause: %v", getErr)
+	}
+	if active != nil {
+		t.Fatalf("expected no pause row: the insert must roll back with its failed paired activity write, got %+v", active)
+	}
+}
+
+// TestReleaseWorkspacePauseWithActivity_ActivityWriteFailureRollsBackRelease
+// proves the release side of the same guarantee (AC-006.10): when the
+// paired activity-log insert fails, the CAS release itself must roll
+// back too, leaving the workspace paused rather than silently resumed
+// with no audit trail.
+func TestReleaseWorkspacePauseWithActivity_ActivityWriteFailureRollsBackRelease(t *testing.T) {
+	repo := newPauseTestRepo(t)
+	ctx := context.Background()
+
+	pause := mustCreatePause(t, repo, "ws-1")
+	mustExec(t, repo, `DROP TABLE office_activity_log`)
+
+	released, err := repo.ReleaseWorkspacePauseWithActivity(ctx, pause.ID, "ws-1", "user-1", "user", "resolved")
+	if err == nil {
+		t.Fatal("expected an error when the paired activity-log write fails")
+	}
+	if released {
+		t.Fatal("expected released=false when the transaction fails")
+	}
+
+	active, getErr := repo.GetActiveWorkspacePause(ctx, "ws-1")
+	if getErr != nil {
+		t.Fatalf("get active pause: %v", getErr)
+	}
+	if active == nil {
+		t.Fatal("expected the pause to remain active: a failed release must leave the workspace paused, not resumed")
+	}
+	if active.ID != pause.ID {
+		t.Fatalf("active pause id = %q, want unchanged %q", active.ID, pause.ID)
+	}
+}
+
 // TestReleaseWorkspacePauseWithActivity_ReleasesAndLogsResumed proves the
 // ordinary resume path: the CAS wins, the record is released, and a
 // workspace_resumed activity entry is written in the same transaction.
