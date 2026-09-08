@@ -12,9 +12,10 @@ import (
 const MetadataKeyInstructionsDir = "kandev_instructions_dir"
 
 // runSkillDeploy resolves the agent profile (now including the office
-// enrichment fields from ADR 0005 Wave A), short-circuits when there's
-// nothing to deploy, and otherwise hands off to the configured
-// SkillDeployer. Any metadata patches the deployer returns are merged
+// enrichment fields from ADR 0005 Wave A) and hands it off to the configured
+// SkillDeployer. Empty profiles still reach the deployer so it can reconcile
+// launch-scoped files left by a previous seat run. Any metadata patches the
+// deployer returns are merged
 // onto the prepared LaunchRequest so executor backends see them
 // (e.g. Docker bind-mount, Sprites manifest upload). Errors are logged
 // and swallowed: an in-flight launch must not be aborted because skill
@@ -31,11 +32,6 @@ func (m *Manager) runSkillDeploy(ctx context.Context, original, prepared *Launch
 		m.logger.Debug("skill deploy skipped: profile lookup failed",
 			zap.String("profile_id", original.AgentProfileID),
 			zap.Error(err))
-		return
-	}
-	if len(profile.SkillIDs) == 0 && len(profile.DesiredSkills) == 0 && len(original.AdditionalSkillSlugs) == 0 {
-		// Fast path: shallow / kanban-flavour profiles with no enrichment to
-		// deploy. Most launches today land here.
 		return
 	}
 	req := SkillDeployRequest{

@@ -386,6 +386,18 @@ func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte,
 	return nil
 }
 
+func (u *sshFileUploader) RemoveAll(ctx context.Context, path string) error {
+	c, err := newSFTPClientContext(ctx, u.client)
+	if err != nil {
+		return fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+	if err := c.RemoveAll(path); err != nil && !isSFTPNotExist(err) && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sftp: remove %s: %w", path, err)
+	}
+	return nil
+}
+
 // sshMkdirAll mimics `mkdir -p` over SFTP. Walks every prefix of dir and
 // creates segments that don't exist; treats "already exists" as success.
 func sshMkdirAll(c *sftp.Client, dir string) error {

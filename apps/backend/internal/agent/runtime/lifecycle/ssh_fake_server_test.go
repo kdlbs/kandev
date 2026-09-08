@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,9 @@ type fakeSSHServer struct {
 	calls   []sshExecCall
 	handler sshExecHandler
 
+	reverseMu       sync.Mutex
+	reverseForwards map[string]net.Listener
+
 	// sftpEnabled serves the "sftp" subsystem against the real filesystem, so
 	// tests point remote paths at a t.TempDir() and assert on real bytes.
 	sftpEnabled bool
@@ -81,7 +85,10 @@ func newFakeSSHServer(t *testing.T, handler sshExecHandler) *fakeSSHServer {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	s := &fakeSSHServer{t: t, listener: listener, signer: signer, handler: handler}
+	s := &fakeSSHServer{
+		t: t, listener: listener, signer: signer, handler: handler,
+		reverseForwards: make(map[string]net.Listener),
+	}
 	t.Cleanup(s.Close)
 	s.wg.Add(1)
 	go s.acceptLoop()
@@ -140,6 +147,12 @@ func (s *fakeSSHServer) lastCommandContaining(substr string) (sshExecCall, bool)
 func (s *fakeSSHServer) Close() {
 	s.closeOnce.Do(func() {
 		_ = s.listener.Close()
+		s.reverseMu.Lock()
+		for key, listener := range s.reverseForwards {
+			_ = listener.Close()
+			delete(s.reverseForwards, key)
+		}
+		s.reverseMu.Unlock()
 	})
 	s.wg.Wait()
 }
@@ -184,10 +197,7 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 	defer func() { _ = serverConn.Close() }()
 
 	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ssh.DiscardRequests(reqs)
-	}()
+	go s.serveGlobalRequests(serverConn, reqs)
 
 	for newChan := range chans {
 		switch newChan.ChannelType() {
@@ -200,6 +210,92 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 		default:
 			_ = newChan.Reject(ssh.UnknownChannelType, newChan.ChannelType())
 		}
+	}
+}
+
+func (s *fakeSSHServer) serveGlobalRequests(conn *ssh.ServerConn, requests <-chan *ssh.Request) {
+	defer s.wg.Done()
+	for req := range requests {
+		switch req.Type {
+		case "tcpip-forward":
+			s.handleTCPIPForward(conn, req)
+		case "cancel-tcpip-forward":
+			s.handleCancelTCPIPForward(req)
+		default:
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}
+}
+
+func (s *fakeSSHServer) handleTCPIPForward(conn *ssh.ServerConn, req *ssh.Request) {
+	var payload struct {
+		Addr string
+		Port uint32
+	}
+	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	address := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(payload.Port), 10))
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	actualPort := uint32(listener.Addr().(*net.TCPAddr).Port)
+	key := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(actualPort), 10))
+	s.reverseMu.Lock()
+	s.reverseForwards[key] = listener
+	s.reverseMu.Unlock()
+	if payload.Port == 0 {
+		_ = req.Reply(true, ssh.Marshal(struct{ Port uint32 }{Port: actualPort}))
+	} else {
+		_ = req.Reply(true, nil)
+	}
+	s.wg.Add(1)
+	go s.serveReverseForward(key, listener)
+}
+
+func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
+	var payload struct {
+		Addr string
+		Port uint32
+	}
+	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	key := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(payload.Port), 10))
+	s.reverseMu.Lock()
+	listener, ok := s.reverseForwards[key]
+	if ok {
+		delete(s.reverseForwards, key)
+	}
+	s.reverseMu.Unlock()
+	if ok {
+		_ = listener.Close()
+	}
+	_ = req.Reply(true, nil)
+}
+
+func (s *fakeSSHServer) serveReverseForward(key string, listener net.Listener) {
+	defer s.wg.Done()
+	defer func() {
+		s.reverseMu.Lock()
+		delete(s.reverseForwards, key)
+		s.reverseMu.Unlock()
+	}()
+	for {
+		incoming, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		_ = incoming.Close()
+		// No current test needs to deliver a connection through the fake
+		// reverse forward. Closing accepted sockets still models the remote
+		// listener's lifetime and keeps the test server bounded.
 	}
 }
 

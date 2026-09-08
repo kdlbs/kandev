@@ -10,6 +10,11 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
+// ReservedDecisionSkillSlug is launch-scoped. It is admitted only through
+// Request.AdditionalSkillSlugs so a seat can receive decision instructions
+// without making them part of a durable agent profile.
+const ReservedDecisionSkillSlug = "kandev-step-decision"
+
 // buildManifest resolves a profile's desired skills + instruction files
 // into a Manifest the delivery strategies can consume. It is pure data
 // — no filesystem side effects.
@@ -17,7 +22,7 @@ import (
 // The agent profile is the unified ADR 0005 row. We read both
 // SkillIDs (the new merged column) and DesiredSkills (legacy office
 // column) and union the two into a single list of slugs / IDs. Empty
-// slots are dropped before lookup.
+// slots and launch-reserved skill slugs are dropped before lookup.
 func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.AgentProfile, workspaceSlug string, additionalSkillSlugs []string) *Manifest {
 	// Profile.AgentID IS the agent type ID after ADR 0005 — the
 	// agent_profiles row's agent_id column points at the agents
@@ -42,6 +47,7 @@ func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile
 		return
 	}
 	keys := mergedSkillKeys(profile)
+	additionalKeys := make(map[string]struct{}, len(additionalSkillSlugs))
 	seen := make(map[string]struct{}, len(keys)+len(additionalSkillSlugs))
 	for _, key := range keys {
 		seen[key] = struct{}{}
@@ -51,6 +57,7 @@ func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile
 		if key == "" {
 			continue
 		}
+		additionalKeys[key] = struct{}{}
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -63,6 +70,13 @@ func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile
 			d.logger.Debug("skip skill in manifest",
 				zap.String("key", key), zap.Error(err))
 			continue
+		}
+		if isReservedSkillSlug(skill.Slug) {
+			if _, launchScoped := additionalKeys[key]; !launchScoped {
+				d.logger.Debug("skip reserved durable skill",
+					zap.String("key", key), zap.String("slug", skill.Slug))
+				continue
+			}
 		}
 		manifest.Skills = append(manifest.Skills, *skill)
 	}
@@ -104,9 +118,11 @@ func (d *Deployer) resolveProjectSkillDir(agentTypeID string) string {
 }
 
 // mergedSkillKeys returns the union of profile.SkillIDs and
-// profile.DesiredSkills, with empties trimmed. Duplicates collapse.
+// profile.DesiredSkills, with empties and launch-reserved skill slugs
+// removed. Duplicates collapse.
 // The order is SkillIDs first (the canonical post-ADR field), then
 // DesiredSkills (legacy office input that callers still populate).
+// Launch-reserved skills are admitted only through AdditionalSkillSlugs.
 //
 // Both fields are JSON-array TEXT columns; non-empty values are unmarshalled
 // into a list of slugs and concatenated. Malformed JSON is treated as an
@@ -122,7 +138,7 @@ func mergedSkillKeys(profile *settingsmodels.AgentProfile) []string {
 	out := make([]string, 0, len(skillIDs)+len(desired))
 	for _, k := range skillIDs {
 		k = strings.TrimSpace(k)
-		if k == "" || seen[k] {
+		if k == "" || isReservedSkillSlug(k) || seen[k] {
 			continue
 		}
 		seen[k] = true
@@ -130,13 +146,17 @@ func mergedSkillKeys(profile *settingsmodels.AgentProfile) []string {
 	}
 	for _, k := range desired {
 		k = strings.TrimSpace(k)
-		if k == "" || seen[k] {
+		if k == "" || isReservedSkillSlug(k) || seen[k] {
 			continue
 		}
 		seen[k] = true
 		out = append(out, k)
 	}
 	return out
+}
+
+func isReservedSkillSlug(slug string) bool {
+	return strings.TrimSpace(slug) == ReservedDecisionSkillSlug
 }
 
 // decodeSkillSlugs parses a JSON-array string into a []string. Empty input

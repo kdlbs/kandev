@@ -235,15 +235,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if err != nil {
 		return nil, err
 	}
-	runtimeAPITunnel, runtimeAPIURL, err := openSSHRuntimeAPITunnel(client, req.Env[envKeyKandevAPIURL])
+	runtimeAPITunnel, _, err = openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
 		return nil, err
-	}
-	if runtimeAPITunnel != nil {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		req.Env[envKeyKandevAPIURL] = runtimeAPIURL
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
@@ -421,6 +415,9 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) (int, int, *SSHPortForwarder, string, error) {
+	if err := uploadSSHSkillManifest(ctx, client, taskDir, req.Metadata); err != nil {
+		return 0, 0, nil, "", fmt.Errorf("ssh: upload skill manifest: %w", err)
+	}
 	nonce, err := generateBootstrapNonce()
 	if err != nil {
 		return 0, 0, nil, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
@@ -503,6 +500,20 @@ func (r *SSHExecutor) buildInstance(
 	port, pid int,
 	workdir, authToken string,
 ) *ExecutorInstance {
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:               target.Host,
+		MetadataKeySSHPort:               strconv.Itoa(target.Port),
+		MetadataKeySSHUser:               target.User,
+		MetadataKeySSHHostFingerprint:    target.PinnedFingerprint,
+		MetadataKeySSHRemoteTaskDir:      taskDir,
+		MetadataKeySSHRemoteSessionDir:   sessionDir,
+		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
+		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
+		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
+		MetadataKeySSHWorkdirRoot:        workdir,
+		MetadataKeyIsRemote:              true,
+	}
+	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:  req.InstanceID,
 		TaskID:      req.TaskID,
@@ -513,19 +524,7 @@ func (r *SSHExecutor) buildInstance(
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken)),
 		WorkspacePath: taskDir,
 		AuthToken:     authToken,
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:               target.Host,
-			MetadataKeySSHPort:               strconv.Itoa(target.Port),
-			MetadataKeySSHUser:               target.User,
-			MetadataKeySSHHostFingerprint:    target.PinnedFingerprint,
-			MetadataKeySSHRemoteTaskDir:      taskDir,
-			MetadataKeySSHRemoteSessionDir:   sessionDir,
-			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
-			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
-			MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
-			MetadataKeySSHWorkdirRoot:        workdir,
-			MetadataKeyIsRemote:              true,
-		},
+		Metadata:      metadata,
 	}
 }
 
@@ -544,6 +543,21 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 			agentctl.WithExecutionID(resumedSSHAgentctlInstanceID(req)),
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken))
 	}
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:               state.target.Host,
+		MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
+		MetadataKeySSHUser:               state.target.User,
+		MetadataKeySSHHostFingerprint:    state.target.PinnedFingerprint,
+		MetadataKeySSHRemoteTaskDir:      taskDir,
+		MetadataKeySSHRemoteSessionDir:   state.remoteDir,
+		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
+		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
+		MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
+		MetadataKeySSHWorkdirRoot:        workdir,
+		MetadataKeyIsRemote:              true,
+		"reuse_existing_process":         state.reusingProcess,
+	}
+	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
@@ -552,20 +566,18 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		Client:        client,
 		WorkspacePath: taskDir,
 		AuthToken:     state.authToken,
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:               state.target.Host,
-			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
-			MetadataKeySSHUser:               state.target.User,
-			MetadataKeySSHHostFingerprint:    state.target.PinnedFingerprint,
-			MetadataKeySSHRemoteTaskDir:      taskDir,
-			MetadataKeySSHRemoteSessionDir:   state.remoteDir,
-			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
-			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
-			MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
-			MetadataKeySSHWorkdirRoot:        workdir,
-			MetadataKeyIsRemote:              true,
-			"reuse_existing_process":         state.reusingProcess,
-		},
+		Metadata:      metadata,
+	}
+}
+
+func copySSHRuntimeAPIMetadata(dst, src map[string]interface{}) {
+	for _, key := range []string{
+		MetadataKeySSHRuntimeAPILocalURL,
+		MetadataKeySSHRuntimeAPIRemotePort,
+	} {
+		if value, ok := src[key]; ok {
+			dst[key] = value
+		}
 	}
 }
 
@@ -717,16 +729,10 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		clearSSHResumeRuntimeMetadata(req.Metadata)
 		return nil
 	}
-	runtimeAPITunnel, runtimeAPIURL, err := openSSHRuntimeAPITunnel(client, req.Env[envKeyKandevAPIURL])
+	runtimeAPITunnel, _, err := openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
 		_ = client.Close()
 		return err
-	}
-	if runtimeAPITunnel != nil {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		req.Env[envKeyKandevAPIURL] = runtimeAPIURL
 	}
 
 	remotePort, _ := strconv.Atoi(portStr)
@@ -883,6 +889,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 		MetadataKeySSHRemoteAgentctlPID,
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,
+		MetadataKeySSHRuntimeAPIRemotePort,
 	} {
 		delete(metadata, key)
 	}
