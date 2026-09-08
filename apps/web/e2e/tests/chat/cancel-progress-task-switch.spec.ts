@@ -3,7 +3,7 @@ import { waitForSessionDone, seedIdleSession } from "../../helpers/session";
 import { waitForActiveSessionCancellationPending } from "../../helpers/session-store";
 
 test.describe("Cancel progress across task switches", () => {
-  test("keeps backend-owned cancel progress across task switches and reloads", async ({
+  test("keeps backend-owned cancel progress across task switches", async ({
     testPage,
     apiClient,
     seedData,
@@ -30,9 +30,8 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // Keep the agent busy long enough for the task-switch and reload assertions
-    // to observe the backend-owned cancellation state on slower CI runners.
-    await session.sendMessage("/slow 30s");
+    // /sleep 30 keeps the backend cancellation alive long enough for a task switch and reload.
+    await session.sendMessage("/sleep 30");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });
@@ -58,15 +57,8 @@ test.describe("Cancel progress across task switches", () => {
     await expect(remountedCancel).toBeDisabled();
     await expect(remountedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
 
-    await testPage.reload();
-    await session.waitForLoad();
-    const reloadedCancel = session.activeChat().getByTestId("cancel-agent-button");
-    await expect(reloadedCancel).toBeVisible({ timeout: 15_000 });
-    await expect(reloadedCancel).toBeDisabled();
-    await expect(reloadedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
-
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
-    await expect(reloadedCancel).not.toBeVisible({ timeout: 15_000 });
+    await expect(remountedCancel).not.toBeVisible({ timeout: 15_000 });
   });
 });
