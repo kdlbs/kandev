@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { Extension } from "@tiptap/core";
 import {
   TIPTAP_EDITOR_TEXT_SIZE_CLASS,
   buildEditorExtensions,
   decideSubmitShortcut,
+  shouldRestoreFocusOnEnable,
 } from "./use-tiptap-editor";
 import * as tiptapEditor from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
@@ -163,6 +164,55 @@ describe("decideSubmitShortcut", () => {
         }),
       ).toBe("consume-noop");
     });
+  });
+});
+
+// Regression: after a send, ProseMirror flips `contenteditable` false then
+// true. A real browser blurs on the first flip and does not restore focus on
+// the second (jsdom does not reproduce this, so the blur is staged
+// explicitly here) -- the composer must regain focus unless something else
+// has since claimed it.
+describe("shouldRestoreFocusOnEnable", () => {
+  let input: HTMLInputElement;
+  let other: HTMLInputElement;
+
+  afterEach(() => {
+    input.remove();
+    other.remove();
+  });
+
+  function mountInputs() {
+    input = document.createElement("input");
+    other = document.createElement("input");
+    document.body.append(input, other);
+  }
+
+  it("restores focus when nothing has since claimed it", () => {
+    mountInputs();
+    input.focus();
+    expect(document.activeElement).toBe(input);
+    input.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    expect(shouldRestoreFocusOnEnable(true)).toBe(true);
+  });
+
+  it("does not restore focus once another element has claimed it", () => {
+    mountInputs();
+    input.focus();
+    input.blur();
+    other.focus();
+    expect(document.activeElement).toBe(other);
+
+    expect(shouldRestoreFocusOnEnable(true)).toBe(false);
+  });
+
+  it("does nothing when the editor never had focus before disabling", () => {
+    mountInputs();
+    input.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    expect(shouldRestoreFocusOnEnable(false)).toBe(false);
   });
 });
 

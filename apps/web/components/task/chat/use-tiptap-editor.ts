@@ -348,9 +348,25 @@ function useSyncEditor({
   initialSyncDoneRef,
   onChangeRef,
 }: SyncEditorOptions) {
-  // Sync disabled state
+  // Sync disabled state. ProseMirror maps `editable` onto the DOM
+  // `contenteditable` attribute, and a real browser blurs the element when
+  // that attribute flips to `false` without restoring focus when it flips
+  // back. Capture focus before disabling and restore it on re-enable, but
+  // only when nothing else has since claimed focus (a user who clicked
+  // another control mid-send should keep it there).
+  const hadFocusBeforeDisableRef = useRef(false);
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled);
+    if (!editor) return;
+    if (disabled) {
+      hadFocusBeforeDisableRef.current = editor.view.hasFocus();
+      editor.setEditable(false);
+      return;
+    }
+    editor.setEditable(true);
+    if (shouldRestoreFocusOnEnable(hadFocusBeforeDisableRef.current)) {
+      editor.commands.focus();
+    }
+    hadFocusBeforeDisableRef.current = false;
   }, [editor, disabled]);
 
   // Sync placeholder via editor.storage. The DynamicPlaceholder extension reads
@@ -428,6 +444,21 @@ function syncEditorValue({
   editor.commands.setContent(textToHtml(value));
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
+}
+
+// ── Focus-restore decision ───────────────────────────────────────────
+
+/** Pure decision for whether re-enabling the editor should restore focus to
+ *  it. A real browser blurs the element when ProseMirror flips
+ *  `contenteditable` to `false` and does not restore focus when it flips
+ *  back, so the caller must do it explicitly -- but only when the editor had
+ *  focus before it was disabled, and only when nothing else has since
+ *  claimed focus (a user who clicked another control mid-send keeps it
+ *  there). */
+export function shouldRestoreFocusOnEnable(hadFocusBeforeDisable: boolean): boolean {
+  if (!hadFocusBeforeDisable) return false;
+  const active = document.activeElement;
+  return active === null || active === document.body;
 }
 
 // ── Submit shortcut decision ────────────────────────────────────────
