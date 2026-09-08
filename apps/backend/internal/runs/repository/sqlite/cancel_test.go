@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 // TestCancelRun_CancelsQueuedAndClaimedRuns pins every column the
@@ -99,8 +100,8 @@ func TestCancelRunsWhere_ReportsRowsActuallyCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel where: %v", err)
 	}
-	if cancelled != 2 {
-		t.Errorf("cancelled = %d, want 2", cancelled)
+	if len(cancelled) != 2 {
+		t.Errorf("cancelled = %d, want 2", len(cancelled))
 	}
 	checkString(t, "q1", string(mustGetRun(t, repo, "q1").Status), "cancelled")
 	checkString(t, "c1", string(mustGetRun(t, repo, "c1").Status), "cancelled")
@@ -113,8 +114,71 @@ func TestCancelRunsWhere_ReportsRowsActuallyCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel where (second pass): %v", err)
 	}
-	if cancelled != 0 {
-		t.Errorf("second pass cancelled = %d, want 0", cancelled)
+	if len(cancelled) != 0 {
+		t.Errorf("second pass cancelled = %d, want 0", len(cancelled))
+	}
+}
+
+// TestCancelRunsWhere_ReturnedRowsCarryClassificationFields pins the
+// fields a caller needs to classify each cancelled run's loop-liveness
+// terminal shape (office_loop_terminal_total) without a second read: the
+// launched run's session_id must survive onto the returned row, distinct
+// from the never-launched run's empty one.
+func TestCancelRunsWhere_ReturnedRowsCarryClassificationFields(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	requestedAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+
+	launched := mustCreateRun(t, repo, &models.Run{
+		ID: "launched", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{}`, Status: "claimed",
+	})
+	if err := repo.SetRunRequestedAtForTest(ctx, launched.ID, requestedAt); err != nil {
+		t.Fatalf("backdate requested_at: %v", err)
+	}
+	if _, err := repo.SetRunSessionID(ctx, launched.ID, "session-in-flight"); err != nil {
+		t.Fatalf("set session id: %v", err)
+	}
+	neverLaunched := mustCreateRun(t, repo, &models.Run{
+		ID: "never-launched", AgentProfileID: "a2", Reason: "task_assigned",
+		Payload: `{}`, Status: "queued",
+	})
+	if err := repo.SetRunRequestedAtForTest(ctx, neverLaunched.ID, requestedAt); err != nil {
+		t.Fatalf("backdate requested_at: %v", err)
+	}
+
+	cancelled, err := repo.CancelRunsWhere(ctx, "reason",
+		`id IN (?, ?)`, launched.ID, neverLaunched.ID)
+	if err != nil {
+		t.Fatalf("cancel where: %v", err)
+	}
+	if len(cancelled) != 2 {
+		t.Fatalf("cancelled = %d, want 2", len(cancelled))
+	}
+
+	byID := map[string]runssqlite.CancelledRun{}
+	for _, row := range cancelled {
+		byID[row.ID] = row
+	}
+	got, ok := byID[launched.ID]
+	if !ok {
+		t.Fatalf("launched run missing from cancelled rows: %v", cancelled)
+	}
+	if got.AgentProfileID != "a1" {
+		t.Errorf("launched agent_profile_id = %q, want a1", got.AgentProfileID)
+	}
+	if got.SessionID != "session-in-flight" {
+		t.Errorf("launched session_id = %q, want session-in-flight", got.SessionID)
+	}
+	if !got.RequestedAt.Equal(requestedAt) {
+		t.Errorf("launched requested_at = %v, want %v", got.RequestedAt, requestedAt)
+	}
+	got, ok = byID[neverLaunched.ID]
+	if !ok {
+		t.Fatalf("never-launched run missing from cancelled rows: %v", cancelled)
+	}
+	if got.SessionID != "" {
+		t.Errorf("never-launched session_id = %q, want empty", got.SessionID)
 	}
 }
 
@@ -138,8 +202,8 @@ func TestCancelRunsWhere_MultiArgSelectorBindsInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel where: %v", err)
 	}
-	if cancelled != 1 {
-		t.Errorf("cancelled = %d, want 1", cancelled)
+	if len(cancelled) != 1 {
+		t.Errorf("cancelled = %d, want 1", len(cancelled))
 	}
 	checkString(t, "match", string(mustGetRun(t, repo, "match").Status), "cancelled")
 	checkString(t, "wrong-reason", string(mustGetRun(t, repo, "wrong-reason").Status), "queued")
@@ -160,11 +224,14 @@ func TestBulkCancelRuns_CancelsOnlyTheListedEligibleRuns(t *testing.T) {
 	setStatus(t, repo, finished.ID, "finished", nil, timePtr(now))
 	queueRunAt(t, repo, "out-of-set", "a1", now)
 
-	err := repo.BulkCancelRuns(ctx,
+	cancelled, err := repo.BulkCancelRuns(ctx,
 		[]string{"in-set-queued", "in-set-claimed", "in-set-finished", "missing-id"},
 		"workspace deleted")
 	if err != nil {
 		t.Fatalf("bulk cancel: %v", err)
+	}
+	if len(cancelled) != 2 {
+		t.Errorf("cancelled = %d, want 2 (queued + claimed, not the finished run)", len(cancelled))
 	}
 
 	checkString(t, "in-set-queued", string(mustGetRun(t, repo, "in-set-queued").Status), "cancelled")
@@ -186,8 +253,12 @@ func TestBulkCancelRuns_EmptyIDListIsANoOp(t *testing.T) {
 	queueRunAt(t, repo, "survivor", "a1", time.Now().UTC())
 
 	for _, ids := range [][]string{nil, {}} {
-		if err := repo.BulkCancelRuns(ctx, ids, "nothing"); err != nil {
+		cancelled, err := repo.BulkCancelRuns(ctx, ids, "nothing")
+		if err != nil {
 			t.Fatalf("bulk cancel %v: %v", ids, err)
+		}
+		if len(cancelled) != 0 {
+			t.Errorf("bulk cancel %v: cancelled = %d, want 0", ids, len(cancelled))
 		}
 	}
 	got := mustGetRun(t, repo, "survivor")

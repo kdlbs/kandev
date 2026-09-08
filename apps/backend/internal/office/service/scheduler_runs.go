@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 // ClaimNextRun atomically claims the next eligible run from the queue.
@@ -111,6 +112,31 @@ func (s *Service) recordTerminalShape(ctx context.Context, run *models.Run, stat
 		workspaceID = agent.WorkspaceID
 	}
 	IncLoopTerminal(workspaceID, string(shape))
+}
+
+// recordTerminalShapesForCancelledRuns classifies and counts one
+// cancelled-transition shape per row a bulk cancel (CancelRunsForTasks,
+// BulkCancelRuns) actually persisted — a bulk write covers rows whose
+// session_id can differ per row (a claimed run may have already launched),
+// so each row is classified individually rather than assuming one shape
+// for the whole batch.
+func (s *Service) recordTerminalShapesForCancelledRuns(ctx context.Context, cancelled []runssqlite.CancelledRun) {
+	for _, row := range cancelled {
+		s.recordTerminalShape(ctx, &models.Run{
+			AgentProfileID: row.AgentProfileID,
+			SessionID:      row.SessionID,
+			RequestedAt:    row.RequestedAt,
+		}, RunStatusCancelled, nil)
+	}
+}
+
+// RecordCancelledRunTerminalShapes is recordTerminalShapesForCancelledRuns,
+// exported for the dashboard package's TerminalShapeRecorder seam — a
+// dashboard-driven cancellation (displaced participant) reaches the same
+// counter every other cancellation path reaches, without a second,
+// divergence-prone classification implementation in dashboard.
+func (s *Service) RecordCancelledRunTerminalShapes(ctx context.Context, cancelled []runssqlite.CancelledRun) {
+	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
 }
 
 // releaseTaskCheckoutForRun releases the run's task checkout. Call this

@@ -74,6 +74,43 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	}
 }
 
+// TestSchedulerTick_TasklessRunRecordsTerminalShape is the Testing round 3
+// regression test. failTasklessRun calls repo.MarkRunFailed directly
+// (not through HandleAgentFailure), so it bypassed office_loop_terminal_total
+// entirely — the same bypass class Review round 1 (R1-1) fixed for the other
+// three production terminal-writers, just missed here. A taskless run never
+// launches, so it must classify as unlaunched_failed.
+func TestSchedulerTick_TasklessRunRecordsTerminalShape(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-terminal-shape",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-terminal-shape",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeUnlaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	service.RunSchedulerTick(svc, ctx)
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("unlaunched_failed delta = %d, want 1", after-before)
+	}
+}
+
 // TestSchedulerTick_TaskBoundRunStillLaunches is the regression guard
 // alongside the taskless-failure fix above: an ordinary task-bound run with
 // a wired task starter must still launch normally and stay `claimed` (not

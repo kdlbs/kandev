@@ -1466,6 +1466,10 @@ func wireOfficeSvcsDependencies(
 	services.Task.SetTaskStateActivityLogger(services.OfficeSvcs.Dashboard)
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
+	// Wire the office service as the terminal-shape recorder so a
+	// dashboard-driven displaced-run cancellation still counts toward
+	// office_loop_terminal_total.
+	services.OfficeSvcs.Dashboard.SetTerminalShapeRecorder(services.Office)
 	// Wire the office service as the task canceller for status→cancelled hard-cancels.
 	services.OfficeSvcs.Dashboard.SetTaskCanceller(services.Office)
 	// Route the Office "No parent" mutation through the canonical task detach

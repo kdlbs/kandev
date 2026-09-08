@@ -708,6 +708,7 @@ func (si *SchedulerIntegration) failTasklessRun(
 			zap.String("run_id", run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
 	}
+	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
 
 	// Settle the auto-dismiss decision before publishing: the frontend

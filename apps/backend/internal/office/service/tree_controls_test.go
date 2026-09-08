@@ -61,6 +61,40 @@ func TestPauseTaskTree(t *testing.T) {
 	}
 }
 
+// TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns is the Testing
+// round 3 regression test. PauseTaskTree cancels every member task's runs
+// via repo.CancelRunsForTasks, which bypassed office_loop_terminal_total
+// entirely — the same bypass class Review round 1 fixed for the
+// single-run CancelRun call sites. A queued run never launched, so
+// pausing its tree must classify the cancellation as unlaunched_failed.
+func TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
+	canceller := &mockTaskCanceller{}
+	svc := newTestService(t, service.ServiceOptions{TaskCanceller: canceller})
+	ctx := context.Background()
+	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
+
+	agent := makeAgent("tree-pause-worker", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"root"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	key := service.LoopMetricLabel("workspace", agent.WorkspaceID, "shape", string(service.ShapeUnlaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	if _, err := svc.PauseTaskTree(ctx, "root"); err != nil {
+		t.Fatalf("PauseTaskTree: %v", err)
+	}
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("unlaunched_failed delta = %d, want 1", after-before)
+	}
+}
+
 func TestCancelAndRestoreTaskTree(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -104,5 +138,35 @@ func TestCancelAndRestoreTaskTree(t *testing.T) {
 	}
 	if preview.ActiveHold != nil {
 		t.Fatalf("active hold after restore = %+v, want nil; cancel hold was %s", preview.ActiveHold, hold.ID)
+	}
+}
+
+// TestCancelTaskTree_RecordsTerminalShapeForCancelledRuns mirrors
+// TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns for
+// CancelTaskTree's own repo.CancelRunsForTasks call site.
+func TestCancelTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
+
+	agent := makeAgent("tree-cancel-worker", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"root"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	key := service.LoopMetricLabel("workspace", agent.WorkspaceID, "shape", string(service.ShapeUnlaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	if _, err := svc.CancelTaskTree(ctx, "root", "user:test"); err != nil {
+		t.Fatalf("CancelTaskTree: %v", err)
+	}
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("unlaunched_failed delta = %d, want 1", after-before)
 	}
 }

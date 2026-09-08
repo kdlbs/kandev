@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 func (r *Repository) createTreeHoldTables() error {
@@ -208,23 +209,22 @@ func (r *Repository) CountActiveRunsForTasks(ctx context.Context, taskIDs []stri
 }
 
 // CancelRunsForTasks cancels the queued or claimed runs belonging to the
-// given tasks and returns how many rows were actually cancelled.
+// given tasks and returns the rows actually cancelled, so a caller can
+// classify and count each one's loop-liveness terminal shape.
 //
 // The terminal write itself lives in the runs repository's CancelRunsWhere,
 // which applies the queued/claimed guard; only the by-task-id selector stays
 // here. json_extract is SQLite-flavoured — Postgres is a supported driver
 // (internal/persistence/provider.go) and would need dialect.JSONExtract — so
 // keeping it local avoids baking dialect-specific SQL into the shared writer.
-func (r *Repository) CancelRunsForTasks(ctx context.Context, taskIDs []string, reason string) (int, error) {
+func (r *Repository) CancelRunsForTasks(
+	ctx context.Context, taskIDs []string, reason string,
+) ([]runssqlite.CancelledRun, error) {
 	if len(taskIDs) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	selector, args := taskIDInQuery(`json_extract(payload, '$.task_id') IN (%s)`, taskIDs)
-	rows, err := r.CancelRunsWhere(ctx, reason, selector, args...)
-	if err != nil {
-		return 0, err
-	}
-	return int(rows), nil
+	return r.CancelRunsWhere(ctx, reason, selector, args...)
 }
 
 func (r *Repository) BulkUpdateTaskState(ctx context.Context, taskIDs []string, state string) error {
