@@ -33,13 +33,17 @@ func (si *SchedulerIntegration) admitRun(
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 
 	// Gate 1: workspace resolution (AC-OFFICE-BUDGET-001.13). The lookup
-	// itself already happened in processRun via GetAgentFromConfig; per the
-	// recorded W2 human disposition that call site's error contract is not
-	// reshaped, so a lookup ERROR never reaches admitRun (processRun already
-	// returned early on it, via the pre-existing escalating
-	// HandleRunFailure path). Only the "found an agent with no workspace
-	// identifier" branch is reachable and decidable here, from the
-	// already-fetched agent -- no second lookup is performed.
+	// itself already happened in processRun via GetAgentFromConfig, which
+	// now disposes of a lookup ERROR itself (deferWorkspaceLookupFailure)
+	// before admitRun is ever called, per the recorded W2 human disposition
+	// that GetAgentFromConfig's own error contract is not reshaped. This
+	// gate is therefore defense-in-depth, not a live production path: the
+	// repository's agentInstanceFilter (workspace_id != '') guarantees any
+	// agent GetAgentFromConfig successfully returns already has a non-empty
+	// WorkspaceID, so this branch is structurally unreachable via the sole
+	// real caller and exists to keep AC-OFFICE-BUDGET-001.13's textual
+	// requirement true of admitRun itself, independent of that caller.
+	// AdmitRunForTest exercises it directly against a constructed agent.
 	if agent.WorkspaceID == "" {
 		incBudgetCancelledNoWorkspace(provenance)
 		return si.cancelBudgetRun(ctx, run, agent, "no_resolvable_workspace",
@@ -57,20 +61,36 @@ func (si *SchedulerIntegration) admitRun(
 	}
 
 	// Gate 3/4: evaluator invocation + applicable policies. The run's
-	// project identifier is resolved here, after gate 3 has a chance to
-	// succeed but before any policy is evaluated (AC-OFFICE-BUDGET-006.7).
+	// project identifier is resolved first (cheap: a single lookup, and its
+	// two permanent-cancellation outcomes -- (c) unparseable payload, (d)
+	// task not found -- are unconditional regardless of evaluator health),
+	// but a *lookup error* (b) must not itself decide the disposition:
+	// AC-OFFICE-BUDGET-001.14/-006.7 require project resolution to yield to
+	// gate 3 succeeding first, so that a run whose evaluator errors and
+	// whose project lookup would also fail gets one determinate disposition
+	// (evaluator fault) rather than one depending on which lookup happens to
+	// run first. On a lookup error we therefore invoke the evaluator with no
+	// project scope (a project-lookup failure is not itself evidence a
+	// project applies -- AC-OFFICE-BUDGET-001.15 already treats "no project"
+	// this way) to test gate 3 in isolation: an evaluator fault discovered
+	// there takes precedence, and only once gate 3 is confirmed healthy does
+	// the unresolvable project get its own distinguishable disposition
+	// (AC-OFFICE-BUDGET-006.3).
 	projectID, res := si.resolveRunProject(ctx, run.Payload)
 	switch res {
-	case projectResolutionLookupError:
-		return si.admitBudgetDeferral(ctx, run, agent, budgetDeferralProjectLookupError, "")
 	case projectResolutionUnparseable:
+		incBudgetCancelledUnparseablePayload(provenance)
 		return si.cancelBudgetRun(ctx, run, agent, "unparseable_payload",
 			"run_budget_payload_unparseable", nil)
 	case projectResolutionTaskNotFound:
+		incBudgetCancelledTaskNotFound(provenance)
 		return si.cancelBudgetRun(ctx, run, agent, "task_not_found",
 			"run_budget_task_not_found", nil)
 	}
 	hasProject := res == projectResolutionFound
+	if res == projectResolutionLookupError {
+		projectID, hasProject = "", false
+	}
 
 	now := time.Now().UTC()
 	result, err := si.svc.EvaluatePreLaunch(ctx, agent.WorkspaceID, agent.ID, projectID, hasProject, provenance, now)
@@ -80,6 +100,12 @@ func (si *SchedulerIntegration) admitRun(
 			return si.admitBudgetDeferral(ctx, run, agent, budgetDeferralUnevaluatedPolicy, upErr.PolicyID)
 		}
 		return si.admitBudgetDeferral(ctx, run, agent, budgetDeferralEvaluatorFault, "")
+	}
+	if res == projectResolutionLookupError {
+		// Gate 3 just succeeded (the evaluator itself is healthy) but the
+		// project remains unresolvable -- its own distinguishable cause,
+		// per AC-OFFICE-BUDGET-006.3/-006.7.
+		return si.admitBudgetDeferral(ctx, run, agent, budgetDeferralProjectLookupError, "")
 	}
 	si.logPolicyObservability(ctx, agent.WorkspaceID, run.ID, result.Policies, now)
 	degradedAdmitted := anyDegradedAdmitted(result.Policies)
@@ -251,11 +277,11 @@ func (si *SchedulerIntegration) resolveRunProject(
 // (AC-OFFICE-BUDGET-001.3/.16) but must stay distinguishable from it and
 // from each other in their activity entries (AC-OFFICE-BUDGET-006.5). The
 // workspace-lookup-error branch of AC-OFFICE-BUDGET-001.13 is deliberately
-// NOT a fourth value here: per the recorded W2 human disposition,
-// GetAgentFromConfig's error contract is not reshaped, so that branch is
-// indistinguishable, at its call site, from any other GetAgentFromConfig
-// failure and continues to ride the pre-existing HandleRunFailure/
-// escalateFailure path -- it never reaches admitRun or this type.
+// NOT a fourth value here: it never reaches admitRun at all (processRun
+// resolves it before admitRun is called, since no *models.AgentInstance
+// exists yet to pass in), so it has its own dedicated pair,
+// deferWorkspaceLookupFailure/cancelUnresolvableAgentRun, sharing this
+// type's action-naming and no-escalation shape but not its cause value.
 type budgetDeferralCause int
 
 const (
@@ -303,6 +329,7 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 
 	if run.RetryCount >= MaxRetryCount {
+		incBudgetFailedNoEscalation(cause, provenance)
 		if err := si.svc.failRunNoEscalation(ctx, run, agent, cause, policyID); err != nil {
 			si.logger.Error("failed to fail run without escalation",
 				zap.String("run_id", run.ID), zap.Error(err))
@@ -316,8 +343,13 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 			"run_budget_deferral_stale_cancelled", "run", run.ID,
 			mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined, "cause": "budget_deferral"}), run.ID, "")
 	} else {
-		if cause == budgetDeferralEvaluatorFault {
+		switch cause {
+		case budgetDeferralEvaluatorFault:
 			incBudgetDeferredEvaluatorFault(provenance)
+		case budgetDeferralUnevaluatedPolicy:
+			incBudgetDeferredUnevaluatedPolicy(provenance)
+		case budgetDeferralProjectLookupError:
+			incBudgetDeferredProjectLookup(provenance)
 		}
 		fields := map[string]string{
 			activityFieldCeiling: ceilingNotDetermined,
@@ -335,4 +367,74 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 			zap.String("run_id", run.ID), zap.Error(err))
 	}
 	return false
+}
+
+// cancelUnresolvableAgentRun implements AC-OFFICE-BUDGET-001.13's "lookup
+// succeeded and found no agent instance" disposition, called from
+// processRun before an *models.AgentInstance is available -- the run
+// carries no workspace and therefore no ceiling that could ever be
+// evaluated, so it is cancelled rather than retried or failed, and never
+// escalated (AC-OFFICE-BUDGET-001.17). Shares its action with admitRun's
+// gate 1 (agent found but WorkspaceID == ""), the other branch of the same
+// disposition; unlike cancelBudgetRun's other callers, no agent is
+// available here, so the activity entry carries no workspace scope.
+func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, run *models.Run) {
+	provenance := shared.ClassifyRunProvenance(run.Reason)
+	incBudgetCancelledNoWorkspace(provenance)
+
+	if err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
+		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
+	} else {
+		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+	}
+	si.svc.LogActivityWithRun(ctx, "", "scheduler", "office-scheduler",
+		"run_budget_workspace_unresolvable", "run", run.ID,
+		mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined}), run.ID, "")
+}
+
+// deferWorkspaceLookupFailure implements AC-OFFICE-BUDGET-001.13's "lookup
+// returned an error" disposition: deferred/retried on the same terms as an
+// evaluator fault (AC-OFFICE-BUDGET-001.3/.16/.18), and at MaxRetryCount
+// failed without escalation (AC-OFFICE-BUDGET-006.4) rather than through
+// the generic HandleRunFailure/escalateFailure path, which would queue a
+// new run for the CEO agent (AC-OFFICE-BUDGET-001.17). Mirrors
+// admitBudgetDeferral's shape, but no *models.AgentInstance is available
+// here (the lookup itself is what failed), so the activity entry carries
+// no workspace scope, and no checkout is released -- GetAgentFromConfig
+// runs before checkoutTask, so processRun never holds one at this point.
+func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context, run *models.Run) {
+	provenance := shared.ClassifyRunProvenance(run.Reason)
+
+	if run.RetryCount >= MaxRetryCount {
+		incBudgetFailedWorkspaceLookup(provenance)
+		if err := si.svc.FailRun(ctx, run.ID); err != nil {
+			si.logger.Error("failed to fail run without escalation",
+				zap.String("run_id", run.ID), zap.Error(err))
+			return
+		}
+		si.svc.LogActivityWithRun(ctx, "", "system", "scheduler",
+			"run_budget_workspace_lookup_failed", "run", run.ID,
+			mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined}), run.ID, "")
+		return
+	}
+
+	if stale, _ := isRetryStale(run); stale {
+		incBudgetCancelledStaleDeferral(provenance)
+		si.svc.LogActivityWithRun(ctx, "", "scheduler", "office-scheduler",
+			"run_budget_deferral_stale_cancelled", "run", run.ID,
+			mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined, "cause": "workspace_lookup"}), run.ID, "")
+	} else {
+		incBudgetDeferredWorkspaceLookup(provenance)
+		si.svc.LogActivityWithRun(ctx, "", "scheduler", "office-scheduler",
+			"run_budget_workspace_lookup_deferred", "run", run.ID,
+			mustJSON(map[string]string{
+				activityFieldCeiling: ceilingNotDetermined,
+				"attempt":            strconv.Itoa(run.RetryCount + 1),
+			}), run.ID, "")
+	}
+
+	if err := si.svc.scheduleRetry(ctx, run); err != nil {
+		si.logger.Error("failed to schedule workspace lookup retry",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
 }

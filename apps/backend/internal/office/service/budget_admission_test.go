@@ -287,3 +287,347 @@ func TestResolveRunProject(t *testing.T) {
 		}
 	})
 }
+
+// TestAdmitRun_PricingDegradedBlock_UnmeasurableOutcome covers
+// AC-OFFICE-BUDGET-004.6/-005.7: a policy that blocks purely on pricing
+// degradation (its limit was never confirmed reached) carries the distinct
+// run_budget_unmeasurable outcome and its own activity action, not the plain
+// limit-block pair.
+func TestAdmitRun_PricingDegradedBlock_UnmeasurableOutcome(t *testing.T) {
+	svc := newTestService(t)
+	deciding := &models.PreLaunchPolicyResult{
+		PolicyID: "policy-pricing-degraded", Degraded: true, DegradationBlocked: true, LimitExceeded: false,
+	}
+	fake := &fakeBudgetEvaluator{
+		preLaunchResult: models.PreLaunchResult{
+			Decision:       models.PreLaunchDecisionBlockedByDegradation,
+			DecidingPolicy: deciding,
+			Policies:       []models.PreLaunchPolicyResult{*deciding},
+		},
+	}
+	svc.SetBudgetChecker(fake)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-pricing-degraded-block", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonRoutineTrigger)
+	assertOutcome(t, run, service.RunOutcomeBudgetUnmeasurable)
+	if !hasActivityAction(t, svc, "ws-1", "run_budget_pricing_degraded_blocked") {
+		t.Error("expected run_budget_pricing_degraded_blocked activity entry")
+	}
+	if hasActivityAction(t, svc, "ws-1", "run_budget_blocked") {
+		t.Error("a pricing-degraded block must not also fire the plain limit-block action")
+	}
+}
+
+// TestAdmitRun_DefaultCeiling_ExemptsAttendedRun covers AC-OFFICE-BUDGET-003.3:
+// the built-in default ceiling gates unattended runs only. An attended run
+// launches even though its workspace already exceeds the default ceiling
+// (mirroring TestAdmitRun_DefaultCeiling_BlocksUnattendedRunWithZeroPolicies's
+// spend fixture, but with a task-assigned, attended run instead).
+func TestAdmitRun_DefaultCeiling_ExemptsAttendedRun(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-default-ceiling-attended", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	insertTestCostEvent(t, svc, agent.ID, "task-default-ceiling-attended", int64(600_000))
+	insertTestTask(t, svc, "task-default-ceiling-attended-run", "ws-1")
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-default-ceiling-attended-run"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
+	if run.Status == service.RunStatusCancelled {
+		t.Fatalf("status = %q, attended run must not be cancelled by the default ceiling", run.Status)
+	}
+	if run.Status == "finished" && run.Outcome != nil && *run.Outcome == service.RunOutcomeBudgetBlocked {
+		t.Fatalf("attended run was finished with outcome %q, want not blocked by the default ceiling", *run.Outcome)
+	}
+	if hasActivityAction(t, svc, "ws-1", "run_budget_blocked") {
+		t.Error("attended run must not trigger a default-ceiling block")
+	}
+}
+
+// activityActionForRun returns the single activity action recorded for
+// runID within wsID's activity log, failing the test if none is found.
+// cancelUnresolvableAgentRun logs with an empty workspace scope (no agent
+// available to read WorkspaceID from), so callers pass "" for that scenario.
+func activityActionForRun(t *testing.T, svc *service.Service, wsID, runID string) string {
+	t.Helper()
+	entries, err := svc.ListActivity(context.Background(), wsID, 50)
+	if err != nil {
+		t.Fatalf("list activity: %v", err)
+	}
+	for _, e := range entries {
+		if e.RunID == runID {
+			return string(e.Action)
+		}
+	}
+	t.Fatalf("no activity entry found for run %s in workspace %q", runID, wsID)
+	return ""
+}
+
+// TestBudgetAdmission_ActionsAreDistinguishable covers AC-OFFICE-BUDGET-005.3/
+// -006.5: every admission-fault, cancellation, and block disposition this
+// capability introduces writes its own distinct activity action, so an
+// operator (or an alerting query keyed on the action string) can always
+// tell dispositions apart. Each scenario runs against its own service
+// instance so setup that mutates shared state (a dropped table, a forced
+// retry count) can't leak into another scenario's result.
+func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
+	type observedAction struct{ scenario, action string }
+	var seen []observedAction
+	record := func(scenario, action string) {
+		seen = append(seen, observedAction{scenario, action})
+	}
+
+	t.Run("workspace_lookup_deferred", func(t *testing.T) {
+		svc := newTestService(t)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-ws-deferred", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		svc.ExecSQL(t, `DROP TABLE agent_profiles`)
+		service.ProcessRunForTest(svc, ctx, run)
+		// deferWorkspaceLookupFailure logs with no workspace scope: no
+		// *models.AgentInstance was ever resolved to read a WorkspaceID from.
+		record("workspace_lookup_deferred", activityActionForRun(t, svc, "", run.ID))
+	})
+
+	t.Run("workspace_lookup_failed", func(t *testing.T) {
+		svc := newTestService(t)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-ws-failed", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		svc.ExecSQL(t, `DROP TABLE agent_profiles`)
+		run.RetryCount = service.MaxRetryCount
+		service.ProcessRunForTest(svc, ctx, run)
+		record("workspace_lookup_failed", activityActionForRun(t, svc, "", run.ID))
+	})
+
+	t.Run("workspace_unresolvable", func(t *testing.T) {
+		svc := newTestService(t)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-ws-unresolvable", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		svc.ExecSQL(t, `DELETE FROM agent_profiles WHERE id = ?`, agent.ID)
+		service.ProcessRunForTest(svc, ctx, run)
+		record("workspace_unresolvable", activityActionForRun(t, svc, "", run.ID))
+	})
+
+	t.Run("unevaluated_policy_deferred", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{
+			preLaunchErr: &models.UnevaluatedPolicyError{PolicyID: "policy-actions", Err: context.DeadlineExceeded},
+		}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-unevaluated-deferred", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		service.RunSchedulerTick(svc, ctx)
+		run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonRoutineTrigger)
+		record("unevaluated_policy_deferred", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	t.Run("unevaluated_policy_failed", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{
+			preLaunchErr: &models.UnevaluatedPolicyError{PolicyID: "policy-actions", Err: context.DeadlineExceeded},
+		}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-unevaluated-failed", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		run.RetryCount = service.MaxRetryCount
+		service.ProcessRunForTest(svc, ctx, run)
+		record("unevaluated_policy_failed", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	// project_lookup_deferred/failed, payload_unparseable and task_not_found
+	// all drive admitRun directly via AdmitRunForTest rather than through
+	// RunSchedulerTick/ProcessRunForTest: as TestResolveRunProject's doc
+	// comment explains, checkoutTask's own contention query independently
+	// requires the named task to exist (or the tasks table to be queryable
+	// at all), so a task-not-found or tasks-table failure is intercepted by
+	// checkoutTask as "held by another agent" / a checkout error before the
+	// run ever reaches admitRun through the scheduler pipeline -- exactly
+	// the scenario each of these needs to construct.
+
+	t.Run("project_lookup_deferred", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{preLaunchResult: models.PreLaunchResult{Decision: models.PreLaunchDecisionLaunch}}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-project-deferred", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		svc.ExecSQL(t, `DROP TABLE tasks`)
+		run.Payload = `{"task_id":"any-task"}`
+		service.AdmitRunForTest(svc, ctx, run, agent)
+		record("project_lookup_deferred", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	t.Run("project_lookup_failed", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{preLaunchResult: models.PreLaunchResult{Decision: models.PreLaunchDecisionLaunch}}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-project-failed", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		svc.ExecSQL(t, `DROP TABLE tasks`)
+		run.Payload = `{"task_id":"any-task"}`
+		run.RetryCount = service.MaxRetryCount
+		service.AdmitRunForTest(svc, ctx, run, agent)
+		record("project_lookup_failed", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	t.Run("payload_unparseable", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{preLaunchResult: models.PreLaunchResult{Decision: models.PreLaunchDecisionLaunch}}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-unparseable", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		run.Payload = `{not-json`
+		service.AdmitRunForTest(svc, ctx, run, agent)
+		record("payload_unparseable", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	t.Run("task_not_found", func(t *testing.T) {
+		svc := newTestService(t)
+		fake := &fakeBudgetEvaluator{preLaunchResult: models.PreLaunchResult{Decision: models.PreLaunchDecisionLaunch}}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-task-not-found", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		run, err := svc.ClaimNextRun(ctx)
+		if err != nil || run == nil {
+			t.Fatalf("claim: %v", err)
+		}
+		run.Payload = `{"task_id":"does-not-exist"}`
+		service.AdmitRunForTest(svc, ctx, run, agent)
+		record("task_not_found", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	t.Run("pricing_degraded_blocked", func(t *testing.T) {
+		svc := newTestService(t)
+		deciding := &models.PreLaunchPolicyResult{
+			PolicyID: "policy-actions-degraded", Degraded: true, DegradationBlocked: true, LimitExceeded: false,
+		}
+		fake := &fakeBudgetEvaluator{preLaunchResult: models.PreLaunchResult{
+			Decision: models.PreLaunchDecisionBlockedByDegradation, DecidingPolicy: deciding,
+			Policies: []models.PreLaunchPolicyResult{*deciding},
+		}}
+		svc.SetBudgetChecker(fake)
+		ctx := context.Background()
+		agent := makeAgent("worker-actions-pricing-degraded", models.AgentRoleWorker)
+		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		service.RunSchedulerTick(svc, ctx)
+		run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonRoutineTrigger)
+		record("pricing_degraded_blocked", activityActionForRun(t, svc, "ws-1", run.ID))
+	})
+
+	const wantScenarios = 10
+	if len(seen) != wantScenarios {
+		t.Fatalf("expected %d scenarios to record an action, got %d: %+v", wantScenarios, len(seen), seen)
+	}
+	byAction := make(map[string]string, len(seen))
+	for _, o := range seen {
+		if prior, ok := byAction[o.action]; ok {
+			t.Errorf("action %q fired for both %q and %q; every disposition must be independently distinguishable",
+				o.action, prior, o.scenario)
+			continue
+		}
+		byAction[o.action] = o.scenario
+	}
+}

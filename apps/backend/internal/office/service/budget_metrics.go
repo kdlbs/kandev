@@ -10,15 +10,6 @@ import (
 // same /debug/vars surface as the existing Office metrics (routing_*,
 // cost_events_*). Mirrors scheduler/metrics_vars.go's shape: counters only,
 // each labelled by run provenance (AC-OFFICE-BUDGET-007.1).
-//
-// Two of AC-OFFICE-BUDGET-006.4/-006.5's admission-fault causes --
-// unevaluated-policy deferral and project-lookup-error deferral -- are not
-// named in AC-OFFICE-BUDGET-005.4's literal nine-counter enumeration and so
-// have no counter here; both remain individually observable via their own
-// distinctly-actioned activity entries (AC-OFFICE-BUDGET-005.3/.5/.6,
-// run_budget_unevaluated_policy_deferred / run_budget_project_lookup_deferred).
-// Recorded as an accepted gap against the AC's literal text, not silently
-// widened, consistent with this capability's Y1 disposition.
 var (
 	budgetBlockedByLimitTotal          = expvar.NewMap("office_budget_blocked_by_limit_total")
 	budgetDeferredEvaluatorFaultTotal  = expvar.NewMap("office_budget_deferred_evaluator_fault_total")
@@ -29,6 +20,26 @@ var (
 	budgetBlockedPricingDegradedTotal  = expvar.NewMap("office_budget_blocked_pricing_degraded_total")
 	budgetAdmittedDefaultTotal         = expvar.NewMap("office_budget_admitted_default_total")
 	budgetAdmittedDegradedWindowTotal  = expvar.NewMap("office_budget_admitted_degraded_window_total")
+)
+
+// expvar maps for AC-OFFICE-BUDGET-006.6's seven additional counters, one
+// per state AC-OFFICE-BUDGET-006.5 names beyond the nine above: two
+// deferral-attempt counters for the causes AC-OFFICE-BUDGET-005.4's literal
+// enumeration omits (unevaluated-policy, project-lookup-error --
+// workspace-lookup deferral already has budgetDeferredWorkspaceLookupTotal
+// above), three MaxRetryCount-failure counters, one per AC-OFFICE-BUDGET-
+// 006.4 cause (the "evaluator error itself" is explicitly out of that
+// criterion's scope, so it is not a fourth), and two AC-OFFICE-BUDGET-006.7
+// cancellation counters. Kept in a separate var block from the nine above
+// because they answer a distinct criterion, not a revision of it.
+var (
+	budgetDeferredUnevaluatedPolicyTotal = expvar.NewMap("office_budget_deferred_unevaluated_policy_total")
+	budgetDeferredProjectLookupTotal     = expvar.NewMap("office_budget_deferred_project_lookup_total")
+	budgetFailedWorkspaceLookupTotal     = expvar.NewMap("office_budget_failed_workspace_lookup_total")
+	budgetFailedUnevaluatedPolicyTotal   = expvar.NewMap("office_budget_failed_unevaluated_policy_total")
+	budgetFailedProjectLookupTotal       = expvar.NewMap("office_budget_failed_project_lookup_total")
+	budgetCancelledUnparseablePayload    = expvar.NewMap("office_budget_cancelled_unparseable_payload_total")
+	budgetCancelledTaskNotFoundTotal     = expvar.NewMap("office_budget_cancelled_task_not_found_total")
 )
 
 // provenanceLabel renders a run's provenance as the "provenance=..." expvar
@@ -81,4 +92,46 @@ func incBudgetAdmittedDefault(p shared.RunProvenance) {
 // written.
 func incBudgetAdmittedDegradedWindow(p shared.RunProvenance) {
 	budgetAdmittedDegradedWindowTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetDeferredUnevaluatedPolicy(p shared.RunProvenance) {
+	budgetDeferredUnevaluatedPolicyTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetDeferredProjectLookup(p shared.RunProvenance) {
+	budgetDeferredProjectLookupTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetFailedWorkspaceLookup(p shared.RunProvenance) {
+	budgetFailedWorkspaceLookupTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetFailedUnevaluatedPolicy(p shared.RunProvenance) {
+	budgetFailedUnevaluatedPolicyTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetFailedProjectLookup(p shared.RunProvenance) {
+	budgetFailedProjectLookupTotal.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetCancelledUnparseablePayload(p shared.RunProvenance) {
+	budgetCancelledUnparseablePayload.Add(provenanceLabel(p), 1)
+}
+
+func incBudgetCancelledTaskNotFound(p shared.RunProvenance) {
+	budgetCancelledTaskNotFoundTotal.Add(provenanceLabel(p), 1)
+}
+
+// incBudgetFailedNoEscalation increments the MaxRetryCount-failure counter
+// matching cause, per AC-OFFICE-BUDGET-006.6's "not one counter shared
+// across the three" rule. The evaluator-fault-proper cause is deliberately
+// not routed here: AC-OFFICE-BUDGET-006.4 excludes "the evaluator error
+// itself" from its own three named causes.
+func incBudgetFailedNoEscalation(cause budgetDeferralCause, p shared.RunProvenance) {
+	switch cause {
+	case budgetDeferralUnevaluatedPolicy:
+		incBudgetFailedUnevaluatedPolicy(p)
+	case budgetDeferralProjectLookupError:
+		incBudgetFailedProjectLookup(p)
+	}
 }

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -201,19 +203,25 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		"reason":           run.Reason,
 	})
 
-	// Guard: check agent status.
+	// Guard: check agent status. AC-OFFICE-BUDGET-001.13 gives the two ways
+	// this lookup can fail different dispositions: a genuine "no such
+	// agent" (soft-deleted or never existed) is cancelled, never retried or
+	// escalated, since an orphaned run has no workspace and therefore no
+	// ceiling that could ever be evaluated; a transient lookup error is
+	// deferred/retried on the same terms as an evaluator fault and, at
+	// MaxRetryCount, failed without escalation (AC-OFFICE-BUDGET-006.4) --
+	// neither disposition may queue a run for any other agent
+	// (AC-OFFICE-BUDGET-001.17), so neither uses the generic
+	// HandleRunFailure/escalateFailure path, which does exactly that.
 	agent, err := si.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
 			zap.String("run_id", runID), zap.Error(err))
-		// AC-OFFICE-BUDGET-001.13's workspace-lookup-error branch: per the
-		// recorded W2 human disposition this call site's error contract is
-		// not reshaped, so it rides the pre-existing HandleRunFailure retry
-		// path rather than admitRun/admitBudgetDeferral -- but
-		// AC-OFFICE-BUDGET-005.4 still names it as one of the nine required
-		// counters, so it is instrumented here, once per attempt.
-		incBudgetDeferredWorkspaceLookup(shared.ClassifyRunProvenance(run.Reason))
-		_ = si.svc.HandleRunFailure(ctx, run, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			si.cancelUnresolvableAgentRun(ctx, run)
+			return
+		}
+		si.deferWorkspaceLookupFailure(ctx, run)
 		return
 	}
 

@@ -138,8 +138,15 @@ func TestAdmitRun_MetricBlockedAbsentEvaluator(t *testing.T) {
 }
 
 // TestAdmitRun_MetricDeferredWorkspaceLookup covers the one counter whose
-// cause never reaches admitRun at all (W2 disposition): a GetAgentFromConfig
-// failure, instrumented at its existing call site in processRun.
+// cause never reaches admitRun at all (W2 disposition): a genuine
+// GetAgentFromConfig I/O error, instrumented at its existing call site in
+// processRun. AC-OFFICE-BUDGET-001.13 gives this a different disposition
+// than a lookup that succeeds and finds no row (see
+// TestProcessRun_AgentRowDeleted_Cancels below): the query is broken by
+// dropping the underlying table after the agent, so the earlier
+// create/queue/claim calls that also read it succeed normally and only the
+// processRun call under test observes the failure -- a real, non-ErrNoRows
+// error, not a simulation of one.
 func TestAdmitRun_MetricDeferredWorkspaceLookup(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -157,11 +164,62 @@ func TestAdmitRun_MetricDeferredWorkspaceLookup(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	svc.ExecSQL(t, `DELETE FROM agent_profiles WHERE id = ?`, agent.ID)
+	svc.ExecSQL(t, `DROP TABLE agent_profiles`)
 	service.ProcessRunForTest(svc, ctx, run)
 
 	if got := service.BudgetMetricValueForTest(t, metricDeferredWorkspace, labelUnattended); got != before+1 {
 		t.Errorf("%s[%s] = %d, want %d", metricDeferredWorkspace, labelUnattended, got, before+1)
+	}
+}
+
+// TestProcessRun_AgentRowDeleted_Cancels covers AC-OFFICE-BUDGET-001.13's
+// other workspace-lookup disposition: the lookup itself succeeds (no I/O
+// error) but finds no row, because the agent was deleted after the run was
+// queued. Unlike a lookup error (deferred/retried above), this is
+// cancelled -- an orphaned run has no workspace and so no ceiling that
+// could ever be evaluated -- and must never reach MaxRetryCount or
+// escalate. Drives it through the real processRun pipeline (not
+// AdmitRunForTest, which only reaches admitRun's separate, structurally
+// unreachable-in-production gate-1 branch for an agent found with an empty
+// WorkspaceID -- see TestAdmitRun_MetricCancelledNoWorkspace above).
+func TestProcessRun_AgentRowDeleted_Cancels(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	beforeCancelled := service.BudgetMetricValueForTest(t, metricCancelledNoWS, labelUnattended)
+	beforeDeferred := service.BudgetMetricValueForTest(t, metricDeferredWorkspace, labelUnattended)
+
+	agent := makeAgent("worker-metric-agent-deleted", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	svc.ExecSQL(t, `DELETE FROM agent_profiles WHERE id = ?`, agent.ID)
+	service.ProcessRunForTest(svc, ctx, run)
+
+	if got := service.BudgetMetricValueForTest(t, metricCancelledNoWS, labelUnattended); got != beforeCancelled+1 {
+		t.Errorf("%s[%s] = %d, want %d", metricCancelledNoWS, labelUnattended, got, beforeCancelled+1)
+	}
+	if got := service.BudgetMetricValueForTest(t, metricDeferredWorkspace, labelUnattended); got != beforeDeferred {
+		t.Errorf("%s[%s] = %d, want unchanged %d (a deleted agent must cancel, not defer)",
+			metricDeferredWorkspace, labelUnattended, got, beforeDeferred)
+	}
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != service.RunStatusCancelled {
+		t.Errorf("run status = %q, want %q", got.Status, service.RunStatusCancelled)
+	}
+	if got.RetryCount != 0 {
+		t.Errorf("retry_count = %d, want 0 (cancelled, never retried)", got.RetryCount)
 	}
 }
 

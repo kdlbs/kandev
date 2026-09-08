@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -719,6 +720,17 @@ func (s *Service) CheckBudget(ctx context.Context, workspaceID, agentInstanceID,
 	return s.budgetChecker.EvaluateBudget(ctx, workspaceID, agentInstanceID, projectID)
 }
 
+// errBudgetEvaluatorNotConfigured is returned by EvaluatePreLaunch and
+// EvaluateDefaultCeiling when no BudgetEvaluator is wired. Unlike
+// CheckBudget's no-op, both calls always need a real disposition -- there
+// is no zero-value PreLaunchResult/PreLaunchPolicyResult that means
+// anything -- so a nil budgetChecker is a distinguishable error rather than
+// a silent no-op. Safe today only because admitRun's gate 2
+// (budget_admission.go) already checks budgetChecker == nil before either
+// is ever called; this guard is what keeps a future caller that skips gate
+// 2 from a nil-pointer dereference instead.
+var errBudgetEvaluatorNotConfigured = errors.New("office: no budget evaluator configured")
+
 // EvaluatePreLaunch delegates to the wired BudgetEvaluator for the
 // pre-launch admission gates (budget_admission.go). Callers must check
 // gate 2 (evaluator presence, s.budgetChecker == nil) themselves before
@@ -730,6 +742,9 @@ func (s *Service) EvaluatePreLaunch(
 	provenance shared.RunProvenance,
 	at time.Time,
 ) (models.PreLaunchResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchResult{}, errBudgetEvaluatorNotConfigured
+	}
 	return s.budgetChecker.EvaluatePreLaunch(ctx, workspaceID, agentInstanceID, projectID, hasProject, provenance, at)
 }
 
@@ -739,6 +754,9 @@ func (s *Service) EvaluatePreLaunch(
 func (s *Service) EvaluateDefaultCeiling(
 	ctx context.Context, workspaceID string, at time.Time,
 ) (models.PreLaunchPolicyResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchPolicyResult{}, errBudgetEvaluatorNotConfigured
+	}
 	return s.budgetChecker.EvaluateDefaultCeiling(ctx, workspaceID, at)
 }
 

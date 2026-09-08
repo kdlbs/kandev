@@ -108,6 +108,49 @@ func TestEvaluatePreLaunch_OverLimitPauseAgent_Blocks(t *testing.T) {
 	}
 }
 
+// TestEvaluatePreLaunch_Inert covers AC-OFFICE-BUDGET-006.2: a pre-launch
+// evaluation is a pure read against the same spend window the post-hoc
+// budgets.go path (EvaluateBudget/CheckPreExecutionBudget) also reads, but
+// unlike that path it must never itself write a budget.alert/budget.exceeded
+// activity entry or pause the agent -- those side effects belong solely to
+// the existing cost-recording path, not to an admission decision. Reuses
+// TestEvaluatePreLaunch_OverLimitPauseAgent_Blocks's exact over-limit,
+// pause_agent fixture (the shape most likely to tempt a shared side-effect
+// path) but swaps in a service built with newBudgetTestServiceWithActivity's
+// spy so the absence of any LogActivity call is observable, and asserts the
+// agent's stored status is unchanged.
+func TestEvaluatePreLaunch_Inert(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, repo, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+	at := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+
+	insertRawBudgetPolicy(t, execSQL, "ws-1", models.BudgetScopeWorkspace, "", 1000,
+		models.BudgetPeriodDaily, models.BudgetActionPauseAgent, at.Add(-time.Hour))
+	createBudgetTestAgent(t, repo, "ws-1", "agent-1")
+	mustCreateCostEvent(t, repo, "agent-1", "", 1500, at.Add(-30*time.Minute), nil)
+
+	got, err := svc.EvaluatePreLaunch(ctx, "ws-1", "agent-1", "", false, shared.RunProvenanceUnattended, at)
+	if err != nil {
+		t.Fatalf("EvaluatePreLaunch: %v", err)
+	}
+	if got.Decision != costs.PreLaunchDecisionBlockedByLimit {
+		t.Fatalf("Decision = %v, want BlockedByLimit (fixture must actually be over limit to be a meaningful inertness check)", got.Decision)
+	}
+
+	if len(spy.calls) != 0 {
+		t.Errorf("EvaluatePreLaunch logged %d activity entries, want 0: %+v", len(spy.calls), spy.calls)
+	}
+	agent, err := repo.GetAgentInstance(ctx, "agent-1")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Status != models.AgentStatusIdle {
+		t.Errorf("agent status = %q, want unchanged %q -- a pre-launch evaluation must never pause an agent",
+			agent.Status, models.AgentStatusIdle)
+	}
+}
+
 func TestEvaluatePreLaunch_OverLimitNotifyOnly_Launches(t *testing.T) {
 	svc, repo, execSQL := newBudgetTestService(t)
 	ctx := context.Background()

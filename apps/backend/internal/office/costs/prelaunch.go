@@ -58,15 +58,21 @@ type PreLaunchResult = models.PreLaunchResult
 // preLaunchApplicablePolicies implements AC-OFFICE-BUDGET-001.15:
 // workspace-scoped always applies; agent-scoped only when scope_id matches
 // the run's agent; project-scoped only when hasProject and scope_id matches
-// the run's project. A scope type this build does not recognize matches
-// none of these and is excluded here, same as a non-matching agent/project
-// scope -- AC-OFFICE-BUDGET-002.14's observability for that case belongs to
-// a workspace-wide policy scan, not to one run's admission check.
+// the run's project. A policy whose scope_type or scope_id is malformed
+// enough that no case below could ever match it, regardless of this run's
+// agent or project, is included anyway (scopeUnclassifiable) rather than
+// silently excluded: evaluateOnePolicy's classifyStoredPolicy call is what
+// actually produces AC-OFFICE-BUDGET-002.14's skip entry, and it only runs
+// on policies this function returns.
 func preLaunchApplicablePolicies(
 	policies []*models.BudgetPolicy, agentInstanceID, projectID string, hasProject bool,
 ) []*models.BudgetPolicy {
 	var out []*models.BudgetPolicy
 	for _, p := range policies {
+		if scopeUnclassifiable(p) {
+			out = append(out, p)
+			continue
+		}
 		switch p.ScopeType {
 		case models.BudgetScopeWorkspace:
 			out = append(out, p)
@@ -81,6 +87,26 @@ func preLaunchApplicablePolicies(
 		}
 	}
 	return out
+}
+
+// scopeUnclassifiable reports whether p's scope_type or scope_id is
+// malformed enough that preLaunchApplicablePolicies' switch above has no
+// case that could ever match it, independent of this run's agent or
+// project: an unrecognized scope_type, or an agent/project scope with no
+// scope_id (which could never equal a real, non-empty agent/project
+// identifier either way). These are exactly the two classifyStoredPolicy
+// issues that are also applicability-blocking, so without this check they
+// would be silently excluded here and classifyStoredPolicy would never run
+// on them at all -- AC-OFFICE-BUDGET-002.14 requires them to be skipped
+// with an operator-visible entry, not dropped with no trace.
+func scopeUnclassifiable(p *models.BudgetPolicy) bool {
+	if !p.ScopeType.Valid() {
+		return true
+	}
+	if (p.ScopeType == models.BudgetScopeAgent || p.ScopeType == models.BudgetScopeProject) && p.ScopeID == "" {
+		return true
+	}
+	return false
 }
 
 // spendWindowForPolicy resolves the scope-selected spend window for policy's

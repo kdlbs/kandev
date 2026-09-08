@@ -44,6 +44,24 @@ func TestDegradationBlocks(t *testing.T) {
 			degraded: true, pricedSubcents: 600, limitSubcents: 1000,
 			provenance: shared.RunProvenanceAttended, want: false,
 		},
+		// AC-OFFICE-BUDGET-004.3 requires the exact, non-truncating
+		// comparison 2*priced >= limit. Every row above uses an even
+		// limitSubcents (1000), under which the forbidden truncating form
+		// (priced >= limit/2, i.e. priced >= 500) produces the identical
+		// pass/fail pattern -- so this table alone would not catch a
+		// regression to that form. An odd limit is the only input shape
+		// that distinguishes the two: limit/2 truncates to 500 either way,
+		// but 2*priced >= 1001 disagrees with priced >= 500 at priced=500.
+		{
+			name:     "odd limit: priced just below half (truncating form would wrongly block)",
+			degraded: true, pricedSubcents: 500, limitSubcents: 1001,
+			provenance: shared.RunProvenanceUnattended, want: false,
+		},
+		{
+			name:     "odd limit: priced at the true (non-truncating) half blocks",
+			degraded: true, pricedSubcents: 501, limitSubcents: 1001,
+			provenance: shared.RunProvenanceUnattended, want: true,
+		},
 	}
 
 	for _, tt := range tests {

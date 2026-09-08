@@ -47,6 +47,26 @@ func skipIssueLabels(issues models.PolicyValidationIssues) []string {
 	return out
 }
 
+// skippedPolicyFields renders a skipped policy's activity-entry fields.
+// AC-OFFICE-BUDGET-002.5 requires naming the unrecognized period value and
+// AC-OFFICE-BUDGET-002.11 requires naming the non-positive limit itself,
+// alongside the policy id and the (already-present) issue labels that
+// satisfy AC-OFFICE-BUDGET-002.14's "offending field" for the remaining
+// issues.
+func skippedPolicyFields(p *models.PreLaunchPolicyResult) map[string]string {
+	fields := map[string]string{
+		"policy_id": p.PolicyID,
+		"issues":    strings.Join(skipIssueLabels(p.SkipIssues), ","),
+	}
+	if p.SkipIssues.UnrecognizedPeriod {
+		fields["period"] = string(p.Period)
+	}
+	if p.SkipIssues.NonPositiveLimit {
+		fields["limit_subcents"] = strconv.FormatInt(p.LimitSubcents, 10)
+	}
+	return fields
+}
+
 // isDegradedAdmitted reports whether p's window was pricing-degraded but did
 // not itself block the run -- the condition AC-OFFICE-BUDGET-004.4/-004.7/
 // -004.8's activity entry and AC-OFFICE-BUDGET-005.4's "admitted against a
@@ -78,8 +98,9 @@ func anyDegradedAdmitted(policies []models.PreLaunchPolicyResult) bool {
 // run's final decision: AC-OFFICE-BUDGET-005.4 states the degraded-admitted
 // entry is written per non-blocking-degraded policy even when a later
 // policy or gate 5 still blocks the run overall — only the *counter*, not
-// this entry, is conditioned on the run's final disposition, and that
-// counter is not yet implemented (see task plan's deferred gaps).
+// this entry, is conditioned on the run's final disposition; see
+// incBudgetAdmittedDegradedWindow's own call sites in budget_admission.go
+// for where that conditioning happens.
 func (si *SchedulerIntegration) logPolicyObservability(
 	ctx context.Context, workspaceID, runID string, policies []models.PreLaunchPolicyResult, at time.Time,
 ) {
@@ -89,10 +110,7 @@ func (si *SchedulerIntegration) logPolicyObservability(
 		switch {
 		case p.Skipped:
 			si.logOncePerPolicyPerDay(ctx, workspaceID, runID, actionBudgetPolicySkipped, p.PolicyID, day,
-				map[string]string{
-					"policy_id": p.PolicyID,
-					"issues":    strings.Join(skipIssueLabels(p.SkipIssues), ","),
-				})
+				skippedPolicyFields(p))
 		case isDegradedAdmitted(p):
 			fields := map[string]string{"degraded": strconv.FormatBool(true)}
 			if p.IsDefault {
