@@ -101,6 +101,21 @@ func (w *synchronizedRunningWriter) UpsertExecutorRunning(
 	return nil
 }
 
+func (w *synchronizedRunningWriter) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, sessionID, executionID, status string,
+) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running == nil {
+		return nil
+	}
+	if w.running.SessionID != sessionID || w.running.AgentExecutionID != executionID {
+		return models.ErrExecutionRotated
+	}
+	w.running.Status = status
+	return nil
+}
+
 func (w *synchronizedRunningWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
 	w.mu.Lock()
 	w.running = nil
@@ -122,6 +137,18 @@ func (w *synchronizedRunningWriter) snapshot() *models.ExecutorRunning {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.running
+}
+
+func TestSynchronizedRunningWriterRejectsRotatedExecutionStatusUpdate(t *testing.T) {
+	writer := &synchronizedRunningWriter{running: &models.ExecutorRunning{
+		SessionID: "session-1", AgentExecutionID: "exec-current",
+	}}
+
+	err := writer.UpdateExecutorRunningStatusIfCurrent(
+		context.Background(), "session-1", "exec-stale", models.ExecutorRunningStatusStopped,
+	)
+	require.ErrorIs(t, err, models.ErrExecutionRotated)
+	require.Empty(t, writer.snapshot().Status)
 }
 
 func (e *statusProviderExecutor) GetRemoteStatus(_ context.Context, instance *ExecutorInstance) (*RemoteStatus, error) {
