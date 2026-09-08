@@ -316,6 +316,32 @@ func TestNextCronFire_DSTFallBackFiresOnce_HalfHourOffset(t *testing.T) {
 	}
 }
 
+// TestNextCronFire_DSTFallBack_MultipleAmbiguousOccurrences_HourRestricted
+// covers the same multi-iteration loop as
+// TestNextCronFire_DSTFallBack_MultipleAmbiguousOccurrences but with an
+// hour-pinned expression: when the anchor is already past 01:59 EDT, every
+// occurrence of the repeated EST 1am hour (01:00, 01:10, ..., 01:50 EST) is
+// ambiguous and must be skipped. Because the expression pins hour=1, the next
+// match isn't 02:00 same day (hour doesn't match) but 01:00 the following
+// day — an easy case to get wrong by assuming the loop always exits at the
+// top of the next hour.
+func TestNextCronFire_DSTFallBack_MultipleAmbiguousOccurrences_HourRestricted(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+
+	after := time.Date(2026, time.November, 1, 1, 59, 0, 0, loc) // last pre-transition minute (EDT)
+	got, err := nextCronFire("*/10 1 * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("nextCronFire error: %v", err)
+	}
+	want := time.Date(2026, time.November, 2, 1, 0, 0, 0, loc) // every EST repeat of hour=1 today is skipped
+	if !got.Equal(want) {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
 // TestNextCronFire_DSTFallBackNonRegression pins the boundaries the fix must
 // leave untouched: a slot outside the repeated hour, plain UTC (no
 // transitions), and the spring-forward gap.
