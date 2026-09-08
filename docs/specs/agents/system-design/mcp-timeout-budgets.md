@@ -88,8 +88,10 @@ Separately, the CLI runs a per-tool-call idle watchdog. This section and its
 experiments were verified against a different binary than the CLI version
 above: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`,
 bundled by `@agentclientprotocol/claude-agent-acp@0.75.1` as
-`claude-agent-sdk@0.3.257` (the binary Kandev's ACP adapter actually launches),
-not `~/.local/share/claude/versions/*`. The watchdog function is rewritten
+`claude-agent-sdk@0.3.257` (the managed default Claude ACP runtime pinned at
+this commit; an operator selection can launch a different version — see
+`apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`), not
+`~/.local/share/claude/versions/*`. The watchdog function is rewritten
 below with descriptive names from that binary's minified source (logic and
 constants unchanged; the minified identifiers are not):
 
@@ -108,11 +110,17 @@ function idleTimeoutMs(server) {
 
 Kandev injects its MCP server as `type: "http"` (with an `"sse"` fallback;
 see `apps/backend/internal/agentctl/server/api/agent.go`), which is neither
-`stdio` nor in the disabled set, so the idle floor is **300000 ms (300s)**
-regardless of `MCP_TOOL_TIMEOUT`. A tool call that goes 300s without emitting
-a response or a `notifications/progress` frame is aborted by the CLI with
-"sent no response or progress for 300s; aborting" — independent of the
-7200000 ms `MCP_TOOL_TIMEOUT` budget.
+`stdio` nor in the disabled set, so the idle default is **300000 ms (300s)**.
+The outer `Math.min` in the formula above means `MCP_TOOL_TIMEOUT` can only
+lower that floor, never raise it: at Kandev's managed `MCP_TOOL_TIMEOUT=7200000`
+the clamp is a no-op and the effective idle deadline stays 300000 ms, but a
+profile override (clamped to a 60000 floor by the CLI) can shrink it, e.g.
+`MCP_TOOL_TIMEOUT=60000` yields a 60s idle deadline, not 300s. A tool call
+that goes past its idle deadline without emitting a response or a
+`notifications/progress` frame is aborted by the CLI with "sent no response
+or progress for <n>s; aborting". The 20s keepalive below survives either way,
+so this qualification has no production consequence today — it only affects
+the accuracy of this record.
 
 `ask_user_question_kandev` (`apps/backend/internal/mcp/handlers/handlers.go`)
 is the only Kandev MCP tool that blocks on a person, so it is the only one
