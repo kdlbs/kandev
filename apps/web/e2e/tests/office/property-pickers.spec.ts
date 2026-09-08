@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import type { Page } from "@playwright/test";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { injectLatency, waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for office task property pickers (status, priority,
@@ -373,6 +373,90 @@ test.describe("property pickers", () => {
       const after = (await priorityTrigger.textContent())?.trim() ?? "";
       expect(after).toBe(before);
     }).toPass({ timeout: 5_000 });
+  });
+
+  test("a stale failed mutation does not clobber a newer successful one", async ({
+    testPage,
+    apiClient,
+    officeApi,
+    officeSeed,
+  }) => {
+    // Regression test: useOptimisticTaskMutation used to snapshot-and-restore
+    // unconditionally on failure, with no sequencing. If an older mutation for
+    // the same task failed *after* a newer one had already succeeded, the
+    // older failure's rollback clobbered the newer, server-confirmed state.
+    // Concrete repro: drag todo -> in_progress (request A in flight), then
+    // immediately in_progress -> blocked (request B). B succeeds; A then
+    // fails. Pre-fix the UI settled back on the pre-A status instead of
+    // "blocked". The fix threads a per-task sequence guard through
+    // office-task-content-sync.ts so a failure only rolls back when no
+    // later-sequenced write has already succeeded or is still in flight.
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Race Rollback Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await gotoTaskPage(testPage, task.id, "Picker Race Rollback Task");
+
+    const patchPathname = `/api/v1/office/tasks/${task.id}`;
+    let patchCallCount = 0;
+    await testPage.route(
+      (url) => url.pathname === patchPathname,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.continue();
+          return;
+        }
+        patchCallCount += 1;
+        if (patchCallCount === 1) {
+          // Hold request A open well past request B's real round trip, so B
+          // is guaranteed to settle first. Fail it with no real backend
+          // effect: the backend's status after this test is driven solely by
+          // request B.
+          await injectLatency(
+            1200,
+            "force the older mutation's response to arrive after the newer one",
+          );
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "forced older-mutation failure" }),
+          });
+          return;
+        }
+        // Request B: let it hit the real backend and succeed.
+        await route.continue();
+      },
+    );
+
+    const trigger = testPage.getByTestId("status-picker-trigger");
+    const olderFailure = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
+      predicate: (response) => response.status() === 500,
+    });
+    await trigger.click();
+    await testPage.getByTestId("status-picker-option-in_progress").click();
+    await expect(trigger).toContainText(/In Progress/i, { timeout: 5_000 });
+
+    const newerSuccess = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
+      predicate: (response) => response.ok(),
+    });
+    await trigger.click();
+    await testPage.getByTestId("status-picker-option-blocked").click();
+    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
+
+    // Wait for both requests to actually land, in order, before asserting
+    // the settled state — otherwise the assertion below could pass for the
+    // wrong reason (the stale failure hasn't been processed yet).
+    await newerSuccess;
+    await olderFailure;
+
+    // The stale failure's catch handler must not roll the UI back to "todo"
+    // (the pre-mutation snapshot) or "In Progress" (request A's optimistic
+    // patch) — the newer, server-confirmed "Blocked" must stand.
+    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
+
+    const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+    const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+    const status = (inner.status as string) ?? (inner.state as string) ?? "";
+    expect(status.toLowerCase()).toContain("blocked");
   });
 
   test("started and completed rows show timestamps after a todo -> in_progress -> done transition", async ({
