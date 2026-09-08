@@ -57,6 +57,31 @@ func TestPrepareWorkflowStepSession_FailsClosedWhenInitialReusableLookupFails(t 
 	require.False(t, persisted.IsPrimary, "the uninspected parked session must not be promoted")
 }
 
+func TestPreflightWorkflowStepCredentials_ValidatesSameProfileReplacement(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.current.AgentProfileID = "profile-b"
+	fixture.stepGetter.workflowAgentProfileID = "profile-b"
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	repository := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "widgets", SourceType: "local",
+		Provider: "acme-forge", RemoteURL: "https://forge.example/acme/widgets.git",
+	}
+	require.NoError(t, fixture.repo.CreateRepository(ctx, repository))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "taskrepo1", TaskID: "t1", RepositoryID: repository.ID,
+	}))
+
+	err := fixture.svc.preflightWorkflowStepCredentials(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	})
+
+	require.ErrorContains(t, err, "repo1")
+}
+
 func TestProcessStepExitAndEnter_UnknownSourceKeepsCurrentSessionRecoverable(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)

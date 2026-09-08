@@ -2905,7 +2905,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	}
 	ctx = withWorkflowMetaCache(ctx)
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
-	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+	if effectiveProfile == "" {
 		return nil
 	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
