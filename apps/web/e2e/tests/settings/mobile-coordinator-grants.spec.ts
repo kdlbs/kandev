@@ -25,16 +25,24 @@ async function expectDialogContained(dialog: Locator) {
 }
 
 test.describe("Mobile coordinator grants", () => {
-  test("keeps the create-grant dialog contained and its submit action reachable", async ({
+  test("creates, persists, and revokes a coordinator grant with a contained mobile dialog", async ({
     testPage,
     backend,
     seedData,
+    apiClient,
     prCapture,
   }) => {
     test.setTimeout(90_000);
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY: "true",
     });
+    const coordinatorTask = await apiClient.seedTask(
+      seedData.workspaceId,
+      "QA Mobile Coordinator Task",
+      {
+        workflow_id: seedData.workflowId,
+      },
+    );
 
     try {
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/coordinators`);
@@ -50,9 +58,7 @@ test.describe("Mobile coordinator grants", () => {
       await assertNoElementHorizontalOverflow(dialog, "mobile coordinator grant dialog");
       await assertNoDocumentHorizontalOverflow(testPage, "mobile coordinator grant dialog");
 
-      await testPage
-        .getByTestId("grant-task-id-input")
-        .fill("00000000-0000-4000-8000-000000000001");
+      await testPage.getByTestId("grant-task-id-input").fill(coordinatorTask.task_id);
       await testPage.getByTestId("grant-cap-inspect").tap();
 
       const submit = testPage.getByTestId("grant-create-submit");
@@ -77,6 +83,22 @@ test.describe("Mobile coordinator grants", () => {
       await prCapture.screenshot("mobile-coordinator-grants-create-dialog", {
         caption: "Mobile coordinator grant creation dialog with contained scrollable form",
       });
+
+      await submit.tap();
+      await expect(dialog).toBeHidden();
+
+      const grantRow = testPage
+        .locator('[data-testid^="grant-row-"]')
+        .filter({ hasText: coordinatorTask.task_id });
+      await expect(grantRow).toBeVisible();
+      await testPage.reload();
+      await expect(grantRow).toBeVisible();
+
+      await grantRow.locator('[data-testid^="revoke-grant-"]').tap();
+      await testPage.getByTestId("revoke-grant-confirm").tap();
+      await expect(grantRow).toBeHidden();
+      await testPage.reload();
+      await expect(grantRow).toHaveCount(0);
     } finally {
       await releaseFeature();
     }
