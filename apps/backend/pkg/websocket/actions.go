@@ -81,6 +81,7 @@ const (
 	ActionTaskMove              = "task.move"
 	ActionTaskState             = "task.state"
 	ActionTaskArchive           = "task.archive"
+	ActionTaskRunner            = "task.runner"
 	ActionTaskPlanCreate        = "task.plan.create"
 	ActionTaskPlanGet           = "task.plan.get"
 	ActionTaskPlanUpdate        = "task.plan.update"

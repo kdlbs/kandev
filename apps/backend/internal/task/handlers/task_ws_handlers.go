@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -509,4 +510,61 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+type wsUpdateTaskRunnerRequest struct {
+	ID                string `json:"id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
+}
+
+// wsUpdateTaskRunner implements the task.runner action
+// (REQ-TASKS-RUNNER-SWITCH-002). The response DTO is built through
+// buildTaskDTOsWithSessionInfo, not the bare dto.FromTask, so it carries the
+// recomputed runner_editable/runner_ineligible_reason alongside every other
+// enriched field.
+func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateTaskRunnerRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	task, err := h.service.SwitchTaskRunner(ctx, req.ID, req.ExecutorProfileID)
+	if err != nil {
+		return runnerSwitchWSError(msg, err)
+	}
+
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	if err != nil {
+		h.logger.Error("failed to build task DTO after runner switch", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to load updated task", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dtos[0])
+}
+
+// runnerSwitchWSError maps SwitchTaskRunner's outcome vocabulary onto WS
+// error codes, attaching the machine-readable reason under
+// errorDetailKeyErrorCode so a client can present per-outcome copy without
+// parsing the human-readable message.
+func runnerSwitchWSError(msg *ws.Message, err error) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, service.ErrRunnerSwitchMalformed):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+	case errors.Is(err, service.ErrForbidden):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+	case errors.Is(err, service.ErrExecutorProfileInvalid):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case errors.Is(err, repoerrors.ErrRunnerCompatibilityConflict):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(),
+			map[string]interface{}{errorDetailKeyErrorCode: models.RunnerConflictTargetCannotMaterializeRepository})
+	case errors.Is(err, repoerrors.ErrRunnerEvaluationUnavailable):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, err.Error(), nil)
+	}
+	var mutabilityErr *repoerrors.ErrRunnerMutabilityConflict
+	if errors.As(err, &mutabilityErr) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(),
+			map[string]interface{}{errorDetailKeyErrorCode: mutabilityErr.Reason})
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to switch task runner", nil)
 }
