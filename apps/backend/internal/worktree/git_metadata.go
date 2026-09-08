@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,7 +305,7 @@ func canonicalDirectory(path string) (string, error) {
 }
 
 func readGitdirPointer(gitEntry, checkout string) (string, error) {
-	content, err := os.ReadFile(gitEntry)
+	content, err := readRegularMetadataFile(gitEntry)
 	if err != nil {
 		return "", err
 	}
@@ -328,14 +329,7 @@ func readGitdirPointer(gitEntry, checkout string) (string, error) {
 }
 
 func readMetadataPathStrict(path, relativeTo string) (string, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("metadata pointer is not regular file")
-	}
-	content, err := os.ReadFile(path)
+	content, err := readRegularMetadataFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -350,14 +344,7 @@ func readMetadataPathStrict(path, relativeTo string) (string, error) {
 }
 
 func readSubmoduleCoreWorktree(configPath, relativeTo string) (string, error) {
-	info, err := os.Lstat(configPath)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("submodule config is not a regular file")
-	}
-	content, err := os.ReadFile(configPath)
+	content, err := readRegularMetadataFile(configPath)
 	if err != nil {
 		return "", err
 	}
@@ -408,9 +395,47 @@ func parseSubmoduleConfigLine(section, worktree, rawLine string) (string, string
 		return section, worktree, errors.New("git worktree configuration is not allowed")
 	}
 	if strings.EqualFold(section, "core") && strings.EqualFold(strings.TrimSpace(key), "worktree") {
-		worktree = strings.TrimSpace(value)
+		parsedWorktree, err := parseGitConfigValue(value)
+		if err != nil {
+			return section, worktree, err
+		}
+		worktree = parsedWorktree
 	}
 	return section, worktree, nil
+}
+
+func parseGitConfigValue(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if !strings.HasPrefix(value, "\"") {
+		return value, nil
+	}
+	if len(value) < 2 || !strings.HasSuffix(value, "\"") {
+		return "", errors.New("unterminated quoted git config value")
+	}
+	var decoded strings.Builder
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\\' {
+			decoded.WriteByte(value[i])
+			continue
+		}
+		i++
+		if i == len(value)-1 {
+			return "", errors.New("invalid git config escape")
+		}
+		switch value[i] {
+		case '\\', '"':
+			decoded.WriteByte(value[i])
+		case 'n':
+			decoded.WriteByte('\n')
+		case 't':
+			decoded.WriteByte('\t')
+		case 'b':
+			decoded.WriteByte('\b')
+		default:
+			return "", errors.New("invalid git config escape")
+		}
+	}
+	return decoded.String(), nil
 }
 
 func parseSubmoduleConfigSection(line string) (string, error) {
@@ -446,14 +471,7 @@ func directChildName(parent, child string) (string, error) {
 }
 
 func readCurrentBranchRef(headPath string) (string, error) {
-	info, err := os.Lstat(headPath)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("HEAD is not a regular file")
-	}
-	content, err := os.ReadFile(headPath)
+	content, err := readRegularMetadataFile(headPath)
 	if err != nil {
 		return "", err
 	}
@@ -466,6 +484,29 @@ func readCurrentBranchRef(headPath string) (string, error) {
 		return "", errors.New("invalid HEAD ref")
 	}
 	return ref, nil
+}
+
+// readRegularMetadataFile reads exactly the inode it validates. Opening first
+// keeps a later path replacement from changing the bytes we authorize, while
+// the post-open Lstat rejects a symlink that was followed during open.
+func readRegularMetadataFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	entry, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Mode()&os.ModeSymlink != 0 || !entry.Mode().IsRegular() || !os.SameFile(opened, entry) {
+		return nil, errors.New("metadata pointer is not a stable regular file")
+	}
+	return io.ReadAll(file)
 }
 
 // ValidBranchRef reports whether ref is a canonical local branch ref that is

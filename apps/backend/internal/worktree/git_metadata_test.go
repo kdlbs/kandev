@@ -43,6 +43,60 @@ func TestResolveGitMetadata_LinkedWorktreeContainsOnlyOwnedMetadata(t *testing.T
 	}
 }
 
+func TestResolveGitMetadata_DetachedHeadDoesNotGrantBranchPaths(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	runGitMetadata(t, checkout, "checkout", "--detach")
+
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatalf("ResolveGitMetadata: %v", err)
+	}
+	if projection.CurrentRef != "" {
+		t.Fatalf("CurrentRef = %q, want empty detached HEAD ref", projection.CurrentRef)
+	}
+	if projection.CurrentRefPath != "" || projection.ReflogPath != "" {
+		t.Fatalf("branch paths = (%q, %q), want empty for detached HEAD", projection.CurrentRefPath, projection.ReflogPath)
+	}
+	for _, path := range projection.AgentWritablePaths {
+		if path == projection.CurrentRefPath || path == projection.ReflogPath {
+			t.Fatalf("AgentWritablePaths contains detached branch path %q: %#v", path, projection.AgentWritablePaths)
+		}
+	}
+}
+
+func TestGitMetadataProjectionRevalidateRejectsChangedHeadWithoutTrustedRepository(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.TrustedCommonDir != "" {
+		t.Fatalf("TrustedCommonDir = %q, want empty direct projection", projection.TrustedCommonDir)
+	}
+
+	gitDir := runGitMetadata(t, checkout, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/other-branch\n"), 0o600); err != nil {
+		t.Fatalf("replace HEAD: %v", err)
+	}
+	if err := projection.Revalidate(); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("Revalidate error = %v, want changed direct projection rejection", err)
+	}
+}
+
+func TestParseSubmoduleCoreWorktreeAcceptsQuotedValue(t *testing.T) {
+	worktree, err := parseSubmoduleCoreWorktree("[core]\n\tworktree = \"/tmp/worktree with spaces\"\n")
+	if err != nil {
+		t.Fatalf("parseSubmoduleCoreWorktree: %v", err)
+	}
+	if worktree != "/tmp/worktree with spaces" {
+		t.Fatalf("worktree = %q, want unquoted path", worktree)
+	}
+}
+
 func TestResolveGitMetadataRejectsForgedLinkedWorktreePointer(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	checkout := filepath.Join(t.TempDir(), "task-checkout")
