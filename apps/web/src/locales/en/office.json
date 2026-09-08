@@ -266,6 +266,7 @@
   "date": "Date",
   "defaultCeiling": "Default Ceiling",
   "defaultCeilingDescription": "Blocks new unattended runs once this workspace's spend for the current UTC day reaches the limit below. Never blocks an attended run. A workspace-level daily policy that pauses agents or blocks new tasks replaces this ceiling; a notify-only policy does not, and both apply together.",
+  "defaultCeilingMustBePositive": "Default ceiling must be greater than zero",
   "defaultCeilingUpdated": "Default ceiling updated",
   "defaultFor": "DEFAULT FOR",
   "defaultForRole": "default for {{role}}",

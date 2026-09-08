@@ -322,6 +322,49 @@ func TestCancelBudgetRun_ClearsStaleAgentWorkingStatus(t *testing.T) {
 		"after a gate-1 cancel clears a stale working mark left by an earlier attempt")
 }
 
+// TestFailRunNoEscalation_ClearsStaleAgentWorkingStatus covers
+// failRunNoEscalation (retry.go), reached via admitBudgetDeferral once
+// RetryCount reaches MaxRetryCount. Same stale-mark scenario as the two
+// tests above: a run that reached the launch boundary once, was requeued,
+// then exhausted its retries on a budget-admission fault must not leave its
+// agent stuck "working" forever.
+func TestFailRunNoEscalation_ClearsStaleAgentWorkingStatus(t *testing.T) {
+	svc := newTestService(t)
+	fake := &fakeBudgetEvaluator{preLaunchErr: context.DeadlineExceeded}
+	svc.SetBudgetChecker(fake)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-stale-working-no-escalation", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	if _, err := svc.RepoForTest().MarkAgentWorking(ctx, agent.ID, run.ID); err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the re-admission fault")
+
+	run.RetryCount = service.MaxRetryCount
+	service.AdmitRunForTest(svc, ctx, run, agent)
+
+	failed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if failed.Status != service.RunStatusFailed {
+		t.Fatalf("status at MaxRetryCount = %q, want failed", failed.Status)
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after failRunNoEscalation clears a stale working mark left by an earlier attempt")
+}
+
 // TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity covers
 // AC-OFFICE-BUDGET-005.6: each deferral of the same run writes its own
 // activity entry -- never coalesced into a single running total -- and each

@@ -21,7 +21,7 @@ func validateBudgetPolicyWrite(policy *models.BudgetPolicy) error {
 	if policy.LimitSubcents <= 0 {
 		return fmt.Errorf("%w: limit_subcents must be positive, got %d", ErrInvalidBudgetPolicy, policy.LimitSubcents)
 	}
-	if (policy.ScopeType == scopeAgent || policy.ScopeType == scopeProject) && policy.ScopeID == "" {
+	if (policy.ScopeType == models.BudgetScopeAgent || policy.ScopeType == models.BudgetScopeProject) && policy.ScopeID == "" {
 		return fmt.Errorf("%w: scope_id is required for scope %q", ErrInvalidBudgetPolicy, policy.ScopeType)
 	}
 	return nil

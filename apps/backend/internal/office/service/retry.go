@@ -161,6 +161,7 @@ func (s *Service) failRunNoEscalation(
 	if err := s.FailRun(ctx, run.ID); err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 
 	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
 	if policyID != "" {

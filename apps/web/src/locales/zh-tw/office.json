@@ -266,6 +266,7 @@
   "date": "日期",
   "defaultCeiling": "預設上限",
   "defaultCeilingDescription": "當此工作區目前 UTC 日的支出達到以下限額時，將阻止新的無人值守執行。永遠不會阻止有人值守的執行。工作區級別的每日策略如果設定為暫停代理程式或阻止新任務，將取代此上限；僅通知的策略不會取代它，兩者會同時生效。",
+  "defaultCeilingMustBePositive": "預設上限必須大於零",
   "defaultCeilingUpdated": "預設上限已更新",
   "defaultFor": "預設用於",
   "defaultForRole": "{{role}} 的預設值",

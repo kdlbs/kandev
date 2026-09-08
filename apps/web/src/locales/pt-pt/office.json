@@ -266,6 +266,7 @@
   "date": "Data",
   "defaultCeiling": "Limite máximo predefinido",
   "defaultCeilingDescription": "Bloqueia novas execuções não assistidas quando a despesa deste espaço de trabalho no dia UTC atual atingir o limite abaixo. Nunca bloqueia uma execução assistida. Uma política diária ao nível do espaço de trabalho que pausa agentes ou bloqueia novas tarefas substitui este limite máximo; uma política apenas de notificação não o substitui, e ambas são aplicadas em conjunto.",
+  "defaultCeilingMustBePositive": "O limite máximo predefinido deve ser superior a zero",
   "defaultCeilingUpdated": "Limite máximo predefinido atualizado",
   "defaultFor": "PRÉ-DEFINIDO PARA",
   "defaultForRole": "pré-definido para {{role}}",

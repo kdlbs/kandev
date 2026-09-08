@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -26,11 +26,20 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
   const [editing, setEditing] = useState(false);
   const [draftDollars, setDraftDollars] = useState("");
   const [saving, setSaving] = useState(false);
+  const activeWorkspaceId = useRef(workspaceId);
 
   useEffect(() => {
+    activeWorkspaceId.current = workspaceId;
+    setLimitSubcents(null);
+    setEditing(false);
+    setDraftDollars("");
     getDefaultCeiling(workspaceId)
-      .then((res) => setLimitSubcents(res.limit_subcents))
+      .then((res) => {
+        if (activeWorkspaceId.current !== workspaceId) return;
+        setLimitSubcents(res.limit_subcents);
+      })
       .catch((err) => {
+        if (activeWorkspaceId.current !== workspaceId) return;
         toast.error(err instanceof Error ? err.message : t("office:failedToLoadDefaultCeiling"));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast/t are stable; re-fetch only on workspace change
@@ -43,16 +52,23 @@ export function DefaultCeilingCard({ workspaceId }: Props) {
 
   const handleSave = async () => {
     const nextSubcents = Math.round(parseFloat(draftDollars || "0") * 10000);
+    if (nextSubcents <= 0) {
+      toast.error(t("office:defaultCeilingMustBePositive"));
+      return;
+    }
+    const targetWorkspaceId = workspaceId;
     setSaving(true);
     try {
-      const res = await setDefaultCeiling(workspaceId, nextSubcents);
+      const res = await setDefaultCeiling(targetWorkspaceId, nextSubcents);
+      if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setLimitSubcents(res.limit_subcents);
       setEditing(false);
       toast.success(t("office:defaultCeilingUpdated"));
     } catch (err) {
+      if (activeWorkspaceId.current !== targetWorkspaceId) return;
       toast.error(err instanceof Error ? err.message : t("office:failedToUpdateDefaultCeiling"));
     } finally {
-      setSaving(false);
+      if (activeWorkspaceId.current === targetWorkspaceId) setSaving(false);
     }
   };
 
