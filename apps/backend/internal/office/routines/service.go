@@ -614,14 +614,35 @@ func (s *RoutineService) dispatchRoutineRun(
 	return run, nil
 }
 
+// pausedDispatchError carries the blocking pause record's workspace id and
+// reason alongside shared.ErrWorkspacePaused (via Unwrap), so
+// writeDispatchError can render AC-OFFICE-KILL-SWITCH-002.3's "include the
+// pause reason in the response body" without a second PauseState read —
+// which would race a resume between the block decision and the response.
+// Every existing errors.Is(err, shared.ErrWorkspacePaused) call site
+// (processCronTrigger below, writeDispatchError, scheduler/wakeup) keeps
+// matching unchanged, since Unwrap chains to the shared sentinel.
+type pausedDispatchError struct {
+	workspaceID string
+	reason      string
+}
+
+func (e *pausedDispatchError) Error() string {
+	return shared.ErrWorkspacePaused.Error()
+}
+
+func (e *pausedDispatchError) Unwrap() error {
+	return shared.ErrWorkspacePaused
+}
+
 // checkPauseGate is the shared routine-dispatch gate — the single
 // insertion point cron, webhook, and manual fires all pass through via
 // dispatchRoutineRun. A confirmed pause records the blocked fire as a
 // skipped run (best-effort: an insert failure is logged, not returned,
-// since the fire is blocked either way) and returns
-// shared.ErrWorkspacePaused. A gate-read error writes no row (nothing
-// to retry from — the caller gets shared.ErrPauseGateUnavailable and
-// the next tick/call tries again) and fails closed.
+// since the fire is blocked either way) and returns a *pausedDispatchError
+// wrapping shared.ErrWorkspacePaused. A gate-read error writes no row
+// (nothing to retry from — the caller gets shared.ErrPauseGateUnavailable
+// and the next tick/call tries again) and fails closed.
 func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routineID, triggerID, source string) error {
 	if s.pauseGate == nil {
 		return nil
@@ -641,7 +662,7 @@ func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routin
 		s.logger.Warn("routine dispatch: record pause-skipped run failed",
 			zap.String("routine_id", routineID), zap.Error(err))
 	}
-	return shared.ErrWorkspacePaused
+	return &pausedDispatchError{workspaceID: active.WorkspaceID, reason: active.Reason}
 }
 
 // materialiseRoutineRun branches on tmpl.Title to choose the lightweight
