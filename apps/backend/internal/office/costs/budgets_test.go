@@ -74,14 +74,34 @@ type claimFaultRepo struct {
 	missLevels map[string]bool
 }
 
-func (r *claimFaultRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
+func (r *claimFaultRepo) Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error) {
 	if err, ok := r.failLevels[level]; ok {
 		return false, err
 	}
 	if r.missLevels[level] {
 		return false, nil
 	}
-	return r.Repository.Claim(ctx, policyID, periodKey, level)
+	return r.Repository.Claim(ctx, policyID, periodKey, level, revision)
+}
+
+// ClaimExceeded overrides the atomic pair the same way Claim does, keyed by
+// the level whose outcome is being faulted: "exceeded" fails or misses the
+// pair before either insert is attempted (mirroring a fenced exceeded
+// insert refused or store-faulted); "alert" fails or misses only the
+// companion half, after a real exceeded insert has already run for real,
+// mirroring AC-OFFICE-COSTS-003.10's atomic rollback of the whole pair on a
+// companion-side error.
+func (r *claimFaultRepo) ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error) {
+	if err, ok := r.failLevels["exceeded"]; ok {
+		return false, err
+	}
+	if r.missLevels["exceeded"] {
+		return false, nil
+	}
+	if err, ok := r.failLevels["alert"]; ok {
+		return false, err
+	}
+	return r.Repository.ClaimExceeded(ctx, policyID, periodKey, revision)
 }
 
 // callOrderRecorder records events in the order they occur, for tests that
@@ -113,9 +133,21 @@ type orderRecordingRepo struct {
 	order *callOrderRecorder
 }
 
-func (r *orderRecordingRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
-	claimed, err := r.Repository.Claim(ctx, policyID, periodKey, level)
+func (r *orderRecordingRepo) Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error) {
+	claimed, err := r.Repository.Claim(ctx, policyID, periodKey, level, revision)
 	r.order.record("claim:" + level)
+	return claimed, err
+}
+
+// ClaimExceeded records both of the atomic pair's levels immediately after
+// the (single) real call returns, preserving the ordering property the test
+// cares about: both claim events precede the emission decision. It cannot
+// observe the two inserts individually from outside the transaction, but it
+// doesn't need to — only their position relative to the emission matters.
+func (r *orderRecordingRepo) ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error) {
+	claimed, err := r.Repository.ClaimExceeded(ctx, policyID, periodKey, revision)
+	r.order.record("claim:exceeded")
+	r.order.record("claim:alert")
 	return claimed, err
 }
 

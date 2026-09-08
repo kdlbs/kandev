@@ -53,7 +53,7 @@ func TestUpdateBudgetPolicy_FailedUpdateRollsBackDiscard(t *testing.T) {
 	if err := repo.CreateBudgetPolicy(ctx, policy); err != nil {
 		t.Fatalf("create policy: %v", err)
 	}
-	if _, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert"); err != nil {
+	if _, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert", policy.Revision); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 

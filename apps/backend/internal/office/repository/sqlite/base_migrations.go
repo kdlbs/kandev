@@ -62,10 +62,22 @@ func (r *Repository) runMigrations() error {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateBudgetPolicyRevision()
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// migrateBudgetPolicyRevision adds office_budget_policies.revision for
+// databases created before REQ-OFFICE-COSTS-003. The DEFAULT 1 backfills
+// every existing row exactly like createCostTables' inline column, so a
+// fresh database and a migrated one converge. A boot replay is a no-op:
+// db.IsDuplicateColumnError is the only local classifier (ADR 0027), reused
+// via MigrateLogger.Apply rather than adding a new one.
+func (r *Repository) migrateBudgetPolicyRevision() {
+	r.migrate.Apply("office_budget_policies.revision",
+		`ALTER TABLE office_budget_policies ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

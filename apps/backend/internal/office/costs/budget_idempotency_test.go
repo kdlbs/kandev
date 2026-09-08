@@ -168,12 +168,14 @@ func TestCheckBudget_ExceededClaimsCompanionAlert(t *testing.T) {
 }
 
 // TestCheckBudget_CompanionAlertClaimFault_StillSubmitsExceeded covers the
-// AC-OFFICE-COSTS-002.5 fault-injection carve-out: when the companion
-// alert-level claim errors, the evaluation still submits budget.exceeded
-// (already earned by the exceeded-level claim) and the failure is logged
-// and counted like any other claim-store error. The test deliberately does
-// NOT assert the companion claim was recorded, per the spec's own
-// instruction — that is the failure this test injects.
+// AC-OFFICE-COSTS-003.10 fault-injection case: when the companion
+// alert-level insert errors, the whole atomic pair rolls back — no exceeded
+// claim row survives either — but the evaluation still submits
+// budget.exceeded (already earned by the exceeded-level insert winning
+// before the rollback) and the pair failure is logged and counted exactly
+// once, not once per row. The test deliberately does NOT assert the
+// companion claim was recorded, per the spec's own instruction — that is
+// the failure this test injects.
 func TestCheckBudget_CompanionAlertClaimFault_StillSubmitsExceeded(t *testing.T) {
 	repo, _, execSQL := newBudgetTestRepo(t)
 	ctx := context.Background()
@@ -191,6 +193,7 @@ func TestCheckBudget_CompanionAlertClaimFault_StillSubmitsExceeded(t *testing.T)
 	}
 	insertBudgetTestCostEvent(t, execSQL, "agent-companion-fault", "task-1", 600)
 
+	before := claimFailureCount(t)
 	results, err := svc.CheckBudget(ctx, "ws-1", "agent-companion-fault", "proj-1")
 	if err != nil {
 		t.Fatalf("CheckBudget: %v", err)
@@ -200,6 +203,9 @@ func TestCheckBudget_CompanionAlertClaimFault_StillSubmitsExceeded(t *testing.T)
 	}
 	if got := spy.count("budget.exceeded"); got != 1 {
 		t.Fatalf("budget.exceeded submissions = %d, want 1", got)
+	}
+	if delta := claimFailureCount(t) - before; delta != 1 {
+		t.Fatalf("budget_claim_failures_total delta = %d, want 1 (the pair is one claim attempt)", delta)
 	}
 }
 
@@ -246,12 +252,14 @@ func TestCheckBudget_ClaimStoreFault_EmitsAndReportsSubmittedTrue(t *testing.T) 
 	}
 }
 
-// TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsTwicePerEval
+// TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsOncePerEval
 // extends TestCheckBudget_ClaimStoreFault_EmitsAndReportsSubmittedTrue to the
-// exceeded level: claimAndEmit's afterClaim hook claims the alert-level
-// companion right after the exceeded-level claim, so a broken store fails
-// both claim attempts once per evaluation (AC-OFFICE-COSTS-002.14).
-func TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsTwicePerEval(t *testing.T) {
+// exceeded level: AC-OFFICE-COSTS-003.10 makes the exceeded claim and its
+// alert-level companion one atomic attempt, so a broken store fails the
+// whole pair exactly once per evaluation — one log line, one counter
+// increment (AC-OFFICE-COSTS-003.14 amends AC-OFFICE-COSTS-002.14 to say
+// so), not once per row as it would if the two claims were independent.
+func TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsOncePerEval(t *testing.T) {
 	repo, _, execSQL := newBudgetTestRepo(t)
 	ctx := context.Background()
 	createBudgetTestAgent(t, repo, "ws-1", "agent-fault-exc")
@@ -283,9 +291,8 @@ func TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsTwicePerEval(t *
 	if got := spy.count("budget.exceeded"); got != 2 {
 		t.Fatalf("budget.exceeded = %d, want 2 (duplicates permitted under broken store)", got)
 	}
-	// exceeded claim + companion alert claim both fail => 2 increments per evaluation.
-	if delta := claimFailureCount(t) - before; delta != 4 {
-		t.Fatalf("budget_claim_failures_total delta = %d, want 4 (2 per exceeded eval)", delta)
+	if delta := claimFailureCount(t) - before; delta != 2 {
+		t.Fatalf("budget_claim_failures_total delta = %d, want 2 (1 per exceeded eval, the pair is one claim attempt)", delta)
 	}
 }
 
@@ -526,7 +533,7 @@ func TestCheckBudget_SpendBelowLevelKeepsExistingClaim(t *testing.T) {
 	}
 
 	periodKey := monthlyPeriodKey()
-	if claimed, err := repo.Claim(ctx, policy.ID, periodKey, "alert"); err != nil || !claimed {
+	if claimed, err := repo.Claim(ctx, policy.ID, periodKey, "alert", policy.Revision); err != nil || !claimed {
 		t.Fatalf("seed claim: claimed=%v err=%v", claimed, err)
 	}
 
@@ -536,7 +543,7 @@ func TestCheckBudget_SpendBelowLevelKeepsExistingClaim(t *testing.T) {
 		t.Fatalf("CheckBudget: %v", err)
 	}
 
-	claimed, err := repo.Claim(ctx, policy.ID, periodKey, "alert")
+	claimed, err := repo.Claim(ctx, policy.ID, periodKey, "alert", policy.Revision)
 	if err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}

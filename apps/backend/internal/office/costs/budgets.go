@@ -138,43 +138,27 @@ func (s *CostService) evaluatePolicy(
 		if policy.ActionOnExceed == budgetActionPauseAgent && policy.ScopeType == scopeAgent {
 			result.AgentPaused = s.pauseAgentForBudget(ctx, policy.ScopeID)
 		}
-		result.ExceededSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelExceeded,
-			// A spend that jumps straight from below the alert level to
-			// above the limit must also hold the alert-level claim before
-			// budget.exceeded is emitted, so a concurrent evaluation
-			// landing in the alert band cannot win that claim in the gap
-			// and emit a budget.alert describing a reduction in spend. The
-			// outcome is discarded (claimed or already-claimed are equally
-			// fine here); a claim-store error is still logged and counted
-			// like any other.
-			func() { s.claimCompanionAlert(ctx, policy, periodKey) })
+		result.ExceededSubmitted = s.claimExceededAndEmit(ctx, workspaceID, policy, spent, periodKey)
 	case spent >= threshold:
 		result.AlertFired = true
-		result.AlertSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelAlert, nil)
+		result.AlertSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelAlert)
 	}
 
 	return result, nil
 }
 
 // claimAndEmit resolves the three outcomes of claiming (policy, periodKey,
-// level) and emits that level's activity row when the claim allows it.
-// Reports whether this evaluation submitted the row. afterClaim, when
-// non-nil, runs immediately after the claim and before the emission
-// decision, regardless of the claim's outcome — the seam the exceeded
-// level's alert-level companion claim uses so both claims land before
-// either emission is decided.
+// level) at the policy's current revision, and emits that level's activity
+// row when the claim allows it. Reports whether this evaluation submitted
+// the row.
 func (s *CostService) claimAndEmit(
 	ctx context.Context,
 	workspaceID string,
 	policy *BudgetPolicy,
 	spent int64,
 	periodKey, level string,
-	afterClaim func(),
 ) bool {
-	claimed, err := s.repo.Claim(ctx, policy.ID, periodKey, level)
-	if afterClaim != nil {
-		afterClaim()
-	}
+	claimed, err := s.repo.Claim(ctx, policy.ID, periodKey, level, policy.Revision)
 	if err != nil {
 		s.recordClaimFailure(policy.ID, level, err)
 		s.emitLevel(ctx, workspaceID, policy, spent, level)
@@ -187,15 +171,29 @@ func (s *CostService) claimAndEmit(
 	return true
 }
 
-// claimCompanionAlert records the alert-level claim alongside an
-// exceeded-level emission, so a spend that jumps straight past the limit
-// still de-escalates correctly. Its outcome never changes the
-// budget.exceeded emission; only a claim-store error is reported, exactly
-// like any other claim attempt.
-func (s *CostService) claimCompanionAlert(ctx context.Context, policy *BudgetPolicy, periodKey string) {
-	if _, err := s.repo.Claim(ctx, policy.ID, periodKey, claimLevelAlert); err != nil {
-		s.recordClaimFailure(policy.ID, claimLevelAlert, err)
+// claimExceededAndEmit resolves the atomic exceeded-plus-companion claim
+// pair at the policy's current revision and emits budget.exceeded when the
+// exceeded-level row was won. A claim-store error anywhere in the pair —
+// including on the companion insert — fails the whole pair open: the error
+// is logged and counted once, and budget.exceeded still emits.
+func (s *CostService) claimExceededAndEmit(
+	ctx context.Context,
+	workspaceID string,
+	policy *BudgetPolicy,
+	spent int64,
+	periodKey string,
+) bool {
+	claimed, err := s.repo.ClaimExceeded(ctx, policy.ID, periodKey, policy.Revision)
+	if err != nil {
+		s.recordClaimFailure(policy.ID, claimLevelExceeded, err)
+		s.emitLevel(ctx, workspaceID, policy, spent, claimLevelExceeded)
+		return true
 	}
+	if !claimed {
+		return false
+	}
+	s.emitLevel(ctx, workspaceID, policy, spent, claimLevelExceeded)
+	return true
 }
 
 func (s *CostService) emitLevel(

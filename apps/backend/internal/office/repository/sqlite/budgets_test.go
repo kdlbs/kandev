@@ -84,7 +84,7 @@ func TestClaim_FirstCallWinsSecondCallDoesNotReclaim(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-claim")
 
-	claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert")
+	claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert", policy.Revision)
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestClaim_FirstCallWinsSecondCallDoesNotReclaim(t *testing.T) {
 		t.Fatal("first claim should win")
 	}
 
-	claimed, err = repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert")
+	claimed, err = repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert", policy.Revision)
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -106,15 +106,15 @@ func TestClaim_DifferentPeriodOrLevelIsIndependent(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-claim-2")
 
-	if claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert"); err != nil || !claimed {
+	if claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert", policy.Revision); err != nil || !claimed {
 		t.Fatalf("claim september alert: claimed=%v err=%v", claimed, err)
 	}
 	// A different period (new window) is unclaimed (AC-OFFICE-COSTS-002.7).
-	if claimed, err := repo.Claim(ctx, policy.ID, "2026-10-01T00:00:00Z", "alert"); err != nil || !claimed {
+	if claimed, err := repo.Claim(ctx, policy.ID, "2026-10-01T00:00:00Z", "alert", policy.Revision); err != nil || !claimed {
 		t.Fatalf("claim october alert: claimed=%v err=%v", claimed, err)
 	}
 	// A different level in the same period is unclaimed.
-	if claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "exceeded"); err != nil || !claimed {
+	if claimed, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "exceeded", policy.Revision); err != nil || !claimed {
 		t.Fatalf("claim september exceeded: claimed=%v err=%v", claimed, err)
 	}
 }
@@ -123,7 +123,7 @@ func TestClaim_ForeignKeyViolationReturnsFalseWithNoError(t *testing.T) {
 	repo, _ := newBudgetClaimsRepoWithFK(t)
 	ctx := context.Background()
 
-	claimed, err := repo.Claim(ctx, uuid.NewString(), "lifetime", "alert")
+	claimed, err := repo.Claim(ctx, uuid.NewString(), "lifetime", "alert", 1)
 	if err != nil {
 		t.Fatalf("claim against a nonexistent policy must not be a store error, got: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestDeleteBudgetPolicy_CascadesClaims(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-cascade-1")
 
-	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert"); err != nil {
+	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert", policy.Revision); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if got := countBudgetClaims(t, db, policy.ID); got != 1 {
@@ -157,7 +157,7 @@ func TestDeleteWorkspaceData_CascadesBudgetClaims(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-cascade-2")
 
-	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert"); err != nil {
+	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert", policy.Revision); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestDeleteBudgetPoliciesForRemovedScopes_CascadesClaims(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-cascade-3")
 
-	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert"); err != nil {
+	if _, err := repo.Claim(ctx, policy.ID, "lifetime", "alert", policy.Revision); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestUpdateBudgetPolicy_DiscardsClaims(t *testing.T) {
 	ctx := context.Background()
 	policy := createTestBudgetPolicy(t, repo, "ws-update-1")
 
-	if _, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert"); err != nil {
+	if _, err := repo.Claim(ctx, policy.ID, "2026-09-01T00:00:00Z", "alert", policy.Revision); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if got := countBudgetClaims(t, db, policy.ID); got != 1 {
@@ -203,6 +203,9 @@ func TestUpdateBudgetPolicy_DiscardsClaims(t *testing.T) {
 	policy.LimitSubcents = 2000
 	if err := repo.UpdateBudgetPolicy(ctx, policy); err != nil {
 		t.Fatalf("update budget policy: %v", err)
+	}
+	if policy.Revision != 2 {
+		t.Fatalf("revision returned to caller = %d, want 2", policy.Revision)
 	}
 	if got := countBudgetClaims(t, db, policy.ID); got != 0 {
 		t.Fatalf("claim count after update = %d, want 0 (AC-OFFICE-COSTS-002.8)", got)
@@ -214,6 +217,9 @@ func TestUpdateBudgetPolicy_DiscardsClaims(t *testing.T) {
 	}
 	if updated.LimitSubcents != 2000 {
 		t.Fatalf("limit_subcents = %d, want 2000", updated.LimitSubcents)
+	}
+	if updated.Revision != 2 {
+		t.Fatalf("stored revision = %d, want 2", updated.Revision)
 	}
 }
 
