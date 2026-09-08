@@ -128,6 +128,47 @@ func TestCreateMessageExternalizesLargeShellOutputAndRehydrates(t *testing.T) {
 	}
 }
 
+func TestUpdateMessagePreservesExternalizedProjectedPayload(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-payload-update", "sess-payload-update", "turn-1")
+
+	largeStdout := strings.Repeat("u", largeMessagePayloadThresholdBytes+1)
+	msg := newShellMessage("msg-payload-update", "sess-payload-update", largeStdout, "")
+	msg.TurnID = "turn-1"
+	if err := repo.CreateMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if msg.PayloadDigest == "" {
+		t.Fatal("PayloadDigest was not set for large output")
+	}
+
+	projected, err := repo.GetMessage(ctx, msg.ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	projected.Content = "metadata-only update"
+	projected.Metadata["status"] = "complete"
+	if err := repo.UpdateMessage(ctx, projected); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+
+	got, err := repo.GetMessage(ctx, msg.ID)
+	if err != nil {
+		t.Fatalf("GetMessage after update: %v", err)
+	}
+	if got.PayloadDigest != msg.PayloadDigest {
+		t.Fatalf("PayloadDigest = %q, want preserved %q", got.PayloadDigest, msg.PayloadDigest)
+	}
+	if err := repo.RehydrateMessagePayload(ctx, got); err != nil {
+		t.Fatalf("RehydrateMessagePayload: %v", err)
+	}
+	output, ok := models.ExtractShellExecOutput(got.Metadata)
+	if !ok || output.Stdout != largeStdout {
+		t.Fatalf("rehydrated stdout length = %d, want %d (ok=%v)", len(output.Stdout), len(largeStdout), ok)
+	}
+}
+
 // TestExternalizeMessagePayloadDedupesIdenticalContentAcrossMessages proves
 // the content-addressed store never writes the same payload bytes twice:
 // two different messages with byte-identical large output share one

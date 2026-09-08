@@ -237,9 +237,10 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 
 // mockTaskBranchProvider implements TaskBranchProvider for testing.
 type mockTaskBranchProvider struct {
-	tasks    []TaskBranchInfo
-	err      error
-	branches map[string]string // repositoryID -> branch
+	tasks      []TaskBranchInfo
+	err        error
+	branches   map[string]string   // repositoryID -> branch
+	branchSets map[string][]string // repositoryID -> branches
 }
 
 func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]TaskBranchInfo, error) {
@@ -251,6 +252,13 @@ func (m *mockTaskBranchProvider) ResolveBranchForRepository(_ context.Context, _
 		return m.branches[repositoryID]
 	}
 	return ""
+}
+
+func (m *mockTaskBranchProvider) ResolveBranchesForRepository(_ context.Context, _, repositoryID string) []string {
+	if m.branchSets != nil {
+		return m.branchSets[repositoryID]
+	}
+	return nil
 }
 
 func TestReconcileWatches_CreatesWatchesForTasks(t *testing.T) {
@@ -507,6 +515,46 @@ func TestRefreshStaleBranches_ResolvesByRepositoryNotSession(t *testing.T) {
 	}
 	if updatedB.Branch != "new-b" {
 		t.Errorf("expected repo-b branch %q, got %q", "new-b", updatedB.Branch)
+	}
+}
+
+func TestRefreshStaleBranches_PreservesSameRepositoryMultiBranchWatches(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	seedTask(t, store, "t1", false)
+	watchA := &PRWatch{
+		SessionID: "s1", TaskID: "t1", RepositoryID: "repo-1",
+		Owner: "myorg", Repo: "myrepo", PRNumber: 0, Branch: "feature-a",
+	}
+	watchB := &PRWatch{
+		SessionID: "s2", TaskID: "t1", RepositoryID: "repo-1",
+		Owner: "myorg", Repo: "myrepo", PRNumber: 0, Branch: "feature-b",
+	}
+	for _, watch := range []*PRWatch{watchA, watchB} {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+			t.Fatalf("create PR watch %s: %v", watch.Branch, err)
+		}
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches:   map[string]string{"repo-1": "feature-a"},
+		branchSets: map[string][]string{"repo-1": []string{"feature-a", "feature-b"}},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	watches, err := store.ListPRWatchesByTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	got := map[string]bool{}
+	for _, watch := range watches {
+		got[watch.Branch] = true
+	}
+	if !got["feature-a"] || !got["feature-b"] || len(watches) != 2 {
+		t.Fatalf("watches after refresh = %+v, want both same-repository branches preserved", watches)
 	}
 }
 

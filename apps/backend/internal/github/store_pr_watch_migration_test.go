@@ -133,6 +133,37 @@ func TestPRWatchMigration_SkipsSQLiteTableRebuildForPostgres(t *testing.T) {
 	assert.Contains(t, tableSQL, legacyPRWatchesUniqueConstraint)
 }
 
+func TestPRWatchMigration_PostgresDriverDeduplicatesRowsWithoutTableRebuild(t *testing.T) {
+	db := openLegacyGitHubDB(t)
+	ctx := context.Background()
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedLegacyPRWatch(t, db, &PRWatch{
+		ID: "watch-a", SessionID: "session-a", TaskID: "task-1",
+		Owner: "acme", Repo: "repo", PRNumber: 0, Branch: "feature/x",
+		CreatedAt: base, UpdatedAt: base,
+	})
+	seedLegacyPRWatch(t, db, &PRWatch{
+		ID: "watch-b", SessionID: "session-b", TaskID: "task-1",
+		Owner: "acme", Repo: "repo", PRNumber: 0, Branch: "feature/x",
+		CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute),
+	})
+	store := &Store{db: sqlx.NewDb(db.DB, "pgx"), ro: sqlx.NewDb(db.DB, "pgx")}
+
+	require.NoError(t, store.migratePRWatchesToTaskOwnership())
+	stats := store.PRWatchMigrationStats()
+	require.NotNil(t, stats)
+	assert.Equal(t, 2, stats.RowsBefore)
+	assert.Equal(t, 1, stats.RowsAfter)
+	assert.Equal(t, 1, stats.DuplicatesRemoved)
+
+	var count int
+	require.NoError(t, db.GetContext(ctx, &count, `SELECT COUNT(*) FROM github_pr_watches WHERE task_id = 'task-1'`))
+	assert.Equal(t, 1, count)
+	var tableSQL string
+	require.NoError(t, db.Get(&tableSQL, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'github_pr_watches'"))
+	assert.Contains(t, tableSQL, legacyPRWatchesUniqueConstraint)
+}
+
 // TestPRWatchMigration_PrefersDiscoveredOverSearching is acceptance
 // criterion 8: when a duplicate group contains both a still-searching row
 // and a row that already discovered its PR, the discovered row must survive

@@ -99,12 +99,9 @@ func analyze(ctx context.Context, repo *sqlite.Repository, opts AnalyzeOptions) 
 			}
 			perTaskLimit = remaining
 		}
-		revisions, err := repo.ListObsoletePlanRevisionCandidates(ctx, taskID, opts.KeepPlanRevisions)
+		revisions, err := repo.ListObsoletePlanRevisionCandidates(ctx, taskID, opts.KeepPlanRevisions, perTaskLimit)
 		if err != nil {
 			return Report{}, candidateSet{}, fmt.Errorf("list obsolete plan revision candidates for task %s: %w", taskID, err)
-		}
-		if perTaskLimit > 0 && len(revisions) > perTaskLimit {
-			revisions = revisions[:perTaskLimit]
 		}
 		for _, rev := range revisions {
 			set.planRevisionIDs = append(set.planRevisionIDs, rev.ID)
@@ -176,8 +173,10 @@ func sumGitSnapshotBytes(ctx context.Context, db *sql.DB, ids []string) (int64, 
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
 		query := fmt.Sprintf(`
 			SELECT COALESCE(SUM(
-				LENGTH(files) + LENGTH(metadata) + LENGTH(branch) + LENGTH(remote_branch) +
-				LENGTH(head_commit) + LENGTH(base_commit) + LENGTH(triggered_by) + 96
+				COALESCE(LENGTH(files), 0) + COALESCE(LENGTH(metadata), 0) +
+				COALESCE(LENGTH(branch), 0) + COALESCE(LENGTH(remote_branch), 0) +
+				COALESCE(LENGTH(head_commit), 0) + COALESCE(LENGTH(base_commit), 0) +
+				COALESCE(LENGTH(triggered_by), 0) + 96
 			), 0)
 			FROM task_session_git_snapshots WHERE id IN (%s)`, placeholders)
 		args := make([]interface{}, len(batch))

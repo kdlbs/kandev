@@ -41,6 +41,8 @@ func (c *pollerCircuits) recordOutcome(workspaceID string, class authcircuit.Fai
 	state := c.byWorkspace[workspaceID]
 	if class == authcircuit.FailureClassNone {
 		state.RecordSuccess()
+		delete(c.byWorkspace, workspaceID)
+		return
 	} else {
 		state.RecordFailure(now, class, nil)
 	}
@@ -60,6 +62,9 @@ func (c *pollerCircuits) resetIfFingerprintChanged(workspaceID, fingerprint stri
 	defer c.mu.Unlock()
 	state := c.byWorkspace[workspaceID]
 	changed := state.ResetIfFingerprintChanged(fingerprint)
+	if !changed && !state.Open(time.Now().UTC()) {
+		return false
+	}
 	c.byWorkspace[workspaceID] = state
 	return changed
 }

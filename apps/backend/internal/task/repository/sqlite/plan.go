@@ -240,7 +240,7 @@ type ObsoletePlanRevisionCandidate struct {
 // reported, regardless of ancestry. This is a read-only, non-destructive
 // selection: it reports candidates for a later maintenance command to act
 // on, and never deletes or modifies anything itself.
-func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, taskID string, keepLastN int) ([]ObsoletePlanRevisionCandidate, error) {
+func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, taskID string, keepLastN int, limit int) ([]ObsoletePlanRevisionCandidate, error) {
 	query := `
 		SELECT rev.id, rev.task_id, rev.revision_number, LENGTH(rev.content)
 		FROM task_plan_revisions rev
@@ -255,12 +255,23 @@ func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, tas
 	args := []interface{}{taskID, taskID}
 	if keepLastN > 0 {
 		query += `
-		  AND rev.revision_number <= (
-			  SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
-		  ) - ?`
-		args = append(args, taskID, keepLastN)
+		  AND rev.id NOT IN (
+			  SELECT recent.id
+			  FROM task_plan_revisions recent
+			  WHERE recent.task_id = ?
+			    AND recent.revision_number < (
+				    SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
+			    )
+			  ORDER BY recent.revision_number DESC
+			  LIMIT ?
+		  )`
+		args = append(args, taskID, taskID, keepLastN)
 	}
 	query += ` ORDER BY rev.revision_number ASC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {

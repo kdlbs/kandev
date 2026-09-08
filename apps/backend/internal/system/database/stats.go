@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -137,7 +138,10 @@ func (s *Service) Stats() (Stats, error) {
 		}
 		out.SchemaVersion = version
 
-		storage := readLogicalStorageStats(s.pool.Reader())
+		storage, err := readLogicalStorageStats(s.pool.Reader())
+		if err != nil {
+			return Stats{}, err
+		}
 		out.MessageContentBytes = storage.messageContent
 		out.MessageMetadataBytes = storage.messageMetadata
 		out.MessagePayloadBytes = storage.messagePayload
@@ -168,7 +172,7 @@ type logicalStorageStats struct {
 // fallback when SQLite dbstat or PostgreSQL relation-size extensions are not
 // available. A missing table during early boot or a partial test fixture is
 // reported as zero for that category; database/WAL sizes remain independent.
-func readLogicalStorageStats(db *sqlx.DB) logicalStorageStats {
+func readLogicalStorageStats(db *sqlx.DB) (logicalStorageStats, error) {
 	var out logicalStorageStats
 	queries := []struct {
 		query string
@@ -180,9 +184,24 @@ func readLogicalStorageStats(db *sqlx.DB) logicalStorageStats {
 		{`SELECT COALESCE(SUM(LENGTH(files) + LENGTH(metadata)), 0) FROM task_session_git_snapshots`, &out.gitSnapshot},
 	}
 	for _, metric := range queries {
-		_ = db.QueryRow(metric.query).Scan(metric.dest)
+		if err := db.QueryRow(metric.query).Scan(metric.dest); err != nil {
+			if isMissingLogicalStorageTableError(err) {
+				continue
+			}
+			return logicalStorageStats{}, fmt.Errorf("read logical storage stats: %w", err)
+		}
 	}
-	return out
+	return out, nil
+}
+
+func isMissingLogicalStorageTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "undefined_table")
 }
 
 func (s *Service) databaseDriver() string {

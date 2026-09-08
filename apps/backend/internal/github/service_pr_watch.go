@@ -53,6 +53,7 @@ func (s *Service) createPRWatch(
 	// existing watch instead of creating a duplicate. A non-zero prNumber
 	// (e.g. AssociatePRByURL, which already knows the PR) checks discovered
 	// identity; otherwise it checks searching identity.
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	existing, err := s.getExistingCanonicalPRWatch(ctx, taskID, repositoryID, prNumber, branch)
 	if err != nil {
 		return nil, err
@@ -60,7 +61,6 @@ func (s *Service) createPRWatch(
 	if existing != nil {
 		return existing, nil // already watching this (task, repo, branch/PR)
 	}
-	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
 		SessionID:    sessionID,
@@ -296,6 +296,7 @@ func (s *Service) ensurePRWatch(
 	// comment. Reusing the canonical searching watch here is what stops a
 	// resumed/concurrent session from multiplying watches for the same
 	// task/repository/branch (ADR 2026-08-31-task-owned-pr-watch-identity).
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	existing, err := s.store.GetPRWatchByTaskRepoBranch(ctx, taskID, repositoryID, branch)
 	if err != nil {
 		return nil, err
@@ -303,7 +304,6 @@ func (s *Service) ensurePRWatch(
 	if existing != nil {
 		return existing, nil
 	}
-	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
 		SessionID:    sessionID,

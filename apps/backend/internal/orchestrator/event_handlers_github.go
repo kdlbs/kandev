@@ -1459,19 +1459,54 @@ func (s *Service) ResolveBranchForRepository(ctx context.Context, taskID, reposi
 	return s.activeWorktreeBranchForRepository(ctx, taskID, repositoryID)
 }
 
+// ResolveBranchesForRepository returns every authoritative checkout branch
+// configured for a task/repository pair. Multi-branch tasks may legitimately
+// have several rows for the same repository, so PR-watch reconciliation must
+// preserve each matching watch instead of collapsing the repository to the
+// first row returned by ListTaskRepositories.
+func (s *Service) ResolveBranchesForRepository(ctx context.Context, taskID, repositoryID string) []string {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil
+	}
+	branches := s.checkoutBranchesForRepository(ctx, store, taskID, repositoryID)
+	if len(branches) > 0 {
+		return branches
+	}
+	if branch := s.activeWorktreeBranchForRepository(ctx, taskID, repositoryID); branch != "" {
+		return []string{branch}
+	}
+	return nil
+}
+
 // checkoutBranchForRepository returns the authoritative checkout_branch
 // configured for a specific task/repository pair, or "" if unset or missing.
 func (s *Service) checkoutBranchForRepository(ctx context.Context, store repoStore, taskID, repositoryID string) string {
-	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
-	if err != nil {
+	branches := s.checkoutBranchesForRepository(ctx, store, taskID, repositoryID)
+	if len(branches) == 0 {
 		return ""
 	}
+	return branches[0]
+}
+
+func (s *Service) checkoutBranchesForRepository(ctx context.Context, store repoStore, taskID, repositoryID string) []string {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var branches []string
 	for _, tr := range taskRepos {
 		if tr.RepositoryID == repositoryID {
-			return strings.TrimSpace(tr.CheckoutBranch)
+			branch := strings.TrimSpace(tr.CheckoutBranch)
+			if branch == "" || seen[branch] {
+				continue
+			}
+			seen[branch] = true
+			branches = append(branches, branch)
 		}
 	}
-	return ""
+	return branches
 }
 
 // activeWorktreeBranchForRepository returns the worktree branch of any

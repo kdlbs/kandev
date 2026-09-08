@@ -91,6 +91,10 @@ type TaskBranchProvider interface {
 	ResolveBranchForRepository(ctx context.Context, taskID, repositoryID string) string
 }
 
+type multiBranchTaskBranchProvider interface {
+	ResolveBranchesForRepository(ctx context.Context, taskID, repositoryID string) []string
+}
+
 // Poller runs background loops for PR monitoring and review queue checking.
 type Poller struct {
 	service            *Service
@@ -201,6 +205,7 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 	if p.tryBatchedPRWatchCheck(ctx, watches) {
 		return
 	}
+	watches = p.filterOpenCircuitWatches(ctx, watches)
 	for _, watch := range watches {
 		p.checkSinglePRWatch(ctx, watch)
 	}
@@ -532,6 +537,9 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 		if watch.PRNumber != 0 {
 			continue // already found a PR, branch is correct
 		}
+		if branchSetPreservesWatch(ctx, p.taskBranchProvider, watch) {
+			continue
+		}
 		currentBranch := p.taskBranchProvider.ResolveBranchForRepository(
 			ctx, watch.TaskID, watch.RepositoryID,
 		)
@@ -547,6 +555,27 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Error(updateErr))
 		}
 	}
+}
+
+func branchSetPreservesWatch(ctx context.Context, provider TaskBranchProvider, watch *PRWatch) bool {
+	multiBranchProvider, ok := provider.(multiBranchTaskBranchProvider)
+	if !ok {
+		return false
+	}
+	branches := multiBranchProvider.ResolveBranchesForRepository(ctx, watch.TaskID, watch.RepositoryID)
+	if len(branches) == 0 {
+		return false
+	}
+	return branchListContains(branches, watch.Branch) || len(branches) != 1
+}
+
+func branchListContains(branches []string, branch string) bool {
+	for _, candidate := range branches {
+		if candidate == branch {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewQueueLoop polls review watches for new PRs.

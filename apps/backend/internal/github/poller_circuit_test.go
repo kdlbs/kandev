@@ -113,6 +113,7 @@ func TestClassifyPollErr_GitHubAPIErrorByStatus(t *testing.T) {
 	}{
 		{http.StatusUnauthorized, authcircuit.FailureClassAuth},
 		{http.StatusForbidden, authcircuit.FailureClassAuth},
+		{http.StatusTooManyRequests, authcircuit.FailureClassTransient},
 		{http.StatusNotFound, authcircuit.FailureClassConfig},
 		{http.StatusUnprocessableEntity, authcircuit.FailureClassConfig},
 		{http.StatusBadRequest, authcircuit.FailureClassConfig},
@@ -123,6 +124,13 @@ func TestClassifyPollErr_GitHubAPIErrorByStatus(t *testing.T) {
 		if got := classifyPollErr(err); got != tt.want {
 			t.Fatalf("classifyPollErr(status=%d) = %q, want %q", tt.status, got, tt.want)
 		}
+	}
+}
+
+func TestClassifyPollErr_GitHubAPIForbiddenRateLimitIsTransient(t *testing.T) {
+	err := &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/x", Body: "API rate limit exceeded"}
+	if got := classifyPollErr(err); got != authcircuit.FailureClassTransient {
+		t.Fatalf("classifyPollErr(403 rate limit) = %q, want transient", got)
 	}
 }
 
@@ -166,9 +174,29 @@ func TestCheckPRWatches_ClosedCircuitStillSearches(t *testing.T) {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
-	poller.checkPRWatches(ctx)
+	poller.checkSinglePRWatch(ctx, watch)
 
 	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
 		t.Fatalf("FindPRByBranch calls = %d, want 1 with a closed circuit", got)
+	}
+}
+
+func TestCheckPRWatches_BatchedAuthFailureSkipsPerWatchFallback(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	seedTask(t, store, "t1", false)
+	watch := withTestWorkspace(&PRWatch{
+		TaskID: "t1", Owner: "o", Repo: "r", Branch: "feat",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	gh.branchErr = ErrGitHubConnectionInvalid
+
+	poller.checkPRWatches(ctx)
+
+	if got := gh.FindPRByBranchCallCount(); got != 0 {
+		t.Fatalf("FindPRByBranch calls = %d, want 0 after batched auth failure opens the workspace circuit", got)
 	}
 }

@@ -229,6 +229,41 @@ func TestStore_UpdatePRWatchPRNumber_PostgresUpdateCollisionKeepsTransactionUsab
 	}
 }
 
+func TestStore_ResetPRWatch_DropsDiscoveredSourceOnSearchingCollision(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	source := &PRWatch{
+		ID: "watch-source", WorkspaceID: "ws-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "owner", Repo: "repo", PRNumber: 7, Branch: "feature/A",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	sibling := &PRWatch{
+		ID: "watch-sibling", WorkspaceID: "ws-1", SessionID: "session-2", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "owner", Repo: "repo", PRNumber: 0, Branch: "feature/B",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	for _, watch := range []*PRWatch{source, sibling} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create watch %s: %v", watch.ID, err)
+		}
+	}
+
+	if err := store.ResetPRWatch(ctx, source.ID, sibling.Branch); err != nil {
+		t.Fatalf("ResetPRWatch: %v", err)
+	}
+	if got, err := store.GetPRWatch(ctx, source.ID); err != nil {
+		t.Fatalf("get source watch: %v", err)
+	} else if got != nil {
+		t.Fatalf("source watch still exists after reset collision: %+v", got)
+	}
+	if got, err := store.GetPRWatch(ctx, sibling.ID); err != nil {
+		t.Fatalf("get sibling watch: %v", err)
+	} else if got == nil {
+		t.Fatal("sibling searching watch was removed; want it to survive")
+	}
+}
+
 // TestStore_ReviewWatch_ListTaskIDsAndReset pins the contract used by the
 // review watch reset flow: every dedup row's task_id (including empty
 // reservations) is enumerable, and ResetReviewWatchState wipes those rows

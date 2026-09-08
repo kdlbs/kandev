@@ -234,6 +234,10 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
+	return s.syncWorkspaceLocked(ctx, workspaceID)
+}
+
+func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (*SyncResult, error) {
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -428,18 +432,23 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		lock := s.workspaceLock(cfg.WorkspaceID)
+		lock.Lock()
 		forceSync := s.refreshCredentialFingerprint(ctx, cfg, now)
 		if cfg.circuitOpen(now) {
 			incCircuitSkip(cfg.Provider)
+			lock.Unlock()
 			continue
 		}
 		if !forceSync && !isSyncDue(cfg, now) {
+			lock.Unlock()
 			continue
 		}
-		if _, err := s.SyncWorkspace(ctx, cfg.WorkspaceID); err != nil {
+		if _, err := s.syncWorkspaceLocked(ctx, cfg.WorkspaceID); err != nil {
 			s.logger.Warn("periodic workflow sync failed",
 				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
 		}
+		lock.Unlock()
 	}
 }
 
@@ -459,8 +468,15 @@ func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config,
 		return false
 	}
 	state := cfg.circuitState()
+	previousFingerprint := state.Fingerprint
 	if !state.ResetIfFingerprintChanged(fingerprint) {
 		cfg.applyCircuitState(state) // still record the first-observed fingerprint
+		if previousFingerprint == "" && state.Fingerprint == fingerprint {
+			if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
+				s.logger.Warn("failed to persist credential fingerprint",
+					zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
+			}
+		}
 		return false
 	}
 	cfg.applyCircuitState(state)

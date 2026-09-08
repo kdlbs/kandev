@@ -1798,7 +1798,7 @@ const legacyPRWatchesUniqueConstraint = "UNIQUE(session_id, repository_id, branc
 // uniqueness violation.
 func (s *Store) migratePRWatchesToTaskOwnership() error {
 	if dialect.IsPostgres(s.db.DriverName()) {
-		return nil
+		return s.migratePRWatchesToTaskOwnershipRows(false)
 	}
 	hasLegacy, err := s.tableSQLContains("github_pr_watches", legacyPRWatchesUniqueConstraint)
 	if err != nil {
@@ -1807,7 +1807,10 @@ func (s *Store) migratePRWatchesToTaskOwnership() error {
 	if !hasLegacy {
 		return nil
 	}
+	return s.migratePRWatchesToTaskOwnershipRows(true)
+}
 
+func (s *Store) migratePRWatchesToTaskOwnershipRows(rebuild bool) error {
 	// Resolve table existence up front, on the shared pool, before opening
 	// the transaction below: the SQLite writer pool is capped to a single
 	// connection, so calling s.tableExists (which borrows a pool connection
@@ -1849,8 +1852,18 @@ func (s *Store) migratePRWatchesToTaskOwnership() error {
 	}
 	stats.DuplicatesRemoved = len(toDelete)
 
-	if err := rebuildPRWatchesTableForTaskOwnership(tx); err != nil {
+	if rebuild {
+		if err := rebuildPRWatchesTableForTaskOwnership(tx); err != nil {
+			return err
+		}
+	}
+
+	noop, err := prWatchMigrationNoop(tx, rebuild, stats)
+	if err != nil {
 		return err
+	}
+	if noop {
+		return nil
 	}
 
 	if err := tx.Get(&stats.RowsAfter, `SELECT COUNT(*) FROM github_pr_watches`); err != nil {
@@ -1862,6 +1875,22 @@ func (s *Store) migratePRWatchesToTaskOwnership() error {
 	}
 	s.prWatchMigration = stats
 	return nil
+}
+
+func prWatchMigrationNoop(tx *sqlx.Tx, rebuild bool, stats *PRWatchMigrationStats) (bool, error) {
+	if rebuild || stats.DuplicatesRemoved != 0 || stats.OrphansRemoved != 0 {
+		return false, nil
+	}
+	if err := tx.Get(&stats.RowsAfter, `SELECT COUNT(*) FROM github_pr_watches`); err != nil {
+		return false, fmt.Errorf("count PR watches after migration: %w", err)
+	}
+	if stats.RowsBefore != stats.RowsAfter {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit PR watch task-ownership migration: %w", err)
+	}
+	return true, nil
 }
 
 // clearStalePRWatchSessionProvenance clears session_id on rows whose session
@@ -2490,7 +2519,7 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 		return err
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`), id); err != nil {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
 			return err
 		}
 		return commit()
@@ -2553,9 +2582,7 @@ func recoverPRWatchUniqueUpdate(
 	if !isPRWatchUniqueViolation(updateErr) {
 		return updateErr
 	}
-	if _, err := tx.ExecContext(ctx, rebind(
-		`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`,
-	), id); err != nil {
+	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
 	return commit()

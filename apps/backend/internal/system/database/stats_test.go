@@ -63,6 +63,11 @@ func (fakePostgresStatsConn) QueryContext(
 			return nil, fmt.Errorf("unexpected args for schema version: %#v", args)
 		}
 		return newFakeRows([]string{"value"}, []driver.Value{"v0.99.0"}), nil
+	case "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM task_session_messages",
+		"SELECT COALESCE(SUM(LENGTH(metadata)), 0) FROM task_session_messages",
+		"SELECT COALESCE(SUM(LENGTH(compressed_content)), 0) FROM task_message_payloads",
+		"SELECT COALESCE(SUM(LENGTH(files) + LENGTH(metadata)), 0) FROM task_session_git_snapshots":
+		return newFakeRows([]string{"sum"}, []driver.Value{int64(0)}), nil
 	default:
 		if strings.HasPrefix(normalized, "PRAGMA ") {
 			return nil, fmt.Errorf(`ERROR: syntax error at or near "PRAGMA" (SQLSTATE 42601)`)

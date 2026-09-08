@@ -143,6 +143,9 @@ func classifyPollErr(err error) authcircuit.FailureClass {
 	}
 	var apiErr *GitHubAPIError
 	if errors.As(err, &apiErr) {
+		if isGitHubRateLimitAPIError(apiErr) {
+			return authcircuit.FailureClassTransient
+		}
 		switch apiErr.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return authcircuit.FailureClassAuth
@@ -153,4 +156,18 @@ func classifyPollErr(err error) authcircuit.FailureClass {
 		}
 	}
 	return authcircuit.FailureClassTransient
+}
+
+func isGitHubRateLimitAPIError(err *GitHubAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if err.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	if err.StatusCode != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(err.Body)
+	return strings.Contains(body, "rate limit") || strings.Contains(body, "abuse detection")
 }

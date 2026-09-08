@@ -66,9 +66,25 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 
 	var repo *sqlite.Repository
 	var writer *sqlx.DB
+	var reader *sqlx.DB
 	var closeConnections func() error
+	var backupPath string
 	if opts.Execute {
-		repo, writer, closeConnections, err = openMaintenanceConnections(databasePath, log)
+		writer, reader, closeConnections, err = openMaintenanceRawConnections(databasePath)
+		if err != nil {
+			return Outcome{}, err
+		}
+		backupDir := filepath.Join(filepath.Dir(databasePath), "backups")
+		backupPath, err = createVerifiedBackup(writer, backupDir)
+		if err != nil {
+			_ = closeConnections()
+			return Outcome{}, err
+		}
+		repo, err = openMaintenanceRepository(writer, reader, log)
+		if err != nil {
+			_ = closeConnections()
+			return Outcome{}, err
+		}
 	} else {
 		repo, closeConnections, err = openMaintenanceReadOnlyConnection(databasePath, log)
 	}
@@ -89,7 +105,7 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 		return Outcome{Executed: false, Report: report}, nil
 	}
 
-	return runExecuteAndCompact(ctx, writer, closeConnections, databasePath, report, set, opts.Compact)
+	return runExecuteAndCompact(ctx, writer, closeConnections, databasePath, backupPath, report, set, opts.Compact)
 }
 
 // openMaintenanceReadOnlyConnection opens an existing SQLite database in
@@ -132,7 +148,7 @@ func acquireExecuteLock(homeDir, databaseDriver, databasePath string, execute bo
 // version-migration side effects) and wraps them in a task repository.
 // The returned close func is idempotent and safe to call from a defer even
 // after compact() has already closed the connections itself.
-func openMaintenanceConnections(databasePath string, log *logger.Logger) (*sqlite.Repository, *sqlx.DB, func() error, error) {
+func openMaintenanceRawConnections(databasePath string) (*sqlx.DB, *sqlx.DB, func() error, error) {
 	writerConn, err := db.OpenSQLite(databasePath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open database for writing: %w", err)
@@ -157,13 +173,15 @@ func openMaintenanceConnections(databasePath string, log *logger.Logger) (*sqlit
 		}
 		return readerErr
 	}
+	return writer, reader, closeConnections, nil
+}
 
+func openMaintenanceRepository(writer, reader *sqlx.DB, log *logger.Logger) (*sqlite.Repository, error) {
 	repo, err := sqlite.NewWithDB(writer, reader, log)
 	if err != nil {
-		_ = closeConnections()
-		return nil, nil, nil, fmt.Errorf("initialize task repository: %w", err)
+		return nil, fmt.Errorf("initialize task repository: %w", err)
 	}
-	return repo, writer, closeConnections, nil
+	return repo, nil
 }
 
 // runExecuteAndCompact performs the --execute path: a fresh verified backup,
@@ -171,13 +189,7 @@ func openMaintenanceConnections(databasePath string, log *logger.Logger) (*sqlit
 // VACUUM INTO compaction and atomic replacement. A compaction failure is
 // reported as a partial-success Outcome (deletes already committed and are
 // backed by backupPath) rather than a total abort.
-func runExecuteAndCompact(ctx context.Context, writer *sqlx.DB, closeConnections func() error, databasePath string, report Report, set candidateSet, compactRequested bool) (Outcome, error) {
-	backupDir := filepath.Join(filepath.Dir(databasePath), "backups")
-	backupPath, err := createVerifiedBackup(writer, backupDir)
-	if err != nil {
-		return Outcome{}, err
-	}
-
+func runExecuteAndCompact(ctx context.Context, writer *sqlx.DB, closeConnections func() error, databasePath, backupPath string, report Report, set candidateSet, compactRequested bool) (Outcome, error) {
 	execResult, err := execute(ctx, writer.DB, set)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("execute retention deletes: %w", err)

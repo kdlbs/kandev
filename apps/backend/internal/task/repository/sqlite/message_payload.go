@@ -44,6 +44,8 @@ const maxMessagePayloadRehydrateBytes = 64 * 1024 * 1024
 // reference; content-addressing makes writing it more than once (a
 // duplicate output from a different message) an idempotent no-op.
 func (r *Repository) externalizeMessagePayload(ctx context.Context, message *models.Message) (string, error) {
+	existingDigest := message.PayloadDigest
+	existingSize := message.PayloadSize
 	message.PayloadDigest = ""
 	message.PayloadSize = 0
 	if message.Metadata == nil {
@@ -52,6 +54,10 @@ func (r *Repository) externalizeMessagePayload(ctx context.Context, message *mod
 
 	output, ok := models.ExtractShellExecOutput(message.Metadata)
 	if !ok || len(output.Stdout)+len(output.Stderr) <= largeMessagePayloadThresholdBytes {
+		if existingDigest != "" && isProjectedShellOutputMetadata(message.Metadata) {
+			message.PayloadDigest = existingDigest
+			message.PayloadSize = existingSize
+		}
 		metadataBytes, err := json.Marshal(message.Metadata)
 		if err != nil {
 			return "", fmt.Errorf("failed to serialize message metadata: %w", err)
@@ -76,6 +82,31 @@ func (r *Repository) externalizeMessagePayload(ctx context.Context, message *mod
 	message.PayloadDigest = digest
 	message.PayloadSize = int64(len(payloadBytes))
 	return string(metadataBytes), nil
+}
+
+func isProjectedShellOutputMetadata(metadata map[string]interface{}) bool {
+	normalized, _ := metadata["normalized"].(map[string]interface{})
+	shellExec, _ := normalized["shell_exec"].(map[string]interface{})
+	output, _ := shellExec["output"].(map[string]interface{})
+	if output == nil {
+		return false
+	}
+	if _, hasStdout := output["stdout"]; hasStdout {
+		return false
+	}
+	if _, hasStderr := output["stderr"]; hasStderr {
+		return false
+	}
+	if _, ok := output["has_output"]; ok {
+		return true
+	}
+	if _, ok := output["stdout_bytes"]; ok {
+		return true
+	}
+	if _, ok := output["stderr_bytes"]; ok {
+		return true
+	}
+	return false
 }
 
 // putMessagePayload gzip-compresses payload and upserts it into

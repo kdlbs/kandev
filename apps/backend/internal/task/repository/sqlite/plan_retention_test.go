@@ -35,7 +35,7 @@ func TestListObsoletePlanRevisionCandidatesProtectsHeadAndAncestry(t *testing.T)
 		}
 	}
 
-	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-retention", 0)
+	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-retention", 0, 0)
 	if err != nil {
 		t.Fatalf("ListObsoletePlanRevisionCandidates: %v", err)
 	}
@@ -79,19 +79,71 @@ func TestListObsoletePlanRevisionCandidatesRespectsRecencyWindow(t *testing.T) {
 		}
 	}
 
-	// HEAD is revision 5. keepLastN=2 additionally protects revision 4,
-	// leaving revisions 1-3 as candidates.
-	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-window", 2)
+	// HEAD is revision 5. keepLastN=2 additionally protects revisions 4
+	// and 3, leaving revisions 1-2 as candidates.
+	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-window", 2, 0)
 	if err != nil {
 		t.Fatalf("ListObsoletePlanRevisionCandidates: %v", err)
 	}
-	if len(candidates) != 3 {
-		t.Fatalf("candidates = %d, want 3 (revisions 1-3)", len(candidates))
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %d, want 2 (revisions 1-2)", len(candidates))
 	}
 	for _, c := range candidates {
-		if c.RevisionNumber > 3 {
-			t.Fatalf("candidate revision_number = %d, want <= 3 (recency window must protect revision 4)", c.RevisionNumber)
+		if c.RevisionNumber > 2 {
+			t.Fatalf("candidate revision_number = %d, want <= 2 (recency window must protect revisions 3 and 4)", c.RevisionNumber)
 		}
+	}
+}
+
+func TestListObsoletePlanRevisionCandidatesProtectsRecentRowsWithGaps(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-planrev-gap-window")
+
+	base := time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC)
+	for _, number := range []int{1, 2, 10, 11} {
+		rev := &models.TaskPlanRevision{
+			ID:             "planrev-gap-" + string(rune('a'+number)),
+			TaskID:         "task-planrev-gap-window",
+			RevisionNumber: number,
+			Title:          "v",
+			Content:        "c",
+			CreatedAt:      base.Add(time.Duration(number) * time.Hour),
+		}
+		if err := repo.InsertTaskPlanRevision(ctx, rev); err != nil {
+			t.Fatalf("InsertTaskPlanRevision(%d): %v", number, err)
+		}
+	}
+
+	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-gap-window", 2, 0)
+	if err != nil {
+		t.Fatalf("ListObsoletePlanRevisionCandidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].RevisionNumber != 1 {
+		t.Fatalf("candidates = %+v, want only revision 1; revisions 10 and 2 are the two newest non-HEAD rows", candidates)
+	}
+}
+
+func TestListObsoletePlanRevisionCandidatesAppliesLimitInQuery(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-planrev-limit")
+
+	for i := 1; i <= 5; i++ {
+		if err := repo.InsertTaskPlanRevision(ctx, &models.TaskPlanRevision{
+			ID: "planrev-limit-" + string(rune('0'+i)), TaskID: "task-planrev-limit",
+			RevisionNumber: i, Title: "v", Content: "c",
+		}); err != nil {
+			t.Fatalf("InsertTaskPlanRevision(%d): %v", i, err)
+		}
+	}
+
+	candidates, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-limit", 0, 2)
+	if err != nil {
+		t.Fatalf("ListObsoletePlanRevisionCandidates: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %d, want SQL-limited 2", len(candidates))
 	}
 }
 
@@ -114,7 +166,7 @@ func TestListObsoletePlanRevisionCandidatesIsNonDestructive(t *testing.T) {
 	}
 
 	before := countRows(t, repo, `SELECT COUNT(*) FROM task_plan_revisions WHERE task_id = ?`, "task-planrev-nondestructive")
-	if _, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-nondestructive", 0); err != nil {
+	if _, err := repo.ListObsoletePlanRevisionCandidates(ctx, "task-planrev-nondestructive", 0, 0); err != nil {
 		t.Fatalf("ListObsoletePlanRevisionCandidates: %v", err)
 	}
 	after := countRows(t, repo, `SELECT COUNT(*) FROM task_plan_revisions WHERE task_id = ?`, "task-planrev-nondestructive")
