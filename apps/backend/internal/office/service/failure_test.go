@@ -400,6 +400,20 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	// run captured in the pause snapshot.
 	autoPauseAgent(t, svc, "ws-1", "agent-reassigned-from", 2)
 
+	// Precondition: the pause snapshot must include the reassigned task,
+	// otherwise the negative assertions below would pass vacuously (there
+	// would be nothing to discard).
+	var preCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&preCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-reassigned-from", reassignedTaskID,
+	); err != nil {
+		t.Fatalf("query pre-fix snapshot: %v", err)
+	}
+	if preCount == 0 {
+		t.Fatal("test setup error: reassigned task was not captured in pause snapshot")
+	}
+
 	setTestTaskAssignee(t, svc, reassignedTaskID, "agent-reassigned-to")
 
 	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-reassigned-from"); err != nil {
