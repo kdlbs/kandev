@@ -233,19 +233,7 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 	backgroundBusy := state.backgroundBusy
 	nextBackgroundAt := state.nextBackgroundAt
 	a.principal.mu.Unlock()
-	reason := decision.backgroundReason
-	if reason == "" {
-		switch {
-		case waitingInteractive > 0:
-			reason = rateLimitBlockInteractiveWaiting
-		case backgroundBusy:
-			reason = rateLimitBlockBackgroundBusy
-		case nextBackgroundAt.After(now):
-			reason = rateLimitBlockBackgroundPacing
-		default:
-			reason = "provider_retry"
-		}
-	}
+	reason := backgroundDeferralReason(decision, waitingInteractive, backgroundBusy, nextBackgroundAt, now)
 	if reason == rateLimitBlockBackgroundPacing {
 		if err := waitForLocalPacing(ctx, time.Until(nextBackgroundAt), trackerChanged, changed); err != nil {
 			return nil, err
@@ -257,6 +245,37 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 	return nil, &AdmissionDeferredError{
 		Resource: resource, Delay: wait, RetryAt: retryAt, RetrySource: retrySource, Changed: changed,
 		TrackerChanged: trackerChanged, Reason: reason,
+	}
+}
+
+func backgroundDeferralReason(
+	decision rateAdmissionDecision,
+	waitingInteractive int,
+	backgroundBusy bool,
+	nextBackgroundAt time.Time,
+	now time.Time,
+) string {
+	if decision.backgroundReason != rateLimitBlockBackgroundPacing {
+		if decision.backgroundReason != "" {
+			return decision.backgroundReason
+		}
+	} else {
+		switch {
+		case waitingInteractive > 0:
+			return rateLimitBlockInteractiveWaiting
+		case backgroundBusy:
+			return rateLimitBlockBackgroundBusy
+		}
+	}
+	switch {
+	case waitingInteractive > 0:
+		return rateLimitBlockInteractiveWaiting
+	case backgroundBusy:
+		return rateLimitBlockBackgroundBusy
+	case nextBackgroundAt.After(now):
+		return rateLimitBlockBackgroundPacing
+	default:
+		return "provider_retry"
 	}
 }
 

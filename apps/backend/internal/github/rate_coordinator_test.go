@@ -184,6 +184,17 @@ func TestRateAdmissionWaitForLocalPacingUsesCapturedStateChange(t *testing.T) {
 	}
 }
 
+func TestBackgroundDeferralReasonPrioritizesCurrentWaitersOverStalePacing(t *testing.T) {
+	now := time.Now()
+	decision := rateAdmissionDecision{backgroundReason: rateLimitBlockBackgroundPacing}
+	if got := backgroundDeferralReason(decision, 1, false, now.Add(time.Second), now); got != rateLimitBlockInteractiveWaiting {
+		t.Fatalf("interactive waiter reason = %q, want %q", got, rateLimitBlockInteractiveWaiting)
+	}
+	if got := backgroundDeferralReason(decision, 0, true, now.Add(time.Second), now); got != rateLimitBlockBackgroundBusy {
+		t.Fatalf("busy request reason = %q, want %q", got, rateLimitBlockBackgroundBusy)
+	}
+}
+
 func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)
