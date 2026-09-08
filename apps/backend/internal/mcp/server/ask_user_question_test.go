@@ -478,5 +478,6 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 // that outlives it, and TestAskUserQuestion_StreamsKeepAliveDuringWait
 // wouldn't catch it because it overrides the interval before running.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor(t *testing.T) {
+	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
 	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
 }

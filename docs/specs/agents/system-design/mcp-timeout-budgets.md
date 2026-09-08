@@ -52,7 +52,7 @@ read by the CLI but not currently set by Kandev (see
 | --- | --- | --- |
 | `MCP_TIMEOUT` | MCP connect deadline, and the deadline of the CLI's first-turn wait on the `subscriptions/listen` stream. CLI default is 30000 ms, clamped to at most 2147483647. | `30000` |
 | `MCP_TOOL_TIMEOUT` | Per-call tool budget and the per-request fetch deadline floor, clamped to `[60000, 2147483647]`. | `7200000` |
-| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long, independent of `MCP_TOOL_TIMEOUT`. Unset. |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long, independent of `MCP_TOOL_TIMEOUT`. | Not set by Kandev. |
 
 Verified against the shipped CLI (version 2.1.258):
 
@@ -84,17 +84,24 @@ depend on the CLI keeping 30000 as its own default.
 ### Idle watchdog
 
 `MCP_TOOL_TIMEOUT` bounds total call duration; it does not bound silence.
-Separately, the CLI runs a per-tool-call idle watchdog, extracted verbatim
-from the shipped binary:
+Separately, the CLI runs a per-tool-call idle watchdog. This section and its
+experiments were verified against a different binary than the CLI version
+above: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`,
+bundled by `@agentclientprotocol/claude-agent-acp@0.75.1` as
+`claude-agent-sdk@0.3.257` (the binary Kandev's ACP adapter actually launches),
+not `~/.local/share/claude/versions/*`. The watchdog function is rewritten
+below with descriptive names from that binary's minified source (logic and
+constants unchanged; the minified identifiers are not):
 
 ```js
 function idleTimeoutMs(server) {
   const transport = server?.type ?? "stdio";
-  if (["sse-ide", "ws-ide", "sdk"].has(transport)) return 0; // disabled
+  if (new Set(["sse-ide", "ws-ide", "sdk"]).has(transport)) return 0; // disabled
   const idle = process.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT
     ?? (transport === "stdio" ? 1800000 : 300000);
   if (idle <= 0) return 0;
   const perServerTimeout = server?.timeout >= 1000 ? server.timeout : 0;
+  // toolTimeoutMs(server) = clamp(MCP_TOOL_TIMEOUT, 60000, 2147483647)
   return Math.min(Math.max(idle, perServerTimeout, 1000), toolTimeoutMs(server));
 }
 ```
@@ -114,12 +121,13 @@ this watchdog can plausibly hit. It survives because
 `notifications/progress` frame every `askQuestionKeepAliveInterval` (20s),
 comfortably inside the 300s floor.
 
-Four throwaway experiments against the real CLI (`claude -p --mcp-config
+Four throwaway experiments against that binary (`claude -p --mcp-config
 --allowedTools`, a minimal streamable-HTTP MCP server whose tool never
 returns) confirmed the formula and ruled out the obvious alternative fix:
 
 | Config | Server-observed lifetime | Outcome |
 | --- | --- | --- |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=10000` (10s), silent | ~35s | aborted at the overridden floor, not at 300s — confirms the CLI reads this env var |
 | Default env, `MCP_TOOL_TIMEOUT=7200000`, silent (no progress) | 304.0s | aborted: "sent no response or progress for 300s; aborting" |
 | `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=7200000`, `MCP_TOOL_TIMEOUT=7200000`, silent | 358.1s (reproduced twice) | `The operation timed out.` — a second, lower client-side ceiling the env var does not lift |
 | Default env, SSE + `notifications/progress` every 20s | 535.1s, still alive | ended only by the harness's own external kill |
