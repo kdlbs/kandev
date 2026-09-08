@@ -94,9 +94,6 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 	}
 	if _, err := tx.Exec(`ALTER TABLE dynamic_route_states ADD COLUMN ` +
 		dynamicRouteLegacyActiveBackfillColumn + ` INTEGER NOT NULL DEFAULT 1`); err != nil {
-		if db.IsAlreadyExistsError(err) {
-			return nil
-		}
 		return fmt.Errorf("dynamic route legacy backfill: add marker column: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
