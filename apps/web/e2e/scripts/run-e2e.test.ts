@@ -34,6 +34,22 @@ function fakeExecutable(binDir: string, name: string, contents: string): void {
   fs.chmodSync(executablePath, 0o755);
 }
 
+function isRunningProcess(pid: number): boolean {
+  const result = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+    encoding: "utf8",
+  });
+  if (result.status === 0) {
+    const state = result.stdout.trim();
+    return state !== "" && !state.startsWith("Z");
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("run-e2e.sh", () => {
   it("marks a managed containers run before invoking Playwright", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
@@ -514,7 +530,7 @@ describe("run-e2e.sh", () => {
     expect(result.stderr).toContain("mode=host");
     expect(elapsedMs).toBeLessThan(5_000);
     const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
-    expect(() => process.kill(childPid, 0)).toThrow();
+    expect(isRunningProcess(childPid)).toBe(false);
   }, 20_000);
 
   it.each([
