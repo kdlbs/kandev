@@ -62,6 +62,13 @@ DOCKER_PROBE_TIMEOUT="${KANDEV_E2E_DOCKER_PROBE_TIMEOUT:-10}"
 log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Validated eagerly: it feeds arithmetic in docker_up below, and an unbounded
+# value there (non-numeric, fractional, or padded with whitespace) is exactly
+# the silent-zero-signal failure this script exists to eliminate. 0 is
+# accepted — it means "skip the probe, treat Docker as unavailable".
+[[ "$DOCKER_PROBE_TIMEOUT" =~ ^[0-9]+$ ]] \
+  || die "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer (got '$DOCKER_PROBE_TIMEOUT')"
+
 # Bounded in pure bash (no `timeout`/`gtimeout` dependency — bare macOS has
 # neither). Backgrounds the probe and kills it if it outlives the budget, so a
 # hung daemon degrades to host mode with a visible reason instead of hanging

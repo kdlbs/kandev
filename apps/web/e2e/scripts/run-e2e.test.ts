@@ -467,6 +467,56 @@ describe("run-e2e.sh", () => {
     expect(elapsedMs).toBeLessThan(5_000);
   }, 20_000);
 
+  it.each([
+    ["non-numeric", "abc"],
+    ["fractional", "1.5"],
+    ["a natural but unsupported time suffix", "10s"],
+    ["trailing whitespace, e.g. from a .env file", "10 "],
+  ])("rejects an invalid KANDEV_E2E_DOCKER_PROBE_TIMEOUT (%s)", (_label, value) => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: value }),
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer",
+    );
+    expect(result.stderr).toContain(`got '${value}'`);
+  });
+
+  it("accepts 0 as a valid KANDEV_E2E_DOCKER_PROBE_TIMEOUT (skip the probe)", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "0" }),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain(
+      "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer",
+    );
+  });
+
   it("applies the worker guard to raw Playwright runs", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
     tempDirs.push(binDir);
