@@ -83,10 +83,12 @@ function RecoveryFailureDetails({ failure }: { failure: SessionRecoveryFailure }
           <dt className="font-medium">{t("task:sessionRecoveryResumeAttempt")}</dt>
           <dd className="mt-0.5 break-words text-muted-foreground">{failure.resumeError}</dd>
         </div>
-        <div className="min-w-0">
-          <dt className="font-medium">{t("task:sessionRecoveryRestoreAttempt")}</dt>
-          <dd className="mt-0.5 break-words text-muted-foreground">{failure.restoreError}</dd>
-        </div>
+        {failure.outcome === "recovery_failed" ? (
+          <div className="min-w-0">
+            <dt className="font-medium">{t("task:sessionRecoveryRestoreAttempt")}</dt>
+            <dd className="mt-0.5 break-words text-muted-foreground">{failure.restoreError}</dd>
+          </div>
+        ) : null}
       </dl>
     </details>
   );
@@ -107,14 +109,15 @@ export function EnsureSessionErrorBanner({
   const { t } = useTranslation();
   const info = describeEnsureError(error, workspaceId);
   if (!info) return null;
+  const failedRecovery = recoveryFailure?.outcome === "recovery_failed" ? recoveryFailure : null;
   return (
     <div className={cn(!compact && "px-3 pt-2")} data-testid={testId}>
       <Alert variant="destructive">
         <IconAlertTriangle />
-        <AlertTitle>{recoveryFailure ? t("task:sessionRecoveryFailed") : info.title}</AlertTitle>
+        <AlertTitle>{failedRecovery ? t("task:sessionRecoveryFailed") : info.title}</AlertTitle>
         <AlertDescription>
-          <span>{recoveryFailure ? t("task:sessionRecoveryFailedDetail") : info.detail}</span>
-          {recoveryFailure && <RecoveryFailureDetails failure={recoveryFailure} />}
+          <span>{failedRecovery ? t("task:sessionRecoveryFailedDetail") : info.detail}</span>
+          {failedRecovery ? <RecoveryFailureDetails failure={failedRecovery} /> : null}
           <span className="mt-1 flex flex-wrap items-center gap-2">
             {info.action ? (
               <Link
@@ -168,12 +171,21 @@ export function EnsureSessionErrorBanner({
 }
 
 /** Non-blocking result notice used when the workspace remains available read-only. */
-export function SessionRecoveryNotice({ message }: { message: string }) {
+export function SessionRecoveryNotice({
+  message,
+  recoveryFailure,
+}: {
+  message: string;
+  recoveryFailure?: Extract<SessionRecoveryFailure, { outcome: "workspace_read_only" }> | null;
+}) {
   return (
     <div className="px-3 pt-2" data-testid="session-recovery-notice">
       <Alert>
         <IconInfoCircle />
-        <AlertDescription>{message}</AlertDescription>
+        <AlertDescription>
+          <span>{message}</span>
+          {recoveryFailure ? <RecoveryFailureDetails failure={recoveryFailure} /> : null}
+        </AlertDescription>
       </Alert>
     </div>
   );
@@ -201,6 +213,8 @@ export function SessionRecoveryFeedback({
   recoveryFailure?: SessionRecoveryFailure | null;
   testId?: string;
 }) {
+  const readOnlyRecovery =
+    recoveryFailure?.outcome === "workspace_read_only" ? recoveryFailure : null;
   return (
     <>
       <EnsureSessionErrorBanner
@@ -213,7 +227,9 @@ export function SessionRecoveryFeedback({
         recoveryFailure={recoveryFailure}
         testId={testId}
       />
-      {notice ? <SessionRecoveryNotice message={notice} /> : null}
+      {notice ? (
+        <SessionRecoveryNotice message={notice} recoveryFailure={readOnlyRecovery} />
+      ) : null}
     </>
   );
 }

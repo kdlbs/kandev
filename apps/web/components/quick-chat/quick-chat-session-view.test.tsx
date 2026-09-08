@@ -8,6 +8,9 @@ const sessionRows = vi.hoisted(
       { task_id?: string; agent_profile_id?: string; is_passthrough?: boolean }
     >,
 );
+const quickChatSessions = vi.hoisted(
+  () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
+);
 const useEnsureTaskSession = vi.hoisted(() => vi.fn());
 const useTask = vi.hoisted(() => vi.fn());
 const useSessionResumption = vi.hoisted(() =>
@@ -27,7 +30,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       taskSessions: { items: sessionRows },
-      quickChat: { sessions: [] },
+      quickChat: { sessions: quickChatSessions },
       agentProfiles: { items: [] },
     }),
 }));
@@ -59,6 +62,7 @@ const session = {
 afterEach(() => {
   cleanup();
   delete sessionRows[session.sessionId];
+  quickChatSessions.length = 0;
   vi.clearAllMocks();
   useTask.mockReset();
   useTask.mockReturnValue(null);
@@ -106,6 +110,21 @@ describe("QuickChatSessionView session resumption", () => {
     render(<QuickChatSessionView session={session} />);
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true);
+  });
+
+  it("uses hydrated Quick Chat ownership when the ephemeral task is absent from kanban tasks", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    view.rerender(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+    );
   });
 
   it("passes a null task id until session hydration provides one", () => {

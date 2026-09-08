@@ -239,11 +239,13 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
 
   useForegroundRefresh(loadTaskDetails, Boolean(activeTaskId), activeTaskId);
 
-  const onTaskUnarchived = useCallback((taskId: string) => {
-    setTaskDetails((current) =>
-      current?.id === taskId ? { ...current, archived_at: null } : current,
-    );
-  }, []);
+  const onTaskUnarchived = useCallback(
+    (taskId: string) => {
+      if (activeTaskId !== taskId) return;
+      void loadTaskDetails();
+    },
+    [activeTaskId, loadTaskDetails],
+  );
 
   return {
     task,

@@ -50,10 +50,16 @@ export type SessionStatus = {
 
 export type ResumptionState = "idle" | "checking" | "resuming" | "resumed" | "running" | "error";
 
-export type SessionRecoveryFailure = {
-  resumeError: string;
-  restoreError: string;
-};
+export type SessionRecoveryFailure =
+  | {
+      outcome: "workspace_read_only";
+      resumeError: string;
+    }
+  | {
+      outcome: "recovery_failed";
+      resumeError: string;
+      restoreError: string;
+    };
 
 export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
@@ -90,6 +96,7 @@ type ResumeResponse = {
 };
 
 type LaunchAttempt = { ok: true } | { ok: false; error: Error; archived?: boolean };
+type FailedLaunchAttempt = Extract<LaunchAttempt, { ok: false }>;
 
 export function isTaskArchivedConflict(error: unknown): boolean {
   return error instanceof WebSocketRequestError && error.details?.kind === TASK_ARCHIVED_KIND;
@@ -183,6 +190,41 @@ async function resumeViaLaunch(
   return ok;
 }
 
+async function restoreAfterResumeFailure(
+  context: ResumeLaunchContext,
+  resumeAttempt: FailedLaunchAttempt,
+): Promise<boolean> {
+  const { taskId, sessionId, setters, canContinue } = context;
+  if (!canContinue()) return false;
+  const restoreAttempt = await tryLaunch(
+    buildRestoreWorkspaceRequest(taskId, sessionId).request,
+    context,
+  );
+  if (!canContinue()) return false;
+  if (restoreAttempt.ok) {
+    setters.setError(null);
+    setters.setNotice?.(t("task:resumeFailedWorkspaceReadOnly"));
+    setters.setRecoveryFailure?.({
+      outcome: "workspace_read_only",
+      resumeError: resumeAttempt.error.message,
+    });
+    return true;
+  }
+  if (restoreAttempt.archived) {
+    clearArchiveRecovery(setters);
+    return false;
+  }
+  setters.setResumptionState("error");
+  setters.setNotice?.(null);
+  setters.setRecoveryFailure?.({
+    outcome: "recovery_failed",
+    resumeError: resumeAttempt.error.message,
+    restoreError: restoreAttempt.error.message,
+  });
+  setters.setError(t("task:sessionRecoveryFailed"));
+  return false;
+}
+
 /** Attempt resume, silently falling back to restore_workspace on any failure. */
 export async function resumeWithSilentFallback(
   taskId: string,
@@ -205,31 +247,7 @@ export async function resumeWithSilentFallback(
     clearArchiveRecovery(setters);
     return false;
   }
-  if (!canContinue()) return false;
-  const restoreAttempt = await tryLaunch(
-    buildRestoreWorkspaceRequest(taskId, sessionId).request,
-    context,
-  );
-  if (!canContinue()) return false;
-  if (restoreAttempt.ok) {
-    setters.setError(null);
-    setters.setNotice?.(
-      t("task:resumeFailedWorkspaceReadOnly", { error: resumeAttempt.error.message }),
-    );
-    return true;
-  }
-  if (restoreAttempt.archived) {
-    clearArchiveRecovery(setters);
-    return false;
-  }
-  setters.setResumptionState("error");
-  setters.setNotice?.(null);
-  setters.setRecoveryFailure?.({
-    resumeError: resumeAttempt.error.message,
-    restoreError: restoreAttempt.error.message,
-  });
-  setters.setError(t("task:sessionRecoveryFailed"));
-  return false;
+  return restoreAfterResumeFailure(context, resumeAttempt);
 }
 
 /** Run a single launch attempt and retain its failure for the fallback notice. */

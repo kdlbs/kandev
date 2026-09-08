@@ -5,13 +5,14 @@ import {
   routeRecoveryFailureAndRetry,
   sessionLaunchRequests,
 } from "../../helpers/archived-session-recovery";
-import { waitForSessionState } from "../../helpers/session";
-import { seedWorktreeRecoveryFixture } from "../../helpers/session-resume-recovery";
+import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helpers/session";
+import {
+  prepareArchiveRecoverySession,
+  seedWorktreeRecoveryFixture,
+} from "../../helpers/session-resume-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("archived session recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keeps archived history read-only, then resumes the same session after unarchive", async ({
     testPage,
     apiClient,
@@ -26,27 +27,20 @@ test.describe("archived session recovery", () => {
       seedData,
       `Archived session recovery ${Date.now()}`,
     );
-    const sessionId = fixture.task.session_id!;
     const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
     const beforeRepository = beforeEnvironment?.repos?.find(
       (repository) => repository.repository_id === seedData.repositoryId,
     );
     expect(beforeEnvironment?.id).toBe(fixture.environment.id);
 
-    const stopResponse = await apiClient.stopSession({
-      session_id: sessionId,
-      reason: "archive recovery e2e",
-      force: true,
-    });
-    expect(stopResponse.success).toBe(true);
-    await waitForSessionState(apiClient, {
-      taskId: fixture.task.id,
-      sessionId,
-      expectedState: "CANCELLED",
-      message: "Waiting for the archived recovery session to stop",
-      timeout: 30_000,
-    });
+    const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
     await apiClient.archiveTask(fixture.task.id);
+    await waitForArchiveCancelledSession(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for archive cancellation to mark the recovery session",
+    );
 
     const requests = captureGatewayRequests(testPage);
     await testPage.goto(`/t/${fixture.task.id}`);
@@ -65,14 +59,25 @@ test.describe("archived session recovery", () => {
     await testPage.getByTestId("task-unarchive-button").click();
     await unarchiveResponse;
     await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
-
     await expect
-      .poll(() => sessionLaunchRequests(requests, sessionId)[0]?.payload.intent ?? null, {
-        timeout: 60_000,
-        message: "Unarchive did not trigger same-session recovery",
-      })
-      .toMatch(/^(resume|restore_workspace)$/);
-    await session.waitForChatIdle({ timeout: 60_000 });
+      .poll(
+        () => sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
+        {
+          timeout: 60_000,
+          message: "Unarchive did not trigger automatic same-session resume",
+        },
+      )
+      .toEqual(["resume"]);
+    await waitForSessionDone(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for automatic same-session resume to settle",
+      60_000,
+    );
+    expect(
+      sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
+    ).toEqual(["resume"]);
 
     const afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
     const afterRepository = afterEnvironment?.repos?.find(
@@ -112,20 +117,14 @@ test.describe("archived session recovery", () => {
         seedData,
         `Archived recovery preference ${Date.now()}`,
       );
-      const sessionId = fixture.task.session_id!;
-      await apiClient.stopSession({
-        session_id: sessionId,
-        reason: "archive recovery preference e2e",
-        force: true,
-      });
-      await waitForSessionState(apiClient, {
-        taskId: fixture.task.id,
-        sessionId,
-        expectedState: "CANCELLED",
-        message: "Waiting for the preference recovery session to stop",
-        timeout: 30_000,
-      });
+      const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
       await apiClient.archiveTask(fixture.task.id);
+      await waitForArchiveCancelledSession(
+        apiClient,
+        fixture.task.id,
+        sessionId,
+        "Waiting for archive cancellation to mark the preference session",
+      );
 
       const requests = captureGatewayRequests(testPage);
       await testPage.goto(`/t/${fixture.task.id}`);
@@ -144,7 +143,7 @@ test.describe("archived session recovery", () => {
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
       expect(
         sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
-      ).not.toContain("resume");
+      ).toEqual([]);
     } finally {
       await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
@@ -164,20 +163,14 @@ test.describe("archived session recovery", () => {
       seedData,
       `Archived recovery feedback ${Date.now()}`,
     );
-    const sessionId = fixture.task.session_id!;
-    await apiClient.stopSession({
-      session_id: sessionId,
-      reason: "archived recovery feedback e2e",
-      force: true,
-    });
-    await waitForSessionState(apiClient, {
-      taskId: fixture.task.id,
-      sessionId,
-      expectedState: "CANCELLED",
-      message: "Waiting for the feedback recovery session to stop",
-      timeout: 30_000,
-    });
+    const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
     await apiClient.archiveTask(fixture.task.id);
+    await waitForArchiveCancelledSession(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for archive cancellation to mark the feedback session",
+    );
 
     await routeRecoveryFailureAndRetry(testPage, {
       taskId: fixture.task.id,

@@ -1913,7 +1913,7 @@
   "sessionRecoveryDetails": "恢复详情",
   "sessionRecoveryResumeAttempt": "恢复尝试",
   "sessionRecoveryRestoreAttempt": "工作区还原尝试",
-  "resumeFailedWorkspaceReadOnly": "恢复失败：{{error}}。工作区已以只读模式还原。",
+  "resumeFailedWorkspaceReadOnly": "工作区已以只读模式还原",
   "continueOnNewBranch": "在新分支上继续",
   "restoreReadOnlyWorkspace": "还原只读工作区",
   "gitOperationFailedGeneric": "操作失败",

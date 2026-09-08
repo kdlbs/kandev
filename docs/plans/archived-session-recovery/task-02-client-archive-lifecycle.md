@@ -138,11 +138,13 @@ RED evidence:
 
 GREEN evidence:
 
-- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.navigation.test.ts components/task/preview-session-tabs.test.tsx components/quick-chat/quick-chat-session-view.test.tsx`: 5 files, 68 passed.
+- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.navigation.test.ts components/task/preview-session-tabs.test.tsx components/quick-chat/quick-chat-session-view.test.tsx`: 5 files, 71 passed.
 - `rtk pnpm run typecheck`: passed.
 - `rtk pnpm run lint`: passed with zero warnings after the final test cleanup.
 - `rtk pnpm e2e:run --project=chromium tests/task/archived-session-recovery.spec.ts`: 3 passed. This covers archived read-only history, in-place same-session recovery, the prevent-auto-start preference, and the automatic recovery failure path.
-- `rtk pnpm e2e:run --project=mobile-chrome tests/task/mobile-archived-session-recovery.spec.ts`: 2 passed. This covers the touch-sized mobile Unarchive action, same-session recovery, touch disclosure, retry, and overflow checks.
+- `rtk pnpm e2e:run --project=mobile-chrome tests/task/mobile-archived-session-recovery.spec.ts -- --retries=0`: 3 passed. This covers the touch-sized mobile Unarchive action, same-session recovery, the prevent-auto-start preference, touch disclosure, retry, and overflow checks.
+
+- `rtk go test -race ./internal/orchestrator/executor ./internal/task/service -run 'TestStopSessionSynchronously|TestCancelActiveRuns_UsesSynchronousStopWhenAvailable' -count=1`: 4 passed. The archive lifecycle now waits for runtime teardown and records exact-execution ownership before the wait.
 
 Scope notes:
 

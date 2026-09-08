@@ -1937,7 +1937,7 @@
   "sessionRecoveryDetails": "Recovery details",
   "sessionRecoveryResumeAttempt": "Resume attempt",
   "sessionRecoveryRestoreAttempt": "Workspace restore attempt",
-  "resumeFailedWorkspaceReadOnly": "Resume failed: {{error}}. The workspace was restored in read-only mode.",
+  "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
   "continueOnNewBranch": "Continue on a new branch",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
   "sessionStatusGenerating": "Generating",

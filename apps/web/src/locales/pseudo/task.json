@@ -1937,7 +1937,7 @@
   "sessionRecoveryDetails": "Ŕēćōvēŕŷ ďēţàĩĺś",
   "sessionRecoveryResumeAttempt": "Ŕēśũḿē àţţēḿƥţ",
   "sessionRecoveryRestoreAttempt": "Ŵōŕķśƥàćē ŕēśţōŕē àţţēḿƥţ",
-  "resumeFailedWorkspaceReadOnly": "Ŕēśũḿē ƒàĩĺēď: {{error}}. Ţĥē ŵōŕķśƥàćē ŵàś ŕēśţōŕēď ĩń ŕēàď-ōńĺŷ ḿōďē.",
+  "resumeFailedWorkspaceReadOnly": "Ŵōŕķśƥàćē ŕēśţōŕēď ĩń ŕēàď-ōńĺŷ ḿōďē",
   "continueOnNewBranch": "Ćōńţĩńũē ōń à ńēŵ ƀŕàńćĥ",
   "restoreReadOnlyWorkspace": "Ŕēśţōŕē ŕēàď-ōńĺŷ ŵōŕķśƥàćē",
   "sessionStatusGenerating": "Ĝēńēŕàţĩńĝ",

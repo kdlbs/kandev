@@ -141,14 +141,14 @@ RED evidence:
 
 GREEN evidence:
 
-- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.navigation.test.ts components/task/ensure-session-error.test.tsx components/task/preview-session-tabs.test.tsx components/quick-chat/quick-chat-session-view.test.tsx components/task/chat/messages/action-message-recovery.test.tsx components/task/mobile/session-mobile-top-bar-repository.test.tsx components/task/task-layout-repository.test.tsx`: 9 files, 103 passed.
+- `rtk pnpm test hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.navigation.test.ts components/task/ensure-session-error.test.tsx components/task/preview-session-tabs.test.tsx components/quick-chat/quick-chat-session-view.test.tsx components/task/chat/messages/action-message-recovery.test.tsx components/task/mobile/session-mobile-top-bar-repository.test.tsx components/task/task-layout-repository.test.tsx`: 9 files, 105 passed.
 - `rtk pnpm run i18n:check`: passed for all five supported catalogs and the pseudo locale.
 - `rtk pnpm run i18n:ratchet`: passed with zero new-copy violations.
 - `rtk pnpm run typecheck`: passed.
 - `rtk pnpm run lint`: passed with zero warnings.
 - `rtk node --test scripts/validate-public-docs.test.mjs`: 61 passed. `rtk node scripts/validate-public-docs.mjs`: 46 public pages validated.
 - `rtk pnpm e2e:run --project=chromium tests/task/archived-session-recovery.spec.ts`: 3 passed. The disclosure case verifies collapsed state, keyboard expansion, both labeled causes, retry, and no horizontal overflow.
-- `rtk pnpm e2e:run --project=mobile-chrome tests/task/mobile-archived-session-recovery.spec.ts`: 2 passed. The disclosure case verifies touch expansion, 44px summary hit area, both causes, retry, and no horizontal overflow.
+- `rtk pnpm e2e:run --project=mobile-chrome tests/task/mobile-archived-session-recovery.spec.ts -- --retries=0`: 3 passed. The disclosure case verifies touch expansion, 44px summary hit area, both causes, retry, and no horizontal overflow; the other cases verify same-session recovery and the prevent-auto-start preference.
 
 Docs:
 

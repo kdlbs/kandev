@@ -103,8 +103,10 @@ token. Opening that task reproduces the two launch attempts in the screenshot.
    Preserve manual branch recovery and read-only fallback semantics. Update all
    locale catalogs using the existing translation generation/check tools.
 
-No persistence or runtime ownership change is needed. The design follows the
-existing [task worktree ownership decision](../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
+No persistence schema or new runtime ownership model is needed. Archive stop
+now uses the existing exact-execution teardown ownership seam before it waits
+for runtime exit, so a late stop event cannot undo an unarchive. The design
+follows the existing [task worktree ownership decision](../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 and [explicit branch recovery decision](../../decisions/2026-08-31-explicit-new-branch-session-recovery.md).
 No new ADR is required for these conformance corrections.
 
@@ -154,9 +156,13 @@ sequentially. Install workspace dependencies once before package commands.
 
 - Backend focused archive and recovery checks passed: 36 orchestrator tests, 1
   handler test, 22 executor tests, and 1 worktree test, all with `-race`.
-- Web focused tests passed: 9 files, 103 tests. Typecheck, lint, i18n checks,
+- The archive-stop lifecycle regression passed with `-race`: 3 synchronous-stop
+  executor tests and 1 cascade-cancellation test. Synchronous archive stops
+  now register exact-execution teardown ownership before waiting for runtime
+  exit, so a late stop event cannot re-terminalize an unarchived session.
+- Web focused tests passed: 9 files, 105 tests. Typecheck, lint, i18n checks,
   and the new-code ratchet passed.
-- Managed browser checks passed: 3 Chromium tests and 2 mobile-Chromium tests.
+- Managed browser checks passed: 3 Chromium tests and 3 mobile-Chromium tests.
   They cover archived history, in-place recovery, prevent-auto-start, typed
   failure details, retry, touch targets, and overflow.
 - Public documentation validation passed: 61 validator tests and 46 published

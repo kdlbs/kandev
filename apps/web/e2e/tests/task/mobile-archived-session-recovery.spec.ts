@@ -5,13 +5,14 @@ import {
   routeRecoveryFailureAndRetry,
   sessionLaunchRequests,
 } from "../../helpers/archived-session-recovery";
-import { waitForSessionState } from "../../helpers/session";
-import { seedWorktreeRecoveryFixture } from "../../helpers/session-resume-recovery";
+import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helpers/session";
+import {
+  prepareArchiveRecoverySession,
+  seedWorktreeRecoveryFixture,
+} from "../../helpers/session-resume-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile: archived session recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keeps archived history read-only, then resumes the same session after unarchive", async ({
     testPage,
     apiClient,
@@ -26,25 +27,19 @@ test.describe("mobile: archived session recovery", () => {
       seedData,
       `Mobile archived session recovery ${Date.now()}`,
     );
-    const sessionId = fixture.task.session_id!;
     const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
     const beforeRepository = beforeEnvironment?.repos?.find(
       (repository) => repository.repository_id === seedData.repositoryId,
     );
 
-    await apiClient.stopSession({
-      session_id: sessionId,
-      reason: "mobile archive recovery e2e",
-      force: true,
-    });
-    await waitForSessionState(apiClient, {
-      taskId: fixture.task.id,
-      sessionId,
-      expectedState: "CANCELLED",
-      message: "Waiting for the mobile archived recovery session to stop",
-      timeout: 30_000,
-    });
+    const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
     await apiClient.archiveTask(fixture.task.id);
+    await waitForArchiveCancelledSession(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for archive cancellation to mark the mobile recovery session",
+    );
 
     const requests = captureGatewayRequests(testPage);
     await testPage.goto(`/t/${fixture.task.id}`);
@@ -67,12 +62,24 @@ test.describe("mobile: archived session recovery", () => {
     await unarchiveResponse;
     await expect(unarchiveButton).toHaveCount(0);
     await expect
-      .poll(() => sessionLaunchRequests(requests, sessionId)[0]?.payload.intent ?? null, {
-        timeout: 60_000,
-        message: "Mobile unarchive did not trigger same-session recovery",
-      })
-      .toMatch(/^(resume|restore_workspace)$/);
-    await session.waitForChatIdle({ timeout: 60_000 });
+      .poll(
+        () => sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
+        {
+          timeout: 60_000,
+          message: "Mobile unarchive did not trigger automatic same-session resume",
+        },
+      )
+      .toEqual(["resume"]);
+    await waitForSessionDone(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for mobile automatic same-session resume to settle",
+      60_000,
+    );
+    expect(
+      sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
+    ).toEqual(["resume"]);
 
     const afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
     const afterRepository = afterEnvironment?.repos?.find(
@@ -97,6 +104,52 @@ test.describe("mobile: archived session recovery", () => {
     });
   });
 
+  test("honors prevent-auto-start after a mobile archived task is unarchived", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const fixture = await seedWorktreeRecoveryFixture(
+        testPage,
+        apiClient,
+        seedData,
+        `Mobile archived recovery preference ${Date.now()}`,
+      );
+      const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
+      await apiClient.archiveTask(fixture.task.id);
+      await waitForArchiveCancelledSession(
+        apiClient,
+        fixture.task.id,
+        sessionId,
+        "Waiting for archive cancellation to mark the mobile preference session",
+      );
+
+      const requests = captureGatewayRequests(testPage);
+      await testPage.goto(`/t/${fixture.task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      const unarchiveButton = testPage.getByTestId("task-unarchive-button");
+      await expect(unarchiveButton).toBeVisible();
+      expect(sessionLaunchRequests(requests, sessionId)).toHaveLength(0);
+
+      requests.length = 0;
+      const unarchiveResponse = testPage.waitForResponse((response) =>
+        response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
+      );
+      await unarchiveButton.tap();
+      await unarchiveResponse;
+      await expect(unarchiveButton).toHaveCount(0);
+      await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+      expect(sessionLaunchRequests(requests, sessionId)).toEqual([]);
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
+    }
+  });
+
   test("keeps recovery causes accessible and retryable on touch", async ({
     testPage,
     apiClient,
@@ -111,20 +164,14 @@ test.describe("mobile: archived session recovery", () => {
       seedData,
       `Mobile archived recovery feedback ${Date.now()}`,
     );
-    const sessionId = fixture.task.session_id!;
-    await apiClient.stopSession({
-      session_id: sessionId,
-      reason: "mobile archived recovery feedback e2e",
-      force: true,
-    });
-    await waitForSessionState(apiClient, {
-      taskId: fixture.task.id,
-      sessionId,
-      expectedState: "CANCELLED",
-      message: "Waiting for the mobile feedback recovery session to stop",
-      timeout: 30_000,
-    });
+    const sessionId = await prepareArchiveRecoverySession(apiClient, fixture);
     await apiClient.archiveTask(fixture.task.id);
+    await waitForArchiveCancelledSession(
+      apiClient,
+      fixture.task.id,
+      sessionId,
+      "Waiting for archive cancellation to mark the mobile feedback session",
+    );
 
     await routeRecoveryFailureAndRetry(testPage, {
       taskId: fixture.task.id,

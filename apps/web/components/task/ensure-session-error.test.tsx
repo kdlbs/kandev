@@ -11,6 +11,8 @@ import {
 afterEach(cleanup);
 
 const ENSURE_RETRY_TEST_ID = "ensure-session-error-retry";
+const RESUME_FAILURE_DETAIL = "resume failed: provider request abc-123";
+const RESTORE_FAILURE_DETAIL = "restore failed: workspace /tmp/task-123";
 
 describe("describeEnsureError", () => {
   it("returns null when there is no error", () => {
@@ -56,6 +58,7 @@ describe("describeEnsureError", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("EnsureSessionErrorBanner", () => {
   it("renders nothing when there is no error", () => {
     const { container } = render(
@@ -108,8 +111,9 @@ describe("EnsureSessionErrorBanner", () => {
         error={new Error("Recovery could not complete")}
         onRetry={() => {}}
         recoveryFailure={{
-          resumeError: "resume failed: provider request abc-123",
-          restoreError: "restore failed: workspace /tmp/task-123",
+          outcome: "recovery_failed",
+          resumeError: RESUME_FAILURE_DETAIL,
+          restoreError: RESTORE_FAILURE_DETAIL,
         }}
       />,
     );
@@ -123,9 +127,9 @@ describe("EnsureSessionErrorBanner", () => {
 
     expect(details.open).toBe(true);
     expect(screen.getByText("Resume attempt")).toBeTruthy();
-    expect(screen.getByText("resume failed: provider request abc-123")).toBeTruthy();
+    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
     expect(screen.getByText("Workspace restore attempt")).toBeTruthy();
-    expect(screen.getByText("restore failed: workspace /tmp/task-123")).toBeTruthy();
+    expect(screen.getByText(RESTORE_FAILURE_DETAIL)).toBeTruthy();
   });
 
   it("disables retry while automatic recovery is in flight", () => {
@@ -134,12 +138,41 @@ describe("EnsureSessionErrorBanner", () => {
         error="Recovery could not complete"
         notice={null}
         onRetry={() => {}}
-        recoveryFailure={{ resumeError: "resume failed", restoreError: "restore failed" }}
+        recoveryFailure={{
+          outcome: "recovery_failed",
+          resumeError: "resume failed",
+          restoreError: "restore failed",
+        }}
         retryDisabled
       />,
     );
 
     expect((screen.getByTestId(ENSURE_RETRY_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a read-only fallback notice compact while retaining its resume cause in details", () => {
+    render(
+      <SessionRecoveryFeedback
+        error={null}
+        notice="Workspace restored in read-only mode"
+        onRetry={() => {}}
+        recoveryFailure={{
+          outcome: "workspace_read_only",
+          resumeError: RESUME_FAILURE_DETAIL,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Workspace restored in read-only mode")).toBeTruthy();
+    const details = screen.getByTestId("session-recovery-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(screen.queryByText("Workspace restore attempt")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
+
+    expect(details.open).toBe(true);
+    expect(screen.getByText("Resume attempt")).toBeTruthy();
+    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
   });
 });
 

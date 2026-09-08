@@ -1913,7 +1913,7 @@
   "sessionRecoveryDetails": "Detalhes da recuperação",
   "sessionRecoveryResumeAttempt": "Tentativa de retomar",
   "sessionRecoveryRestoreAttempt": "Tentativa de restaurar o workspace",
-  "resumeFailedWorkspaceReadOnly": "Falha ao retomar: {{error}}. O workspace foi restaurado em modo só de leitura.",
+  "resumeFailedWorkspaceReadOnly": "Workspace restaurado em modo só de leitura",
   "continueOnNewBranch": "Continuar numa nova branch",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
   "gitOperationFailedGeneric": "A operação falhou",

@@ -37,22 +37,22 @@ const LAUNCH_ACTION = "session.launch";
 const STATUS_ACTION = "task.session.status";
 const STARTED_AT = "2026-01-01T00:00:00.000Z";
 const LATER_AT = "2026-01-02T00:00:00.000Z";
+const RESUME_TRANSPORT_ERROR = "Resume transport failed";
+const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 import {
   resumeWithSilentFallback,
   useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
+  type SessionRecoveryFailure,
 } from "./use-session-resumption";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
   errors: (string | null)[];
   notices: (string | null)[];
-  recoveryFailures: Array<{
-    resumeError: string;
-    restoreError: string;
-  } | null>;
+  recoveryFailures: Array<SessionRecoveryFailure | null>;
   worktreePaths: (string | null)[];
   worktreeBranches: (string | null)[];
   taskSessionStates: string[];
@@ -137,7 +137,7 @@ describe("resumeWithSilentFallback", () => {
         success: false,
         task_id: TASK_ID,
         state: FAILED_STATE,
-        error: "Resume transport failed",
+        error: RESUME_TRANSPORT_ERROR,
       })
       .mockResolvedValueOnce({
         success: true,
@@ -166,9 +166,11 @@ describe("resumeWithSilentFallback", () => {
     // Final state is "resumed" (from successful restore), no error surfaced.
     expect(calls.resumptionStates.at(-1)).toBe("resumed");
     expect(calls.errors.filter((e) => typeof e === "string")).toHaveLength(0);
-    expect(calls.notices.at(-1)).toBe(
-      "Resume failed: Resume transport failed. The workspace was restored in read-only mode.",
-    );
+    expect(calls.notices.at(-1)).toBe("Workspace restored in read-only mode");
+    expect(calls.recoveryFailures.at(-1)).toEqual({
+      outcome: "workspace_read_only",
+      resumeError: RESUME_TRANSPORT_ERROR,
+    });
   });
 
   it("falls back to restore_workspace silently when resume throws", async () => {
@@ -193,13 +195,13 @@ describe("resumeWithSilentFallback", () => {
         success: false,
         task_id: TASK_ID,
         state: FAILED_STATE,
-        error: "Resume transport failed",
+        error: RESUME_TRANSPORT_ERROR,
       })
       .mockResolvedValueOnce({
         success: false,
         task_id: TASK_ID,
         state: FAILED_STATE,
-        error: "Workspace restore failed",
+        error: WORKSPACE_RESTORE_ERROR,
       });
     const { setters, calls } = createSetters();
 
@@ -209,8 +211,9 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe("Session recovery failed");
     expect(calls.recoveryFailures.at(-1)).toEqual({
-      resumeError: "Resume transport failed",
-      restoreError: "Workspace restore failed",
+      outcome: "recovery_failed",
+      resumeError: RESUME_TRANSPORT_ERROR,
+      restoreError: WORKSPACE_RESTORE_ERROR,
     });
   });
 
@@ -226,6 +229,7 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe("Session recovery failed");
     expect(calls.recoveryFailures.at(-1)).toEqual({
+      outcome: "recovery_failed",
       resumeError: "ws closed",
       restoreError: "still closed",
     });
