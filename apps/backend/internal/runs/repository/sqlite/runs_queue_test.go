@@ -120,6 +120,7 @@ func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testin
 
 	got := mustGetRun(t, repo, queued.ID)
 	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
 	if n := countRuns(t, repo); n != 1 {
 		t.Errorf("%d rows after coalescing, want 1 (no new run may be created)", n)
 	}
