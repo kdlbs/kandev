@@ -11,9 +11,14 @@ import (
 )
 
 type memoryStore struct {
-	principal *models.WorkspaceAgentPrincipal
-	grants    []*models.CoordinatorGrant
-	audits    []*models.CoordinatorAuditEvent
+	principal        *models.WorkspaceAgentPrincipal
+	grants           []*models.CoordinatorGrant
+	audits           []*models.CoordinatorAuditEvent
+	designatedTaskID string
+}
+
+func (s *memoryStore) GetWorkspaceCoordinatorTaskID(_ context.Context, _ string) (string, error) {
+	return s.designatedTaskID, nil
 }
 
 func (s *memoryStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
@@ -49,7 +54,7 @@ func (s *memoryStore) FinishCoordinatorAuditEvent(_ context.Context, id, result,
 
 // @covers AC-COORDINATOR-AUTHORITY-003
 func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "inspect,orchestrate",
 	}}}
@@ -81,6 +86,30 @@ func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
 	}
 }
 
+// @covers AC-COORDINATOR-AUTHORITY-002
+func TestAuthorityRequiresWorkspaceCoordinatorDesignation(t *testing.T) {
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session",
+	}, grants: []*models.CoordinatorGrant{{
+		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
+		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
+	}}}
+
+	decision, err := New(store, func() bool { return true }).Authorize(context.Background(), Request{
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace"},
+		ActorSessionID: "actor-session",
+		Action:         "stop",
+		Capability:     CapabilityOrchestrate,
+	})
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("decision = %#v, want denial without workspace designation", decision)
+	}
+}
+
 func TestAuthorityRejectsStaleBackingSession(t *testing.T) {
 	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
 		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "current-session",
@@ -107,7 +136,7 @@ func TestAuthorityRejectsStaleBackingSession(t *testing.T) {
 }
 
 func TestAuthorityDeniesCrossWorkspaceWithoutExposingReason(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace-a", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace-a", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace-a",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace-a", Capabilities: "orchestrate", GrantedAt: time.Now(),
 	}}}
@@ -130,7 +159,7 @@ func TestAuthorityDeniesCrossWorkspaceWithoutExposingReason(t *testing.T) {
 
 func TestAuthorityDeniesRevokedOrLegacyTaskBoundPrincipal(t *testing.T) {
 	revokedAt := time.Now().UTC()
-	store := &memoryStore{
+	store := &memoryStore{designatedTaskID: "actor",
 		principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", BackingTaskID: "actor", RevokedAt: &revokedAt},
 		grants: []*models.CoordinatorGrant{{
 			ID: "legacy-grant", CoordinatorTaskID: "actor", WorkspaceID: "workspace",
@@ -154,7 +183,7 @@ func TestAuthorityDeniesRevokedOrLegacyTaskBoundPrincipal(t *testing.T) {
 }
 
 func TestAuthorityDeniesPrincipalWithoutAuthenticatedPluginContext(t *testing.T) {
-	store := &memoryStore{
+	store := &memoryStore{designatedTaskID: "actor",
 		principal: &models.WorkspaceAgentPrincipal{
 			ID: "principal-1", WorkspaceID: "workspace", LogicalKey: "coordinator",
 			BackingTaskID: "actor", BackingSessionID: "actor-session",
@@ -273,7 +302,7 @@ func TestAuthorityFailsClosedOnStoreError(t *testing.T) {
 }
 
 func TestAuthorityAllowsWorkflowScopedGrant(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkflow, ScopeID: "workflow-1", Capabilities: "inspect",
 	}}}
@@ -299,6 +328,10 @@ func TestAuthorityAllowsWorkflowScopedGrant(t *testing.T) {
 }
 
 type errorStore struct{}
+
+func (s *errorStore) GetWorkspaceCoordinatorTaskID(_ context.Context, _ string) (string, error) {
+	return "", context.DeadlineExceeded
+}
 
 func (s *errorStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, _, _ string) (*models.WorkspaceAgentPrincipal, error) {
 	return nil, context.DeadlineExceeded

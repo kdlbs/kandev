@@ -18,6 +18,13 @@ type handoffCoordinatorStore struct {
 	finishErr error
 }
 
+func (s *handoffCoordinatorStore) GetWorkspaceCoordinatorTaskID(_ context.Context, _ string) (string, error) {
+	if s.principal == nil {
+		return "", nil
+	}
+	return s.principal.BackingTaskID, nil
+}
+
 func (s *handoffCoordinatorStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
 	if s.principal != nil && s.principal.WorkspaceID == workspaceID && s.principal.BackingTaskID == taskID && s.principal.RevokedAt == nil {
 		return s.principal, nil

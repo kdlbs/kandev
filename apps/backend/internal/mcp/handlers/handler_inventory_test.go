@@ -91,6 +91,9 @@ func TestHandleAddWorkspaceSourcesCoordinatorGrantAuthorizesUnrelatedTargetAndRe
 		BackingTaskID: caller.ID, BackingSessionID: "caller-session", CreatedAt: now,
 	}
 	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, principal))
+	require.NoError(t, repo.CreateWorkspaceCoordinatorGrant(ctx, &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: caller.WorkspaceID, CoordinatorTaskID: caller.ID, CreatedByUserID: "operator", CreatedAt: now,
+	}))
 	require.NoError(t, repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
 		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: caller.WorkspaceID,
 		ScopeKind: coordinator.ScopeWorkspace, ScopeID: caller.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,

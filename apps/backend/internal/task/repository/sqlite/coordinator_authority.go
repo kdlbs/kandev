@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -20,6 +21,101 @@ const (
 )
 
 const coordinatorGrantColumns = `id, coordinator_task_id, principal_id, workspace_id, scope_kind, scope_id, capabilities, note, granted_by_user_id, granted_at, revoked_at, revoked_by_user_id`
+
+func (r *Repository) CreateWorkspaceCoordinatorGrant(ctx context.Context, grant *models.WorkspaceCoordinatorGrant) error {
+	if grant.CreatedAt.IsZero() {
+		grant.CreatedAt = r.nowUTC()
+	}
+	if grant.UpdatedAt.IsZero() {
+		grant.UpdatedAt = grant.CreatedAt
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workspace_coordinator_grants
+			(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), grant.WorkspaceID, grant.CoordinatorTaskID, grant.CreatedByUserID, grant.CreatedAt, grant.UpdatedAt)
+	return err
+}
+
+// IssueCoordinatorAuthorityGrant atomically establishes (or confirms) the
+// workspace designation and records its principal-bound capability grant.
+// A conflicting designation leaves no new capability row behind.
+func (r *Repository) IssueCoordinatorAuthorityGrant(ctx context.Context, designation *models.WorkspaceCoordinatorGrant, grant *models.CoordinatorGrant) error {
+	if !validCoordinatorAuthorityIssue(designation, grant) {
+		return repoerrors.ErrCoordinatorGrantConflict
+	}
+	if designation.CreatedAt.IsZero() {
+		designation.CreatedAt = r.nowUTC()
+	}
+	if designation.UpdatedAt.IsZero() {
+		designation.UpdatedAt = designation.CreatedAt
+	}
+	if grant.ID == "" {
+		grant.ID = uuid.NewString()
+	}
+	if grant.GrantedAt.IsZero() {
+		grant.GrantedAt = designation.CreatedAt
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureWorkspaceCoordinatorDesignationTx(ctx, tx, designation); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_coordinator_grants (
+			id, coordinator_task_id, principal_id, workspace_id, scope_kind, scope_id, capabilities,
+			note, granted_by_user_id, granted_at, revoked_at, revoked_by_user_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), grant.ID, grant.CoordinatorTaskID, grant.PrincipalID, grant.WorkspaceID, grant.ScopeKind, grant.ScopeID,
+		grant.Capabilities, grant.Note, grant.GrantedByUserID, grant.GrantedAt, grant.RevokedAt, grant.RevokedByUserID)
+	if isCoordinatorGrantScopeUniqueViolation(err) {
+		return repoerrors.ErrCoordinatorGrantConflict
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func validCoordinatorAuthorityIssue(designation *models.WorkspaceCoordinatorGrant, grant *models.CoordinatorGrant) bool {
+	return designation != nil && grant != nil && designation.WorkspaceID != "" && designation.CoordinatorTaskID != "" &&
+		grant.PrincipalID != "" && grant.WorkspaceID == designation.WorkspaceID && grant.CoordinatorTaskID == designation.CoordinatorTaskID
+}
+
+func (r *Repository) ensureWorkspaceCoordinatorDesignationTx(ctx context.Context, tx *sqlx.Tx, designation *models.WorkspaceCoordinatorGrant) error {
+	var existingTaskID string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT coordinator_task_id FROM workspace_coordinator_grants WHERE workspace_id = ?`), designation.WorkspaceID).Scan(&existingTaskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO workspace_coordinator_grants
+				(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?)
+		`), designation.WorkspaceID, designation.CoordinatorTaskID, designation.CreatedByUserID, designation.CreatedAt, designation.UpdatedAt)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if existingTaskID != designation.CoordinatorTaskID {
+		return repoerrors.ErrCoordinatorGrantConflict
+	}
+	return nil
+}
+
+// GetWorkspaceCoordinatorTaskID resolves the workspace's explicit Coordinator
+// designation. A missing designation is intentionally distinct from a
+// principal or capability grant: those controls never imply this relation.
+func (r *Repository) GetWorkspaceCoordinatorTaskID(ctx context.Context, workspaceID string) (string, error) {
+	var taskID string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT coordinator_task_id FROM workspace_coordinator_grants WHERE workspace_id = ?`), workspaceID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return taskID, err
+}
 
 func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error {
 	if principal.ID == "" {

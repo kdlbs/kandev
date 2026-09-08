@@ -2,6 +2,16 @@ package models
 
 import "time"
 
+// WorkspaceCoordinatorGrant is the workspace's explicit Coordinator
+// designation. It grants no capability by itself.
+type WorkspaceCoordinatorGrant struct {
+	WorkspaceID       string    `json:"workspace_id"`
+	CoordinatorTaskID string    `json:"coordinator_task_id"`
+	CreatedByUserID   string    `json:"created_by_user_id"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // CoordinatorPrincipal is the durable, opaque subject approved by an
 // operator. Backing task/session bindings are replaceable implementation
 // details and never the principal's identity.

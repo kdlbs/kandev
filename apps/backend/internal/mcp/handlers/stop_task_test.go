@@ -27,6 +27,11 @@ func TestHandleStopTask_CoordinatorGrantUsesCurrentSessionAndResolvesAudit(t *te
 	if err := repo.CreateWorkspaceAgentPrincipal(context.Background(), principal); err != nil {
 		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
 	}
+	if err := repo.CreateWorkspaceCoordinatorGrant(context.Background(), &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: sender.WorkspaceID, CoordinatorTaskID: sender.ID, CreatedByUserID: "operator", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceCoordinatorGrant: %v", err)
+	}
 	if err := repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
 		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
 		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,

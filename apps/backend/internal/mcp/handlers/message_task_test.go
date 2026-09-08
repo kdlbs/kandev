@@ -841,6 +841,9 @@ func TestHandleMessageTask_CoordinatorGrantInterruptsAndResolvesAudit(t *testing
 		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
 	}
 	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(context.Background(), principal))
+	require.NoError(t, repo.CreateWorkspaceCoordinatorGrant(context.Background(), &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: sender.WorkspaceID, CoordinatorTaskID: sender.ID, CreatedByUserID: "operator", CreatedAt: now,
+	}))
 	require.NoError(t, repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
 		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
 		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,

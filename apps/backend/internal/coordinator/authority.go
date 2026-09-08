@@ -55,6 +55,7 @@ type Decision struct {
 }
 
 type Store interface {
+	GetWorkspaceCoordinatorTaskID(ctx context.Context, workspaceID string) (string, error)
 	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
 	ListActiveWorkspaceAgentPrincipalGrants(ctx context.Context, principalID, workspaceID string) ([]*models.CoordinatorGrant, error)
 	CreateCoordinatorAuditEvent(ctx context.Context, event *models.CoordinatorAuditEvent) error
@@ -87,6 +88,13 @@ func (a *Authority) Authorize(ctx context.Context, request Request) (Decision, e
 }
 
 func (a *Authority) authorizePrincipalGrant(ctx context.Context, request Request) (Decision, error) {
+	designated, err := a.isDesignated(ctx, request.ActorTask)
+	if err != nil {
+		return Decision{Basis: BasisDenied}, err
+	}
+	if !designated {
+		return Decision{Basis: BasisDenied}, nil
+	}
 	principal, err := a.store.GetActiveWorkspaceAgentPrincipalForTask(ctx, request.ActorTask.WorkspaceID, request.ActorTask.ID)
 	if err != nil {
 		return Decision{Basis: BasisDenied}, err
@@ -131,6 +139,11 @@ func (a *Authority) authorizePrincipalGrant(ctx context.Context, request Request
 		return Decision{Basis: BasisDenied}, err
 	}
 	return Decision{Allowed: true, Basis: BasisGrant, GrantID: grant.ID, AuditID: event.ID}, nil
+}
+
+func (a *Authority) isDesignated(ctx context.Context, task *models.Task) (bool, error) {
+	designatedTaskID, err := a.store.GetWorkspaceCoordinatorTaskID(ctx, task.WorkspaceID)
+	return designatedTaskID != "" && designatedTaskID == task.ID, err
 }
 
 func (a *Authority) Finish(ctx context.Context, decision Decision, operationErr error) error {

@@ -224,6 +224,45 @@ func TestCoordinatorGrantRepositoryRevokesGrantAndResolvesAudit(t *testing.T) {
 	}
 }
 
+func TestIssueCoordinatorAuthorityGrantRejectsConflictingDesignationWithoutCapability(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	createUsageEventsTestTask(t, repo, "coordinator-a")
+	createUsageEventsTestTask(t, repo, "coordinator-b")
+	now := time.Now().UTC()
+	for _, principal := range []*models.WorkspaceAgentPrincipal{
+		{ID: "principal-a", WorkspaceID: "ws-1", PluginInstallationID: "plugin-a", LogicalKey: "coordinator-a", BackingTaskID: "coordinator-a", CreatedAt: now},
+		{ID: "principal-b", WorkspaceID: "ws-1", PluginInstallationID: "plugin-b", LogicalKey: "coordinator-b", BackingTaskID: "coordinator-b", CreatedAt: now},
+	} {
+		if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreateWorkspaceAgentPrincipal %s: %v", principal.ID, err)
+		}
+	}
+	if err := repo.IssueCoordinatorAuthorityGrant(ctx,
+		&models.WorkspaceCoordinatorGrant{WorkspaceID: "ws-1", CoordinatorTaskID: "coordinator-a", CreatedByUserID: "operator", CreatedAt: now},
+		&models.CoordinatorGrant{ID: "grant-a", CoordinatorTaskID: "coordinator-a", PrincipalID: "principal-a", WorkspaceID: "ws-1", ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "inspect", GrantedAt: now},
+	); err != nil {
+		t.Fatalf("IssueCoordinatorAuthorityGrant first: %v", err)
+	}
+	err := repo.IssueCoordinatorAuthorityGrant(ctx,
+		&models.WorkspaceCoordinatorGrant{WorkspaceID: "ws-1", CoordinatorTaskID: "coordinator-b", CreatedByUserID: "operator", CreatedAt: now},
+		&models.CoordinatorGrant{ID: "grant-b", CoordinatorTaskID: "coordinator-b", PrincipalID: "principal-b", WorkspaceID: "ws-1", ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "inspect", GrantedAt: now},
+	)
+	if !errors.Is(err, repoerrors.ErrCoordinatorGrantConflict) {
+		t.Fatalf("IssueCoordinatorAuthorityGrant conflict = %v, want ErrCoordinatorGrantConflict", err)
+	}
+	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, "principal-b", "ws-1")
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("conflicting capability grants = %#v, %v; want none", grants, err)
+	}
+	if taskID, err := repo.GetWorkspaceCoordinatorTaskID(ctx, "ws-1"); err != nil || taskID != "coordinator-a" {
+		t.Fatalf("designation = %q, %v; want coordinator-a", taskID, err)
+	}
+}
+
 func TestWorkspaceAgentPrincipalRepositoryRebindsAndRevokesImmediately(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
 	ctx := context.Background()

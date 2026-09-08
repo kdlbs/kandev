@@ -33,7 +33,7 @@ type CoordinatorGrantHandlers struct {
 // need — a subset of the full CoordinatorAuthorityRepository.
 type coordinatorGrantRepo interface {
 	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
-	CreateCoordinatorGrant(ctx context.Context, grant *models.CoordinatorGrant) error
+	IssueCoordinatorAuthorityGrant(ctx context.Context, designation *models.WorkspaceCoordinatorGrant, grant *models.CoordinatorGrant) error
 	GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error)
 	ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error)
 	RevokeCoordinatorGrant(ctx context.Context, id, revokedByUserID string, revokedAt time.Time) error
@@ -343,7 +343,11 @@ func (h *CoordinatorGrantHandlers) httpCreateWorkspaceCoordinatorGrant(c *gin.Co
 		GrantedByUserID:   resolveUserID(c),
 		GrantedAt:         now,
 	}
-	if err := h.repo.CreateCoordinatorGrant(c.Request.Context(), grant); err != nil {
+	designation := &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: workspaceID, CoordinatorTaskID: req.CoordinatorTaskID,
+		CreatedByUserID: resolveUserID(c), CreatedAt: now,
+	}
+	if err := h.repo.IssueCoordinatorAuthorityGrant(c.Request.Context(), designation, grant); err != nil {
 		h.abortWithGrantError(c, "create coordinator grant", err)
 		return
 	}

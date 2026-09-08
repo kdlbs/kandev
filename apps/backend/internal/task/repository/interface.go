@@ -646,6 +646,8 @@ type UsageRepository interface {
 // CoordinatorAuthorityRepository persists explicit operator-granted task
 // authority and its bounded audit trail.
 type CoordinatorAuthorityRepository interface {
+	CreateWorkspaceCoordinatorGrant(ctx context.Context, grant *models.WorkspaceCoordinatorGrant) error
+	GetWorkspaceCoordinatorTaskID(ctx context.Context, workspaceID string) (string, error)
 	CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error
 	GetWorkspaceAgentPrincipal(ctx context.Context, id string) (*models.WorkspaceAgentPrincipal, error)
 	GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error)

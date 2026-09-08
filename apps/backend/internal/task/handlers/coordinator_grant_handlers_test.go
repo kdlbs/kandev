@@ -64,6 +64,10 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	if err != nil || len(grants) != 1 || grants[0].PrincipalID != "principal-1" {
 		t.Fatalf("principal grants = %#v, err = %v; want one principal-bound grant", grants, err)
 	}
+	designatedTaskID, err := repo.GetWorkspaceCoordinatorTaskID(ctx, "ws-1")
+	if err != nil || designatedTaskID != "coordinator" {
+		t.Fatalf("workspace designation = %q, %v; want coordinator", designatedTaskID, err)
+	}
 	created, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", false)
 	if err != nil || len(created) != 1 || created[0].GrantedByUserID != "admin" {
 		t.Fatalf("created grants = %#v, err = %v; want audit actor admin", created, err)
