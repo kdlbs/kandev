@@ -1958,6 +1958,7 @@
   "modelSelectionReasonCatalogEmpty": "執行器未公佈模型目錄。",
   "modelSelectionReasonFallbackNotAdvertised": "執行器未公佈已儲存的備選模型。",
   "modelSelectionReasonRequestedNotAdvertised": "執行器未公佈已儲存的模型。",
+  "modelSelectionReasonUniqueVariation": "執行器套用了已儲存模型唯一公佈的變體。",
   "modelSelectionReasonUnknown": "{{reason}}",
   "modelSelectionReasonUnsupported": "該執行器不支援選擇模型。",
   "modelSelectionRemediationAgentVersion": "請檢查執行器中的代理程式版本。",

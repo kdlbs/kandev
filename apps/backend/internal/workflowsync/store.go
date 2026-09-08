@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -47,7 +46,7 @@ const createTablesSQL = `
 		consecutive_failures INTEGER NOT NULL DEFAULT 0,
 		next_attempt_at DATETIME,
 		last_error_class TEXT NOT NULL DEFAULT '',
-		poll_suspended BOOLEAN NOT NULL DEFAULT 0,
+		poll_suspended {{boolean}} NOT NULL DEFAULT FALSE,
 		poll_suspension_reason TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -72,9 +71,9 @@ func (s *Store) initSchema() error {
 func (s *Store) addRecoveryColumns() error {
 	statements := []string{
 		`ALTER TABLE workflow_sync_configs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE workflow_sync_configs ADD COLUMN next_attempt_at DATETIME`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN next_attempt_at {{timestamp}}`,
 		`ALTER TABLE workflow_sync_configs ADD COLUMN last_error_class TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspended BOOLEAN NOT NULL DEFAULT 0`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspended {{boolean}} NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspension_reason TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range statements {
@@ -285,11 +284,11 @@ func (s *Store) RecordSyncFailure(
 ) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE workflow_sync_configs
-		SET last_synced_at = ?, last_ok = 0, last_error = ?, last_warnings = '[]', last_hash = '',
+		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = '[]', last_hash = '',
 			consecutive_failures = ?, next_attempt_at = ?, last_error_class = ?, poll_suspended = ?,
 			poll_suspension_reason = ?, updated_at = ?
 		WHERE workspace_id = ?
-	`), at, errMsg, directive.consecutive, directive.nextAttemptAt, directive.class,
+	`), at, 0, errMsg, directive.consecutive, directive.nextAttemptAt, directive.class,
 		directive.suspended, directive.suspensionReason, at, workspaceID)
 	return err
 }
@@ -319,9 +318,5 @@ func boolToInt(b bool) int {
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
-	if dialect.IsPostgres(driver) {
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
-	}
-	return schema
+	return dialect.MustRenderSchema(driver, schema)
 }

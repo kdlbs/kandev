@@ -89,6 +89,14 @@ Production comments state the invariant, not the argument for it: no `AC-NN` ref
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
 
+Every built-in SQL schema owner also belongs in
+`apps/backend/internal/persistence/requiredstores` and the fixed
+`apps/backend/internal/persistence/storeconformance` adapter set. Persistence
+changes must run the SQL guard, fresh/replay conformance, and the relevant
+SQLite/PostgreSQL boot or upgrade tests. Disabled features keep their required
+schema; external provider credentials and remote APIs remain a separate,
+degradable startup phase.
+
 ### Internationalization
 
 The web UI is localized with i18next (`namespace:key`). **All new user-facing copy

@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
-updated: 2026-09-04
+updated: 2026-09-07
 owners:
   - kandev
 ---
@@ -50,8 +50,15 @@ if that path reads it. The scroll setter records the WebKit-safe offset.
 Desktop Dockview renders panel content through persistent portals. An inactive
 session transcript can therefore be mounted and receive messages while its
 scroll container has zero or detached geometry. `usePanelActive` supplies the
-authoritative active-tab signal to `TaskChatPanel`, which passes it to the
-native transcript scroll coordinator as `isVisible`.
+authoritative group-local visibility signal to `TaskChatPanel`, which passes it
+to the native transcript scroll coordinator as `isVisible`.
+
+Dockview's panel `isVisible` property means the panel is the selected tab in
+its own group. Its `isActive` property additionally requires that group to own
+global Dockview focus. The transcript uses `isVisible` and
+`onDidVisibilityChange`; clicking a side-by-side Files or Changes group cannot
+make a still-rendered Chat panel ineligible for initial placement or read
+tracking.
 
 Geometry-based initialization and divider placement do not consume their
 one-time completion state while `isVisible` is false. When a transcript first
@@ -194,10 +201,11 @@ pinning, and disabled position restoration.
 ## Failure modes
 
 - If the container is not mounted, the helper performs no work.
-- If a transcript is mounted but inactive, one-time placement remains pending
-  until the panel becomes active and measurable.
-- If a panel becomes inactive again before the post-restore frames complete,
-  the scheduled placement is cancelled.
+- If a transcript is mounted but hidden behind another tab in its group,
+  one-time placement remains pending until the panel becomes visible and
+  measurable.
+- If a panel becomes hidden again before the post-restore frames complete, the
+  scheduled placement is cancelled.
 - Chromium, Gecko, and WebKit clamp the signed 32-bit maximum to the native
   maximum scroll position.
 - An offset outside WebKit's safe range can resolve to zero and move the

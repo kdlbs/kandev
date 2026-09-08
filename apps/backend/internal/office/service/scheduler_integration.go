@@ -291,6 +291,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	runCtx, err := (&officeruntime.ContextBuilder{
 		Agents: si.svc,
 		Runs:   si.svc.repo,
+		Seats:  si.svc,
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
@@ -377,7 +378,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
 	pc.TaskScope = append([]string(nil), runCtx.Capabilities.AllowedTaskIDs...)
-	pc.AllowedActions = runCtx.Capabilities.AllowedKeys()
+	pc.AllowedActions = append(runCtx.Capabilities.AllowedKeys(), runCtx.AvailableActions...)
 	wakeContext := BuildPrompt(pc)
 
 	// Resume = the (task, agent_instance) session has run before. On resume
@@ -969,6 +970,12 @@ func (si *SchedulerIntegration) buildPromptContext(
 
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
+	if reason == RunReasonAgentError {
+		pc.FailedAgentID = parsed["failed_agent_id"]
+		pc.FailedSessionID = parsed["failed_session_id"]
+		pc.AgentErrorMessage = parsed["error"]
 	}
 
 	return pc

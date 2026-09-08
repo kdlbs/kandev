@@ -514,7 +514,9 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.initSchemaFoundations(); err != nil {
 		return err
 	}
-	s.applyIdempotentSchemaColumns()
+	if err := s.applyIdempotentSchemaColumns(); err != nil {
+		return err
+	}
 	if err := s.initSchemaUpgrades(); err != nil {
 		return err
 	}
@@ -524,7 +526,9 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.initSchemaData(legacyUpgrade); err != nil {
 		return err
 	}
-	s.applyIdempotentSchemaIndexes()
+	if err := s.applyIdempotentSchemaIndexes(); err != nil {
+		return err
+	}
 	return s.ensureWorkspaceOwnershipIndexes()
 }
 
@@ -571,30 +575,56 @@ func (s *Store) initSchemaFoundations() error {
 	return nil
 }
 
-func (s *Store) applyIdempotentSchemaColumns() {
+func (s *Store) applyIdempotentSchemaColumns() error {
 	// Idempotent migrations for existing databases.
-	exec := func(statement string) {
-		_, _ = s.db.Exec(schemaSQLForDriver(statement, s.db.DriverName()))
+	exec := func(name, statement string) error {
+		if _, err := s.db.Exec(schemaSQLForDriver(statement, s.db.DriverName())); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add %s: %w", name, err)
+		}
+		return nil
 	}
-	exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
-	exec(`ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`)
+	if err := exec("github_pr_watches.last_review_state", `ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.mergeable_state", `ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
-	exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
-	exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
+	if err := exec("github_task_prs.repository_id", `ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := exec("github_pr_watches.repository_id", `ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	// CI popover: aggregate counts + branch protection's required_approving_review_count
 	// + unresolved review-threads, surfaced in the PR top-bar hover popover so the
 	// frontend can render the counts row without a second round-trip.
-	exec(`ALTER TABLE github_task_prs ADD COLUMN required_reviews INTEGER`)
-	exec(`ALTER TABLE github_task_prs ADD COLUMN unresolved_review_threads INTEGER DEFAULT 0`)
-	exec(`ALTER TABLE github_task_prs ADD COLUMN checks_total INTEGER DEFAULT 0`)
-	exec(`ALTER TABLE github_task_prs ADD COLUMN checks_passing INTEGER DEFAULT 0`)
-	exec(`ALTER TABLE github_task_prs ADD COLUMN detached_at DATETIME`)
+	if err := exec("github_task_prs.required_reviews", `ALTER TABLE github_task_prs ADD COLUMN required_reviews INTEGER`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.unresolved_review_threads", `ALTER TABLE github_task_prs ADD COLUMN unresolved_review_threads INTEGER DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.checks_total", `ALTER TABLE github_task_prs ADD COLUMN checks_total INTEGER DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.checks_passing", `ALTER TABLE github_task_prs ADD COLUMN checks_passing INTEGER DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.detached_at", `ALTER TABLE github_task_prs ADD COLUMN detached_at DATETIME`); err != nil {
+		return err
+	}
 	// Per-watch cleanup policy for review/issue watches: controls whether the
 	// poller deletes auto-created tasks when the underlying PR/issue reaches
 	// a terminal state. Values: 'auto' (default — preserve only when user
 	// engaged), 'always' (delete on terminal state), 'never' (manual only).
-	exec(`ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
-	exec(`ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
+	if err := exec("github_review_watches.cleanup_policy", `ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`); err != nil {
+		return err
+	}
+	if err := exec("github_issue_watches.cleanup_policy", `ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) initSchemaUpgrades() error {
@@ -882,18 +912,23 @@ func (s *Store) clearLifecyclePromptOverrides() error {
 	return err
 }
 
-func (s *Store) applyIdempotentSchemaIndexes() {
+func (s *Store) applyIdempotentSchemaIndexes() error {
 	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
 	// so SQLite can't use that index for the PR-number task search. Add a
 	// dedicated leading-key index so lookups by PR number stay index-backed.
-	_, _ = s.db.Exec(schemaSQLForDriver(
+	if _, err := s.db.Exec(schemaSQLForDriver(
 		`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`,
 		s.db.DriverName(),
-	))
-	_, _ = s.db.Exec(schemaSQLForDriver(
+	)); err != nil {
+		return fmt.Errorf("create idx_github_task_prs_pr_number: %w", err)
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(
 		`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`,
 		s.db.DriverName(),
-	))
+	)); err != nil {
+		return fmt.Errorf("create idx_github_task_ci_pr_state_task: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) resetUnpublishedGitHubAuthSchema() error {
@@ -1008,14 +1043,8 @@ func (s *Store) initAppRegistrationSchema() error {
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	timestampType := dialect.TimestampType(driver)
-	schema = strings.ReplaceAll(schema, "TIMESTAMP", timestampType)
-	schema = strings.ReplaceAll(schema, "DATETIME", timestampType)
+	schema = dialect.MustRenderSchema(driver, schema)
 	if dialect.IsPostgres(driver) {
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
 		if strings.Contains(schema, "CREATE TRIGGER IF NOT EXISTS github_user_connections_registration_insert") {
 			schema = withoutSQLiteGitHubAuthTriggers(schema)
 			schema += postgresGitHubAuthTriggers()
