@@ -127,7 +127,7 @@ func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 	if legacySchema == ciRunTablesSQL {
 		t.Fatal("test did not restore the legacy semantic constraint")
 	}
-	if _, err := store.db.Exec(legacySchema); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(legacySchema, store.db.DriverName())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -210,7 +210,7 @@ func TestStoreMigratesScopedCIRunSemanticConstraintToIncludeWorkflowStep(t *test
 	if noStepSchema == ciRunTablesSQL {
 		t.Fatal("test did not restore the preceding scoped semantic constraint")
 	}
-	if _, err := store.db.Exec(noStepSchema); err != nil {
+	if _, err := store.db.Exec(schemaSQLForDriver(noStepSchema, store.db.DriverName())); err != nil {
 		t.Fatal(err)
 	}
 

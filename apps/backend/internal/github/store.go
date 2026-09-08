@@ -468,9 +468,9 @@ const ciRunTablesSQL = `
 		workflow_step_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		created_by_user_id TEXT NOT NULL,
-		revoked_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		revoked_at {{timestamp}},
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_github_ci_run_grants_scope
 		ON github_ci_run_grants (
@@ -497,10 +497,10 @@ const ciRunTablesSQL = `
 		idempotency_hash TEXT NOT NULL,
 		status TEXT NOT NULL CHECK (status IN ('pending', 'reconciling', 'succeeded', 'failed')),
 		execution_owner TEXT NOT NULL DEFAULT '',
-		execution_lease_expires_at DATETIME,
-		provider_retry_after DATETIME,
+		execution_lease_expires_at {{timestamp}},
+		provider_retry_after {{timestamp}},
 		operation TEXT NOT NULL DEFAULT '',
-		provider_call_started_at DATETIME,
+		provider_call_started_at {{timestamp}},
 		provider_call_revision BIGINT NOT NULL DEFAULT 0,
 		provider_run_watermark BIGINT NOT NULL DEFAULT 0,
 		provider_run_id BIGINT NOT NULL DEFAULT 0,
@@ -517,8 +517,8 @@ const ciRunTablesSQL = `
 		provider_request_id TEXT NOT NULL DEFAULT '',
 		provider_url TEXT NOT NULL DEFAULT '',
 		failure_class TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL,
 		UNIQUE (actor_task_id, idempotency_hash),
 		UNIQUE (
 			workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id,
@@ -532,7 +532,7 @@ const ciRunTablesSQL = `
 		event_type TEXT NOT NULL,
 		failure_class TEXT NOT NULL DEFAULT '',
 		details_json TEXT NOT NULL DEFAULT '{}',
-		created_at DATETIME NOT NULL,
+		created_at {{timestamp}} NOT NULL,
 		FOREIGN KEY (request_id) REFERENCES github_ci_run_requests(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_github_ci_run_audit_request
@@ -794,8 +794,8 @@ var ciRunRecoveryColumnDDL = []struct {
 }{
 	{"grant_generation", "BIGINT NOT NULL DEFAULT 1"},
 	{"execution_owner", "TEXT NOT NULL DEFAULT ''"},
-	{"execution_lease_expires_at", "DATETIME"},
-	{"provider_retry_after", "DATETIME"},
+	{"execution_lease_expires_at", dialect.SchemaTokenTimestamp},
+	{"provider_retry_after", dialect.SchemaTokenTimestamp},
 	{"provider_call_revision", "BIGINT NOT NULL DEFAULT 0"},
 	{"provider_run_watermark", "BIGINT NOT NULL DEFAULT 0"},
 	{"canonical_repository", "TEXT NOT NULL DEFAULT ''"},
@@ -816,7 +816,7 @@ func (s *Store) addCIRunRecoveryColumns() error {
 			continue
 		}
 		stmt := "ALTER TABLE github_ci_run_requests ADD COLUMN " + column.name + " " + column.ddl
-		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+		if _, err := s.db.Exec(schemaSQLForDriver(stmt, s.db.DriverName())); err != nil && !dbutil.IsDuplicateColumnError(err) {
 			return fmt.Errorf("add github_ci_run_requests.%s: %w", column.name, err)
 		}
 	}
@@ -837,9 +837,8 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 	if dialect.IsPostgres(s.db.DriverName()) {
 		return nil
 	}
-	var existingSQL string
-	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master
-		WHERE type = 'table' AND name = 'github_ci_run_requests'`).Scan(&existingSQL); err != nil {
+	existingSQL, err := dbutil.SQLiteTableSQL(s.db, "github_ci_run_requests")
+	if err != nil {
 		return fmt.Errorf("read github_ci_run_requests schema: %w", err)
 	}
 	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) &&
@@ -870,7 +869,7 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 			event_type TEXT NOT NULL,
 			failure_class TEXT NOT NULL DEFAULT '',
 			details_json TEXT NOT NULL DEFAULT '{}',
-			created_at DATETIME NOT NULL,
+			created_at {{timestamp}} NOT NULL,
 			FOREIGN KEY (request_id) REFERENCES github_ci_run_requests_new(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO github_ci_run_audit_events_new
@@ -885,7 +884,7 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 			ON github_ci_run_audit_events(request_id, created_at)`,
 	}
 	for _, statement := range statements {
-		if _, err := tx.Exec(statement); err != nil {
+		if _, err := tx.Exec(schemaSQLForDriver(statement, s.db.DriverName())); err != nil {
 			return fmt.Errorf("migrate github_ci_run_requests semantic constraint: %w", err)
 		}
 	}

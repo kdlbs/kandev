@@ -30,6 +30,14 @@ func TestTableColumnsAndExistsSQLite(t *testing.T) {
 		t.Fatal("TableExists = false, want true")
 	}
 
+	schema, err := SQLiteTableSQL(database, "sample_schema")
+	if err != nil {
+		t.Fatalf("SQLiteTableSQL: %v", err)
+	}
+	if schema == "" {
+		t.Fatal("SQLiteTableSQL returned an empty schema")
+	}
+
 	columns, err := TableColumns(database, "sample_schema")
 	if err != nil {
 		t.Fatalf("table columns: %v", err)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/automation"
@@ -534,7 +535,7 @@ func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID
 }
 
 func deleteGitHubCIRunStateForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
-	tx, err := database.BeginTx(ctx, nil)
+	tx, err := sqlx.NewDb(database, "sqlite3").BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -545,7 +546,7 @@ func deleteGitHubCIRunStateForReset(ctx context.Context, database *sql.DB, works
 		`DELETE FROM github_ci_run_requests WHERE workspace_id = ?`,
 		`DELETE FROM github_ci_run_grants WHERE workspace_id = ?`,
 	} {
-		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), workspaceID); err != nil {
 			return err
 		}
 	}
