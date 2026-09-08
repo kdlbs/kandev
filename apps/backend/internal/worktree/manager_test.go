@@ -714,6 +714,56 @@ func TestManager_RecoverWorktreePreservesEmptyDirectories(t *testing.T) {
 	}
 }
 
+func TestManager_RecoverWorktreeRemovesDestinationDirectoriesAbsentFromSnapshot(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	deletedDirectory := "removed-from-checkout"
+	deletedFile := filepath.Join(deletedDirectory, "tracked.txt")
+	if err := os.Mkdir(filepath.Join(repoPath, deletedDirectory), 0755); err != nil {
+		t.Fatalf("create tracked directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, deletedFile), []byte("tracked\n"), 0644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGit(t, repoPath, "add", deletedFile)
+	runGit(t, repoPath, "commit", "-m", "add tracked directory")
+
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree-removed-directory")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/recover-removed-directory", worktreePath, "main")
+	if err := os.RemoveAll(filepath.Join(worktreePath, deletedDirectory)); err != nil {
+		t.Fatalf("remove tracked directory from damaged checkout: %v", err)
+	}
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover-removed-directory", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/recover-removed-directory", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+	if err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(replacement.Path, deletedDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("recovered deleted directory exists, stat error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(replacement.Path, deletedFile)); !os.IsNotExist(err) {
+		t.Fatalf("recovered deleted file exists, stat error = %v", err)
+	}
+}
+
 func TestCopySnapshotEntriesReplacesDestinationSymlinkWithDirectory(t *testing.T) {
 	source := t.TempDir()
 	if err := os.Mkdir(filepath.Join(source, "empty"), 0700); err != nil {

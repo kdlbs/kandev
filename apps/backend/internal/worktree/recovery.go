@@ -483,12 +483,52 @@ func copySnapshotEntries(source, destination string) error {
 	}); err != nil {
 		return err
 	}
+	if err := removeDestinationDirectoriesAbsentFromSnapshot(source, destination); err != nil {
+		return err
+	}
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		return copySnapshotEntry(source, destination, path, entry)
 	})
+}
+
+func removeDestinationDirectoriesAbsentFromSnapshot(source, destination string) error {
+	var directories []string
+	if err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == destination || !entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(destination, path)
+		if err != nil {
+			return err
+		}
+		if rel == recoveryGitDirName {
+			return filepath.SkipDir
+		}
+		if _, err := os.Lstat(filepath.Join(source, rel)); os.IsNotExist(err) {
+			directories = append(directories, path)
+			return nil
+		} else if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(directories, func(i, j int) bool {
+		return len(directories[i]) > len(directories[j])
+	})
+	for _, directory := range directories {
+		if err := os.Remove(directory); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func copySnapshotEntry(source, destination, path string, entry os.DirEntry) error {
