@@ -172,7 +172,7 @@ func (r *Repository) destinationTransferCEOProfile(
 	var candidates []string
 	if err := tx.SelectContext(ctx, &candidates, r.db.Rebind(`
 		SELECT id FROM agent_profiles
-		WHERE workspace_id = ? AND role = 'ceo' AND deleted_at IS NULL AND enabled = 1
+		WHERE workspace_id = ? AND role = 'ceo' AND deleted_at IS NULL AND enabled = TRUE
 			AND status IN ('idle', 'working') ORDER BY id`), workspaceID); err != nil {
 		return "", err
 	}

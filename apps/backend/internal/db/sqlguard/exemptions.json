@@ -95,6 +95,7 @@
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "backfillExecutorsRunningFromTaskSessions", "rule": "sqlite-catalog", "reason": "This backfill is a SQLite-only legacy migration"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "backfillExecutorsRunningFromTaskSessions", "rule": "raw-placeholder", "reason": "This backfill is a SQLite-only legacy migration"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "healDuplicateTaskEnvForTask", "rule": "raw-placeholder", "reason": "This repair is a SQLite-only legacy migration"},
+    {"file": "internal/task/repository/sqlite/task_transfer_relations.go", "symbol": "transferRelationTableNames", "rule": "sqlite-catalog", "reason": "The SQLite branch is an explicit dialect boundary for the transfer relation inventory"},
     {"file": "internal/task/repository/sqlite/session.go", "symbol": "DismissLastAgentError", "rule": "sqlite-date-function", "reason": "The task SQLite repository owns this SQLite date expression"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_migration.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_migration.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
