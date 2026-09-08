@@ -10,6 +10,8 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/runs/dedupkeys"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -46,10 +48,17 @@ type TaskMutation struct {
 	// What's changing.
 	NewStatus     *string // nil = unchanged
 	NewAssigneeID *string
-	NewPriority   *string
-	Comment       *MutationComment // user/agent comment if this mutation includes one
-	ReopenIntent  bool             // explicit reopen=true (or status moves done|cancelled → todo|in_progress)
-	ResumeIntent  bool             // explicit resume=true (validated upstream to require comment)
+	// AssignmentGeneration is the value the assigning transaction committed,
+	// carried here rather than re-read (a producer reading the task's
+	// current generation after the fact can observe a later occurrence's
+	// value — see docs/specs/office/system-design/run-dedup-generation-01.md
+	// #carrying-the-generation). Nil means the caller could not supply one;
+	// reactToAssigneeChange then enqueues keyless rather than guess.
+	AssignmentGeneration *int64
+	NewPriority          *string
+	Comment              *MutationComment // user/agent comment if this mutation includes one
+	ReopenIntent         bool             // explicit reopen=true (or status moves done|cancelled → todo|in_progress)
+	ResumeIntent         bool             // explicit resume=true (validated upstream to require comment)
 
 	// Who is acting.
 	ActorID   string
@@ -115,11 +124,15 @@ func (ss *SchedulerService) ApplyTaskMutation(
 			return
 		}
 		seen[key] = struct{}{}
-		if err := ss.QueueRunCtx(ctx, agentID, c); err != nil {
+		outcome, err := ss.QueueRunCtx(ctx, agentID, c)
+		if err != nil {
 			ss.logger.Error("reactivity run failed",
 				zap.String("agent", agentID),
 				zap.String("reason", c.Reason),
 				zap.Error(err))
+			return
+		}
+		if outcome != runsservice.QueueOutcomeQueued {
 			return
 		}
 		res.Runs = append(res.Runs, QueuedRunSummary{
@@ -133,7 +146,12 @@ func (ss *SchedulerService) ApplyTaskMutation(
 	}
 
 	// --- Assignee handoff ---
-	if change.NewAssigneeID != nil && *change.NewAssigneeID != task.AssigneeAgentProfileID {
+	// Fires on every non-nil NewAssigneeID, including a repeat assignment to
+	// the agent that already holds the seat: that is a real occurrence (the
+	// operator is asking for the work again), not a no-op, so this no longer
+	// gates on the two ids differing. reactToAssigneeChange itself guards the
+	// session interrupt.
+	if change.NewAssigneeID != nil {
 		ss.reactToAssigneeChange(task, *change.NewAssigneeID, change, queue, res)
 	}
 
@@ -222,6 +240,13 @@ func (ss *SchedulerService) reactToStatusChange(
 //
 // The previous assignee is NOT separately notified — interrupting their
 // run is the signal that they're no longer in charge.
+//
+// ApplyTaskMutation now calls this for every non-nil NewAssigneeID,
+// including a repeat assignment to the agent that already holds the seat.
+// The interrupt must NOT fire for that case — it would hard-cancel the
+// agent's own in-flight run — so unlike the removed caller-side equality
+// gate, this comparison stays local to the interrupt decision and does not
+// also guard the wake.
 func (ss *SchedulerService) reactToAssigneeChange(
 	task *TaskSnapshot,
 	newAssigneeID string,
@@ -229,25 +254,36 @@ func (ss *SchedulerService) reactToAssigneeChange(
 	queue func(string, RunContext),
 	res *ApplyTaskMutationResult,
 ) {
-	// Cancel the prior assignee's session if there was one. We re-use
-	// InterruptSessionID — status→cancelled also sets it; either reason
-	// for hard-cancelling produces the same downstream call.
-	if task.AssigneeAgentProfileID != "" && res.InterruptSessionID == "" {
+	if task.AssigneeAgentProfileID != "" && newAssigneeID != task.AssigneeAgentProfileID {
 		res.InterruptSessionID = task.ID
 	}
 
-	// Wake the new assignee.
+	if newAssigneeID == "" {
+		// Unassignment: the interrupt above (if any) already fired; queue's
+		// own empty-agent-id guard would catch this too, but there is no key
+		// to build or keyless cause to report for a run that will never be
+		// attempted.
+		return
+	}
+
 	commentID := ""
 	if change.Comment != nil {
 		commentID = change.Comment.ID
 	}
+	var key string
+	if change.AssignmentGeneration != nil {
+		key = dedupkeys.AssignmentKey(task.ID, newAssigneeID, *change.AssignmentGeneration)
+	} else {
+		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "nil_mutation_generation")
+	}
 	queue(newAssigneeID, RunContext{
-		Reason:      RunReasonTaskAssigned,
-		TaskID:      task.ID,
-		WorkspaceID: task.WorkspaceID,
-		ActorID:     change.ActorID,
-		ActorType:   change.ActorType,
-		CommentID:   commentID,
+		Reason:         RunReasonTaskAssigned,
+		TaskID:         task.ID,
+		WorkspaceID:    task.WorkspaceID,
+		ActorID:        change.ActorID,
+		ActorType:      change.ActorType,
+		CommentID:      commentID,
+		IdempotencyKey: key,
 	})
 }
 
@@ -352,19 +388,34 @@ func (ss *SchedulerService) cascadeBlockersResolved(
 	}
 	for _, blockedID := range blockedTaskIDs {
 		// Verify all OTHER blockers are also resolved.
-		ready, err := ss.allBlockersResolvedExcept(ctx, blockedID, task.ID)
-		if err != nil || !ready {
+		ready, blockers, err := ss.allBlockersResolvedExcept(ctx, blockedID, task.ID)
+		if err != nil {
+			ss.logger.Error("check blockers resolved failed",
+				zap.String("task_id", blockedID), zap.Error(err))
+			continue
+		}
+		if !ready {
 			continue
 		}
 		assignee, err := ss.repo.GetTaskAssignee(ctx, blockedID)
 		if err != nil || assignee == "" {
 			continue
 		}
+		blockerIDs := make([]string, 0, len(blockers))
+		for _, b := range blockers {
+			blockerIDs = append(blockerIDs, b.BlockerTaskID)
+		}
+		if len(blockerIDs) == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%s:%s:%s:%s",
+			RunReasonTaskBlockersResolved, blockedID, assignee, dedupkeys.BlockerDigest(blockerIDs))
 		queue(assignee, RunContext{
 			Reason:                RunReasonTaskBlockersResolved,
 			TaskID:                blockedID,
 			WorkspaceID:           task.WorkspaceID,
 			ResolvedBlockerTaskID: task.ID,
+			IdempotencyKey:        key,
 		})
 	}
 }
@@ -443,13 +494,17 @@ func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`
-// other than `excludeBlockerID` is in a terminal step.
+// other than `excludeBlockerID` is in a terminal step, alongside the full
+// blocker-task-id set it read to decide — the caller digests that same
+// slice for the wake's dedup key rather than re-reading it (AC-001.9
+// applied to a set: a second read could observe a different set than the
+// one this readiness decision was actually made against).
 func (ss *SchedulerService) allBlockersResolvedExcept(
 	ctx context.Context, taskID, excludeBlockerID string,
-) (bool, error) {
+) (bool, []*models.TaskBlocker, error) {
 	blockers, err := ss.repo.ListTaskBlockers(ctx, taskID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	for _, b := range blockers {
 		if b.BlockerTaskID == excludeBlockerID {
@@ -457,13 +512,13 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		}
 		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if !done {
-			return false, nil
+			return false, blockers, nil
 		}
 	}
-	return true, nil
+	return true, blockers, nil
 }
 
 // normalisedStatus maps both backend uppercase task states (TODO,

@@ -17,6 +17,7 @@ import (
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -266,6 +267,7 @@ func (a *routineWakeupAdapter) CreateWakeupRequest(
 	}
 	if err := a.repo.CreateWakeupRequest(ctx, row); err != nil {
 		if errors.Is(err, officesqlite.ErrWakeupIdempotencyConflict) {
+			runsservice.ReportDurableDedup(runsservice.QueueSourceWakeup, req.Reason, req.IdempotencyKey, req.AgentProfileID)
 			return officeroutines.ErrWakeupAlreadyRequested
 		}
 		return err

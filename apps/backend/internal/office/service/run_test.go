@@ -17,7 +17,7 @@ func TestQueueRun_Basic(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "key-1")
+	_, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "key-1")
 	if err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -47,11 +47,11 @@ func TestQueueRun_Idempotency(t *testing.T) {
 	}
 
 	key := "idem-key-1"
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", key); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", key); err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
 	// Second enqueue with same key should be silently dropped.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", key); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", key); err != nil {
 		t.Fatalf("second enqueue: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestQueueRun_SkipsPausedAgent(t *testing.T) {
 		t.Fatalf("pause agent: %v", err)
 	}
 
-	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
+	_, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
 	if err == nil {
 		t.Fatal("expected error for paused agent")
 	}
@@ -97,7 +97,7 @@ func TestQueueRun_SkipsStoppedAgent(t *testing.T) {
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
+	_, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
 	if err == nil {
 		t.Fatal("expected error for stopped agent")
 	}
@@ -113,10 +113,10 @@ func TestQueueRun_Coalesce(t *testing.T) {
 	}
 
 	// Two runs with the same agent + reason within coalesce window should merge.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("second: %v", err)
 	}
 

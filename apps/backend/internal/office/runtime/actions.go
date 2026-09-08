@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // CommentWriter is the comment mutation dependency used by runtime actions.
@@ -254,7 +255,7 @@ type ApprovalRequester interface {
 
 // RunSpawner is the run queue dependency used by runtime actions.
 type RunSpawner interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // AgentModifier is the agent update dependency used by runtime actions.
@@ -566,6 +567,15 @@ type SpawnAgentRunInput struct {
 }
 
 // SpawnAgentRun queues a run for an agent in the same workspace.
+//
+// A non-empty agent-supplied key is prefixed with the calling run's id
+// (agent:<callerRunID>:<key>) so a retry of the same run reuses the run id
+// and still dedupes, while a later run gets a different prefix and is not
+// suppressed. With no caller run id the request enqueues keyless
+// (cause=unresolved) rather than risk colliding across runs. An empty key is
+// NOT prefixed: the agent expressed no dedup intent (cause=by_design), and
+// prefixing it would collapse every no-dedup-intent call inside one run onto
+// a single key, suppressing every call after the first.
 func (a *Actions) SpawnAgentRun(
 	ctx context.Context,
 	runCtx RunContext,
@@ -592,7 +602,17 @@ func (a *Actions) SpawnAgentRun(
 	if err != nil {
 		return err
 	}
-	return a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), input.IdempotencyKey)
+	key := ""
+	switch {
+	case input.IdempotencyKey == "":
+		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseByDesign, "")
+	case runCtx.RunID != "":
+		key = fmt.Sprintf("agent:%s:%s", runCtx.RunID, input.IdempotencyKey)
+	default:
+		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseUnresolved, "no_caller_run")
+	}
+	_, err = a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), key)
+	return err
 }
 
 // ModifyAgentInput contains agent fields an authorized runtime may update.

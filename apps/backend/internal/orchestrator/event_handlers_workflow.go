@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1711,13 +1712,16 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 }
 
 // officeAutoStartIdempotencyKey uses the immutable workflow-step transition
-// row as the per-entry component. A legacy event without that field uses the
-// task timestamp as a compatibility fallback until the event is republished.
+// row as the per-entry component. A zero stepTransitionID means the
+// per-occurrence identity is unavailable, so the enqueue goes keyless rather
+// than falling back to a time-derived key that would never suppress a
+// redelivery.
 func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string, stepTransitionID int64) string {
-	entryID := strconv.FormatInt(stepTransitionID, 10)
 	if stepTransitionID == 0 {
-		entryID = "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		runsservice.ReportKeylessEnqueue(officeAutoStartRunReason, runsservice.KeylessCauseUnresolved, "zero_step_transition")
+		return ""
 	}
+	entryID := strconv.FormatInt(stepTransitionID, 10)
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		officeAutoStartRunReason, task.ID, agentProfileID, stepID, entryID)
 }

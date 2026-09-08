@@ -103,7 +103,7 @@ func (s *ChannelService) SetupChannel(ctx context.Context, channel *models.Chann
 	// workflow_step_participants. Channel tasks have no workflow_step_id;
 	// the participant row is keyed at (step_id="", task_id) and the
 	// runner projection still resolves it.
-	if err := s.repo.UpdateTaskAssignee(ctx, taskID, channel.AgentProfileID); err != nil {
+	if _, err := s.repo.UpdateTaskAssignee(ctx, taskID, channel.AgentProfileID); err != nil {
 		_ = s.repo.DeleteChannel(ctx, channel.ID)
 		return fmt.Errorf("set channel task assignee: %w", err)
 	}

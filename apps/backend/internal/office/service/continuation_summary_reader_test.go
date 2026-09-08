@@ -26,7 +26,7 @@ func TestLoadContinuationSummary_AgentScope_RoundTripsThroughRealWriterAndReader
 
 	createTestAgent(t, svc, "ws-1", "agent-scope-a")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "agent-scope-a", service.RunReasonTaskAssigned, "{}", "continuation-agent-scope",
 	); err != nil {
 		t.Fatalf("queue run: %v", err)
@@ -147,7 +147,7 @@ func TestLoadContinuationSummary_ScopeSurvivesCoalesceAfterClaim(t *testing.T) {
 
 	createTestAgent(t, svc, "ws-1", "agent-scope-coalesce")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "agent-scope-coalesce", service.RunReasonTaskAssigned, "{}", "continuation-scope-coalesce",
 	); err != nil {
 		t.Fatalf("queue run: %v", err)

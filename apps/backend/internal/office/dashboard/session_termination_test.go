@@ -90,7 +90,7 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 
 	insertTestTask(t, deps.db, "task-r", "ws-r", "Reassign", "todo", 2)
 	// Seed prev assignee directly via the underlying repo update.
-	if err := deps.repo.UpdateTaskAssignee(context.Background(), "task-r", "agent-prev"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "task-r", "agent-prev"); err != nil {
 		t.Fatalf("seed prev assignee: %v", err)
 	}
 

@@ -45,7 +45,7 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 
 	// Mirrors wakeup/dispatcher.go's createFreshRun: reason from the
 	// routine trigger, payload literally "{}" (no task_id).
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestSchedulerTick_TaskBoundRunStillLaunches(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-wo35-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent(t *testing.T) {
 	// mirrors 3 ticks of the pre-installed coordinator heartbeat routine.
 	const firesAtThreshold = 3
 	for i := 0; i < firesAtThreshold; i++ {
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue taskless run %d: %v", i, err)
 		}
 		service.RunSchedulerTick(svc, ctx)
@@ -184,7 +184,7 @@ func TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent(t *testing.T) {
 	// failures: a task-bound run queued afterwards must still launch.
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-wo35-pause-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-pause-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-pause-1"}`, ""); err != nil {
 		t.Fatalf("queue task-bound run: %v", err)
 	}
 	service.RunSchedulerTick(svc, ctx)
@@ -233,7 +233,7 @@ func TestSchedulerTick_TasklessRunFailure_PublishesResolvableWorkspaceEvent(t *t
 	}
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	service.RunSchedulerTick(svc, ctx)
@@ -294,7 +294,7 @@ func TestSchedulerTick_UnlaunchableRun_PublishesResolvableWorkspaceEvent(t *test
 	}
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-wo35-unlaunchable"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestSchedulerTick_RepeatTasklessFailures_OnlyFirstStaysInInbox(t *testing.T
 	const fires = 3
 	var firstRunID string
 	for i := 0; i < fires; i++ {
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue taskless run %d: %v", i, err)
 		}
 		service.RunSchedulerTick(svc, ctx)
@@ -415,7 +415,7 @@ func TestSchedulerTick_RepeatTasklessFailures_StayVisiblePerRoutineScope(t *test
 
 	queueRoutineFailure := func(scope, idempotencyKey string) string {
 		t.Helper()
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, idempotencyKey); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, idempotencyKey); err != nil {
 			t.Fatalf("queue routine %s: %v", scope, err)
 		}
 		runs, err := svc.ListRuns(ctx, "ws-1")

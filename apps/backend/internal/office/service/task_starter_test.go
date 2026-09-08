@@ -99,7 +99,7 @@ func TestSchedulerTick_LaunchesAgent(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, priority, created_at, updated_at)
 		VALUES ('task-launch-1', 'ws-1', 'Build API', 'Implement endpoint', 'medium', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-launch-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-launch-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestSchedulerTick_LaunchIncludesRuntimeTokenEnv(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-token-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-token-1","session_id":"sess-token"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-token-1","session_id":"sess-token"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestSchedulerTick_SnapshotsRunSkills(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-skill-1', 'ws-1', 'Review API', 'Review endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-skill-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-skill-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestSchedulerTick_KeepsRunClaimedUntilAgentCompletes(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-life-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-life-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-life-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestSchedulerTick_AgentStoppedFinishesRun(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-stop-1', 'ws-1', 'Stop handler test', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-stop-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-stop-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -386,7 +386,7 @@ func TestSchedulerTick_StartTaskError_TriggersRetry(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
 		VALUES ('task-fail-1', 'ws-1', 'Failing Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-fail-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-fail-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -439,7 +439,7 @@ func TestSchedulerTick_NoTaskStarter_FailsRunLoudly(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
 		VALUES ('task-noop-1', 'ws-1', 'NoOp Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-noop-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-noop-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -494,7 +494,7 @@ func TestSchedulerTick_NoTaskStarter_UpdatesFailureAccounting(t *testing.T) {
 
 	for i := 0; i < threshold; i++ {
 		idempotencyKey := fmt.Sprintf("task-noop-accounting-%d", i)
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 			`{"task_id":"task-noop-accounting"}`, idempotencyKey); err != nil {
 			t.Fatalf("queue failure %d: %v", i, err)
 		}

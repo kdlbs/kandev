@@ -440,7 +440,8 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		task.Repositories = repos
 	}
 
-	s.publishTaskEvent(ctx, events.TaskCreated, task, nil)
+	s.publishTaskEventWithExtra(ctx, events.TaskCreated, task, nil,
+		map[string]interface{}{"assignment_generation": assignmentGenerationForCreate(task)})
 	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
 	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
 		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))
@@ -451,6 +452,17 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return CreateTaskResult{Task: task, Outcome: CreateTaskOutcomeCreated}, nil
+}
+
+// assignmentGenerationForCreate mirrors insertTaskTx's runner-row guard in
+// memory rather than re-reading the row it just wrote: a task created
+// already assigned starts at generation 1 (matching the value insertTaskTx
+// committed), everything else starts at 0 (never assigned).
+func assignmentGenerationForCreate(task *models.Task) int64 {
+	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
+		return 1
+	}
+	return 0
 }
 
 func (s *Service) prepareWorkspacePolicyForCreation(ctx context.Context, req *CreateTaskRequest) error {

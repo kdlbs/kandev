@@ -205,7 +205,12 @@ func (s *Service) queueCEOAgentError(
 		"run_id":            run.ID,
 		"error":             errMsg,
 	})
-	_ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, "")
+	// The failed run's own id makes this occurrence identity: one escalation
+	// per failed run per CEO, but a later run by the same agent that also
+	// fails escalates again instead of being silently swallowed by a
+	// permanently-unique-per-pair key.
+	key := fmt.Sprintf("agent_error:%s:%s", run.ID, ceos[0].ID)
+	_, _ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, key)
 }
 
 // retryDelayWithJitter returns the base delay for a given retry index

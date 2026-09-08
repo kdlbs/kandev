@@ -226,7 +226,7 @@ func TestHandleRunFailure_RateLimitParsed_UsesResetTime(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -275,7 +275,7 @@ func TestHandleRunFailure_RateLimitNoParseable_UsesBackoff(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k2"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k2"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -325,7 +325,7 @@ func TestHandleRunFailure_NonRateLimit_UsesBackoff(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k3"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k3"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)

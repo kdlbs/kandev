@@ -114,6 +114,12 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
+	// tasks from an explicit column list. Adding this column beforehand would
+	// have it silently dropped by the recreate on any database still carrying
+	// the legacy FK, leaving it absent for the remainder of that boot (the
+	// same hazard class as the task_sessions.name comment above).
+	r.migrate.Apply("tasks.assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`)
 	if err := r.dropRetiredSlackIntegration(); err != nil {
 		return err
 	}

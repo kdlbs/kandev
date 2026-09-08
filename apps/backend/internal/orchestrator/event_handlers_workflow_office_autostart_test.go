@@ -36,6 +36,20 @@ func TestOfficeAutoStartIdempotencyKey(t *testing.T) {
 	}
 }
 
+// TestOfficeAutoStartIdempotencyKey_ZeroStepTransitionGoesKeyless pins that a
+// zero StepTransitionID (no per-occurrence identity available) enqueues with
+// no key at all, rather than falling back to a time-derived key that would
+// never suppress a genuine redelivery.
+func TestOfficeAutoStartIdempotencyKey_ZeroStepTransitionGoesKeyless(t *testing.T) {
+	task := &models.Task{ID: "t1", UpdatedAt: time.Now().UTC(), WorkflowStepTransitionID: 0}
+
+	key := officeAutoStartIdempotencyKey(task, "agent-1", "step2", task.WorkflowStepTransitionID)
+
+	if key != "" {
+		t.Errorf("key = %q, want empty (keyless) for zero StepTransitionID", key)
+	}
+}
+
 // TestAutoStartOfficeTaskLogsQueuedOutcomeAtInfo pins that a real insert
 // (QueueOutcomeQueued) is logged as an info-level "queued" message, and the
 // log is only emitted after the queue attempt resolves — not asserted
