@@ -241,6 +241,87 @@ func TestAdmitRun_UnevaluatedPolicy_NamesPolicyInDeferral(t *testing.T) {
 	}
 }
 
+// TestFinishPolicyBlock_ClearsStaleAgentWorkingStatus and
+// TestCancelBudgetRun_ClearsStaleAgentWorkingStatus pin a fix carried over
+// from a rebase onto main: main independently added an equivalent
+// clearAgentWorking call to the old checkBudget's block branch (fixing a
+// stuck-"working" agent), and cancelBudgetRun's own doc comment already
+// claimed to mirror cancelStaleRun's release/cancel/publish/log sequence --
+// which has always included clearAgentWorking -- without actually doing so.
+// admitRun always runs before markAgentWorking in the real pipeline
+// (processRun calls admitRun, then prepareAndLaunch marks working), so the
+// only way an agent is already "working" when a block/cancel fires for the
+// same run.ID is a run that reached the launch boundary once, then got
+// requeued (e.g. a contended checkout retry) and is being re-admitted.
+
+// TestFinishPolicyBlock_ClearsStaleAgentWorkingStatus covers finishPolicyBlock.
+func TestFinishPolicyBlock_ClearsStaleAgentWorkingStatus(t *testing.T) {
+	svc := newTestService(t)
+	deciding := &models.PreLaunchPolicyResult{PolicyID: "policy-stale-working", LimitExceeded: true}
+	fake := &fakeBudgetEvaluator{
+		preLaunchResult: models.PreLaunchResult{
+			Decision:       models.PreLaunchDecisionBlockedByLimit,
+			DecidingPolicy: deciding,
+			Policies:       []models.PreLaunchPolicyResult{*deciding},
+		},
+	}
+	svc.SetBudgetChecker(fake)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-stale-working-block", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	if _, err := svc.RepoForTest().MarkAgentWorking(ctx, agent.ID, run.ID); err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the re-admission block")
+
+	service.AdmitRunForTest(svc, ctx, run, agent)
+
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after a policy block clears a stale working mark left by an earlier attempt")
+}
+
+// TestCancelBudgetRun_ClearsStaleAgentWorkingStatus covers cancelBudgetRun,
+// via gate 1's cancellation path.
+func TestCancelBudgetRun_ClearsStaleAgentWorkingStatus(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-stale-working-cancel", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	if _, err := svc.RepoForTest().MarkAgentWorking(ctx, agent.ID, run.ID); err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the re-admission cancel")
+
+	unresolvedAgent := *agent
+	unresolvedAgent.WorkspaceID = ""
+	service.AdmitRunForTest(svc, ctx, run, &unresolvedAgent)
+
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after a gate-1 cancel clears a stale working mark left by an earlier attempt")
+}
+
 // TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity covers
 // AC-OFFICE-BUDGET-005.6: each deferral of the same run writes its own
 // activity entry -- never coalesced into a single running total -- and each
