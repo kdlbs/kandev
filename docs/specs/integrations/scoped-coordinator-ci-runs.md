@@ -54,10 +54,10 @@ unique within the actor scope, and a second unique identity covers the
 semantic source run attempt. Concurrent or retried claims return the same
 logical operation. Once `provider_call_started_at` is recorded, an interrupted
 or ambiguous call is reconciled from GitHub. It is never blindly sent again.
-When GitHub definitively rejects the rerun as ineligible, Kandev durably changes
-the same request to pre-dispatch work before inspecting or sending the fallback.
-Recovery resumes that dispatch phase and does not submit the rejected rerun
-again.
+When GitHub definitively rejects the rerun as ineligible, Kandev records the
+typed immutable-ref denial `dispatch_ref_unavailable`. It does not inspect,
+prepare, or send a workflow-dispatch fallback. Recovery does not submit the
+rejected rerun again.
 Before provider start, one execution lease owns the transition and an expired
 lease can be taken over after a worker crash. Provider start succeeds only for
 the current lease owner. A definitive rate-limit response or reconciliation
@@ -66,11 +66,8 @@ that time. A rate limit observed after provider start preserves that marker and
 resumes with read-only reconciliation. Mutation
 timeouts, connection loss, and HTTP 5xx responses remain ambiguous and may
 only reconcile.
-Rerun reconciliation accepts only the exact next attempt. Dispatch
-reconciliation records the greatest matching run ID immediately before the
-provider call, then accepts only one first attempt created at or after the call
-whose run ID is greater than that watermark. Zero or multiple candidates remain
-ambiguous.
+Rerun reconciliation accepts only the exact next attempt. Zero or multiple
+matching attempts remain ambiguous.
 
 ## Receipt and audit
 
@@ -83,7 +80,7 @@ the same durable receipt when a logical request exists. Failures expose stable
 classes such as `not_authorized`, `head_drift`, `source_run_mismatch`,
 `installation_required`, `installation_permission_missing`,
 `fork_dispatch_disallowed`, `dispatch_ref_unavailable`,
-`workflow_dispatch_denied`, `provider_rate_limited`, `provider_unavailable`,
+`provider_rate_limited`, `provider_unavailable`,
 `provider_call_ambiguous`, and `merge_evidence_unavailable`.
 
 Audit rows record actor task/session, workspace, workflow/step, repository/PR,

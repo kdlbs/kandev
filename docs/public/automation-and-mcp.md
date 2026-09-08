@@ -598,8 +598,8 @@ Kandev never dispatches a branch, tag, or fork ref as a substitute.
 GitHub's REST run record does not expose enough runtime merge-SHA evidence to
 prove that semantic safely. Kandev does not synthesize a check or relabel an old
 run. Other stable failures include `not_authorized`, `head_drift`,
-`source_run_mismatch`, `workflow_dispatch_denied`,
-`fork_dispatch_disallowed`, `dispatch_ref_unavailable`,
+`source_run_mismatch`, `fork_dispatch_disallowed`,
+`dispatch_ref_unavailable`,
 `installation_required`, `installation_permission_missing`,
 `provider_rate_limited`, `provider_unavailable`, and
 `provider_call_ambiguous`.
@@ -613,19 +613,18 @@ GitHub rather than blindly sent again. A definitive rate-limit response records
 GitHub's reset time and retries the same request only after that time. If a
 reconciliation read is rate-limited after the write may have happened, Kandev
 keeps the provider-start marker and performs only read-only reconciliation
-after the reset. When
-GitHub definitively rejects a rerun as ineligible, Kandev records the typed
-immutable-ref denial without retrying the rejected attempt. Receipts contain the canonical repository and PR, expected
+after the reset. When GitHub definitively rejects a rerun as ineligible, Kandev
+records the typed immutable-ref denial `dispatch_ref_unavailable` without
+retrying the rejected attempt or inspecting, preparing, or sending a
+workflow-dispatch fallback. Receipts contain the canonical repository and PR, expected
 and observed PR head, source and result run attempts, workflow and provider
 head/event identities, evidence verdict, non-secret App principal, provider
 request ID/URL, retry reset, and timestamps. Typed errors include the same
 durable receipt when admission created a logical request. Audit events record
 the same identities and terminal state atomically with the request. A rerun
-receipt is successful only after Kandev observes the exact next attempt. A
-dispatch receipt is successful only after Kandev observes exactly one new run
-created after the provider call began and newer than the run-ID watermark
-recorded immediately before dispatch. Ambiguous evidence remains reconciling and
-never claims an unrelated run. Receipts never contain an installation token,
+receipt is successful only after Kandev observes the exact next attempt.
+Ambiguous evidence remains reconciling and never claims an unrelated run.
+Receipts never contain an installation token,
 private key, authorization header, or raw provider body. This behavior is part
 of the canonical server implementation. A deployment-local script, broad token,
 proxy customization, Docker access, or operator shortcut does not implement the
