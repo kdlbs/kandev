@@ -11,6 +11,14 @@ import {
 import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import {
+  beginWrite,
+  endWrite,
+  nextTaskSequence,
+  recordWriteSettled,
+  shouldRestoreAfterFailedWrite,
+  TASK_SCOPE,
+} from "@/lib/state/office-task-content-sync";
 
 /**
  * Collaborators for `applyStatusDrop`, injected so the drop rules can be
@@ -48,19 +56,31 @@ export async function applyStatusDrop(
   // pixels, not a move. Sending it would burn a PATCH and a WS round-trip.
   if (snapshot.status === targetStatus) return;
 
+  const sequence = nextTaskSequence(taskId);
+  beginWrite(taskId, TASK_SCOPE, sequence);
+
   deps.patchTask(taskId, { status: targetStatus });
   try {
     await deps.updateStatus(taskId, targetStatus);
+    recordWriteSettled(taskId, TASK_SCOPE, sequence);
+    endWrite(taskId, TASK_SCOPE, sequence);
   } catch (err) {
-    if (err instanceof ApprovalGateError) {
-      // The backend already redirected and persisted this status server-side
-      // before returning the error (see ApprovalGateError), so the board is
-      // wrong if it rolls back to the pre-drop snapshot here. Patch status
-      // only: spreading the snapshot would reinstate its stale rawStatus and
-      // the card would re-normalize back to the old column.
-      deps.patchTask(taskId, { status: err.redirectedStatus });
-    } else {
-      deps.patchTask(taskId, snapshot);
+    // Only settle onto this failure's outcome if no later-sequenced move on
+    // this task has already succeeded or is still in flight — otherwise this
+    // stale failure would clobber newer, server-confirmed state.
+    const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
+    endWrite(taskId, TASK_SCOPE, sequence);
+    if (shouldRestore) {
+      if (err instanceof ApprovalGateError) {
+        // The backend already redirected and persisted this status server-side
+        // before returning the error (see ApprovalGateError), so the board is
+        // wrong if it rolls back to the pre-drop snapshot here. Patch status
+        // only: spreading the snapshot would reinstate its stale rawStatus and
+        // the card would re-normalize back to the old column.
+        deps.patchTask(taskId, { status: err.redirectedStatus });
+      } else {
+        deps.patchTask(taskId, snapshot);
+      }
     }
     // The approver gate arrives here already translated into a sentence
     // naming who still has to sign off.

@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyStatusDrop, type StatusDropDeps } from "./use-board-drag";
 import { ApprovalGateError } from "@/lib/api/domains/office-status-gate";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import { __resetOfficeTaskContentSyncForTests } from "@/lib/state/office-task-content-sync";
+
+afterEach(() => {
+  __resetOfficeTaskContentSyncForTests();
+});
 
 function task(id: string, status: OfficeTaskStatus): OfficeTask {
   return {
@@ -26,6 +31,35 @@ function deps(
     updateStatus: vi.fn(updateStatus),
     onError: vi.fn(),
   } satisfies StatusDropDeps;
+}
+
+/**
+ * Unlike `deps`, `getTask` here reflects every prior `patchTask` call, the
+ * way the real board (backed by the Zustand store) does. The interleaving
+ * tests below need a second drop to see the first drop's still-optimistic
+ * patch, not a snapshot frozen at test setup.
+ */
+function liveDeps(initial: OfficeTask) {
+  let current = initial;
+  const d = {
+    getTask: vi.fn(() => current),
+    patchTask: vi.fn((_id: string, patch: Partial<OfficeTask>) => {
+      current = { ...current, ...patch };
+    }),
+    updateStatus: vi.fn(),
+    onError: vi.fn(),
+  } satisfies StatusDropDeps;
+  return { d, getCurrent: () => current };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("applyStatusDrop", () => {
@@ -134,5 +168,59 @@ describe("applyStatusDrop", () => {
 
     expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", before);
     expect(d.onError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("applyStatusDrop generation guard — overlapping status mutations", () => {
+  it("older-fails-after-newer-succeeds: the older drop's rollback does not clobber the newer, server-confirmed status", async () => {
+    const { d, getCurrent } = liveDeps(task("t1", "todo"));
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    d.updateStatus.mockImplementationOnce(() => older.promise);
+    d.updateStatus.mockImplementationOnce(() => newer.promise);
+
+    // Two fast consecutive drags on the same card: the first (todo ->
+    // in_progress) is still in flight when the second (in_progress ->
+    // blocked) is dropped.
+    const p1 = applyStatusDrop("t1", "in_progress", d);
+    const p2 = applyStatusDrop("t1", "blocked", d);
+
+    newer.resolve();
+    await p2;
+    expect(getCurrent().status).toBe("blocked");
+
+    older.reject(new Error("boom"));
+    await p1;
+
+    // The stale failure must not roll the board back past the newer,
+    // already-succeeded status, but it still surfaces its own toast.
+    expect(getCurrent().status).toBe("blocked");
+    expect(d.onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("gate-redirect superseded by a newer success does not clobber the newer status", async () => {
+    const { d, getCurrent } = liveDeps(task("t1", "todo"));
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    d.updateStatus.mockImplementationOnce(() => older.promise);
+    d.updateStatus.mockImplementationOnce(() => newer.promise);
+
+    const p1 = applyStatusDrop("t1", "done", d);
+    const p2 = applyStatusDrop("t1", "blocked", d);
+
+    newer.resolve();
+    await p2;
+    expect(getCurrent().status).toBe("blocked");
+
+    // The older drop's gate redirect resolves after the newer drop already
+    // succeeded: redirecting to "in_review" here would clobber the newer,
+    // server-confirmed "blocked" status the same way an unconditional
+    // rollback would.
+    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    older.reject(new ApprovalGateError(gate, "in_review"));
+    await p1;
+
+    expect(getCurrent().status).toBe("blocked");
+    expect(d.onError).toHaveBeenCalledWith(gate);
   });
 });

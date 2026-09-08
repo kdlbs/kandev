@@ -12,8 +12,10 @@ import {
   endWrite,
   getCanonicalValue,
   nextTaskSequence,
+  recordWriteSettled,
   recordWriteSuccess,
   shouldRestoreAfterFailedWrite,
+  TASK_SCOPE,
 } from "@/lib/state/office-task-content-sync";
 
 /**
@@ -64,6 +66,9 @@ export function useOptimisticTaskMutation() {
       const storePatch = toOfficeTaskPatch(patch);
       const storeSnapshot = storeApi.getState().office.tasks.items.find((t) => t.id === taskId);
 
+      const sequence = nextTaskSequence(taskId);
+      beginWrite(taskId, TASK_SCOPE, sequence);
+
       // Apply optimistic patches (local + store).
       ctx.applyPatch(patch);
       if (storeSnapshot) {
@@ -72,20 +77,29 @@ export function useOptimisticTaskMutation() {
 
       try {
         await apiCall();
+        recordWriteSettled(taskId, TASK_SCOPE, sequence);
+        endWrite(taskId, TASK_SCOPE, sequence);
       } catch (err) {
-        // Rollback both layers. This hook never patches title/description
-        // (see `toOfficeTaskPatch` above), so the rollback must not touch
-        // them either — those two fields are governed exclusively by the
-        // per-field guard in office-task-content-sync.ts and have their own
-        // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
-        // Restoring the full pre-mutation snapshot here would silently
-        // revert a confirmed title/description edit whenever an unrelated
-        // picker mutation fails (AC-61: exactly two writers may touch a
-        // guarded field).
-        ctx.restore(snapshot);
-        if (storeSnapshot) {
-          const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
-          storeApi.getState().patchTaskInStore(taskId, storeRollback);
+        // Only restore if no later-sequenced mutation on this task has
+        // already succeeded or is still in flight — otherwise this stale
+        // failure's rollback would clobber newer, server-confirmed state.
+        const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
+        endWrite(taskId, TASK_SCOPE, sequence);
+        if (shouldRestore) {
+          // Rollback both layers. This hook never patches title/description
+          // (see `toOfficeTaskPatch` above), so the rollback must not touch
+          // them either — those two fields are governed exclusively by the
+          // per-field guard in office-task-content-sync.ts and have their own
+          // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
+          // Restoring the full pre-mutation snapshot here would silently
+          // revert a confirmed title/description edit whenever an unrelated
+          // picker mutation fails (AC-61: exactly two writers may touch a
+          // guarded field).
+          ctx.restore(snapshot);
+          if (storeSnapshot) {
+            const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
+            storeApi.getState().patchTaskInStore(taskId, storeRollback);
+          }
         }
         toastUpdateFailure(err);
         throw err;
