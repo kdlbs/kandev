@@ -19,6 +19,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: true, usesDesktopWorkbench: false }),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => true,
+}));
+
 vi.mock("./task-launch-error-context", () => ({
   useTaskLaunchErrorContext: () => ({ error: null, repositories: [] }),
 }));

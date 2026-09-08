@@ -269,6 +269,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
+    priority: "medium",
+    setPriority: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
@@ -342,6 +344,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setCurrentLocalBranchLoading: () => undefined,
     noRepository: false,
     setNoRepository: () => undefined,
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => undefined,
     workspacePath: "",
     setWorkspacePath: () => undefined,
   };

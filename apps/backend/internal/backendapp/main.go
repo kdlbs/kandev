@@ -23,8 +23,11 @@ import (
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -323,6 +326,14 @@ func setBuildInfo(build BuildInfo) {
 
 // run initializes all services and runs the server. Returns false on fatal startup error.
 func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCleanups func()) bool {
+	// Organizations without authentication is the one configuration that
+	// cannot work: a tenant boundary needs identities to belong to it. Refuse
+	// at startup rather than booting an instance whose boundary is decorative.
+	if err := org.ValidateStartup(cfg.Features.MultiTenancy, cfg.Features.Auth); err != nil {
+		log.Error("Invalid feature configuration", zap.Error(err))
+		return false
+	}
+
 	addCleanup := func(fn func() error) { *cleanups = append(*cleanups, fn) }
 
 	// 3. Create context with cancellation
@@ -417,9 +428,33 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
-	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
-	if err != nil {
-		log.Error("Failed to initialize session hostname cache", zap.Error(err))
+	taskservice.SetTenancyEnforced(cfg.Features.MultiTenancy)
+	if services.Org != nil && services.Org.Enabled() {
+		services.Auth.SetAdminCreatedHook(services.Org.ClaimSetupAdmin)
+		services.Org.SetFirstAdminCreator(services.Auth.CreateUserInOrg)
+		// Workspace fan-out needs to know which organization a user belongs
+		// to, so an org-visible workspace reaches its own org only.
+		services.Task.SetUserOrgResolver(func(ctx context.Context, userID string) (string, error) {
+			user, err := repos.UserAccounts.GetUser(ctx, userID)
+			if err != nil || user == nil {
+				return "", err
+			}
+			return user.OrgID, nil
+		})
+	}
+	if services.Org != nil && services.Org.Enabled() {
+		// A suspended organization fails every session and token closed, which
+		// is what makes suspension a real lever rather than a label. An
+		// unreadable status fails closed too: an org we cannot verify does not
+		// get to keep serving requests.
+		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
+			record, err := services.Org.Get(ctx, orgID)
+			return err == nil && record.Active()
+		})
+	}
+	hostnameStore := repos.HostnameCache
+	if hostnameStore == nil {
+		log.Error("Failed to initialize session hostname cache: required store is unavailable")
 		return false
 	}
 	hostnameResolver := hostnames.NewResolver(
@@ -564,7 +599,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	worktreeMgr, _, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
+	worktreeMgr, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
 		return false
@@ -640,7 +675,8 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials)
+		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
+		repos.SystemSettings, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -809,15 +845,16 @@ func startAgentInfrastructure(
 	// tables exist (already true here, provided in provideRepositories) —
 	// the ledger's foreign keys require them present at CREATE TABLE time
 	// on PostgreSQL. services.Task satisfies delivery.CheckoutResolver.
-	if _, deliveryCleanup, err := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log); err != nil {
-		log.Warn("delivery ledger sweep unavailable", zap.Error(err))
-	} else {
-		// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
-		// stops workers registered here, and a restore checkpoints, closes,
-		// and replaces the shared database pool. A five-minute sweep pass
-		// overlapping that would race the pool swap.
-		databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
+	_, deliveryCleanup, deliveryErr := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log)
+	if recordErr := recordRequiredStore(repos.RequiredStores, "delivery", deliveryErr); recordErr != nil {
+		log.Error("delivery ledger initialization failed", zap.Error(recordErr))
+		return false
 	}
+	// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
+	// stops workers registered here, and a restore checkpoints, closes,
+	// and replaces the shared database pool. A five-minute sweep pass
+	// overlapping that would race the pool swap.
+	databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
@@ -918,6 +955,9 @@ func startGatewayAndServe(
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
+	if cfg.Features.Canvases {
+		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
+	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
@@ -1092,6 +1132,7 @@ func startGatewayAndServe(
 	// Composed before HTTP routes so the registration pass below can mount
 	// the /api/v1/system/* group; started before the listener so the
 	// updates poller is alive as soon as we accept connections.
+	persistenceHealth := requiredstores.NewHealth(repos.RequiredStores, dbPool, log)
 	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
 		Version:   Version,
 		Commit:    Commit,
@@ -1100,20 +1141,35 @@ func startGatewayAndServe(
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 		DatabaseQuiesce:      databaseQuiesce,
 		RestoreQuiesce:       restoreQuiesce,
+		SystemSettings:       repos.SystemSettings,
+		RequiredStores:       repos.RequiredStores,
+		PersistenceHealth:    persistenceHealth,
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
 		MessageQueueConfig:   queueConfiguration(cfg),
 		TaskSessions:         repos.Task,
 	})
-	storageComposition, err := provideStorageComposition(
-		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+	storageComposition, err := provideStorageCompositionWithDependencies(
+		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
+		repos.RequiredStores, repos.SystemSettings,
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
+	if err := repos.RequiredStores.ValidateComplete(); err != nil {
+		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	if err := persistenceHealth.Check(ctx); err != nil {
+		log.Error("Required-store health check failed", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	addCleanup(persistenceHealth.Start(ctx))
 	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	var hostUtilityWG sync.WaitGroup
@@ -1183,7 +1239,7 @@ func startGatewayAndServe(
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1195,6 +1251,19 @@ func startGatewayAndServe(
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
+	// Record the version only after every required store, the immediate health
+	// probe, and the complete HTTP wiring have succeeded. A late startup
+	// failure must leave the previous version marker intact so the next boot
+	// still takes the upgrade backup.
+	if err := recordSchemaVersionAfterPersistence(
+		repos.RequiredStores.ValidateComplete,
+		func() error { return persistenceHealth.Check(ctx) },
+		func() { recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log) },
+	); err != nil {
+		log.Error("Required persistence changed before readiness", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
 
 	// Flip readiness before swapping in the fully wired router — see
 	// publishReadiness for why the order matters and
@@ -1418,6 +1487,11 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// Human assignee writes from the office PATCH surface go through the task
+	// service, which authorizes the caller and validates the assignee. That
+	// route carries no :wsId, so it is not covered by the office
+	// workspace-scope middleware and must not write the column directly.
+	services.OfficeSvcs.Dashboard.SetHumanAssigneeWriter(services.Task)
 	// Wire the reactivity pipeline so property mutations queue downstream runs.
 	services.OfficeSvcs.Dashboard.SetReactivityApplier(
 		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),
@@ -2216,6 +2290,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	persistenceHealth ...*requiredstores.Health,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -2256,8 +2331,16 @@ func buildHTTPServer(
 		addCleanup,
 	)
 
-	// Opt-in authentication. Runs after CORS; in disabled mode it only
-	// injects the synthetic single-user identity (behavior unchanged).
+	var requiredHealth *requiredstores.Health
+	if len(persistenceHealth) > 0 {
+		requiredHealth = persistenceHealth[0]
+	}
+	// Gate stateful requests before authentication can query the required
+	// stores. This preserves the actionable persistence_unavailable 503 when
+	// auth is enabled and the database is unhealthy.
+	router.Use(requiredPersistenceMiddleware(requiredHealth))
+	// Opt-in authentication. In disabled mode it only injects the synthetic
+	// single-user identity (behavior unchanged).
 	router.Use(authhttpmw.Middleware(services.Auth))
 	// Per-user workspace ownership on the third-party integration route
 	// groups (jira/gitlab/github/...), which resolve a caller-supplied
@@ -2269,8 +2352,11 @@ func buildHTTPServer(
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
 	// unclassified (sanitized 500).
+	// Workspace secrets are a shared credential the workspace owner is
+	// accountable for, so they require secret.manage rather than mere reach:
+	// a collaborator contributes to the workspace, they do not hold its keys.
 	secretsSvc.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
-		err := services.Task.AuthorizeWorkspaceAccess(ctx, workspaceID)
+		err := services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSecretManage)
 		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 			return secrets.ErrWorkspaceAccessDenied
 		}
@@ -2302,6 +2388,7 @@ func buildHTTPServer(
 		temporaryArtifacts:            temporaryArtifacts,
 		runtimeFlagsSvc:               services.RuntimeFlags,
 		dbPool:                        dbPool,
+		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,

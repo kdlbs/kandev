@@ -83,10 +83,22 @@ type Manager struct {
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
 
+	// sessionExecCheck enforces the session.exec scope on surfaces that hand
+	// the caller a shell, a file write, or a port preview. Reading a
+	// transcript and running a command in the worktree are different
+	// permissions, so they get different checks.
+	sessionExecCheck func(ctx context.Context, sessionID string) error
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
 	environmentAccessCheck func(ctx context.Context, environmentID string) error
+
+	// environmentExecCheck enforces session.exec on the environment-keyed
+	// surfaces that tear down or hand out a PTY. environmentAccessCheck is the
+	// read-level sibling used by the SSR terminal lists: listing terminals and
+	// destroying one are different permissions on the same identifier.
+	environmentExecCheck func(ctx context.Context, environmentID string) error
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, used by
 	// the task-keyed SSR terminal list which reads terminal rows by task ID
@@ -454,6 +466,22 @@ func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessio
 	m.sessionAccessCheck = check
 }
 
+// SetSessionExecAccessChecker installs the session.exec check used by the
+// terminal, shell, file-write, VS Code and port-preview surfaces.
+func (m *Manager) SetSessionExecAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionExecCheck = check
+}
+
+// CheckSessionExecAccess authorizes an execution-capable session operation.
+// It falls back to the read check when no exec checker is wired, so an
+// unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck == nil {
+		return m.CheckSessionAccess(ctx, sessionID)
+	}
+	return m.sessionExecCheck(ctx, sessionID)
+}
+
 // SetAttachmentReader wires the backend attachment reader used by prompt
 // dispatch. Claimed descriptors are streamed into the active agentctl
 // session immediately before an ACP prompt is sent.
@@ -467,6 +495,22 @@ func (m *Manager) SetAttachmentReader(reader AttachmentReader) {
 // check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
 func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {
 	m.environmentAccessCheck = check
+}
+
+// SetEnvironmentExecAccessChecker installs the session.exec check for the
+// environment-keyed surfaces that destroy or open a PTY.
+func (m *Manager) SetEnvironmentExecAccessChecker(check func(ctx context.Context, environmentID string) error) {
+	m.environmentExecCheck = check
+}
+
+// CheckEnvironmentExecAccess authorizes an execution-capable environment
+// operation. It falls back to the read check when no exec checker is wired,
+// so an unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckEnvironmentExecAccess(ctx context.Context, taskEnvironmentID string) error {
+	if m.environmentExecCheck == nil {
+		return m.CheckEnvironmentAccess(ctx, taskEnvironmentID)
+	}
+	return m.environmentExecCheck(ctx, taskEnvironmentID)
 }
 
 // SetTaskAccessChecker installs the per-user task visibility check used by
@@ -597,4 +641,16 @@ func (m *Manager) DockerClientProvider() func() *docker.Client {
 		}
 		return dockerExec.Client()
 	}
+}
+
+// execAccessCheck returns the check that execution-capable surfaces must pass.
+//
+// It prefers the session.exec checker and falls back to the plain access check
+// when no scoped checker is wired. The fallback is never weaker than the
+// behavior before session.exec existed; production always wires both.
+func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck != nil {
+		return m.sessionExecCheck
+	}
+	return m.sessionAccessCheck
 }

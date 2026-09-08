@@ -24,6 +24,8 @@ permissions:
 jobs:
   lint:
     name: Architecture boundaries do not regress
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
 
     steps:

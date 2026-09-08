@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode, RefObject } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -52,6 +53,8 @@ export type EditorBodyProps = {
   onRename: (name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteConfirmation?: ReactNode;
   onDuplicate: () => void;
   onReapplySort: () => void;
   onSetMaxColumns: (value: string, badInput?: boolean) => void;
@@ -82,6 +85,8 @@ export function EditorBody({
   onRename,
   onDiscard,
   onDelete,
+  deleteAnchorRef,
+  deleteConfirmation,
   onDuplicate,
   onReapplySort,
   onSetMaxColumns,
@@ -124,6 +129,8 @@ export function EditorBody({
         onSave={onSave}
         onDiscard={onDiscard}
         onDelete={onDelete}
+        deleteAnchorRef={deleteAnchorRef}
+        deleteConfirmation={deleteConfirmation}
         onNameChange={onNameChange}
         onNameModeChange={onNameModeChange}
         onReapplySort={onReapplySort}
@@ -151,6 +158,8 @@ type EditorSectionsProps = Pick<
   | "onSave"
   | "onDiscard"
   | "onDelete"
+  | "deleteAnchorRef"
+  | "deleteConfirmation"
   | "onNameChange"
   | "onNameModeChange"
   | "onReapplySort"
@@ -174,6 +183,8 @@ function EditorSections({
   onSave,
   onDiscard,
   onDelete,
+  deleteAnchorRef,
+  deleteConfirmation,
   onNameChange,
   onNameModeChange,
   onReapplySort,
@@ -232,6 +243,8 @@ function EditorSections({
         }}
         onDiscard={onDiscard}
         onDelete={onDelete}
+        deleteAnchorRef={deleteAnchorRef}
+        deleteConfirmation={deleteConfirmation}
       />
     </>
   );

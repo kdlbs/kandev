@@ -41,7 +41,11 @@ func (m *Manager) ResolveSessionRuntime(ctx context.Context, sessionID string) (
 	if sessionID == "" {
 		return "", fmt.Errorf("session_id is required")
 	}
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return "", err
 		}
@@ -81,7 +85,11 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Per-user workspace scoping (opt-in auth): user-facing session surfaces
 	// funnel through here; internal callers pass a ctx without an identity
 	// and are unaffected.
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return nil, err
 		}
@@ -446,7 +454,11 @@ func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
 func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
 	// cached execution cannot be reached by a non-owner.
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return nil, err
 		}
@@ -813,6 +825,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		}
 	}
 
+	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -821,7 +834,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskEnvironmentID:              info.TaskEnvironmentID,
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
-			OfficeAgentProfileID:           info.AgentProfileID,
+			OfficeAgentProfileID:           officeAgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
 			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
@@ -869,11 +882,12 @@ func (m *Manager) prepareExecutionEnvironment(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) (*executionEnvironmentPreparation, error) {
+	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	managedReq := &LaunchRequest{
 		TaskID:             taskID,
 		WorkspaceID:        info.WorkspaceID,
 		SessionID:          info.SessionID,
-		AgentProfileID:     info.AgentProfileID,
+		AgentProfileID:     officeAgentProfileID,
 		ExecutionProfileID: executionProfileID,
 		ExecutorType:       info.ExecutorType,
 		Env:                make(map[string]string),
@@ -1002,6 +1016,18 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 	}
 	if info.ExecutionProfileID != "" {
 		return info.ExecutionProfileID
+	}
+	return info.AgentProfileID
+}
+
+func workspaceOfficeAgentProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	if value, ok := info.Metadata[MetadataKeyOfficeAgentProfileID].(string); ok {
+		if profileID := strings.TrimSpace(value); profileID != "" {
+			return profileID
+		}
 	}
 	return info.AgentProfileID
 }

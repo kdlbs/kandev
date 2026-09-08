@@ -193,7 +193,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 		return err
 	}
 	wt = m.enrichCleanupWorktreeFromCache(wt)
-	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch)
+	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, WorktreeCleanupOptions{})
 	if !removeBranch {
 		m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	}
@@ -208,7 +208,7 @@ func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) 
 		return newBranchCleanupReceipt(), err
 	}
 	wt = m.enrichCleanupWorktreeFromCache(wt)
-	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, false)
+	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, false, WorktreeCleanupOptions{})
 	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	return receipt, err
 }
@@ -294,13 +294,15 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 }
 
 // removeWorktree performs the actual removal of a worktree.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
-	_, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch)
+func (m *Manager) removeWorktree(
+	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) error {
+	_, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 	return err
 }
 
 func (m *Manager) removeWorktreeWithReceipt(
-	ctx context.Context, wt *Worktree, removeBranch bool,
+	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
 ) (BranchCleanupReceipt, error) {
 	receipt := newBranchCleanupReceipt()
 	if wt == nil {
@@ -342,7 +344,7 @@ func (m *Manager) removeWorktreeWithReceipt(
 		return retainedReceipt, nil
 	}
 
-	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch)
+	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch, options)
 	if err != nil {
 		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
@@ -559,7 +561,18 @@ func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]strin
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
 func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
-	return m.cleanupWorktrees(ctx, worktrees, true)
+	return m.cleanupWorktrees(ctx, worktrees, true, WorktreeCleanupOptions{})
+}
+
+// CleanupWorktreesWithOptions removes worktrees while retaining all cleanup
+// identity and branch-safety audits. Discard consent only changes the clean
+// checkout gate.
+func (m *Manager) CleanupWorktreesWithOptions(
+	ctx context.Context,
+	worktrees []*Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	return m.cleanupWorktrees(ctx, worktrees, true, options)
 }
 
 // CleanupWorktreesPreservingBranches removes provided worktrees and compacts
@@ -573,7 +586,7 @@ func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktr
 func (m *Manager) CleanupWorktreesWithReceipt(
 	ctx context.Context, worktrees []*Worktree,
 ) (BranchCleanupReceipt, error) {
-	receipt, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, false)
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, false, WorktreeCleanupOptions{})
 	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	return receipt, err
 }
@@ -638,29 +651,25 @@ func (m *Manager) maintainArchivedBranchCandidate(
 	return candidateReceipt, err
 }
 
-func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {
-	_, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, removeBranch)
+func (m *Manager) cleanupWorktrees(
+	ctx context.Context, worktrees []*Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) error {
+	_, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, removeBranch, options)
 	return err
 }
 
 func (m *Manager) cleanupWorktreesWithReceipt(
-	ctx context.Context, worktrees []*Worktree, removeBranch bool,
+	ctx context.Context, worktrees []*Worktree, removeBranch bool, options WorktreeCleanupOptions,
 ) (BranchCleanupReceipt, error) {
 	receipt := newBranchCleanupReceipt()
 	if len(worktrees) == 0 {
 		return receipt, nil
 	}
 
-	var lastErr error
+	var errs []error
 	seen := make(map[string]struct{}, len(worktrees))
 	for _, wt := range worktrees {
-		if wt == nil {
-			continue
-		}
-		// Task-environment inventory rows can describe a repository slot
-		// without a materialized physical worktree. Never pass such a row to
-		// filesystem cleanup, because its path can be the source checkout.
-		if strings.TrimSpace(wt.ID) == "" {
+		if wt == nil || strings.TrimSpace(wt.ID) == "" {
 			continue
 		}
 		if _, ok := seen[wt.ID]; ok {
@@ -668,17 +677,17 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 		}
 		seen[wt.ID] = struct{}{}
 		wt = m.enrichCleanupWorktreeFromCache(wt)
-		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch)
+		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 		receipt.merge(branchReceipt)
 		if err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
 				zap.Error(err))
-			lastErr = err
+			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
 		}
 	}
-	return receipt, lastErr
+	return receipt, errors.Join(errs...)
 }
 
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.

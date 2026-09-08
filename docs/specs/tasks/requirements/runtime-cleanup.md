@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-08-31
+updated: 2026-09-05
 owners:
   - cfl
 ---
@@ -34,25 +34,37 @@ and safe when runtimes or task rows are already gone.
   attach-only reuse of the deleted workspace.
 - **AC-TASKS-RUNTIME-CLEANUP-001.8:** When dead-row repair loses its compare-and-set to a newer execution, reconciliation shall preserve the newer row without a warning. Other repair errors shall remain warnings.
 - **AC-TASKS-RUNTIME-CLEANUP-001.9:** When task deletion reclaims a Git worktree, the system shall verify the exact recorded path, branch, and commit before mutation; preserve a checkout with tracked or untracked changes; preserve a clean local branch with commits not contained by the recorded base or repository default; recover idempotently when the checkout path is already absent; and keep failed registration or branch cleanup retryable.
-- **AC-TASKS-RUNTIME-CLEANUP-001.10:** When terminal lifecycle cleanup removes a
+- **AC-TASKS-RUNTIME-CLEANUP-001.10:** When a task deletion targets an owned
+  worktree with tracked or untracked changes, the system shall require explicit
+  discard consent before it mutates the task or starts resource cleanup.
+- **AC-TASKS-RUNTIME-CLEANUP-001.11:** When discard consent is absent, the
+  system shall return a typed conflict and preserve the task, worktree, branch,
+  and local changes without a cleanup retry.
+- **AC-TASKS-RUNTIME-CLEANUP-001.12:** When discard consent is present, the
+  system shall remove dirty owned worktrees only after the pinned no-follow
+  path handle confirms the exact owned path, no shared active environment
+  reference exists, and all ownership, path, registration, branch, and commit
+  identity checks pass. The existing unique branch preservation rule shall
+  remain active.
+- **AC-TASKS-RUNTIME-CLEANUP-001.13:** When terminal lifecycle cleanup removes a
   worktree registration, it shall delete a local branch only when the persisted
   owner is Kandev, no live Git worktree uses the branch, exactly one durable
   environment-repository row owns it, and its exact head is contained in the
   persisted intended integration ref. Every other case shall retain the branch.
-- **AC-TASKS-RUNTIME-CLEANUP-001.11:** Before deleting an eligible integrated
+- **AC-TASKS-RUNTIME-CLEANUP-001.14:** Before deleting an eligible integrated
   branch, cleanup shall persist its exact head SHA. Unarchive and worktree
   recreation shall restore a missing managed branch from that SHA before remote
   recovery, while branches with unpublished commits shall retain their original
   local ref and restore exactly.
-- **AC-TASKS-RUNTIME-CLEANUP-001.12:** Managed branch compaction shall delete only
+- **AC-TASKS-RUNTIME-CLEANUP-001.15:** Managed branch compaction shall delete only
   one explicit local ref with an atomic expected-head compare-and-delete. It shall never
   delete remote refs, protected/base refs, inferred branch globs, externally
   owned refs, or refs with legacy, missing, or ambiguous ownership metadata.
-- **AC-TASKS-RUNTIME-CLEANUP-001.13:** Terminal cleanup shall emit bounded
+- **AC-TASKS-RUNTIME-CLEANUP-001.16:** Terminal cleanup shall emit bounded
   attempted, deleted, and retained totals plus fixed retained-reason counts.
   Receipts and metrics shall not contain branch lists, repository contents, or
   credentials.
-- **AC-TASKS-RUNTIME-CLEANUP-001.14:** When archive cleanup retains a managed
+- **AC-TASKS-RUNTIME-CLEANUP-001.17:** When archive cleanup retains a managed
   branch because it is not yet integrated, storage maintenance shall revisit at
   most a fixed number of archived, inactive worktree rows per run. It shall
   revalidate that the task remains archived immediately before invoking the

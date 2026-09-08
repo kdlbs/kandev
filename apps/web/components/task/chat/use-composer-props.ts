@@ -16,6 +16,7 @@ type ComposerPropsArgs = {
   handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   handleCancelTurn: () => Promise<void>;
   isSending: boolean;
+  launchErrorOwned?: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   onClarificationResolved: () => void;
@@ -41,6 +42,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     handleSubmit,
     handleCancelTurn,
     isSending,
+    launchErrorOwned,
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     onClarificationResolved,
@@ -75,6 +77,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
     isSending,
+    launchErrorOwned,
     onCancel: handleCancelTurn,
     placeholder,
     pendingClarification: panelState.pendingClarification,

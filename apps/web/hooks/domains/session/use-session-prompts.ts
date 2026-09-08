@@ -26,10 +26,11 @@ function requestPromptMessages(
   sessionId: string,
   readiness: Promise<unknown> | null,
   generation: number,
+  refreshGeneration: number,
 ): Promise<PromptListResponse> {
   // A removed session can be recreated with the same ID. Keep the old
   // request isolated so the new session does not join a stale snapshot.
-  const requestKey = `${sessionId}\u0000${generation}`;
+  const requestKey = `${sessionId}\u0000${generation}\u0000${refreshGeneration}`;
   const existing = inFlightPromptRequests.get(requestKey);
   if (existing) return existing.promise;
   const promise = (readiness ?? Promise.resolve()).then(() =>
@@ -94,14 +95,20 @@ export function useSessionPrompts(sessionId: string | null): UseSessionPromptsRe
   useEffect(() => {
     if (!sessionId) return;
     let current = true;
-    setFetchFailed(false);
     const generation = store.getState().messagePrompts.generationBySession?.[sessionId] ?? 0;
+    setFetchFailed(false);
     store.getState().setPromptMessagesLoading(sessionId, true);
-    void requestPromptMessages(sessionId, readinessRef.current, generation)
+    const refreshGeneration =
+      store.getState().messagePrompts.refreshGenerationBySession?.[sessionId] ?? 0;
+    void requestPromptMessages(sessionId, readinessRef.current, generation, refreshGeneration)
       .then((response) => {
         if (!current) return;
         const promptState = store.getState().messagePrompts;
         if ((promptState.generationBySession?.[sessionId] ?? 0) !== generation) return;
+        if ((promptState.refreshGenerationBySession?.[sessionId] ?? 0) !== refreshGeneration) {
+          setRetryVersion((version) => version + 1);
+          return;
+        }
         store
           .getState()
           .replacePromptMessages(sessionId, [...(response.messages ?? [])].reverse(), {
@@ -112,7 +119,11 @@ export function useSessionPrompts(sessionId: string | null): UseSessionPromptsRe
       .catch(() => {
         const promptState = store.getState().messagePrompts;
         if (current && (promptState.generationBySession?.[sessionId] ?? 0) === generation) {
-          setFetchFailed(true);
+          if ((promptState.refreshGenerationBySession?.[sessionId] ?? 0) !== refreshGeneration) {
+            setRetryVersion((version) => version + 1);
+          } else {
+            setFetchFailed(true);
+          }
         }
       })
       .finally(() => {

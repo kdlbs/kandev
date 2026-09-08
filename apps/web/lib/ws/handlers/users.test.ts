@@ -180,6 +180,26 @@ describe("session hostname resolution websocket sync", () => {
   });
 });
 
+describe("manual task-color websocket sync", () => {
+  it("applies the normalized server map, including clear tombstones", () => {
+    const store = makeStore();
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        revision: 1,
+        sidebar_task_colors: {
+          "task-red": "red",
+          "task-cleared": null,
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.sidebarTaskColors).toEqual({
+      "task-red": "red",
+      "task-cleared": null,
+    });
+  });
+});
+
 describe("last seen display websocket sync", () => {
   it("applies a relative value and normalizes unknown values", () => {
     const store = makeStore();

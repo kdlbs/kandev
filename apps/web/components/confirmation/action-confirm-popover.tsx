@@ -35,6 +35,10 @@ export type ActionConfirmPopoverProps = {
   onConfirm: () => void | Promise<void>;
 };
 
+export function isActionConfirmationTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-confirmation-boundary]") !== null;
+}
+
 /**
  * A non-modal confirmation surface for one anchored action.
  *

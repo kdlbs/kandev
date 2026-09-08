@@ -2,13 +2,16 @@ package modelsdev_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -491,51 +494,83 @@ func (g *requestGate) waitForFirstRequest(t *testing.T) {
 	}
 }
 
+type blockingRefreshTransport struct {
+	body        string
+	started     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
+	requests    atomic.Int32
+}
+
+func newBlockingRefreshTransport(body string) *blockingRefreshTransport {
+	return &blockingRefreshTransport{
+		body:    body,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (t *blockingRefreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	count := t.requests.Add(1)
+	if count == 1 {
+		close(t.started)
+	}
+	<-t.release
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(t.body)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func (t *blockingRefreshTransport) releaseAll() {
+	t.releaseOnce.Do(func() { close(t.release) })
+}
+
 func TestClient_ConcurrentRefreshCallsShareOneFetch(t *testing.T) {
-	dir := t.TempDir()
-	cachePath := filepath.Join(dir, "models-dev.json")
-	gate := newRequestGate(t, sampleDataset)
-	c := modelsdev.New(modelsdev.Config{
-		CachePath:  cachePath,
-		URL:        gate.server.URL,
-		TTL:        time.Hour,
-		HTTPClient: gate.server.Client(),
-	}, logger.Default())
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		cachePath := filepath.Join(dir, "models-dev.json")
+		transport := newBlockingRefreshTransport(sampleDataset)
+		c := modelsdev.New(modelsdev.Config{
+			CachePath:  cachePath,
+			URL:        "http://models.dev.test/api.json",
+			TTL:        time.Hour,
+			HTTPClient: &http.Client{Transport: transport},
+		}, logger.Default())
 
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for index := 0; index < 8; index++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			if err := c.Refresh(context.Background()); err != nil {
-				t.Errorf("Refresh: %v", err)
-			}
-		}()
-	}
-	// If waitForFirstRequest below times out, its t.Fatal runs
-	// runtime.Goexit and skips the explicit releaseAll+wg.Wait() that
-	// follows, leaving these 8 goroutines parked in the gate. This
-	// Cleanup performs release-then-join as one atomic unit so it is
-	// safe regardless of its LIFO position relative to newRequestGate's
-	// own release Cleanup: without it, the parked goroutines complete
-	// only once the deferred release fires, after the test has already
-	// been marked done, and their t.Errorf call above then panics with
-	// "Log in goroutine after Test has completed" instead of failing
-	// cleanly.
-	t.Cleanup(func() {
-		gate.releaseAll()
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for index := 0; index < 8; index++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if err := c.Refresh(context.Background()); err != nil {
+					t.Errorf("Refresh: %v", err)
+				}
+			}()
+		}
+		// If synctest.Wait below fails, cleanup still releases the transport
+		// and joins every caller before the test returns.
+		t.Cleanup(func() {
+			transport.releaseAll()
+			wg.Wait()
+		})
+		close(start)
+		<-transport.started
+		// All goroutines are now either inside the same singleflight call or
+		// waiting for its result. The in-memory transport keeps the leader
+		// blocked, so this barrier does not depend on network scheduling.
+		synctest.Wait()
+		transport.releaseAll()
 		wg.Wait()
-	})
-	close(start)
-	gate.waitForFirstRequest(t)
-	gate.releaseAll()
-	wg.Wait()
 
-	if got := gate.requests.Load(); got != 1 {
-		t.Fatalf("models.dev request count = %d, want 1", got)
-	}
+		if got := transport.requests.Load(); got != 1 {
+			t.Fatalf("models.dev request count = %d, want 1", got)
+		}
+	})
 }
 
 func TestClient_ConcurrentLookupsShareOneBackgroundFetch(t *testing.T) {

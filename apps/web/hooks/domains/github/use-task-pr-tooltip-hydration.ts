@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getTaskCIAutomationOptions, listTaskPRs } from "@/lib/api/domains/github-api";
@@ -235,13 +235,16 @@ export function useTaskPRTooltipHydration(
     });
   }, [includeAutomation, store, taskId, workspaceContextGeneration, workspaceId]);
 
-  return {
-    status,
-    hydrate,
-    // Prefer the store entry because WebSocket updates replace the fetched
-    // snapshot while the disclosure remains mounted. Fall back to the local
-    // snapshot for compatibility with callers/tests that provide no store
-    // entry (for example, a request that completed before state hydration).
-    automationOptions: storedAutomationOptions ?? hydratedAutomationOptions,
-  };
+  return useMemo(
+    () => ({
+      status,
+      hydrate,
+      // Prefer the store entry because WebSocket updates replace the fetched
+      // snapshot while the disclosure remains mounted. Fall back to the local
+      // snapshot for compatibility with callers/tests that provide no store
+      // entry (for example, a request that completed before state hydration).
+      automationOptions: storedAutomationOptions ?? hydratedAutomationOptions,
+    }),
+    [status, hydrate, storedAutomationOptions, hydratedAutomationOptions],
+  );
 }

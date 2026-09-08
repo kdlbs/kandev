@@ -77,7 +77,7 @@ make test-e2e
 
 ```bash
 cd apps/web
-pnpm e2e:run -- --project chromium -- tests/path/to/spec.ts
+pnpm e2e:run --project chromium tests/path/to/spec.ts
 ```
 
 The managed runner builds what it needs, chooses host or the CI runtime image, enables strict WebSocket assertions, and supports `--shards N`, `--no-build`, and `--project NAME`.
@@ -99,8 +99,7 @@ Run container-backed cases explicitly:
 
 ```bash
 cd apps/web
-pnpm exec playwright test --config e2e/playwright.config.ts \
-  --project=containers
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers
 ```
 
 E2E rules:
@@ -110,6 +109,9 @@ E2E rules:
 - never point tests at a developer's normal database or task workspace;
 - assert persisted or user-visible outcomes, not fixed sleeps;
 - preserve traces, screenshots, video, and backend logs for failures;
+- use the guarded `e2e:raw` or `e2e:run` commands. Both enforce one
+  Playwright worker per process; the managed runner also enforces a
+  memory-aware local shard limit;
 - cover reconnect, multi-repository, and mobile behavior when the feature depends on them.
 
 The internal `docs/test_e2e_web.md` contains fixture and debugging detail.

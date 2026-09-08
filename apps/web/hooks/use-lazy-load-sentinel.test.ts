@@ -74,6 +74,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// eslint-disable-next-line max-lines-per-function -- observer lifecycle cases share one deterministic harness.
 describe("useLazyLoadSentinel", () => {
   it("rechecks current geometry when a restored viewport becomes eligible", async () => {
     const scrollRef = makeScrollRef();
@@ -129,6 +130,70 @@ describe("useLazyLoadSentinel", () => {
     expect(record.unobserved).toContain(first);
     expect(record.targets).toContain(second);
     expect(record.disconnected).toBe(false);
+  });
+
+  it("recreates the observer when the owning lifecycle generation changes", () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 20);
+    const { result, rerender } = renderHook(
+      ({ lifecycleKey }: { lifecycleKey: number }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, { lifecycleKey }),
+      { initialProps: { lifecycleKey: 0 } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    const first = records[0];
+
+    rerender({ lifecycleKey: 1 });
+
+    expect(first.disconnected).toBe(true);
+    expect(records).toHaveLength(2);
+    expect(records[1].targets).toContain(node);
+  });
+  it("ignores queued callbacks from a replaced observer with the same lifecycle key", () => {
+    const scrollRef = makeScrollRef();
+    const firstLoadMore = vi.fn(async () => 20);
+    const secondLoadMore = vi.fn(async () => 20);
+    const { result, rerender } = renderHook(
+      ({ loadMore }: { loadMore: () => Promise<number> }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+          lifecycleKey: 0,
+        }),
+      { initialProps: { loadMore: firstLoadMore } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    const firstObserver = records[0];
+
+    rerender({ loadMore: secondLoadMore });
+    expect(records).toHaveLength(2);
+
+    fire(firstObserver, true, node);
+    expect(firstLoadMore).not.toHaveBeenCalled();
+    expect(secondLoadMore).not.toHaveBeenCalled();
+
+    fire(records[1], true, node);
+    expect(secondLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms a replacement observer after the old one disarmed", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 0);
+    const { result, rerender } = renderHook(
+      ({ lifecycleKey }: { lifecycleKey: number }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+          lifecycleKey,
+          rearmWhileIntersecting: true,
+        }),
+      { initialProps: { lifecycleKey: 0 } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    await act(async () => fire(records[0], true, node));
+    rerender({ lifecycleKey: 1 });
+    await act(async () => fire(records[1], true, node));
+
+    expect(loadMore).toHaveBeenCalledTimes(2);
   });
 
   it("fires loadMore on intersection when eligible", async () => {
@@ -231,6 +296,7 @@ describe("useLazyLoadSentinel — scroller lifecycle", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- eligibility, disarm, and stale-completion cases share one lifecycle fixture
 describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => {
   it("retries when loading becomes eligible while the sentinel remains intersecting", async () => {
     const scrollRef = makeScrollRef();
@@ -254,6 +320,28 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // must retry the still-visible sentinel itself.
     rerender({ blocked: false });
     await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
+
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
+  it("does not retry a blocked intersection that is outside current geometry", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 20);
+    const { result, rerender } = renderHook(
+      ({ blocked }: { blocked: boolean }) =>
+        useLazyLoadSentinel(scrollRef, true, blocked, false, loadMore, {
+          rearmWhileIntersecting: true,
+          isCurrentGeometryEligible: () => false,
+        }),
+      { initialProps: { blocked: true } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    rerender({ blocked: false });
+    await act(async () => {});
+
+    expect(loadMore).not.toHaveBeenCalled();
   });
 
   it("re-arms only when enabled: unobserves before loading and re-observes after a positive result", async () => {
@@ -729,6 +817,61 @@ describe("useLazyLoadSentinel — stale view handoff", () => {
     // No exit/re-entry or recovery click: releasing A must replay B's current
     // intersection through the normal sentinel path.
     await waitFor(() => expect(loadB).toHaveBeenCalledTimes(1));
+  });
+
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
+  it("does not hand off a stale intersection that left current geometry", async () => {
+    const scrollRef = makeScrollRef();
+    let activeView = "A";
+    let geometryEligible = true;
+    let resolveA: (value: number) => void = () => {};
+    const loadA = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+    const loadB = vi.fn(async () => 0);
+    const { result, rerender } = renderHook(
+      ({ view }: { view: string }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, view === "A" ? loadA : loadB, {
+          rearmWhileIntersecting: true,
+          isCurrentGeometryEligible: () => geometryEligible,
+          isRequestCurrent: () => activeView === view,
+        }),
+      { initialProps: { view: "A" } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    activeView = "B";
+    rerender({ view: "B" });
+    fire(records[1], true, node);
+    geometryEligible = false;
+
+    await act(async () => resolveA(20));
+    await act(async () => {});
+
+    expect(loadB).not.toHaveBeenCalled();
+  });
+
+  it("rejects a queued positive intersection when current geometry is ineligible", () => {
+    const scrollRef = makeScrollRef();
+    let geometryEligible = true;
+    const loadMore = vi.fn(async () => 20);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        isCurrentGeometryEligible: () => geometryEligible,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    geometryEligible = false;
+    fire(records[0], true, node);
+
+    expect(loadMore).not.toHaveBeenCalled();
   });
 });
 

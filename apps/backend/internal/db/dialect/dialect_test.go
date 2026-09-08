@@ -18,6 +18,15 @@ func TestIsPostgres(t *testing.T) {
 	}
 }
 
+func TestTimestampType(t *testing.T) {
+	if got := TimestampType(SQLite3); got != "DATETIME" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := TimestampType(PGX); got != "TIMESTAMPTZ" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestBoolToInt(t *testing.T) {
 	if BoolToInt(true) != 1 {
 		t.Error("expected 1 for true")
@@ -33,6 +42,15 @@ func TestBlobType(t *testing.T) {
 	}
 	if BlobType(PGX) != "BYTEA" {
 		t.Errorf("pgx: got %q", BlobType(PGX))
+	}
+}
+
+func TestByteLength(t *testing.T) {
+	if got := ByteLength(SQLite3, "name"); got != "length(CAST(name AS BLOB))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := ByteLength(PGX, "name"); got != "octet_length(name)" {
+		t.Errorf("postgres: got %q", got)
 	}
 }
 
@@ -140,6 +158,15 @@ func TestDateTimeOf(t *testing.T) {
 	}
 	got = DateTimeOf(PGX, "activation.value")
 	if got != "(activation.value)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestNullableTimestamp(t *testing.T) {
+	if got := NullableTimestamp(SQLite3, "?"); got != "?" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := NullableTimestamp(PGX, "?"); got != "(?)::timestamptz" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

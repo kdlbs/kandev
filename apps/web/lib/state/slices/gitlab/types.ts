@@ -36,7 +36,10 @@ export type GitLabStatsState = {
 };
 
 export type GitLabStatusState = {
-  workspaceId: string | null;
+  byWorkspaceId: Record<string, GitLabStatusEntry>;
+};
+
+export type GitLabStatusEntry = {
   data: GitLabStatus | null;
   loading: boolean;
   loadedAt: number | null;
@@ -96,8 +99,9 @@ export type GitLabSliceActions = {
   setGitLabStats: (stats: GitLabStats | null) => void;
   setGitLabStatsLoading: (loading: boolean) => void;
 
-  setGitLabStatus: (workspaceId: string | null, status: GitLabStatus | null) => void;
-  setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) => void;
+  setGitLabStatus: (workspaceId: string, status: GitLabStatus | null) => void;
+  setGitLabStatusLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitLabStatus: (workspaceId: string) => void;
 
   setTaskMRAutomationOptions: (taskId: string, options: TaskMRAutomationOptions) => void;
   setTaskMRAutomationLoading: (taskId: string, loading: boolean) => void;

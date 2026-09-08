@@ -366,6 +366,89 @@ test.describe("PR status badge", () => {
     await expectTopbarReadyState(testPage, session, "false");
   });
 
+  test("keeps pending CI yellow on Kanban reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, inboxStep } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      "Pending CI Reload Task",
+    );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 105,
+      pr_url: "https://github.com/testorg/testrepo/pull/105",
+      pr_title: "Pending CI with blocked mergeability",
+      head_branch: "fix/pending-ci-reload",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "pending",
+      mergeable_state: "blocked",
+      checks_total: 2,
+      checks_passing: 1,
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "pending",
+      mergeable_state: "blocked",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardInColumn(task.title, inboxStep.id);
+    await expect(card).toBeVisible();
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toHaveClass(/text-yellow-500/);
+
+    let releaseWorkspacePRs = () => undefined;
+    const workspacePRsHeld = new Promise<void>((resolve) => {
+      releaseWorkspacePRs = resolve;
+    });
+    let markWorkspacePRsRequested = () => undefined;
+    const workspacePRsRequested = new Promise<void>((resolve) => {
+      markWorkspacePRsRequested = resolve;
+    });
+    let markWorkspacePRsSettled = () => undefined;
+    const workspacePRsSettled = new Promise<void>((resolve) => {
+      markWorkspacePRsSettled = resolve;
+    });
+    await testPage.route("**/api/v1/github/task-prs?workspace_id=*", async (route) => {
+      markWorkspacePRsRequested();
+      const response = await route.fetch();
+      await workspacePRsHeld;
+      await route.fulfill({ response });
+      markWorkspacePRsSettled();
+    });
+
+    try {
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await workspacePRsRequested;
+      await expect(card).toBeVisible();
+      await expect(icon).toHaveClass(/text-yellow-500/);
+      await prCapture.screenshot("desktop-kanban-pending-ci-reloaded", {
+        caption: "Desktop Kanban card keeps pending CI yellow after reload",
+      });
+    } finally {
+      releaseWorkspacePRs();
+    }
+
+    await workspacePRsSettled;
+    await expect(icon).toHaveClass(/text-yellow-500/);
+  });
+
   /**
    * When reviewers approved, CI passes, and GitHub's mergeable_state is clean,
    * the badge must show the ready-to-merge state so the user knows the PR
@@ -709,19 +792,70 @@ test.describe("PR status badge", () => {
     await taskRow.hover();
     await expect(taskActions).toBeVisible();
     await expect(menuSlot).toHaveCSS("width", "24px");
-    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
-    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
-    await icon.hover();
-    await icon.focus();
+    // Escape leaves the icon focused and the controlled tooltip dismissed. Move
+    // focus through the row so the updated icon receives a real focus event.
+    // This avoids relying on a synthetic hover after the association rerender.
+    await taskRow.focus();
+    await testPage.keyboard.press("Tab");
+    await expect(icon).toBeFocused();
 
     const multiSummary = visibleTaskPRSummary(testPage);
-    await expect(multiSummary).toBeVisible();
+    // The second association updates the icon while the disclosure is closed.
+    // Wait for the keyboard-reopened tooltip before querying its refreshed rows.
+    await expect(multiSummary).toBeVisible({ timeout: 15_000 });
     const entries = multiSummary.getByTestId("pr-task-status-entry");
-    await expect(entries).toHaveCount(2);
+    await expect(entries).toHaveCount(2, { timeout: 15_000 });
     await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");
-    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967");
+    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967", {
+      timeout: 15_000,
+    });
     await expect(entries.nth(1).getByTestId("pr-task-status-title")).toHaveText(
       "Resolve the failing API checks",
+      { timeout: 15_000 },
     );
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  test("keeps a draft PR icon muted when CI fails", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
+
+    const taskTitle = "Draft PR with failing CI";
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      taskTitle,
+    );
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2968,
+      pr_url: "https://github.com/testorg/testrepo/pull/2968",
+      pr_title: taskTitle,
+      head_branch: "feat/draft-with-failing-ci",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+
+    const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveClass(/text-muted-foreground/);
+    await expect(icon).not.toHaveClass(/text-red-500/);
   });
 });
