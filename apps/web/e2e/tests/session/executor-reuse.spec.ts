@@ -49,6 +49,11 @@ test.describe("Executor reuse", () => {
     expect(env!.status).toBe("ready");
     // executor_type should be present (standalone for mock agent)
     expect(env!.executor_type).toBeDefined();
+
+    // Keep cleanup and verification in one attempt so a retry cannot recreate
+    // the worker-scoped seed checkout and mask a cleanup regression.
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    expect(existsSync(seedData.repositoryPath)).toBe(true);
   });
 
   test("second session reuses same task environment by default", async ({
@@ -57,11 +62,6 @@ test.describe("Executor reuse", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-
-    // The suite seed is shared by this worker and must outlive the previous
-    // test's task cleanup. Reuse validation deliberately fails closed when it
-    // does not.
-    expect(existsSync(seedData.repositoryPath)).toBe(true);
 
     // 1. Create task with first session
     const task = await apiClient.createTaskWithAgent(
