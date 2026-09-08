@@ -398,7 +398,10 @@ func (s *Service) executeSendNowClaimWithContext(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
-	defer s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
+	defer func() {
+		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
+		s.drainQueuedDispatchIfPending(sessionID)
+	}()
 
 	restore := func() {
 		if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
@@ -472,7 +475,9 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		// rejects the replacement. The ordinary FIFO handoff uses the same
 		// ordering: workflow admission precedes executor prompt acceptance, and
 		// the restored claim is retried through the normal ready path.
-		s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
+		if !turnStartAlreadyProcessed(claim.Dispatch.Metadata) {
+			s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
+		}
 	}
 
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,

@@ -979,6 +979,10 @@ type Service struct {
 	// arbitrated through cancelInFlight.
 	dispatchingQueued      sync.Map
 	acceptedQueuedDispatch sync.Map
+	// queuedDispatchDrainPending records a boot-ready event that arrived while
+	// another queued dispatch still owned the session. The worker consumes the
+	// marker after it clears that reservation and starts one deferred drain.
+	queuedDispatchDrainPending sync.Map // map[sessionID]struct{}
 
 	// afterReadyLifecycleReservation is a deterministic test seam for the
 	// narrow interval after handleAgentReady releases its per-session guard
@@ -3413,6 +3417,29 @@ func (s *Service) GetMessageQueue() *messagequeue.Service {
 	return s.messageQueue
 }
 
+type sessionPromptAdmissionContextKey struct{}
+
+func (s *Service) withSessionPromptAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	if fn == nil {
+		return errors.New("session prompt admission callback is nil")
+	}
+	if sessionID != "" {
+		if heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string); heldSessionID == sessionID {
+			return fn(ctx)
+		}
+	}
+	if s.messageQueue == nil {
+		return fn(ctx)
+	}
+	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
+	})
+}
+
 // QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
 // The user message row is already written by the WebSocket handler, so the
 // queue marker prevents the drain path from creating a duplicate row.
@@ -3434,18 +3461,30 @@ func (s *Service) QueueUserPrompt(
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
-	if _, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		sessionID,
-		taskID,
-		prompt,
-		model,
-		messagequeue.QueuedByUser,
-		planMode,
-		toQueuedAttachments(attachments),
-		queueMetadata,
-	); err != nil {
-		return fmt.Errorf("queue user prompt: %w", err)
+	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
+		if err != nil {
+			return fmt.Errorf("load session before queueing user prompt: %w", err)
+		}
+		if session == nil || isTerminalSessionState(session.State) {
+			return ErrSessionNotPromptable
+		}
+		if _, err := s.messageQueue.QueueMessageWithMetadata(
+			admittedCtx,
+			sessionID,
+			taskID,
+			prompt,
+			model,
+			messagequeue.QueuedByUser,
+			planMode,
+			toQueuedAttachments(attachments),
+			queueMetadata,
+		); err != nil {
+			return fmt.Errorf("queue user prompt: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 

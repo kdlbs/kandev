@@ -3918,6 +3918,11 @@ const metaKeyUserMessageRecorded = "user_message_recorded"
 // one prompt.
 const MetaKeyTurnStartAlreadyProcessed = "turn_start_already_processed"
 
+func turnStartAlreadyProcessed(metadata map[string]interface{}) bool {
+	processed, _ := metadata[MetaKeyTurnStartAlreadyProcessed].(bool)
+	return processed
+}
+
 type workflowMessageOrigin struct {
 	StepID    string
 	StepName  string

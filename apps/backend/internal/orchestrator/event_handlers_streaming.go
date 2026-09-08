@@ -1066,6 +1066,29 @@ func (s *Service) updateTaskSessionStateWithHook(
 	onChanged func(),
 	preloadedSession ...*models.TaskSession,
 ) (*models.TaskSession, bool) {
+	if isTerminalSessionState(nextState) && s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var updated *models.TaskSession
+			var changed bool
+			err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				updated, changed = s.updateTaskSessionStateWithHook(
+					admittedCtx,
+					taskID,
+					sessionID,
+					nextState,
+					errorMessage,
+					allowWakeFromWaiting,
+					onChanged,
+				)
+				return nil
+			})
+			if err != nil {
+				return nil, false
+			}
+			return updated, changed
+		}
+	}
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -1229,6 +1252,26 @@ func (s *Service) transitionTaskSessionState(
 	errorMessage string,
 	onChanged func(),
 ) (bool, models.TaskSessionState, error) {
+	if isTerminalSessionState(nextState) && s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var changed bool
+			var finalState models.TaskSessionState
+			var err error
+			err = s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				changed, finalState, err = s.transitionTaskSessionState(
+					admittedCtx,
+					taskID,
+					sessionID,
+					nextState,
+					errorMessage,
+					onChanged,
+				)
+				return err
+			})
+			return changed, finalState, err
+		}
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, "", fmt.Errorf("get session before state transition: %w", err)

@@ -389,6 +389,9 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// above is the guarded admission decision; the drain performs its own
 	// cancellation check and leaves the queue untouched if a new cancellation
 	// claims the session in this handoff.
+	if s.isQueuedDispatchInFlight(data.SessionID) {
+		s.markQueuedDispatchDrainPending(data.SessionID)
+	}
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
@@ -818,6 +821,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+		s.drainQueuedDispatchIfPending(reservedSessionID)
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()
 		}
@@ -888,8 +892,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("queue_id", queuedMsg.ID))
 			return
 		}
-		alreadyProcessed, _ := queuedMsg.Metadata[MetaKeyTurnStartAlreadyProcessed].(bool)
-		if !alreadyProcessed {
+		if !turnStartAlreadyProcessed(queuedMsg.Metadata) {
 			s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
 		}
 	}

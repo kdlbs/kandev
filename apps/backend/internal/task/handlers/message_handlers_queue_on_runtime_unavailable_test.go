@@ -43,6 +43,7 @@ func TestForwardMessageAsPrompt_QueuesMessageDroppedDuringProfileSwitchWindow(t 
 	assert.Equal(t, 1, orch.promptCalls, "PromptTask must not be retried: neither retry sentinel matches this error class")
 	assert.Equal(t, 0, orch.resumeCalls)
 	assert.Equal(t, 1, orch.queuePromptCalls, "the message must be queued for delivery once the runtime comes up")
+	assert.Equal(t, true, orch.queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed], "queued retry must preserve the completed turn-start admission")
 	assert.Empty(t, repo.createdMessages, "a queued message must not also surface as a dropped-message error")
 }
 

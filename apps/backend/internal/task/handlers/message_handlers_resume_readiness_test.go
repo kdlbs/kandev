@@ -45,6 +45,7 @@ type resumeRetryOrchestrator struct {
 	callOrder        []string
 	queuePromptCalls int
 	queuePromptErr   error
+	queueMetadata    map[string]interface{}
 }
 
 func (o *resumeRetryOrchestrator) PromptTask(
@@ -77,8 +78,9 @@ func (o *resumeRetryOrchestrator) ProcessOnTurnStart(context.Context, string, st
 	return orchestrator.ProcessOnTurnStartResult{}, nil
 }
 
-func (o *resumeRetryOrchestrator) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
+func (o *resumeRetryOrchestrator) QueueUserPrompt(_ context.Context, _, _, _, _ string, _ bool, _ []v1.MessageAttachment, metadata map[string]interface{}, _ bool) error {
 	o.queuePromptCalls++
+	o.queueMetadata = metadata
 	return o.queuePromptErr
 }
 
