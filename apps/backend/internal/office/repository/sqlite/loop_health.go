@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // TriggerHealthRow is one overdue or stranded cron trigger
@@ -95,6 +97,55 @@ type StuckRunRow struct {
 	Condition      string     `db:"-"`
 }
 
+// stuckRunsUnionSQL is the shared claimed+queued candidate set behind
+// ListStuckRuns' stuck_since column, unchanged by dialect: both source
+// expressions (`claimed_at`, `COALESCE(scheduled_retry_at, requested_at)`)
+// are plain TIMESTAMP-typed columns on both engines.
+const stuckRunsUnionSQL = `
+	SELECT r.id, r.agent_profile_id, r.status, r.claimed_at AS stuck_since
+	FROM runs r
+	JOIN agent_profiles a ON a.id = r.agent_profile_id
+	WHERE a.workspace_id = ? AND r.status = 'claimed'
+	  AND (r.claimed_at IS NULL OR r.claimed_at <= ?)
+	UNION ALL
+	SELECT r.id, r.agent_profile_id, r.status,
+	       COALESCE(r.scheduled_retry_at, r.requested_at) AS stuck_since
+	FROM runs r
+	JOIN agent_profiles a ON a.id = r.agent_profile_id
+	WHERE a.workspace_id = ? AND r.status = 'queued'
+	  AND r.current_route_attempt_seq = 0
+	  AND r.routing_blocked_status IS NULL
+	  AND COALESCE(r.scheduled_retry_at, r.requested_at) <= ?
+	  AND NOT EXISTS (
+	    SELECT 1 FROM runs s
+	    WHERE s.agent_profile_id = r.agent_profile_id AND s.status = 'claimed'
+	  )
+`
+
+// stuckSinceColumnExpr and stuckSinceLayout keep stuck_since portable
+// across dialects. stuck_since is a computed UNION ALL column, so it
+// carries no declared type for the driver to auto-parse into
+// time.Time (unlike a direct table column read): on SQLite, strftime()
+// normalizes it to a fixed ISO-8601 UTC string that the scan target
+// (sql.NullString) parses by hand below. Postgres has no strftime;
+// selecting the raw TIMESTAMP column there returns a native time.Time
+// that database/sql's Scan already formats into an RFC3339Nano string
+// on assignment to *sql.NullString, so one scan type and one dialect
+// switch cover both engines without a second query or row type.
+func stuckSinceColumnExpr(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return "w.stuck_since"
+	}
+	return "strftime('%Y-%m-%dT%H:%M:%fZ', w.stuck_since)"
+}
+
+func stuckSinceLayout(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return time.RFC3339Nano
+	}
+	return "2006-01-02T15:04:05.000Z"
+}
+
 // ListStuckRuns returns claimed-stuck and queued-stuck runs in one
 // list, each row naming which condition it matched, ordered claimed
 // first then by stuck instant (NULL first), capped with the same-
@@ -115,12 +166,8 @@ func (r *Repository) ListStuckRuns(
 ) ([]StuckRunRow, int, error) {
 	claimedBefore := now.Add(-claimedGrace)
 	queuedBefore := now.Add(-queuedGrace)
+	driver := r.ro.DriverName()
 
-	// stuck_since is a computed column from a UNION ALL, so it carries
-	// no declared column type for the driver to auto-parse into
-	// time.Time (unlike a direct table column read). strftime()
-	// normalizes it to a fixed ISO-8601 UTC string first so the scan
-	// target is an unambiguous string, parsed by hand below.
 	type row struct {
 		ID             string         `db:"id"`
 		AgentProfileID string         `db:"agent_profile_id"`
@@ -129,42 +176,26 @@ func (r *Repository) ListStuckRuns(
 		Total          int            `db:"total"`
 	}
 	var rows []row
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT w.id AS id, w.agent_profile_id AS agent_profile_id, w.status AS status,
-		       strftime('%Y-%m-%dT%H:%M:%fZ', w.stuck_since) AS stuck_since,
+		       %s AS stuck_since,
 		       COUNT(*) OVER () AS total
-		FROM (
-			SELECT r.id, r.agent_profile_id, r.status, r.claimed_at AS stuck_since
-			FROM runs r
-			JOIN agent_profiles a ON a.id = r.agent_profile_id
-			WHERE a.workspace_id = ? AND r.status = 'claimed'
-			  AND (r.claimed_at IS NULL OR r.claimed_at <= ?)
-			UNION ALL
-			SELECT r.id, r.agent_profile_id, r.status,
-			       COALESCE(r.scheduled_retry_at, r.requested_at) AS stuck_since
-			FROM runs r
-			JOIN agent_profiles a ON a.id = r.agent_profile_id
-			WHERE a.workspace_id = ? AND r.status = 'queued'
-			  AND r.current_route_attempt_seq = 0
-			  AND r.routing_blocked_status IS NULL
-			  AND COALESCE(r.scheduled_retry_at, r.requested_at) <= ?
-			  AND NOT EXISTS (
-			    SELECT 1 FROM runs s
-			    WHERE s.agent_profile_id = r.agent_profile_id AND s.status = 'claimed'
-			  )
-		) w
+		FROM (%s) w
 		ORDER BY (w.status = 'claimed') DESC, (w.stuck_since IS NULL) DESC, w.stuck_since ASC, w.id ASC
 		LIMIT ?
-	`), workspaceID, claimedBefore, workspaceID, queuedBefore, limit)
+	`, stuckSinceColumnExpr(driver), stuckRunsUnionSQL)
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query),
+		workspaceID, claimedBefore, workspaceID, queuedBefore, limit)
 	if err != nil {
 		return nil, 0, err
 	}
+	layout := stuckSinceLayout(driver)
 	out := make([]StuckRunRow, 0, len(rows))
 	total := 0
 	for _, rr := range rows {
 		hr := StuckRunRow{RunID: rr.ID, AgentProfileID: rr.AgentProfileID, Status: rr.Status}
 		if rr.StuckSince.Valid {
-			parsed, perr := time.Parse("2006-01-02T15:04:05.000Z", rr.StuckSince.String)
+			parsed, perr := time.Parse(layout, rr.StuckSince.String)
 			if perr != nil {
 				return nil, 0, fmt.Errorf("parse stuck_since %q: %w", rr.StuckSince.String, perr)
 			}
