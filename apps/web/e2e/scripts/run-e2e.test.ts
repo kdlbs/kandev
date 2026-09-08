@@ -472,6 +472,7 @@ describe("run-e2e.sh", () => {
     ["fractional", "1.5"],
     ["a natural but unsupported time suffix", "10s"],
     ["trailing whitespace, e.g. from a .env file", "10 "],
+    ["a leading zero, which bash arithmetic reads as octal", "08"],
   ])("rejects an invalid KANDEV_E2E_DOCKER_PROBE_TIMEOUT (%s)", (_label, value) => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
@@ -495,16 +496,19 @@ describe("run-e2e.sh", () => {
     expect(result.stderr).toContain(`got '${value}'`);
   });
 
-  it("accepts 0 as a valid KANDEV_E2E_DOCKER_PROBE_TIMEOUT (skip the probe)", () => {
+  it("accepts 0 as a valid KANDEV_E2E_DOCKER_PROBE_TIMEOUT and skips the probe wait in auto mode", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
+    const dockerPath = path.join(binDir, "docker");
+    fs.writeFileSync(dockerPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(dockerPath, 0o755);
     const pnpmPath = path.join(binDir, "pnpm");
     fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
     fs.chmodSync(pnpmPath, 0o755);
 
     const result = spawnSync(
       "bash",
-      [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--help"],
+      [scriptPath, "--no-build", "--project", "chromium", "--", "--help"],
       {
         encoding: "utf8",
         env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "0" }),
@@ -515,6 +519,10 @@ describe("run-e2e.sh", () => {
     expect(result.stderr).not.toContain(
       "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer",
     );
+    expect(result.stderr).toContain(
+      "docker info did not respond within 0s; treating Docker as unavailable",
+    );
+    expect(result.stderr).toContain("mode=host");
   });
 
   it("applies the worker guard to raw Playwright runs", () => {
