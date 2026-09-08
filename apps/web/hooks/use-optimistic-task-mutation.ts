@@ -81,6 +81,13 @@ export function useOptimisticTaskMutation() {
         recordWriteSettled(taskId, TASK_SCOPE, sequence);
         endWrite(taskId, TASK_SCOPE, sequence);
       } catch (err) {
+        if (err instanceof ApprovalGateError) {
+          // The backend has already persisted the redirected status at this
+          // write's sequence regardless of whether the UI ends up showing it,
+          // so a later-failing, lower-sequence write must see this as settled
+          // rather than treating it as unresolved and clobbering it.
+          recordWriteSettled(taskId, TASK_SCOPE, sequence);
+        }
         // Only restore if no later-sequenced mutation on this task has
         // already succeeded or is still in flight — otherwise this stale
         // failure's rollback would clobber newer, server-confirmed state.

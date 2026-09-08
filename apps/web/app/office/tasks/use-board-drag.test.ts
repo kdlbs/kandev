@@ -4,6 +4,8 @@ import { ApprovalGateError } from "@/lib/api/domains/office-status-gate";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { __resetOfficeTaskContentSyncForTests } from "@/lib/state/office-task-content-sync";
 
+const GATE_MESSAGE = "Cannot mark done: awaiting approval from Ada, Grace";
+
 afterEach(() => {
   __resetOfficeTaskContentSyncForTests();
 });
@@ -125,7 +127,7 @@ describe("applyStatusDrop", () => {
   it("surfaces the approver-gate sentence rather than a bare failure", async () => {
     // A plain Error (anything that isn't the typed ApprovalGateError below)
     // still rolls back to the snapshot and surfaces its message verbatim.
-    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    const gate = GATE_MESSAGE;
     const d = deps(task("t1", "in_review"), async () => {
       throw new Error(gate);
     });
@@ -142,7 +144,7 @@ describe("applyStatusDrop", () => {
     // for exactly this case). Rolling back to the pre-drop snapshot here
     // would show a status the server no longer holds.
     const before = task("t1", "todo");
-    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    const gate = GATE_MESSAGE;
     const d = deps(before, async () => {
       throw new ApprovalGateError(gate, "in_review");
     });
@@ -216,11 +218,38 @@ describe("applyStatusDrop generation guard — overlapping status mutations", ()
     // succeeded: redirecting to "in_review" here would clobber the newer,
     // server-confirmed "blocked" status the same way an unconditional
     // rollback would.
-    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    const gate = GATE_MESSAGE;
     older.reject(new ApprovalGateError(gate, "in_review"));
     await p1;
 
     expect(getCurrent().status).toBe("blocked");
     expect(d.onError).toHaveBeenCalledWith(gate);
+  });
+
+  it("a newer gate redirect is not clobbered by an older, later-resolving plain failure", async () => {
+    const { d, getCurrent } = liveDeps(task("t1", "todo"));
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    d.updateStatus.mockImplementationOnce(() => older.promise);
+    d.updateStatus.mockImplementationOnce(() => newer.promise);
+
+    // The older drop (todo -> in_progress) is still in flight when the newer
+    // one (-> done) is dropped and hits the approver gate first, redirecting
+    // to "in_review" server-side.
+    const p1 = applyStatusDrop("t1", "in_progress", d);
+    const p2 = applyStatusDrop("t1", "done", d);
+
+    const gate = GATE_MESSAGE;
+    newer.reject(new ApprovalGateError(gate, "in_review"));
+    await p2;
+    expect(getCurrent().status).toBe("in_review");
+
+    // The older drop then fails with a plain error. It must not be able to
+    // roll the board back past the newer, server-confirmed gate redirect.
+    older.reject(new Error("boom"));
+    await p1;
+
+    expect(getCurrent().status).toBe("in_review");
+    expect(d.onError).toHaveBeenCalledTimes(2);
   });
 });

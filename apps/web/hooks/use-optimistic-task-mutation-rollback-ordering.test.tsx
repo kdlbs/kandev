@@ -384,7 +384,9 @@ describe("useOptimisticTaskMutation generation guard — overlapping status muta
     expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("todo");
     expect(toast.error).toHaveBeenCalledTimes(2);
   });
+});
 
+describe("useOptimisticTaskMutation generation guard — approval gate redirect", () => {
   it("gate-redirect superseded by a newer success does not clobber the newer status", async () => {
     const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
     render(<Wrapper />);
@@ -425,5 +427,45 @@ describe("useOptimisticTaskMutation generation guard — overlapping status muta
     expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("blocked");
     await expect(p1).rejects.toThrow(gate);
     expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("a newer gate redirect is not clobbered by an older, later-resolving plain failure", async () => {
+    const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
+    render(<Wrapper />);
+
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    let p1!: Promise<void>;
+    let p2!: Promise<void>;
+
+    // The older mutation (todo -> in_progress) is still in flight when the
+    // newer one (-> done) issues and hits the approver gate first, redirecting
+    // to "in_review" server-side.
+    act(() => {
+      p1 = mutateRef.current!("t-1", { status: "in_progress" }, () => older.promise);
+    });
+    act(() => {
+      p2 = mutateRef.current!("t-1", { status: "done" }, () => newer.promise);
+    });
+    const p1Settled = p1.catch(() => undefined);
+    const p2Settled = p2.catch(() => undefined);
+
+    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    await act(async () => {
+      newer.reject(new ApprovalGateError(gate, "in_review"));
+      await p2Settled;
+    });
+    expect(taskRef.current.status).toBe("in_review");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("in_review");
+
+    // The older mutation then fails with a plain error. It must not be able
+    // to roll the board back past the newer, server-confirmed gate redirect.
+    await act(async () => {
+      older.reject(new Error(WRITE_FAILURE_MESSAGE));
+      await p1Settled;
+    });
+    expect(taskRef.current.status).toBe("in_review");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("in_review");
+    expect(toast.error).toHaveBeenCalledTimes(2);
   });
 });
