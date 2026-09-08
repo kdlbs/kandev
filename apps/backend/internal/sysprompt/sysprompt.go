@@ -503,3 +503,14 @@ func InterpolatePlaceholders(template string, taskID string) string {
 	result = strings.ReplaceAll(result, "{task_id}", taskID)
 	return result
 }
+
+// InterpolateStepEntryNumber replaces every occurrence of the exact literal
+// {step_entry_number} with entryNumber in base 10. entryNumber is a lower
+// bound on the true entry count: entries before task_step_transitions' first
+// row (2026-08-16) were never recorded and cannot be counted, so a task whose
+// history predates the ledger will under-count. Callers compute entryNumber
+// themselves (this function is pure, taking no context or database handle)
+// and are expected to have already floored it at 1.
+func InterpolateStepEntryNumber(template string, entryNumber int) string {
+	return strings.ReplaceAll(template, "{step_entry_number}", strconv.Itoa(entryNumber))
+}
