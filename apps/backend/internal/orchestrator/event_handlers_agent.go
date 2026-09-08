@@ -389,6 +389,9 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// above is the guarded admission decision; the drain performs its own
 	// cancellation check and leaves the queue untouched if a new cancellation
 	// claims the session in this handoff.
+	if s.isQueuedDispatchInFlight(data.SessionID) {
+		s.markQueuedDispatchDrainPending(data.SessionID)
+	}
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
@@ -818,6 +821,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+		s.drainQueuedDispatchIfPending(reservedSessionID)
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()
 		}
@@ -888,7 +892,9 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("queue_id", queuedMsg.ID))
 			return
 		}
-		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
+		if !turnStartAlreadyProcessed(queuedMsg.Metadata) {
+			s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
+		}
 	}
 
 	// Call promptTask with this entry's ID as a second ownership check. The
@@ -998,10 +1004,13 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	// ErrSessionRuntimeUnavailable: the runtime for a just-promoted session has
+	// not finished launching. Requeue so the drain on agent.boot_ready delivers it.
 	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
-		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
+		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
+		errors.Is(err, ErrSessionRuntimeUnavailable) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}

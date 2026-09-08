@@ -36,3 +36,4 @@ Use the record skill or follow the ADR format in
 0001-file-based-knowledge-system.md. Use the complete filename stem as the
 stable decision ID. New decisions use a date-prefixed filename so branches do
 not reserve a shared sequence number.
+

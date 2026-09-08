@@ -321,7 +321,11 @@ func (r *Repository) ListAllRuns(ctx context.Context, workspaceID string, limit 
 	return runs, nil
 }
 
-// GetActiveRunForFingerprint returns an active run matching the fingerprint.
+// GetActiveRunForFingerprint returns the newest active run matching the
+// fingerprint, if any. "Active" means status = task_created (the only
+// status a run can gate another fire from — see
+// routines.RoutineService's materialise* methods). The caller repairs
+// terminal, archived, or missing linked tasks before it applies policy.
 func (r *Repository) GetActiveRunForFingerprint(
 	ctx context.Context, routineID, fingerprint string,
 ) (*models.RoutineRun, error) {
@@ -341,6 +345,77 @@ func (r *Repository) GetActiveRunForFingerprint(
 	return &run, nil
 }
 
+// GetRoutineRunByLinkedTaskID returns the most recent run linked to
+// taskID, or nil if no run is linked to it (most tasks aren't
+// routine-created). Used by SyncRunStatus to find the run to close out
+// when its task reaches a terminal step. taskID must be non-empty:
+// linked_task_id defaults to "" for every lightweight run, so an empty
+// taskID would match (and let a caller rewrite) an arbitrary lightweight
+// run instead of correctly finding nothing.
+func (r *Repository) GetRoutineRunByLinkedTaskID(
+	ctx context.Context, taskID string,
+) (*models.RoutineRun, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	var run models.RoutineRun
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM office_routine_runs
+		WHERE linked_task_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), taskID).StructScan(&run)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// GetTaskTerminalStatus reports the linked task outcome: "done" for
+// COMPLETED, "failed" for FAILED, "cancelled" for CANCELLED or archived
+// tasks, "missing" when the task row was deleted, and "" otherwise.
+// Reads the shared tasks table directly because the routines gate must
+// distinguish an active task from a terminal, archived, or missing task.
+func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error) {
+	var state string
+	var archivedAt sql.NullTime
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, ''), archived_at FROM tasks WHERE id = ?`), taskID).Scan(&state, &archivedAt)
+	if err == sql.ErrNoRows {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if archivedAt.Valid {
+		return "cancelled", nil
+	}
+	switch state {
+	case taskStateCompleted:
+		return "done", nil
+	case taskStateFailed:
+		return "failed", nil
+	case taskStateCancelled:
+		return "cancelled", nil
+	default:
+		return "", nil
+	}
+}
+
+// TouchRoutineLastRun updates only last_run_at (+ updated_at) on a
+// routine. Deliberately narrower than UpdateRoutine, whose whole-row
+// snapshot write can revert concurrent edits to other columns (see
+// UpdateRoutineConfigFields above) — a dispatch in flight should never
+// clobber a config change made while it ran, or vice versa.
+func (r *Repository) TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routines SET last_run_at = ?, updated_at = ? WHERE id = ?
+	`), at, time.Now().UTC(), routineID)
+	return err
+}
+
 // UpdateRunStatus updates a run's status and optionally its linked task.
 func (r *Repository) UpdateRunStatus(
 	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
@@ -352,6 +427,31 @@ func (r *Repository) UpdateRunStatus(
 		WHERE id = ?
 	`), status, linkedTaskID, now, runID)
 	return err
+}
+
+// UpdateRunStatusIfTaskCreated closes a run out with a terminal status,
+// but only while it is still 'task_created' — the one status a routine
+// run can gate its fingerprint from. The WHERE clause makes this an
+// atomic claim: SyncRunStatus (TaskMoved-driven) and the concurrency
+// gate's own inline check (applyConcurrencyPolicy) can both observe the
+// same terminal task, and this is what lets exactly one of them win
+// instead of a read-then-write race rewriting an already-closed run's
+// status or completed_at. Returns whether this call was the one that
+// closed it.
+func (r *Repository) UpdateRunStatusIfTaskCreated(
+	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
+) (bool, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routine_runs
+		SET status = ?, linked_task_id = ?, completed_at = ?
+		WHERE id = ? AND status = 'task_created'
+	`), status, linkedTaskID, now, runID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
 }
 
 // UpdateRunCoalesced marks a run as coalesced into another run.

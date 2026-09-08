@@ -3909,6 +3909,20 @@ func (s *Service) autoStartPassthroughPrompt(
 // failed transiently and the queue was later drained via boot_ready.
 const metaKeyUserMessageRecorded = "user_message_recorded"
 
+// MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
+// hook already ran synchronously before queuing (see
+// task/handlers.queuePromptIfRuntimeUnavailable, which queues after
+// wsAddMessage already called ProcessOnTurnStart for the same user message).
+// executeQueuedMessageWithReservation reads this flag to skip its own
+// processOnTurnStartViaEngine call and avoid firing on_turn_start twice for
+// one prompt.
+const MetaKeyTurnStartAlreadyProcessed = "turn_start_already_processed"
+
+func turnStartAlreadyProcessed(metadata map[string]interface{}) bool {
+	processed, _ := metadata[MetaKeyTurnStartAlreadyProcessed].(bool)
+	return processed
+}
+
 type workflowMessageOrigin struct {
 	StepID    string
 	StepName  string
