@@ -112,7 +112,7 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	}
 	replacementPath := wt.Path + ".recovered-" + record.OperationID[:8]
 	replacementBranch := branch + "-recovered-" + record.OperationID[:8]
-	if _, err := m.gitAddWorktree(ctx, req.RepositoryPath, replacementBranch, replacementPath, branch); err != nil {
+	if err := m.ensureRecoveryReplacementWorktree(ctx, req.RepositoryPath, replacementBranch, replacementPath, branch); err != nil {
 		return nil, blockRecovery(jobPath, record, err)
 	}
 	if err := restoreSnapshot(snapshotPath, replacementPath, manifest); err != nil {
@@ -141,6 +141,28 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil, err
 	}
 	return &replacement, nil
+}
+
+// ensureRecoveryReplacementWorktree resumes the deterministic replacement
+// created before a crash, or creates it when the prior attempt did not reach Git.
+func (m *Manager) ensureRecoveryReplacementWorktree(ctx context.Context, repositoryPath, branch, replacementPath, baseRef string) error {
+	if m.IsValid(replacementPath) {
+		currentBranch, err := m.runBoundedGitInspect(ctx, replacementPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil || strings.TrimSpace(currentBranch) != branch {
+			return fmt.Errorf("recovery replacement has an unexpected branch")
+		}
+		return nil
+	}
+	exists, err := m.branchExists(ctx, repositoryPath, "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("inspect recovery replacement branch: %w", err)
+	}
+	if exists {
+		_, err = m.gitAddWorktreeExisting(ctx, repositoryPath, branch, replacementPath)
+	} else {
+		_, err = m.gitAddWorktree(ctx, repositoryPath, branch, replacementPath, baseRef)
+	}
+	return err
 }
 
 func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recoveryLock, error) {

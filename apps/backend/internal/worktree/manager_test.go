@@ -715,6 +715,62 @@ func TestManager_RecoverWorktreeRebuildsPartialSnapshotAfterCrash(t *testing.T) 
 	}
 }
 
+func TestManager_RecoverWorktreeResumesAfterReplacementWorktreeWasCreated(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree-resume-replacement")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/recover-resume-replacement", worktreePath, "main")
+	uniqueFile := filepath.Join(worktreePath, "preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("preserved\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover-resume-replacement", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/recover-resume-replacement", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	snapshotPath := worktreePath + ".kandev-recovery-resume001"
+	if err := snapshotCheckout(worktreePath, snapshotPath); err != nil {
+		t.Fatalf("snapshot checkout: %v", err)
+	}
+	manifest, err := checkoutManifest(snapshotPath)
+	if err != nil {
+		t.Fatalf("snapshot manifest: %v", err)
+	}
+	operationID := "resume001-operation"
+	replacementPath := worktreePath + ".recovered-" + operationID[:8]
+	replacementBranch := original.Branch + "-recovered-" + operationID[:8]
+	if _, err := mgr.gitAddWorktree(ctx, repoPath, replacementBranch, replacementPath, original.Branch); err != nil {
+		t.Fatalf("create replacement before crash: %v", err)
+	}
+	removeRecoveryAdminDirectory(t, worktreePath)
+	record := recoveryRecord{
+		OperationID: operationID, TaskID: original.TaskID, WorktreeID: original.ID,
+		Original: original.Path, Snapshot: snapshotPath, Manifest: manifest, State: RecoveryStateRematerializing,
+	}
+	if err := createRecoveryRecord(worktreePath+".kandev-recovery.json", record); err != nil {
+		t.Fatalf("create recovery record: %v", err)
+	}
+
+	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+	if err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	if replacement.Path != replacementPath {
+		t.Fatalf("replacement path = %q, want %q", replacement.Path, replacementPath)
+	}
+	content, err := os.ReadFile(filepath.Join(replacement.Path, "preserve-me.txt"))
+	if err != nil || string(content) != "preserved\n" {
+		t.Fatalf("recovered content = %q, err=%v", content, err)
+	}
+}
+
 func TestManager_RecoverWorktreePreservesEmptyDirectories(t *testing.T) {
 	ctx := context.Background()
 	cfg := newTestConfig(t)
