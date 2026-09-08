@@ -714,6 +714,39 @@ func TestManager_RecoverWorktreePreservesEmptyDirectories(t *testing.T) {
 	}
 }
 
+func TestCopySnapshotEntriesReplacesDestinationSymlinkWithDirectory(t *testing.T) {
+	source := t.TempDir()
+	if err := os.Mkdir(filepath.Join(source, "empty"), 0700); err != nil {
+		t.Fatalf("create snapshot directory: %v", err)
+	}
+	destination := t.TempDir()
+	external := filepath.Join(t.TempDir(), "external")
+	if err := os.Mkdir(external, 0750); err != nil {
+		t.Fatalf("create external directory: %v", err)
+	}
+	if err := os.Symlink(external, filepath.Join(destination, "empty")); err != nil {
+		t.Skipf("create destination symlink: %v", err)
+	}
+
+	if err := copySnapshotEntries(source, destination); err != nil {
+		t.Fatalf("copySnapshotEntries: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(destination, "empty"))
+	if err != nil {
+		t.Fatalf("lstat restored directory: %v", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("restored entry mode = %s, want directory without symlink", info.Mode())
+	}
+	externalInfo, err := os.Stat(external)
+	if err != nil {
+		t.Fatalf("stat external directory: %v", err)
+	}
+	if got := externalInfo.Mode().Perm(); got != 0750 {
+		t.Fatalf("external directory mode = %04o, want 0750", got)
+	}
+}
+
 func TestIsAdminDirectoryMissing(t *testing.T) {
 	repoPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")

@@ -519,6 +519,16 @@ func copySnapshotDirectory(entry os.DirEntry, target string) error {
 	if err != nil {
 		return err
 	}
+	if existing, err := os.Lstat(target); err == nil && !existing.IsDir() {
+		if !existing.Mode().IsRegular() && existing.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("unsupported recovery destination entry %q", target)
+		}
+		if err := os.Remove(target); err != nil {
+			return err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
 		return err
 	}
