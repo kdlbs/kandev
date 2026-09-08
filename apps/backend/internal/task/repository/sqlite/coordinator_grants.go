@@ -122,10 +122,11 @@ func (r *Repository) postgresCoordinatorGrantSchemaCurrent() (bool, error) {
 			SELECT 1 FROM pg_index index_ref
 			WHERE index_ref.indrelid = 'tasks'::regclass
 			  AND index_ref.indisunique
-			  AND index_ref.indkey = ARRAY[
-				(SELECT attnum FROM pg_attribute WHERE attrelid = index_ref.indrelid AND attname = 'workspace_id'),
+			  AND cardinality(index_ref.indkey::smallint[]) = 2
+			  AND (index_ref.indkey::smallint[])[0] =
+				(SELECT attnum FROM pg_attribute WHERE attrelid = index_ref.indrelid AND attname = 'workspace_id')
+			  AND (index_ref.indkey::smallint[])[1] =
 				(SELECT attnum FROM pg_attribute WHERE attrelid = index_ref.indrelid AND attname = 'id')
-			]::smallint[]
 		) AND EXISTS (
 			SELECT 1 FROM pg_constraint
 			WHERE conrelid = 'workspace_coordinator_grants'::regclass
