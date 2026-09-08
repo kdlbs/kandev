@@ -217,6 +217,8 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
+		"canvas_guidance_section":          "",
+		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
@@ -231,6 +233,13 @@ const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct pare
 
 const autopilotSection = `AUTOPILOT MODE:
 This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. The question tool ends the current turn, so do not make another tool call or continue working after you ask it. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
+`
+
+const canvasGuidanceSection = `CANVAS AUTHORING:
+For a requested Kandev canvas, discover create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create the draft in Kandev before writing application files. Read the authoring skill once and edit only inside the returned source directory. Publish through MCP and report the returned release status. Files or a successful local build do not create a published Kandev canvas.
+`
+
+const richOutputSection = `- show_rich_output_kandev: When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now. Do not implement the display as ASCII/SVG/HTML or with another app. Else prose; small text table: Markdown. Send version=1,title,blocks (1-4). Inline: {"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}. CSV line: {"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Metrics: {"type":"metrics","items":[{"label":"Passed","value":"38"}]}. Paths workspace-relative. Kandev owns axes/legends/tooltips/layout. Label series with units.
 `
 
 // stepCompleteSection is the description + instruction block for the
@@ -292,6 +301,7 @@ type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
+	IncludeCanvasGuidance          bool
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
@@ -335,12 +345,18 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.Autopilot {
 		autopilot = autopilotSection
 	}
+	canvasGuidance := ""
+	if options.IncludeCanvasGuidance {
+		canvasGuidance = canvasGuidanceSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
+		"canvas_guidance_section":          canvasGuidance,
+		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
 	})

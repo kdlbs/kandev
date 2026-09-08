@@ -53,6 +53,10 @@ type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type taskCanvasGuidanceResolver interface {
+	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
 	service             *service.Service
@@ -153,6 +157,7 @@ func (h *MessageHandlers) injectMessageContext(
 	configMode bool,
 	startCreatedSession bool,
 	titleOwner bool,
+	includeCanvasGuidance bool,
 	content string,
 	trustedPromptContext string,
 ) string {
@@ -178,10 +183,22 @@ func (h *MessageHandlers) injectMessageContext(
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
+		IncludeCanvasGuidance:          includeCanvasGuidance,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
+}
+
+func (h *MessageHandlers) resolveCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskCanvasGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -593,8 +610,16 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// "type in chat to start the agent" path. Wrap with the Kandev MCP
 		// system block before persisting so the DB row matches what the agent
 		// receives (and "Show formatted" reveals it).
+		includeCanvasGuidance, resolveErr := h.resolveCanvasGuidance(ctx, req.TaskID, req.TaskSessionID)
+		if resolveErr != nil {
+			h.logger.Warn("failed to resolve canvas prompt capability",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(resolveErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt capabilities", nil)
+		}
 		storedContent = h.injectMessageContext(
-			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, storedContent,
 			trustedPromptContext,
 		)
 	}

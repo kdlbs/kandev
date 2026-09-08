@@ -119,6 +119,21 @@ test.describe("Plugin-backed canvases on mobile", () => {
       // the option, so this remains deterministic under strict locators.
       await testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last().tap();
 
+      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
+      for (const tool of [
+        "create_canvas_kandev",
+        "read_canvas_authoring_skill_kandev",
+        "publish_canvas_kandev",
+      ]) {
+        expect(defaultPrompt, `mobile preset is missing ${tool}`).toContain(tool);
+      }
+      expect(defaultPrompt).not.toContain("e2e:mcp:");
+      await expect
+        .poll(() =>
+          testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        )
+        .toBe(true);
+
       const canvasTitle = "E2E Guided Canvas";
       const taskTitle = "E2E Guided Canvas Task";
       const description = [
@@ -178,6 +193,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await approvePendingCanvasThroughHost(testPage, apiClient, published);
 
       const createdTask = await apiClient.getTask(taskId);
+      expect(createdTask.description).toBe(description);
       expect(createdTask.repositories ?? []).toHaveLength(0);
       const { sessions } = await apiClient.listTaskSessions(taskId);
       expect(

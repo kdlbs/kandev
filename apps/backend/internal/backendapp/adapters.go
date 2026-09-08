@@ -1136,6 +1136,12 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
 }
 
+// TaskSessionCanvasGuidanceEnabled forwards the resolved capability used when
+// the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
 func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return w.svc.ForegroundActivity(sessionID)

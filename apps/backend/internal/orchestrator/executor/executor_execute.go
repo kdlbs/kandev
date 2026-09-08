@@ -101,6 +101,19 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
+// ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
+// be sent to a session launch. Prompt producers use this read-only view so
+// optional guidance follows the same surface and capability resolver as the
+// runtime MCP server.
+func (e *Executor) ResolveTaskSessionMCPProfile(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (mcpprofile.Context, error) {
+	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+}
+
 func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
 	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
 		return profile.WithCapability(mcpprofile.CapabilityCanvas)
