@@ -135,6 +135,10 @@ func (m *mockAgentManager) CancelPermissionBySessionID(context.Context, string, 
 	return nil, nil
 }
 
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return client.ProbeResultUnknown, nil
+}
+
 func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	return nil
 }
@@ -1235,6 +1239,20 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	env := m.taskEnvironments[environmentID]
+	if env == nil {
+		return false, fmt.Errorf("task environment not found: %s", environmentID)
+	}
+	if env.TaskDirName != "" {
+		return false, nil
+	}
+	env.TaskDirName = taskDirName
+	m.writeCallLog = append(m.writeCallLog, "stamp_task_dir")
+	return true, nil
 }
 func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
 	if m.finalizeTaskEnvironmentErr != nil {

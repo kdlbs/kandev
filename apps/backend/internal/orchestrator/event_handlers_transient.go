@@ -85,6 +85,7 @@ type capturedPrompt struct {
 	model       string
 	planMode    bool
 	attachments []v1.MessageAttachment
+	onAccepted  func(turnID string)
 }
 
 // transientRetryEntry tracks one session's in-progress retry loop: the current
@@ -109,6 +110,13 @@ func (e *transientRetryEntry) claim() bool {
 // rememberTurnPrompt caches the raw outbound prompt so a transient retry can
 // re-drive the same turn without the original caller's context.
 func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment) {
+	s.rememberTurnPromptWithAccepted(sessionID, text, model, planMode, attachments, nil)
+}
+
+func (s *Service) rememberTurnPromptWithAccepted(
+	sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment,
+	onAccepted func(turnID string),
+) {
 	if sessionID == "" {
 		return
 	}
@@ -117,6 +125,7 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 		model:       model,
 		planMode:    planMode,
 		attachments: attachments,
+		onAccepted:  onAccepted,
 	})
 }
 
@@ -175,6 +184,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessage(ctx, data, classified, attempt, delay, retryAt)
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Park the session in WAITING_FOR_INPUT (a calm, banner-less state that
@@ -306,7 +316,9 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 
-	if _, err := s.PromptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false); err != nil {
+	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, promptTaskOptions{
+		onAccepted: cp.onAccepted,
+	}); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
