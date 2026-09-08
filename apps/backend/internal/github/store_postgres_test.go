@@ -1,11 +1,51 @@
 package github
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/testutil"
 )
+
+// Reviewer-requested regression coverage for the PostgreSQL upgrade path.
+func TestPostgresStoreAddsCIRunRecoveryTimestampColumnsOnUpgrade(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			archived_at TIMESTAMPTZ
+		)`); err != nil {
+		t.Fatalf("create prerequisite tables: %v", err)
+	}
+	if _, err := NewStore(database, database); err != nil {
+		t.Fatalf("initialize GitHub store: %v", err)
+	}
+	for _, column := range []string{"execution_lease_expires_at", "provider_retry_after"} {
+		if _, err := database.Exec(`ALTER TABLE github_ci_run_requests DROP COLUMN ` + column); err != nil {
+			t.Fatalf("drop legacy-missing column %s: %v", column, err)
+		}
+	}
+
+	if _, err := NewStore(database, database); err != nil {
+		t.Fatalf("run GitHub store upgrade: %v", err)
+	}
+	for _, column := range []string{"execution_lease_expires_at", "provider_retry_after"} {
+		var dataType string
+		if err := database.Get(&dataType, `SELECT data_type
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'github_ci_run_requests'
+				AND column_name = $1`, column); err != nil {
+			t.Fatalf("read %s type: %v", column, err)
+		}
+		if !strings.EqualFold(dataType, "timestamp with time zone") {
+			t.Fatalf("%s type = %q, want timestamp with time zone", column, dataType)
+		}
+	}
+}
 
 func TestPostgresStoreSchemaReplay(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
