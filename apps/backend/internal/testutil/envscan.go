@@ -19,8 +19,9 @@ import (
 // scrub against silently falling behind new environment reads.
 //
 // os.Getenv and os.LookupEnv are always treated as environment reads. They are
-// matched by the file-local import name bound to the os package. Blank and dot
-// imports are not scanned because neither supports selector calls.
+// matched by the file-local import name bound to the os package. Dot imports
+// are matched by bare Getenv and LookupEnv calls. Blank imports are not scanned
+// because they name no package.
 // Names are likewise resolved against package-level constants with no scope
 // analysis, so a local variable shadowing one of those constants resolves to
 // the constant's value rather than its own.

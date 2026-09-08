@@ -106,6 +106,22 @@ func read() string { return stdos.Getenv("BAR") }
 	}
 }
 
+// TestUncoveredEnvReadsCoveredAliasedOSImport documents that alias resolution
+// uses the same scrub/exempt classification as the ordinary os import path.
+func TestUncoveredEnvReadsCoveredAliasedOSImport(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import stdos "os"
+
+func read() string { return stdos.Getenv("FOO") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil)
+	if len(messages) != 0 {
+		t.Fatalf("covered aliased read reported as uncovered: %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsUncoveredDotImportedOS(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
@@ -121,6 +137,23 @@ func lookupenv() (string, bool) { return LookupEnv("BAZ") }
 	}
 	if !strings.Contains(messages[0], "BAR") || !strings.Contains(messages[1], "BAZ") {
 		t.Fatalf("messages %q do not name both uncovered variables", messages)
+	}
+}
+
+// TestUncoveredEnvReadsCoveredDotImportedOS documents that dot-imported reads
+// are classified against the caller's scrubbed and exempt environment names.
+func TestUncoveredEnvReadsCoveredDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func getenv() string { return Getenv("FOO") }
+func lookupenv() (string, bool) { return LookupEnv("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, []string{"BAR"})
+	if len(messages) != 0 {
+		t.Fatalf("covered dot-imported reads reported as uncovered: %v", messages)
 	}
 }
 
