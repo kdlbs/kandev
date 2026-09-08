@@ -554,6 +554,9 @@ func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.Ex
 func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	return nil
 }
@@ -603,6 +606,9 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 }
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
+}
+func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil

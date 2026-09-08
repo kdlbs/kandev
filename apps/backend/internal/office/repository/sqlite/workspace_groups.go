@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -441,4 +442,37 @@ func (r *Repository) GetWorkspaceGroupForTask(ctx context.Context, taskID string
 		return nil, err
 	}
 	return &g, nil
+}
+
+// GetActiveWorkspaceGroupTaskIDs reports, for each of taskIDs, whether the
+// task holds an active (non-released) workspace-group membership — the same
+// predicate GetWorkspaceGroupForTask applies for one task, batched behind a
+// single IN-clause query so a projection covering many tasks does not fan
+// out into one query per task.
+func (r *Repository) GetActiveWorkspaceGroupTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(taskIDs))
+	args := make([]interface{}, len(taskIDs))
+	for i, id := range taskIDs {
+		placeholders[i], args[i] = "?", id
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(
+		`SELECT DISTINCT task_id FROM task_workspace_group_members WHERE released_at IS NULL AND task_id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			return nil, err
+		}
+		result[taskID] = true
+	}
+	return result, rows.Err()
 }

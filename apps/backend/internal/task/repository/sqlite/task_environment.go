@@ -164,6 +164,14 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 	return env, nil
 }
 
+// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs, whether
+// any task_environments row exists — the same unconditional presence check
+// runnerHasEnvironment makes for one task, batched behind a single IN-clause
+// query for a projection covering many.
+func (r *Repository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return r.batchedTaskIDExistence(ctx, "task_environments", taskIDs)
+}
+
 // UpdateTaskEnvironment updates an existing task environment.
 // Per-repo rows are not touched; use the TaskEnvironmentRepo CRUD methods.
 func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {

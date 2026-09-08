@@ -303,6 +303,14 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 	return scanExecutorRunningRows(rows)
 }
 
+// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs, whether
+// any executors_running row exists — the same unconditional presence check
+// runnerHasExecutorRunning makes for one task, batched behind a single
+// IN-clause query for a projection covering many.
+func (r *Repository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return r.batchedTaskIDExistence(ctx, "executors_running", taskIDs)
+}
+
 func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")

@@ -560,6 +560,11 @@ type ExecutorRepository interface {
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any executors_running row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -600,6 +605,11 @@ type TaskEnvironmentRepository interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any task_environments row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	DeleteTaskEnvironment(ctx context.Context, id string) error
 	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error

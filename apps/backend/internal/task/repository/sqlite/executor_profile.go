@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const jsonNull = "null"
@@ -54,7 +55,7 @@ func (r *Repository) GetExecutorProfile(ctx context.Context, id string) (*models
 		&configJSON, &profile.PrepareScript, &profile.CleanupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("executor profile not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", repoerrors.ErrExecutorProfileNotFound, id)
 	}
 	if err != nil {
 		return nil, err

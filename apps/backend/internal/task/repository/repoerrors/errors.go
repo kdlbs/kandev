@@ -83,6 +83,10 @@ func (e *ErrRunnerMutabilityConflict) Error() string {
 // target, not the task.
 var ErrRunnerCompatibilityConflict = errors.New("target cannot materialize repository")
 
+// ErrExecutorProfileNotFound reports that no executor profile row matched
+// the supplied id.
+var ErrExecutorProfileNotFound = errors.New("executor profile not found")
+
 // ErrRunnerEvaluationUnavailable reports that a runner switch could not be
 // decided or applied — a failed read, a failed lock acquisition, a stale
 // compatibility-gate snapshot (AC-TASKS-RUNNER-SWITCH-002.7c), a failed
