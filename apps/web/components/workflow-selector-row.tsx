@@ -2,10 +2,24 @@
 
 import { Fragment, memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCheck, IconChevronDown, IconInfoCircle, IconLogicBuffer } from "@tabler/icons-react";
+import {
+  IconArrowBigRightLines,
+  IconCheck,
+  IconChevronDown,
+  IconLogicBuffer,
+} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
@@ -122,35 +136,60 @@ function WorkflowSelectorTrigger({
 
 function LaunchDestinationInfo() {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const label = t("task:launchDestinationHelpLabel");
+  const description = t("task:launchDestinationHelp");
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+      aria-label={label}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      data-testid="task-create-launch-step-info"
+    >
+      <IconArrowBigRightLines
+        className="h-3.5 w-3.5"
+        aria-hidden="true"
+        data-testid="task-create-launch-step-arrow"
+      />
+    </Button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent data-testid="task-create-launch-step-help-drawer">
+          <DrawerHeader>
+            <DrawerTitle>{label}</DrawerTitle>
+            <DrawerDescription>{description}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          aria-label={t("task:launchDestinationHelpLabel")}
-          data-testid="task-create-launch-step-info"
-        >
-          <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        </Button>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
       <TooltipContent className="max-w-[320px] text-xs leading-relaxed">
-        {t("task:launchDestinationHelp")}
+        {description}
       </TooltipContent>
     </Tooltip>
   );
 }
 
 function LaunchDestinationLabel({ stepName }: { stepName: string }) {
-  const { t } = useTranslation();
   return (
     <span
       className="min-w-0 max-w-[45vw] shrink truncate text-xs text-muted-foreground"
       data-testid="task-create-launch-step"
     >
-      {t("task:launchDestination", { step: stepName })}
+      {stepName}
     </span>
   );
 }

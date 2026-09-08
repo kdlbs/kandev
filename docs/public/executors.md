@@ -101,15 +101,30 @@ Review the selected bundles before saving the profile.
 ### Model selection in remote executors
 
 The host model probe helps edit a profile, but it is not the launch authority.
-At launch, the selected executor's advertised ACP catalog decides whether
-Kandev sends the saved model. If the executor does not advertise that model,
-Kandev sends no request for it. It uses an advertised fallback only when one
-exists; otherwise the agent uses its current or default model.
+At launch, the selected executor's advertised ACP catalog decides the model.
+For profiles without automatic fallback, Kandev applies this deterministic
+order:
 
-Kandev writes one warning to task chat when this happens. The warning can list
-the requested model, effective model, agent, executor, and executor profile.
-It also tells you to check executor credentials, copied agent configuration,
-and the agent version. Kandev does not rewrite the saved profile model.
+1. An exact advertised model ID.
+2. An advertised explicit fallback.
+3. One unique advertised bracketed variation of the saved model.
+4. The agent's current or default model.
+
+For profiles with automatic fallback enabled, an absent saved model keeps the
+legacy behavior: Kandev ignores the explicit fallback and does not infer a
+variation. It uses the agent's current or default model instead.
+
+For example, a saved `opus` model uses `opus[1m]` when that is the only
+advertised variation. With both `opus[270k]` and `opus[1m, fast]`, Kandev
+does not infer a choice and uses the agent's current or default model instead.
+It treats model IDs as case-sensitive and variation text as opaque.
+
+Kandev writes one warning to task chat when the effective model differs from
+the saved model. The warning can list the requested model, effective model,
+agent, executor, and executor profile. It also tells you to check executor
+credentials, copied agent configuration, and the agent version. Kandev does
+not rewrite the saved profile model, including after applying a unique
+variation.
 Portable configuration can improve parity, but it does not guarantee equal
 host and executor model catalogs.
 

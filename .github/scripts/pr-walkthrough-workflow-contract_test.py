@@ -129,7 +129,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             'PUBLIC_URL="${WALKTHROUGH_BASE_URL%/}/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             "RESPONSE_META_PATH=pr-walkthrough-public.response",
             "curl --fail",
-            "--write-out '%{http_code}\\t%{content_type}\\t%{url_effective}'",
+            "--write-out '%{http_code}\\t%{content_type}\\t%{url_effective}\\n'",
             "response_status",
             'response_effective_url" != "$PUBLIC_URL"',
             "response_content_type",

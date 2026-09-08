@@ -46,6 +46,11 @@ const (
 	// read/write/sort paths.
 	handoffSourceTaskIDKey = "source_task_id"
 	handoffHandedOffAtKey  = "handed_off_at"
+
+	// handoffOutcomeKey is the activity-log detail field name shared by the
+	// source and target log entries in logHandoffActivity, extracted so
+	// goconst doesn't flag the repeated literal.
+	handoffOutcomeKey = "outcome"
 )
 
 // handoffError carries a WS error code alongside its message so validation
@@ -818,7 +823,7 @@ func (h *Handlers) logHandoffActivity(
 	sourceDetails, _ := json.Marshal(map[string]interface{}{
 		"counterpart_task_id":      deliveryTask.ID,
 		"counterpart_workspace_id": targetWorkspaceID,
-		"outcome":                  outcome,
+		handoffOutcomeKey:          outcome,
 	})
 	h.dashboardSvc.LogActivityWithRun(ctx, principal.WorkspaceID, "agent", actorID, "task.handed_off",
 		"task", principal.CallerTaskID, string(sourceDetails), runID, principal.CallerSessionID)
@@ -826,7 +831,7 @@ func (h *Handlers) logHandoffActivity(
 	targetDetails, _ := json.Marshal(map[string]interface{}{
 		"counterpart_task_id":      principal.CallerTaskID,
 		"counterpart_workspace_id": principal.WorkspaceID,
-		"outcome":                  outcome,
+		handoffOutcomeKey:          outcome,
 	})
 	h.dashboardSvc.LogActivityWithRun(ctx, targetWorkspaceID, "agent", actorID, "task.handoff_received",
 		"task", deliveryTask.ID, string(targetDetails), runID, principal.CallerSessionID)

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -412,6 +413,36 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 	// Should NOT contain the default work assignment phrasing.
 	if strings.Contains(prompt, "You have been assigned") {
 		t.Errorf("review prompt should not contain assignment phrasing:\n%s", prompt)
+	}
+}
+
+// TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision is the
+// anti-contradiction assertion: a reviewer whose run holds the decision seat
+// must see record_step_decision in its own allowed-actions list, so it never
+// reads the writeDecisionContract instruction below as excluded by its own
+// stated permissions.
+func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:         service.RunReasonTaskAssigned,
+		TaskIdentifier: "KAN-10",
+		TaskTitle:      "Auth service",
+		StageType:      "review",
+		RunID:          "run-1",
+		AgentID:        "agent-1",
+		AllowedActions: []string{officeruntime.CapabilityPostComment, officeruntime.AvailableActionRecordStepDecision},
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if !strings.Contains(prompt, "You must call the record_step_decision_kandev tool") {
+		t.Fatalf("expected the decision contract sentence:\n%s", prompt)
+	}
+	allowedIdx := strings.Index(prompt, "- Allowed actions:")
+	if allowedIdx == -1 {
+		t.Fatalf("expected an allowed actions line:\n%s", prompt)
+	}
+	allowedLine := prompt[allowedIdx : strings.Index(prompt[allowedIdx:], "\n")+allowedIdx]
+	if !strings.Contains(allowedLine, officeruntime.AvailableActionRecordStepDecision) {
+		t.Fatalf("allowed actions line must list record_step_decision so it does not contradict the decision contract:\n%s", allowedLine)
 	}
 }
 

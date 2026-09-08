@@ -58,6 +58,19 @@ const AGENT_WITH_GPT: AvailableAgent = {
   },
 } as unknown as AvailableAgent;
 
+const AGENT_WITH_OPUS_VARIATION: AvailableAgent = {
+  name: "omp-acp",
+  available: true,
+  model_config: {
+    default_model: "opus[1m]",
+    available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    current_model_id: "opus[1m]",
+    available_modes: [],
+    supports_dynamic_models: false,
+    status: "ok",
+  },
+} as unknown as AvailableAgent;
+
 const GONE_MODEL = "claude-gone";
 const DATA_DISABLED = "data-disabled";
 const MODEL_PROBE_WARNING_TEST_ID = "agent-profile-model-probe-warning";
@@ -223,6 +236,14 @@ describe("useAgentProfileOptions executor-authoritative model hint", () => {
   it("keeps a profile with an available start model selectable", () => {
     const option = renderOptions([profileOption({ model: "gpt-5" })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+  });
+
+  it("names a unique advertised variation without disabling the profile", () => {
+    setAvailableAgents([AGENT_WITH_OPUS_VARIATION]);
+    const option = renderOptions([profileOption({ model: "opus" })]);
+
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(getModelProbeWarningLabel()).toContain("opus[1m]");
   });
 
   it("keeps a profile with an empty (agent default) model selectable", () => {

@@ -43,6 +43,7 @@ export function buildStateOverrides(m: DefaultState) {
     shell: m.shell,
     processes: m.processes,
     gitStatus: m.gitStatus,
+    gitCheckoutGeneration: m.gitCheckoutGeneration,
     contextWindow: m.contextWindow,
     agents: m.agents,
     sessionMode: m.sessionMode,
