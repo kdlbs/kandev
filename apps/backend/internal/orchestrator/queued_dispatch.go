@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 
@@ -292,6 +293,22 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
 		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}
+}
+
+func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
+	if sessionID != "" {
+		s.queuedDispatchDrainPending.Store(sessionID, struct{}{})
+	}
+}
+
+func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if _, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID); !pending {
+		return
+	}
+	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)
 }
 
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim
