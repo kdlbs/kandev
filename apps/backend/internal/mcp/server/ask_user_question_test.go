@@ -469,3 +469,14 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	assert.GreaterOrEqual(t, progressSeen, 1, "expected at least one keepalive progress notification")
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
 }
+
+// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor pins
+// askQuestionKeepAliveInterval comfortably below the measured 300000ms idle
+// watchdog floor that Claude Code's CLI applies to non-stdio MCP transports
+// (see docs/specs/agents/system-design/mcp-timeout-budgets.md). Raising the
+// production constant above that floor would silently break every question
+// that outlives it, and TestAskUserQuestion_StreamsKeepAliveDuringWait
+// wouldn't catch it because it overrides the interval before running.
+func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor(t *testing.T) {
+	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+}
