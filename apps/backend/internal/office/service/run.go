@@ -123,6 +123,53 @@ func (s *Service) QueueRunWithActor(
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }
 
+// QueueRunFromTaskBoundary enqueues a run attributed to the task-boundary
+// carrier read off taskID's metadata (AC-OFFICE-RUN-CAUSATION-001.5/.18):
+// the carrier's actor and lineage stand in for a live causing run,
+// without requiring a read of the run that created the task. A taskID
+// whose metadata carries no carrier at all (the common case: the task
+// was never created by an Office trigger) resolves to the same
+// system-actor root behaviour QueueRun already provides.
+func (s *Service) QueueRunFromTaskBoundary(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, taskID string,
+) error {
+	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
+		return err
+	}
+
+	if s.runsService != nil {
+		carrier := s.taskBoundaryCarrier(ctx, taskID)
+		humanRooted := carrier.HumanRooted
+		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+			Reason:                reason,
+			IdempotencyKey:        idempotencyKey,
+			Payload:               PayloadWithAgent(payload, agentInstanceID),
+			ActorKind:             carrier.ActorKind,
+			ActorID:               carrier.ActorID,
+			RoutineID:             carrier.RoutineID,
+			CarrierHumanRooted:    &humanRooted,
+			CarrierCreatingRunID:  carrier.CreatingRunID,
+			CarrierCausationID:    carrier.CausationID,
+			CarrierCausationDepth: carrier.CausationDepth,
+		})
+		return err
+	}
+	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
+}
+
+// taskBoundaryCarrier reads and validates the causation carrier off
+// taskID's metadata. A metadata read failure (task not found, transient
+// error) is treated the same as "no carrier": this lookup must never
+// block the enqueue it's attached to.
+func (s *Service) taskBoundaryCarrier(ctx context.Context, taskID string) taskBoundaryCarrier {
+	metadata, err := s.repo.GetTaskMetadata(ctx, taskID)
+	if err != nil {
+		return taskBoundaryCarrier{}
+	}
+	return carrierFromTaskMetadata(metadata)
+}
+
 // queueRunInline performs the legacy in-office insert path used when
 // no runs service is wired (older tests, transitional deployments).
 // Behaviour matches the pre-Phase-3 implementation.

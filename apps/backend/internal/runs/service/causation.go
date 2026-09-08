@@ -134,13 +134,24 @@ func (s *Service) applyCausationLineage(
 ) error {
 	if req.CausingRunID == "" {
 		// AC-OFFICE-RUN-CAUSATION-001.9/.13: a human actor always roots a
-		// new chain; otherwise the task-boundary carrier reports
-		// human-rooted across a boundary with no live causing run to read
-		// it from.
+		// new chain, discarding any carrier lineage or human-rooted flag
+		// the task-boundary carrier reports.
 		if actorKind == models.ActorKindUser {
 			res.HumanRooted = true
-		} else if req.CarrierHumanRooted != nil {
+			return nil
+		}
+		if req.CarrierHumanRooted != nil {
 			res.HumanRooted = *req.CarrierHumanRooted
+		}
+		// AC-OFFICE-RUN-CAUSATION-001.18/.24: the task-boundary carrier's
+		// creating run identifier stands in for a live causing run,
+		// without requiring a read of that run. An empty value means the
+		// resulting run is a root regardless of what the carried
+		// causation identifier and depth say.
+		if req.CarrierCreatingRunID != "" {
+			res.ParentRunID = req.CarrierCreatingRunID
+			res.CausationDepth = req.CarrierCausationDepth + 1
+			res.CausationID = req.CarrierCausationID
 		}
 		return nil
 	}

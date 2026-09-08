@@ -115,6 +115,16 @@ type QueueRunRequest struct {
 	// to report (a direct CausingRunID enqueue derives human-rooted from
 	// that run instead).
 	CarrierHumanRooted *bool
+	// CarrierCreatingRunID and CarrierCausationDepth carry the
+	// task-boundary carrier's lineage across a task boundary without
+	// requiring a read of the creating run (AC-OFFICE-RUN-CAUSATION-001.18).
+	// Both are empty/zero when the caller has no carrier lineage to
+	// report. Per AC-OFFICE-RUN-CAUSATION-001.24, an empty
+	// CarrierCreatingRunID means the resulting run is a root regardless of
+	// what CarrierCausationID and CarrierCausationDepth say.
+	CarrierCreatingRunID  string
+	CarrierCausationID    string
+	CarrierCausationDepth int
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two

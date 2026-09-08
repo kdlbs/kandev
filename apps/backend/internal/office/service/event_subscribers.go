@@ -940,7 +940,7 @@ func (s *Service) queueTaskAssignedRun(
 	}
 	payload := mustJSON(map[string]string{"task_id": taskID})
 	key := fmt.Sprintf("task_assigned:%s:%s", taskID, agentProfileID)
-	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
+	return s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues
