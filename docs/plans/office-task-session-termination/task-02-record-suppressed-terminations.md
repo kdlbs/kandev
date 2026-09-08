@@ -1,7 +1,7 @@
 ---
 id: "02-record-suppressed-terminations"
 title: "Record suppressed session terminations"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-guard-retained-capacity"
@@ -108,4 +108,21 @@ git diff --check
 
 ## Results
 
-Pending.
+- Added `internal/office/dashboard/session_termination_metrics.go` with
+  `office_session_term_suppressed_total`, following the
+  `"k1=v1;k2=v2"` expvar label idiom used by the office scheduler and the
+  stall detectors.
+- Labels are `reason` (three values) and `outcome` (`runner`, `seat`,
+  `read_failed`), so a read fault is countable apart from a genuinely retained
+  capacity. Both increments are issued from the single guarded termination
+  helper, so no call site can forget one.
+- `TestSuppressedTermination_IsCounted` asserts one increment per cause using
+  before/after deltas, since expvar maps are process-global and shared across
+  the package's tests. `TestSuppressionLabels_AreBounded` scans every label the
+  package produced, rejecting any that carries an identifier, has other than
+  two dimensions, or names a value outside the closed sets. It fails rather
+  than passing vacuously when no label was recorded.
+- Documented the counter and both label dimensions in `CLAUDE.md`'s
+  Observability section, beside `office_stall_*` and `routing_*`.
+- `go build ./...` passes, `internal/office/dashboard` passes with `-race`, and
+  `golangci-lint` reports 0 issues for the package.

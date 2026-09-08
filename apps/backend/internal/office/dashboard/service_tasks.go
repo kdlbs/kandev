@@ -996,11 +996,13 @@ func (s *DashboardService) terminateSessionUnlessRetained(
 
 	capacity, err := s.retainsTaskCapacity(ctx, taskID, agentProfileID)
 	if err != nil {
+		recordSessionTermSuppressed(reason, sessionTermSuppressReadFailed)
 		s.logger.Warn("office session termination suppressed: capacity read failed",
 			append(fields, zap.Error(err))...)
 		return
 	}
 	if capacity != capacityNone {
+		recordSessionTermSuppressed(reason, string(capacity))
 		s.logger.Info("office session termination suppressed: agent retains a capacity",
 			append(fields, zap.String("retained_capacity", string(capacity)))...)
 		return
