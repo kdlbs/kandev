@@ -213,6 +213,22 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+
+	// The MetaKeyOfficeCarrier* keys are the task-boundary causation carrier
+	// set (AC-OFFICE-RUN-CAUSATION-001.18), persisted on a task when an
+	// Office trigger creates it (AC-OFFICE-RUN-CAUSATION-001.5): an agent
+	// creating a task through a runtime action, or a routine fire creating
+	// a task. A run later queued because of that task inherits these
+	// values as though the task creation were the causing run, without
+	// needing to read the creating run row again — which may no longer
+	// exist by the time the task is acted on.
+	MetaKeyOfficeCarrierCausationID    = "office_carrier_causation_id"
+	MetaKeyOfficeCarrierCausationDepth = "office_carrier_causation_depth"
+	MetaKeyOfficeCarrierCreatingRunID  = "office_carrier_creating_run_id"
+	MetaKeyOfficeCarrierHumanRooted    = "office_carrier_human_rooted"
+	MetaKeyOfficeCarrierRoutineID      = "office_carrier_routine_id"
+	MetaKeyOfficeCarrierActorKind      = "office_carrier_actor_kind"
+	MetaKeyOfficeCarrierActorID        = "office_carrier_actor_id"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable

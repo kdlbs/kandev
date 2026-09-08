@@ -19,6 +19,9 @@ type CommentWriter interface {
 
 // TaskCreator is the task mutation dependency used by runtime actions.
 type TaskCreator interface {
+	// CreateOfficeTaskAsAgent's causingRunID is the run this task creation
+	// happened inside (AC-OFFICE-RUN-CAUSATION-001.5), empty when there is
+	// none.
 	CreateOfficeTaskAsAgent(
 		ctx context.Context,
 		callerAgentID string,
@@ -27,6 +30,7 @@ type TaskCreator interface {
 		assigneeAgentID string,
 		title string,
 		description string,
+		causingRunID string,
 	) (string, error)
 	CreateOfficeSubtaskAsAgent(
 		ctx context.Context,
@@ -78,6 +82,10 @@ func (i CreateTaskInput) unsupportedField() string {
 }
 
 // CreateTask creates a root Office task or a child of the requested parent.
+// A root task creation is an Office trigger (AC-OFFICE-RUN-CAUSATION-001.5):
+// runCtx.RunID is threaded through as the causing run, so the task-boundary
+// causation carrier gets persisted on it. Subtask creation does not carry
+// one yet (task/service.ChildTaskSpec has no metadata field to receive it).
 func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input CreateTaskInput) (string, error) {
 	if input.ParentTaskID != "" {
 		if !runCtx.Capabilities.Allows(CapabilityCreateSubtask) {
@@ -115,6 +123,7 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	}
 	return a.deps.Tasks.CreateOfficeTaskAsAgent(
 		ctx, runCtx.AgentID, runCtx.WorkspaceID, input.ProjectID, input.AssigneeAgentID, input.Title, input.Description,
+		runCtx.RunID,
 	)
 }
 

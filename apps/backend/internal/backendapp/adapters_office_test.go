@@ -99,7 +99,7 @@ func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
 	ctx := context.Background()
 
 	agentTaskID, err := adapter.CreateOfficeTaskAsAgent(
-		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime",
+		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime", nil,
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)

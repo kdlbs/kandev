@@ -161,15 +161,19 @@ type taskCreatorAdapter struct {
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding)
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding, nil)
 }
 
-func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated)
+func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+	metadata map[string]interface{},
+) (string, error) {
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated, metadata)
 }
 
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
+	metadata map[string]interface{},
 ) (string, error) {
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
@@ -178,6 +182,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Origin:                 origin,
+		Metadata:               metadata,
 	})
 	if err != nil {
 		return "", err

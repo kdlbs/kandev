@@ -109,6 +109,7 @@ func (r *handlerTaskCreator) CreateOfficeTaskAsAgent(
 	assigneeAgentID string,
 	_ string,
 	_ string,
+	_ string,
 ) (string, error) {
 	r.calls++
 	r.rootWorkspaces = append(r.rootWorkspaces, workspaceID)
