@@ -229,6 +229,10 @@ func (r *Repository) attemptClaim(
 		return nil, nil
 	}
 
+	if claimWindowHook != nil {
+		claimWindowHook(ctx, tx, claim.id)
+	}
+
 	claimed, err := r.claimAutoSeat(ctx, tx, claim.id, agentID)
 	if err != nil {
 		return nil, err
@@ -422,6 +426,17 @@ func (r *Repository) findClaimableAutoSeat(
 	}
 	return &candidates[0], nil
 }
+
+// claimWindowHook is a yield point between the statement that selects a
+// claimable seat and the statement that reassigns it. It is nil in every build
+// that does not set it, nothing production reads it, and it carries no
+// behavior of its own.
+//
+// It exists because that window is the only place claimAutoSeat's decision
+// condition can add anything the selection did not already provide, and the
+// window cannot be reached by racing goroutines in a way a test can rely on.
+// Unexported, so only this package's tests can set it.
+var claimWindowHook func(ctx context.Context, tx *sqlx.Tx, seatID string)
 
 // claimAutoSeat reassigns the seat identified by seatID to agentID and
 // marks it "manual", conditional on the seat still carrying provenance
