@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -303,6 +305,10 @@ func (r *Repository) runMigrations() error {
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("task_sessions.queue_incarnation_id", `ALTER TABLE task_sessions ADD COLUMN queue_incarnation_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.backfillTaskSessionQueueIncarnations(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_session_turns.execution_profile_id", `ALTER TABLE task_session_turns ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_session_turns.route_generation", `ALTER TABLE task_session_turns ADD COLUMN route_generation BIGINT NOT NULL DEFAULT 0`)
 
@@ -369,6 +375,37 @@ func (r *Repository) runMigrations() error {
 		return fmt.Errorf("required task migration: %w", err)
 	}
 
+	return nil
+}
+func (r *Repository) backfillTaskSessionQueueIncarnations() error {
+	rows, err := r.db.Queryx(`SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
+	if err != nil {
+		return fmt.Errorf("list sessions missing queue incarnation: %w", err)
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan session missing queue incarnation: %w", err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close queue incarnation rows: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions missing queue incarnation: %w", err)
+	}
+	for _, sessionID := range sessionIDs {
+		if _, err := r.db.Exec(r.db.Rebind(`
+			UPDATE task_sessions
+			   SET queue_incarnation_id = ?
+			 WHERE id = ? AND queue_incarnation_id = ''
+		`), uuid.NewString(), sessionID); err != nil {
+			return fmt.Errorf("backfill queue incarnation for session %s: %w", sessionID, err)
+		}
+	}
 	return nil
 }
 

@@ -41,6 +41,14 @@ A focused throwaway hook test reproduced the race: session A's delayed response
 produced no `updateSessionReadCursor("session-1", "m2")` call after session B
 dispatched. The temporary test was removed after recording the red evidence.
 
+The follow-up trace exposed a separate visibility defect. Dockview restored the
+incoming Chat tab as selected in the center group while the side-by-side
+Changes group retained global focus. `usePanelActive` read Dockview's
+`isActive`, which combines group-local tab visibility with global group focus,
+so the visibly rendered transcript reported `isVisible=false` and skipped
+initial placement. Completed agents produced no later message or work-state
+write to mask the skipped placement.
+
 ## Scope
 
 ### In scope
@@ -119,6 +127,7 @@ changes.
 ## Work orders
 
 - [x] [Task 01: Preserve read cursor across task switches](task-01-preserve-read-cursor-across-task-switches.md)
+- [x] [Task 02: Recognize visible Dockview chat panels](task-02-recognize-visible-dockview-chat-panels.md)
 
 ## Verification results
 
@@ -132,6 +141,15 @@ changes.
 - Mobile Chrome completed-task switch E2E passed (1 test).
 - Specification linter tests passed (30 tests); all specification files passed.
 - `git diff --check` passed.
+- Follow-up TDD regression: the visibility hook returned false when Dockview
+  reported `isActive=false` and `isVisible=true`; it passed after switching to
+  the group-local visibility contract.
+- Follow-up focused Vitest passed: 1 file, 6 tests.
+- Follow-up TypeScript typecheck and scoped ESLint passed.
+- Follow-up Chromium task-switch E2E passed with Changes retaining global
+  Dockview focus while the visible Chat transcript returned to the bottom.
+- Follow-up Mobile Chrome completed-task switch E2E passed.
+- Follow-up specification linter tests and full specification lint passed.
 
 ## Risks
 

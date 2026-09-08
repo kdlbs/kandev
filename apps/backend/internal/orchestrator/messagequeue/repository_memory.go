@@ -13,23 +13,151 @@ import (
 // memoryRepository is an in-memory Repository implementation used in tests and
 // any deployment that explicitly opts into ephemeral queueing.
 type memoryRepository struct {
-	mu           sync.Mutex
-	entries      map[string][]*QueuedMessage // sessionID -> ordered list (head = index 0)
-	nextPosition map[string]int64            // sessionID -> monotonic counter
-	pendingMoves map[string]*PendingMove
-	generation   map[string]int64
-	autoRun      map[string]bool
+	mu                 sync.Mutex
+	entries            map[string][]*QueuedMessage // sessionID -> ordered list (head = index 0)
+	nextPosition       map[string]int64            // sessionID -> monotonic counter
+	pendingMoves       map[string]*PendingMove
+	generation         map[string]int64
+	sendNowGeneration  map[string]int64
+	autoRun            map[string]bool
+	autoRunIncarnation map[string]string
+	autoMergeOverrides map[QueueSessionIdentity]AutoMergeOverride
+	identities         map[string]QueueSessionIdentity
+	statusGeneration   map[string]int64
+	authority          func(context.Context, string, string) (QueueSessionIdentity, error)
 }
 
 // NewMemoryRepository returns an in-memory Repository. Suitable for tests.
 func NewMemoryRepository() Repository {
 	return &memoryRepository{
-		entries:      make(map[string][]*QueuedMessage),
-		nextPosition: make(map[string]int64),
-		pendingMoves: make(map[string]*PendingMove),
-		generation:   make(map[string]int64),
-		autoRun:      make(map[string]bool),
+		entries:            make(map[string][]*QueuedMessage),
+		nextPosition:       make(map[string]int64),
+		pendingMoves:       make(map[string]*PendingMove),
+		generation:         make(map[string]int64),
+		sendNowGeneration:  make(map[string]int64),
+		autoRun:            make(map[string]bool),
+		autoRunIncarnation: make(map[string]string),
+		autoMergeOverrides: make(map[QueueSessionIdentity]AutoMergeOverride),
+		statusGeneration:   make(map[string]int64),
+		identities:         make(map[string]QueueSessionIdentity),
 	}
+}
+
+// NewMemoryRepositoryWithAuthority returns an in-memory queue whose immutable
+// identities come from the supplied task-session authority.
+func NewMemoryRepositoryWithAuthority(
+	authority func(context.Context, string, string) (QueueSessionIdentity, error),
+) Repository {
+	repo := NewMemoryRepository().(*memoryRepository)
+	repo.authority = authority
+	return repo
+}
+
+func (r *memoryRepository) clearSessionStateLocked(sessionID string) {
+	delete(r.entries, sessionID)
+	delete(r.nextPosition, sessionID)
+	delete(r.pendingMoves, sessionID)
+	delete(r.sendNowGeneration, sessionID)
+	delete(r.autoRun, sessionID)
+	delete(r.autoRunIncarnation, sessionID)
+	delete(r.statusGeneration, sessionID)
+	delete(r.identities, sessionID)
+	for identity := range r.autoMergeOverrides {
+		if identity.SessionID == sessionID {
+			delete(r.autoMergeOverrides, identity)
+		}
+	}
+}
+
+func (r *memoryRepository) bindIdentityLocked(identity QueueSessionIdentity) error {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return ErrSessionIdentityMismatch
+	}
+	if current, ok := r.identities[identity.SessionID]; ok {
+		if current != identity {
+			return ErrSessionIdentityMismatch
+		}
+		return nil
+	}
+	if identity.SessionIncarnationID != "memory:"+identity.SessionID {
+		return ErrSessionIdentityMismatch
+	}
+	for _, entry := range r.entries[identity.SessionID] {
+		if entry.TaskID != identity.TaskID {
+			return ErrSessionIdentityMismatch
+		}
+	}
+	r.identities[identity.SessionID] = identity
+	return nil
+}
+
+func (r *memoryRepository) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (QueueSessionIdentity, error) {
+	if taskID == "" || sessionID == "" {
+		return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+	}
+	if r.authority != nil {
+		identity, err := r.authority(ctx, taskID, sessionID)
+		if err != nil {
+			return QueueSessionIdentity{}, err
+		}
+		if identity.TaskID != taskID || identity.SessionID != sessionID || identity.SessionIncarnationID == "" {
+			return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if existing, ok := r.identities[sessionID]; ok && existing != identity {
+			r.clearSessionStateLocked(sessionID)
+		}
+		r.identities[sessionID] = identity
+		return identity, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if identity, ok := r.identities[sessionID]; ok {
+		if identity.TaskID != taskID {
+			return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+		}
+		return identity, nil
+	}
+	identity := QueueSessionIdentity{
+		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: "memory:" + sessionID,
+	}
+	r.identities[sessionID] = identity
+	return identity, nil
+}
+
+func (r *memoryRepository) Snapshot(
+	_ context.Context,
+	identity QueueSessionIdentity,
+) (RepositorySnapshot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return RepositorySnapshot{}, err
+	}
+	entries := make([]QueuedMessage, len(r.entries[identity.SessionID]))
+	for index, entry := range r.entries[identity.SessionID] {
+		entries[index] = *entry
+	}
+	autoRun := r.autoRunForIdentityLocked(identity)
+	var override *AutoMergeOverride
+	if stored, ok := r.autoMergeOverrides[identity]; ok {
+		copy := stored
+		override = &copy
+	}
+	var pendingMove *PendingMove
+	if stored := r.pendingMoves[identity.SessionID]; stored != nil {
+		copy := *stored
+		pendingMove = &copy
+	}
+	r.statusGeneration[identity.SessionID]++
+	return RepositorySnapshot{
+		Entries:           entries,
+		PendingMove:       pendingMove,
+		AutoRun:           autoRun,
+		AutoMergeOverride: override,
+		StatusGeneration:  r.statusGeneration[identity.SessionID],
+	}, nil
 }
 
 // LifecycleGeneration returns the current archive/delete generation for a task.
@@ -59,6 +187,11 @@ func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, err
 			continue
 		}
 		r.entries[sessionID] = kept
+	}
+	for sessionID, move := range r.pendingMoves {
+		if move != nil && move.TaskID == taskID {
+			delete(r.pendingMoves, sessionID)
+		}
 	}
 	r.generation[taskID]++
 	return removed, nil
@@ -96,10 +229,77 @@ func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerS
 	return r.insertLocked(msg, maxPerSession)
 }
 
+func (r *memoryRepository) InsertForSession(_ context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.insertLocked(msg, maxPerSession)
+}
+
+func (r *memoryRepository) InsertForSessionWithClaim(_ context.Context, identity QueueSessionIdentity, msg *QueuedMessage, _ QueueAttachmentClaim, maxPerSession int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.insertLocked(msg, maxPerSession)
+}
+
+func (r *memoryRepository) InsertForSessionWithPolicy(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	_ *QueueAttachmentClaim,
+	maxPerSession int,
+	policy AutoMergePolicy,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	if err := r.validateAutoMergePolicyLocked(identity, policy); err != nil {
+		return err
+	}
+	return r.insertLocked(msg, maxPerSession)
+}
+
 // Restore reinserts a previously dequeued entry at its original FIFO position.
 func (r *memoryRepository) Restore(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.restoreLocked(msg, maxPerSession)
+}
+
+func (r *memoryRepository) RestoreForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	maxPerSession int,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.restoreLocked(msg, maxPerSession)
+}
+
+func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) error {
 	list := r.entries[msg.SessionID]
 	if maxPerSession > 0 && len(list) >= maxPerSession {
 		return ErrQueueFull
@@ -118,6 +318,67 @@ func (r *memoryRepository) Restore(_ context.Context, msg *QueuedMessage, maxPer
 	r.entries[msg.SessionID] = list
 	if clone.Position > r.nextPosition[msg.SessionID] {
 		r.nextPosition[msg.SessionID] = clone.Position
+	}
+	return nil
+}
+
+func (r *memoryRepository) GetAutoMergeOverride(
+	_ context.Context,
+	identity QueueSessionIdentity,
+) (*AutoMergeOverride, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.validateIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	override, ok := r.autoMergeOverrides[identity]
+	if !ok {
+		return nil, nil
+	}
+	return &override, nil
+}
+
+func (r *memoryRepository) SetAutoMergeOverride(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	enabled bool,
+) (AutoMergeOverride, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return AutoMergeOverride{}, err
+	}
+	override := r.autoMergeOverrides[identity]
+	override.Enabled = enabled
+	override.Revision++
+	r.autoMergeOverrides[identity] = override
+	return override, nil
+}
+
+func (r *memoryRepository) validateIdentityLocked(identity QueueSessionIdentity) error {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return ErrSessionIdentityMismatch
+	}
+	current, ok := r.identities[identity.SessionID]
+	if !ok || current != identity {
+		return ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+func (r *memoryRepository) validateAutoMergePolicyLocked(identity QueueSessionIdentity, policy AutoMergePolicy) error {
+	override, exists := r.autoMergeOverrides[identity]
+	switch policy.Source {
+	case AutoMergeSourceGlobal:
+		if exists {
+			return ErrAutoMergePolicyChanged
+		}
+	case AutoMergeSourceSession:
+		if !exists || override.Enabled != policy.Enabled || override.Revision != policy.Revision {
+			return ErrAutoMergePolicyChanged
+		}
+	default:
+		return ErrAutoMergePolicyChanged
 	}
 	return nil
 }
@@ -160,25 +421,45 @@ func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) e
 func (r *memoryRepository) RequeuePreservingFIFO(_ context.Context, msg *QueuedMessage) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.requeuePreservingFIFOLocked(msg, "")
+}
+
+func (r *memoryRepository) RequeuePreservingFIFOForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.requeuePreservingFIFOLocked(msg, identity.SessionIncarnationID)
+}
+
+func (r *memoryRepository) requeuePreservingFIFOLocked(
+	msg *QueuedMessage,
+	expectedIncarnationID string,
+) error {
+	if msg.IsReservedLifecycleDelivery() {
+		return r.releaseLifecycleReservationForRetryLocked(msg, expectedIncarnationID)
+	}
 	list := r.entries[msg.SessionID]
 	coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
-	// Coalesce-replace: only when caller supplied a coalesce key. This
-	// matches the original RequeueMessage's branching (coalesceKey != ""
-	// takes the coalesce-replace path; empty coalesceKey takes the
-	// tail-append path). A bare requeue of a message with no coalesce
-	// key must NOT collapse onto an unrelated same-sender entry.
+
+	// Coalesce-replace only when the caller supplied a key. Reserved rows
+	// belong to an active delivery and cannot be replacement targets.
 	if coalesceKey != "" {
 		for _, existing := range list {
-			if existing.QueuedBy != msg.QueuedBy {
+			if existing.IsReservedInFlight() || existing.QueuedBy != msg.QueuedBy {
 				continue
 			}
 			if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
 				continue
 			}
-			// Coalesce hit: replace in place. The retry keeps the existing
-			// entry's position, which by construction is the most head-of-
-			// queue position for this coalesce key — supersede→requeue of
-			// the same content stays FIFO at the same slot.
 			existing.TaskID = msg.TaskID
 			existing.Content = msg.Content
 			existing.Model = msg.Model
@@ -208,6 +489,53 @@ func (r *memoryRepository) RequeuePreservingFIFO(_ context.Context, msg *QueuedM
 	newList = append(newList, list...)
 	r.entries[msg.SessionID] = newList
 	return nil
+}
+
+func (r *memoryRepository) releaseLifecycleReservationForRetryLocked(
+	msg *QueuedMessage,
+	expectedIncarnationID string,
+) error {
+	for index, existing := range r.entries[msg.SessionID] {
+		if existing.ID != msg.ID || !existing.IsReservedInFlight() {
+			continue
+		}
+		if expectedIncarnationID != "" &&
+			lifecycleReservationIncarnation(existing.Metadata) != expectedIncarnationID {
+			return ErrEntryNotFound
+		}
+		coalesceKey := metadataString(existing.Metadata, MetadataCoalesceKey)
+		if r.hasPendingCoalescedSuccessorLocked(
+			msg.SessionID,
+			index,
+			existing.QueuedBy,
+			coalesceKey,
+		) {
+			r.removeEntryLocked(msg.SessionID, index)
+			return nil
+		}
+		existing.Metadata = clearReservedMetadata(existing.Metadata)
+		return nil
+	}
+	return ErrEntryNotFound
+}
+
+func (r *memoryRepository) hasPendingCoalescedSuccessorLocked(
+	sessionID string,
+	excludedIndex int,
+	queuedBy, coalesceKey string,
+) bool {
+	if coalesceKey == "" {
+		return false
+	}
+	for index, successor := range r.entries[sessionID] {
+		if index == excludedIndex || successor.IsReservedInFlight() || successor.QueuedBy != queuedBy {
+			continue
+		}
+		if metadataString(successor.Metadata, MetadataCoalesceKey) == coalesceKey {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *memoryRepository) nextRequeuePositionLocked(sessionID string, list []*QueuedMessage) int64 {
@@ -243,7 +571,19 @@ func (r *memoryRepository) nextRequeuePositionLocked(sessionID string, list []*Q
 func (r *memoryRepository) AppendOrInsertTail(_ context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.appendOrInsertTailLocked(sessionID, taskID, content, model, queuedBy, planMode, attachments, metadata, maxPerSession)
+}
 
+func (r *memoryRepository) AppendOrInsertTailForSession(_ context.Context, identity QueueSessionIdentity, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.appendOrInsertTailLocked(identity.SessionID, identity.TaskID, content, model, queuedBy, planMode, attachments, metadata, maxPerSession)
+}
+
+func (r *memoryRepository) appendOrInsertTailLocked(sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
 	list := r.entries[sessionID]
 	if len(list) > 0 {
 		tail := list[len(list)-1]
@@ -274,7 +614,35 @@ func (r *memoryRepository) AppendOrInsertTail(_ context.Context, sessionID, task
 func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.insertOrReplaceByCoalesceKeyLocked(msg, coalesceKey, maxPerSession, allowInsert)
+}
 
+func (r *memoryRepository) InsertOrReplaceByCoalesceKeyForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.insertOrReplaceByCoalesceKeyLocked(msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *memoryRepository) insertOrReplaceByCoalesceKeyLocked(
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	reservedMatch := false
 	for _, existing := range r.entries[msg.SessionID] {
 		if existing.QueuedBy != msg.QueuedBy {
 			continue
@@ -282,39 +650,8 @@ func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *
 		if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
 			continue
 		}
-		if msg.QueuedAt.IsZero() {
-			msg.QueuedAt = time.Now().UTC()
-		}
-		existing.TaskID = msg.TaskID
-		existing.Content = msg.Content
-		existing.Model = msg.Model
-		existing.PlanMode = msg.PlanMode
-		existing.Attachments = msg.Attachments
-		existing.Metadata = msg.Metadata
-		existing.QueuedAt = msg.QueuedAt
-		out := *existing
-		return &out, true, nil
-	}
-	if !allowInsert {
-		return nil, false, ErrEntryNotFound
-	}
-	if err := r.insertLocked(msg, maxPerSession); err != nil {
-		return nil, false, err
-	}
-	return msg, false, nil
-}
-
-// The memory queue has no task store. Tests which need an archive race wrap
-// this method with their deterministic active-task guard.
-func (r *memoryRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	expected, ok := lifecycleGenerationFromMetadata(msg.Metadata)
-	if !ok || expected != r.generation[msg.TaskID] {
-		return nil, false, ErrLifecycleCancelled
-	}
-	for _, existing := range r.entries[msg.SessionID] {
-		if existing.QueuedBy != msg.QueuedBy || metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
+		if existing.IsReservedInFlight() {
+			reservedMatch = true
 			continue
 		}
 		if msg.QueuedAt.IsZero() {
@@ -332,6 +669,83 @@ func (r *memoryRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Con
 	}
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
+	}
+	if reservedMatch {
+		maxPerSession = 0
+	}
+	if err := r.insertLocked(msg, maxPerSession); err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}
+func (r *memoryRepository) InsertOrReplaceLifecycleByCoalesceKey(
+	_ context.Context,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.insertOrReplaceLifecycleLocked(msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *memoryRepository) InsertOrReplaceLifecycleByCoalesceKeyForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.insertOrReplaceLifecycleLocked(msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *memoryRepository) insertOrReplaceLifecycleLocked(
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	expected, ok := lifecycleGenerationFromMetadata(msg.Metadata)
+	if !ok || expected != r.generation[msg.TaskID] {
+		return nil, false, ErrLifecycleCancelled
+	}
+	reservedMatch := false
+	for _, existing := range r.entries[msg.SessionID] {
+		if existing.QueuedBy != msg.QueuedBy || metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
+			continue
+		}
+		if existing.IsReservedInFlight() {
+			reservedMatch = true
+			continue
+		}
+		if msg.QueuedAt.IsZero() {
+			msg.QueuedAt = time.Now().UTC()
+		}
+		existing.TaskID = msg.TaskID
+		existing.Content = msg.Content
+		existing.Model = msg.Model
+		existing.PlanMode = msg.PlanMode
+		existing.Attachments = msg.Attachments
+		existing.Metadata = msg.Metadata
+		existing.QueuedAt = msg.QueuedAt
+		out := *existing
+		return &out, true, nil
+	}
+	if !allowInsert {
+		return nil, false, ErrEntryNotFound
+	}
+	if reservedMatch {
+		maxPerSession = 0
 	}
 	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
@@ -404,31 +818,48 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.reserveHeadLocked(sessionID), nil
+	return r.reserveHeadLocked(sessionID, nil, false), nil
 }
 
-func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
+func (r *memoryRepository) reserveHeadLocked(
+	sessionID string,
+	identity *QueueSessionIdentity,
+	retainOrdinary bool,
+) *QueuedMessage {
 	list := r.entries[sessionID]
 	if len(list) == 0 {
 		return nil
 	}
 	head := list[0]
 	out := *head
-	if head.IsDurableLifecycle() {
-		// Mirror the SQLite reservation: the stored row is flagged in flight so
-		// queue status stops listing it, while the returned copy keeps the
-		// unmarked metadata a requeue would write back.
+	if head.IsDurableLifecycle() || retainOrdinary {
+		reservationIncarnation := lifecycleReservationIncarnation(head.Metadata)
+		if identity != nil && reservationIncarnation != "" &&
+			reservationIncarnation != identity.SessionIncarnationID {
+			r.removeEntryLocked(sessionID, 0)
+			return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
+		}
 		out.Metadata = clearReservedMetadata(head.Metadata)
-		out.reservedLifecycleDelivery = true
-		head.Metadata = markReservedMetadata(out.Metadata)
+		out.reservedLifecycleDelivery = head.IsDurableLifecycle()
+		if identity != nil {
+			out.reservationIdentity = *identity
+			head.Metadata = markReservedMetadataForIncarnation(out.Metadata, identity.SessionIncarnationID)
+		} else {
+			head.Metadata = markReservedMetadata(out.Metadata)
+		}
 		return &out
 	}
-	r.entries[sessionID] = list[1:]
+	r.removeEntryLocked(sessionID, 0)
+	return &out
+}
+
+func (r *memoryRepository) removeEntryLocked(sessionID string, index int) {
+	list := r.entries[sessionID]
+	r.entries[sessionID] = append(list[:index], list[index+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
 	}
-	return &out
 }
 
 // GetAutoRun returns true when no explicit policy exists.
@@ -442,12 +873,57 @@ func (r *memoryRepository) autoRunLocked(sessionID string) bool {
 	enabled, exists := r.autoRun[sessionID]
 	return !exists || enabled
 }
+func (r *memoryRepository) autoRunForIdentityLocked(identity QueueSessionIdentity) bool {
+	enabled, exists := r.autoRun[identity.SessionID]
+	if !exists {
+		return true
+	}
+	incarnationID := r.autoRunIncarnation[identity.SessionID]
+	if incarnationID == "" {
+		r.autoRunIncarnation[identity.SessionID] = identity.SessionIncarnationID
+		return enabled
+	}
+	if incarnationID != identity.SessionIncarnationID {
+		return true
+	}
+	return enabled
+}
+
+func identityPointer(identity QueueSessionIdentity) *QueueSessionIdentity {
+	if identity.SessionIncarnationID == "" {
+		return nil
+	}
+	return &identity
+}
+
+func (r *memoryRepository) setAutoRunLocked(
+	identity *QueueSessionIdentity,
+	sessionID string,
+	enabled bool,
+) {
+	r.autoRun[sessionID] = enabled
+	if identity == nil {
+		r.autoRunIncarnation[sessionID] = ""
+		return
+	}
+	r.autoRunIncarnation[sessionID] = identity.SessionIncarnationID
+}
 
 // SetAutoRun persists the per-session automatic-drain policy.
 func (r *memoryRepository) SetAutoRun(_ context.Context, sessionID string, enabled bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.autoRun[sessionID] = enabled
+	r.setAutoRunLocked(nil, sessionID, enabled)
+	return nil
+}
+
+func (r *memoryRepository) SetAutoRunForSession(_ context.Context, identity QueueSessionIdentity, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	r.setAutoRunLocked(&identity, identity.SessionID, enabled)
 	return nil
 }
 
@@ -455,14 +931,33 @@ func (r *memoryRepository) SetAutoRun(_ context.Context, sessionID string, enabl
 func (r *memoryRepository) PauseAutoRunIfPending(_ context.Context, sessionID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.pauseAutoRunIfPendingLocked(nil, sessionID), nil
+}
+
+func (r *memoryRepository) PauseAutoRunIfPendingForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return false, err
+	}
+	return r.pauseAutoRunIfPendingLocked(&identity, identity.SessionID), nil
+}
+
+func (r *memoryRepository) pauseAutoRunIfPendingLocked(
+	identity *QueueSessionIdentity,
+	sessionID string,
+) bool {
 	for _, msg := range r.entries[sessionID] {
 		if msg.IsReservedInFlight() {
 			continue
 		}
-		r.autoRun[sessionID] = false
-		return true, nil
+		r.setAutoRunLocked(identity, sessionID, false)
+		return true
 	}
-	return false, nil
+	return false
 }
 
 // ReserveHeadIfAutoRun atomically checks policy and reserves the FIFO head.
@@ -472,7 +967,34 @@ func (r *memoryRepository) ReserveHeadIfAutoRun(_ context.Context, sessionID str
 	if !r.autoRunLocked(sessionID) {
 		return nil, false, nil
 	}
-	return r.reserveHeadLocked(sessionID), true, nil
+	return r.reserveHeadLocked(sessionID, nil, false), true, nil
+}
+
+func (r *memoryRepository) ReserveHeadIfAutoRunForSession(_ context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, true, err
+	}
+	if !r.autoRunForIdentityLocked(identity) {
+		return nil, false, nil
+	}
+	return r.reserveHeadLocked(identity.SessionID, &identity, false), true, nil
+}
+
+func (r *memoryRepository) ReserveHeadForDeliveryIfAutoRunForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, true, err
+	}
+	if !r.autoRunForIdentityLocked(identity) {
+		return nil, false, nil
+	}
+	return r.reserveHeadLocked(identity.SessionID, &identity, true), true, nil
 }
 
 // AcknowledgeByID removes a reserved durable entry after executor acceptance.
@@ -494,18 +1016,112 @@ func (r *memoryRepository) AcknowledgeByID(_ context.Context, sessionID, entryID
 	return ErrEntryNotFound
 }
 
+func (r *memoryRepository) AcknowledgeByIDForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	for index, msg := range r.entries[identity.SessionID] {
+		if msg.ID != entryID {
+			continue
+		}
+		if !msg.IsReservedInFlight() ||
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+			return ErrEntryNotFound
+		}
+		r.removeEntryLocked(identity.SessionID, index)
+		return nil
+	}
+	return ErrEntryNotFound
+}
+
+func (r *memoryRepository) ReleaseDeliveryReservationForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	for index, msg := range r.entries[identity.SessionID] {
+		if msg.ID != entryID {
+			continue
+		}
+		if !msg.IsReservedInFlight() ||
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+			return ErrEntryNotFound
+		}
+		coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
+		if r.hasPendingCoalescedSuccessorLocked(
+			identity.SessionID,
+			index,
+			msg.QueuedBy,
+			coalesceKey,
+		) {
+			r.removeEntryLocked(identity.SessionID, index)
+			return nil
+		}
+		msg.Metadata = clearReservedMetadata(msg.Metadata)
+		return nil
+	}
+	return ErrEntryNotFound
+}
+func (r *memoryRepository) DiscardLifecycleReservation(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index, msg := range r.entries[identity.SessionID] {
+		if msg.ID != entryID {
+			continue
+		}
+		if !msg.IsReservedInFlight() ||
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+			return ErrEntryNotFound
+		}
+		r.removeEntryLocked(identity.SessionID, index)
+		return nil
+	}
+	return ErrEntryNotFound
+}
+
 // TakeByID atomically returns and deletes the entry identified by entryID,
 // regardless of its FIFO position. Unlike DeleteByID, it has no
 // QueuedByAgent guard — see the Repository interface doc comment.
 func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.takeByIDLocked(sessionID, entryID), nil
+}
+func (r *memoryRepository) TakeByIDForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	return r.takeByIDLocked(identity.SessionID, entryID), nil
+}
+
+func (r *memoryRepository) takeByIDLocked(sessionID, entryID string) *QueuedMessage {
 	list, ok := r.entries[sessionID]
 	if !ok {
-		return nil, nil
+		return nil
 	}
-	for i, m := range list {
-		if m.ID != entryID {
+	for i, message := range list {
+		if message.ID != entryID {
 			continue
 		}
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
@@ -513,16 +1129,33 @@ func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string
 			delete(r.entries, sessionID)
 			delete(r.nextPosition, sessionID)
 		}
-		out := *m
-		return &out, nil
+		out := *message
+		return &out
 	}
-	return nil, nil
+	return nil
 }
 
 // ClaimSendNow atomically claims the exact ordered source snapshot for a send-now dispatch.
 func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.claimSendNowLocked(r.identities[sessionID], sessionID, expected)
+}
+
+func (r *memoryRepository) ClaimSendNowForSession(_ context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	return r.claimSendNowLocked(identity, identity.SessionID, expected)
+}
+
+func (r *memoryRepository) claimSendNowLocked(
+	identity QueueSessionIdentity,
+	sessionID string,
+	expected []QueuedMessage,
+) (*SendNowClaim, error) {
 	if len(expected) == 0 {
 		return nil, ErrSendNowEmpty
 	}
@@ -551,6 +1184,7 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	}
 
 	sources := cloneSendNowSources(selected)
+	bindSendNowLifecycleReservations(sources, identity)
 	envelope, err := BuildSendNowEnvelope(sources)
 	if err != nil {
 		return nil, err
@@ -569,7 +1203,10 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 			continue
 		}
 		if entry.IsDurableLifecycle() {
-			entry.Metadata = markReservedMetadata(entry.Metadata)
+			entry.Metadata = markReservedMetadataForIncarnation(
+				entry.Metadata,
+				identity.SessionIncarnationID,
+			)
 			remaining = append(remaining, entry)
 		}
 	}
@@ -579,19 +1216,56 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	} else {
 		r.entries[sessionID] = remaining
 	}
-	r.autoRun[sessionID] = true
-	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+	r.setAutoRunLocked(identityPointer(identity), sessionID, true)
+	r.sendNowGeneration[sessionID]++
+	return &SendNowClaim{
+		Identity:            identity,
+		OperationGeneration: r.sendNowGeneration[sessionID],
+		Sources:             sources,
+		Dispatch:            *envelope,
+		SourceGenerations:   generations,
+	}, nil
+}
+
+func (r *memoryRepository) validateSendNowClaimAuthority(
+	ctx context.Context,
+	claim *SendNowClaim,
+) error {
+	if claim.Identity.SessionIncarnationID == "" || r.authority == nil {
+		return nil
+	}
+	current, err := r.authority(ctx, claim.Identity.TaskID, claim.Identity.SessionID)
+	if err != nil || current != claim.Identity {
+		return ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+func (r *memoryRepository) validateSendNowClaimLocked(claim *SendNowClaim) (string, error) {
+	sessionID := claim.Sources[0].SessionID
+	if claim.Identity.SessionIncarnationID != "" && r.identities[sessionID] != claim.Identity {
+		return "", ErrSessionIdentityMismatch
+	}
+	if claim.OperationGeneration > 0 && r.sendNowGeneration[sessionID] != claim.OperationGeneration {
+		return "", ErrSendNowClaimChanged
+	}
+	return sessionID, nil
 }
 
 // RestoreSendNowClaim puts every claimed source back at its original position.
-func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
 	if claim == nil || len(claim.Sources) == 0 {
 		return ErrSendNowEmpty
 	}
+	if err := r.validateSendNowClaimAuthority(ctx, claim); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	sessionID := claim.Sources[0].SessionID
+	sessionID, err := r.validateSendNowClaimLocked(claim)
+	if err != nil {
+		return err
+	}
 	list := r.entries[sessionID]
 	existing := make(map[string]*QueuedMessage, len(list))
 	for _, entry := range list {
@@ -652,13 +1326,19 @@ func validateMemorySendNowRestore(
 }
 
 // AcknowledgeSendNowClaim removes every durable source after the replacement prompt is accepted.
-func (r *memoryRepository) AcknowledgeSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
 	if claim == nil || len(claim.Sources) == 0 {
 		return ErrSendNowEmpty
 	}
+	if err := r.validateSendNowClaimAuthority(ctx, claim); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	sessionID := claim.Sources[0].SessionID
+	sessionID, err := r.validateSendNowClaimLocked(claim)
+	if err != nil {
+		return err
+	}
 	requested := make(map[string]struct{})
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
@@ -718,6 +1398,14 @@ func cloneQueuedMessage(entry *QueuedMessage) *QueuedMessage {
 	return &clone
 }
 
+func cloneQueuedMessages(entries []*QueuedMessage) []QueuedMessage {
+	clones := make([]QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		clones = append(clones, *cloneQueuedMessage(entry))
+	}
+	return clones
+}
+
 // sameQueuedMessageContent reports whether two entries carry identical content, attachments, and metadata.
 func sameQueuedMessageContent(left, right *QueuedMessage) bool {
 	if left == nil || right == nil {
@@ -741,6 +1429,28 @@ func (r *memoryRepository) UpdateContent(ctx context.Context, sessionID, entryID
 func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.updateContentAndMetadataLocked(sessionID, entryID, content, attachments, metadataUpdates, queuedBy)
+}
+
+func (r *memoryRepository) UpdateContentAndMetadataForSession(_ context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.updateContentAndMetadataLocked(identity.SessionID, entryID, content, attachments, metadataUpdates, queuedBy)
+}
+
+func (r *memoryRepository) UpdateContentAndMetadataForSessionWithClaim(_ context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string, _ QueueAttachmentClaim) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.updateContentAndMetadataLocked(identity.SessionID, entryID, content, attachments, metadataUpdates, queuedBy)
+}
+
+func (r *memoryRepository) updateContentAndMetadataLocked(sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
 	if queuedBy == "" || IsReservedQueuedBy(queuedBy) {
 		return ErrEntryNotFound
 	}
@@ -752,10 +1462,7 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 		if m.ID != entryID {
 			continue
 		}
-		if queuedBy != "" && m.QueuedBy != queuedBy {
-			return ErrEntryNotFound
-		}
-		if IsReservedQueuedBy(m.QueuedBy) {
+		if m.QueuedBy != queuedBy || m.IsReservedInFlight() {
 			return ErrEntryNotFound
 		}
 		m.Content = content
@@ -774,6 +1481,19 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.mergeIntoAboveLocked(sessionID, sourceID, queuedBy)
+}
+
+func (r *memoryRepository) MergeIntoAboveForSession(_ context.Context, identity QueueSessionIdentity, sourceID, queuedBy string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	return r.mergeIntoAboveLocked(identity.SessionID, sourceID, queuedBy)
+}
+
+func (r *memoryRepository) mergeIntoAboveLocked(sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
 	list, ok := r.entries[sessionID]
 	if !ok {
 		return nil, ErrEntryNotFound
@@ -822,10 +1542,8 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	target.QueuedAt = latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
-		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
 	}
-
 	merged := *target
 	return &merged, nil
 }
@@ -835,7 +1553,36 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.autoMergeIntoAboveLocked(sessionID, sourceID)
+}
 
+func (r *memoryRepository) AutoMergeIntoAboveForSession(_ context.Context, identity QueueSessionIdentity, sourceID string) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID)
+}
+
+func (r *memoryRepository) AutoMergeIntoAboveForSessionWithPolicy(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	sourceID string,
+	policy AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateAutoMergePolicyLocked(identity, policy); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID)
+}
+
+func (r *memoryRepository) autoMergeIntoAboveLocked(sessionID, sourceID string) (*QueuedMessage, bool, error) {
 	list := r.entries[sessionID]
 	sourceIndex := -1
 	for index, message := range list {
@@ -875,7 +1622,55 @@ func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sour
 func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
 
+func (r *memoryRepository) AutoMergeCandidateIntoAboveForSession(_ context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
+
+func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(_ context.Context, identity QueueSessionIdentity, candidate *QueuedMessage, _ QueueAttachmentClaim) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
+
+func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	candidate *QueuedMessage,
+	_ *QueueAttachmentClaim,
+	policy AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateAutoMergePolicyLocked(identity, policy); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
+
+func (r *memoryRepository) autoMergeCandidateIntoAboveLocked(candidate *QueuedMessage) (*QueuedMessage, bool, error) {
 	list := r.entries[candidate.SessionID]
 	var target *QueuedMessage
 	for _, message := range list {
@@ -907,6 +1702,19 @@ func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candid
 func (r *memoryRepository) ReorderEntries(_ context.Context, sessionID string, orderedIDs []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.reorderEntriesLocked(sessionID, orderedIDs)
+}
+
+func (r *memoryRepository) ReorderEntriesForSession(_ context.Context, identity QueueSessionIdentity, orderedIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.reorderEntriesLocked(identity.SessionID, orderedIDs)
+}
+
+func (r *memoryRepository) reorderEntriesLocked(sessionID string, orderedIDs []string) error {
 	stored := r.entries[sessionID]
 
 	// The stored slice is not guaranteed position-sorted after ReplaceSession;
@@ -950,6 +1758,46 @@ func (r *memoryRepository) ReorderEntries(_ context.Context, sessionID string, o
 func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.deleteByIDLocked(sessionID, entryID)
+}
+
+func (r *memoryRepository) DeleteByIDForSession(_ context.Context, identity QueueSessionIdentity, entryID string) (*QueueRemovalResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	return r.deleteByIDForSessionLocked(identity.SessionID, entryID)
+}
+
+func (r *memoryRepository) deleteByIDForSessionLocked(sessionID, entryID string) (*QueueRemovalResult, error) {
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	for i, message := range list {
+		if message.ID != entryID {
+			continue
+		}
+		if message.IsReservedInFlight() {
+			return nil, ErrEntryNotFound
+		}
+		removed := cloneQueuedMessage(message)
+		r.entries[sessionID] = append(list[:i], list[i+1:]...)
+		retained := cloneQueuedMessages(r.entries[sessionID])
+		if len(r.entries[sessionID]) == 0 {
+			delete(r.entries, sessionID)
+			delete(r.nextPosition, sessionID)
+		}
+		return &QueueRemovalResult{
+			Removed:  []QueuedMessage{*removed},
+			Retained: retained,
+		}, nil
+	}
+	return nil, ErrEntryNotFound
+}
+
+func (r *memoryRepository) deleteByIDLocked(sessionID, entryID string) error {
 	list, ok := r.entries[sessionID]
 	if !ok {
 		return ErrEntryNotFound
@@ -975,6 +1823,41 @@ func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID stri
 func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.deleteAllBySessionLocked(sessionID)
+}
+
+func (r *memoryRepository) DeleteAllBySessionForIdentity(_ context.Context, identity QueueSessionIdentity) (*QueueRemovalResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return nil, err
+	}
+	return r.deleteAllBySessionForIdentityLocked(identity.SessionID), nil
+}
+
+func (r *memoryRepository) deleteAllBySessionForIdentityLocked(sessionID string) *QueueRemovalResult {
+	list := r.entries[sessionID]
+	kept := list[:0]
+	result := &QueueRemovalResult{}
+	for _, message := range list {
+		cloned := cloneQueuedMessage(message)
+		if message.IsReservedInFlight() {
+			kept = append(kept, message)
+			result.Retained = append(result.Retained, *cloned)
+			continue
+		}
+		result.Removed = append(result.Removed, *cloned)
+	}
+	if len(kept) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		r.entries[sessionID] = kept
+	}
+	return result
+}
+
+func (r *memoryRepository) deleteAllBySessionLocked(sessionID string) (int, error) {
 	list := r.entries[sessionID]
 	kept := list[:0]
 	removed := 0
@@ -994,14 +1877,59 @@ func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID strin
 	return removed, nil
 }
 
+func (r *memoryRepository) PurgeDeletedSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current, exists := r.identities[identity.SessionID]; exists && current != identity {
+		return nil
+	}
+	r.clearSessionStateLocked(identity.SessionID)
+	return nil
+}
+
 // TransferSession moves all entries (and any pending move) from one session to another.
 func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newSessionID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.transferSessionLocked(nil, nil, oldSessionID, newSessionID)
+}
+
+func (r *memoryRepository) TransferSessionIdentities(_ context.Context, source, destination QueueSessionIdentity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if source.TaskID != destination.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := r.bindIdentityLocked(source); err != nil {
+		return err
+	}
+	if err := r.bindIdentityLocked(destination); err != nil {
+		return err
+	}
+	return r.transferSessionLocked(&source, &destination, source.SessionID, destination.SessionID)
+}
+
+func (r *memoryRepository) transferSessionLocked(
+	source, destination *QueueSessionIdentity,
+	oldSessionID, newSessionID string,
+) error {
 	if oldSessionID == newSessionID {
 		return nil
 	}
-	destinationAutoRun := r.autoRunLocked(oldSessionID) && r.autoRunLocked(newSessionID)
+	for _, entry := range r.entries[oldSessionID] {
+		if entry.IsReservedInFlight() {
+			return ErrQueueChanged
+		}
+	}
+	sourceAutoRun := r.autoRunLocked(oldSessionID)
+	destinationAutoRun := r.autoRunLocked(newSessionID)
+	if source != nil && destination != nil {
+		sourceAutoRun = r.autoRunForIdentityLocked(*source)
+		destinationAutoRun = r.autoRunForIdentityLocked(*destination)
+	}
 	if list, ok := r.entries[oldSessionID]; ok {
 		// Mirror the SQLite repo: shift transferred positions past the
 		// destination's max so source entries always sort *after* anything
@@ -1031,11 +1959,17 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		delete(r.nextPosition, oldSessionID)
 	}
 	if move, ok := r.pendingMoves[oldSessionID]; ok {
+		if destination, exists := r.identities[newSessionID]; exists {
+			move.SessionIncarnationID = destination.SessionIncarnationID
+			move.TaskID = destination.TaskID
+		}
 		r.pendingMoves[newSessionID] = move
 		delete(r.pendingMoves, oldSessionID)
 	}
-	r.autoRun[newSessionID] = destinationAutoRun
+	r.setAutoRunLocked(destination, newSessionID, sourceAutoRun && destinationAutoRun)
 	delete(r.autoRun, oldSessionID)
+	delete(r.autoRunIncarnation, oldSessionID)
+	delete(r.identities, oldSessionID)
 	return nil
 }
 
@@ -1043,6 +1977,22 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.replaceSessionLocked(sessionID, entries, pendingMove)
+}
+
+func (r *memoryRepository) ReplaceSessionForIdentity(_ context.Context, identity QueueSessionIdentity, entries []QueuedMessage, pendingMove *PendingMove) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := validateReplacementSnapshot(&identity, entries, pendingMove); err != nil {
+		return err
+	}
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
+	return r.replaceSessionLocked(identity.SessionID, entries, pendingMove)
+}
+
+func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
 	if len(entries) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
@@ -1076,6 +2026,32 @@ func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, e
 func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, move *PendingMove) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if move == nil || move.TaskID == "" || sessionID == "" {
+		return ErrSessionIdentityMismatch
+	}
+	if move.SessionIncarnationID == "" {
+		if identity, ok := r.identities[sessionID]; ok {
+			if identity.TaskID != move.TaskID {
+				return ErrSessionIdentityMismatch
+			}
+			move.SessionIncarnationID = identity.SessionIncarnationID
+		} else {
+			move.SessionIncarnationID = "memory:" + sessionID
+			r.identities[sessionID] = QueueSessionIdentity{
+				TaskID: move.TaskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
+			}
+		}
+	}
+	if _, ok := r.identities[sessionID]; !ok {
+		r.identities[sessionID] = QueueSessionIdentity{
+			TaskID: move.TaskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
+		}
+	}
+	if err := r.bindIdentityLocked(QueueSessionIdentity{
+		TaskID: move.TaskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
+	}); err != nil {
+		return err
+	}
 	move.ID = uuid.New().String()
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()

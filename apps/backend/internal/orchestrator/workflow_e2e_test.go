@@ -11,7 +11,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -314,7 +313,7 @@ func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStep
 		repo:         repo,
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log),
+		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 	}
 	svc.SetWorkflowStepGetter(sg)
