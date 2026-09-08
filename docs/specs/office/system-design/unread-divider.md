@@ -117,4 +117,3 @@ agent update only masked failed initial placement.
 - Desktop and mobile Playwright tests use completed tasks, delay task A's
   mark-read response across a task switch, return to task A, and prove the stale
   divider does not move the transcript away from the bottom.
-

@@ -71,12 +71,16 @@ export function sessionStatusTooltip(
   state: TaskSessionState,
   pending: PendingInput,
   foregroundActivity?: ForegroundActivity | null,
+  parkedOnBackgroundWork = false,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return t("task:sessionStatusPermissionRequested");
   if (canRequestInput && pending.clarification) return t("task:sessionStatusWaitingForInput");
   if (canRequestInput && foregroundActivity === "background")
     return t("task:sessionStatusBackgroundRunning");
+  // Parked-on-background-work (AC-51/52): the tooltip must match the icon
+  // (getSessionStateIcon reads SESSION_BACKGROUND_ICON for the same signal).
+  if (canRequestInput && parkedOnBackgroundWork) return t("task:sessionStatusBackgroundRunning");
   return t(STATUS_LABEL_KEYS[mapSessionStatus(state)]);
 }
 
@@ -275,6 +279,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           <Button
             variant="ghost"
             size="sm"
+            data-testid="sessions-dropdown-trigger"
             className="h-7 cursor-pointer gap-1.5 px-2 hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
@@ -466,6 +471,7 @@ function SessionRow({
   return (
     <div
       onClick={() => onSelect(session.id)}
+      data-testid={`session-row-${session.id}`}
       className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
       <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>
@@ -487,17 +493,21 @@ function SessionRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <div>
-              {getSessionStateIcon(
-                session.state,
-                "h-3.5 w-3.5",
-                session.foreground_activity,
-                pending.clarification,
-                pending.permission,
-              )}
+              {getSessionStateIcon(session.state, "h-3.5 w-3.5", {
+                foregroundActivity: session.foreground_activity,
+                hasPendingClarification: pending.clarification,
+                hasPendingPermission: pending.permission,
+                parkedOnBackgroundWork: session.parked_on_background_work,
+              })}
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {sessionStatusTooltip(session.state, pending, session.foreground_activity)}
+            {sessionStatusTooltip(
+              session.state,
+              pending,
+              session.foreground_activity,
+              session.parked_on_background_work,
+            )}
           </TooltipContent>
         </Tooltip>
       </div>

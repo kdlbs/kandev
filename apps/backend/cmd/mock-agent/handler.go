@@ -457,6 +457,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitBackgroundWork(e, cmd)
 	case strings.EqualFold(cmd, "/detached-background") || strings.HasPrefix(strings.ToLower(cmd), "/detached-background "):
 		emitDetachedBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/parked-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/parked-fixture "):
+		emitParkedFixture(e, cmd)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
@@ -522,6 +524,62 @@ func emitDetachedBackgroundWork(e *emitter, cmd string) {
 		time.Sleep(d)
 		backgroundEmitter.completeDetachedWork()
 	}()
+}
+
+// emitParkedFixture is a task-09 (disambiguate-waiting) e2e-only fixture. It
+// registers a *shell-kind* detached background launch — a Bash/execute tool
+// call whose input carries run_in_background:true, the condition
+// claudeBackgroundLaunchRecognizer.RecognizesDetachedLaunch actually checks
+// (internal/agentctl/server/adapter/transport/acp/background_launch_recognizer.go)
+// and trackBackgroundToolUpdate keys its setObservedDetachedLaunch call on
+// (internal/orchestrator/event_handlers_streaming.go). This is deliberately
+// NOT /detached-background's async-subagent (Task-tool) launch shape: that
+// registers as BackgroundWorkKindSubagent, which the parked projection's
+// attestation term never sets — only the shell kind does.
+//
+// The attestation persists until the session's next turn starts (spec D3),
+// independent of any specific "duration", so unlike /detached-background
+// this fixture needs no background goroutine or completion signal — the
+// tool call itself completes immediately.
+//
+// The foreground turn (tool call + text) is delayed by settleDelay first:
+// completing the tool call and text immediately would settle the foreground
+// turn near-instantly, which would race the Playwright suite's own HTTP
+// round-trip to read the freshly-created session's ID and script its
+// BackgroundProbe answer sequence (POST /api/v1/_test/background-probe)
+// before settleParkedProjectionSync's synchronous first probe sample (spec
+// D2) fires at that settle. Usage: /parked-fixture [settleDelay], default 3s.
+func emitParkedFixture(e *emitter, cmd string) {
+	parts := strings.Fields(cmd)
+	settleDelay := 3 * time.Second
+	if len(parts) >= 2 {
+		settleDelay = parseDurationArg(parts[1], settleDelay)
+	}
+	time.Sleep(settleDelay)
+
+	toolID := nextToolID()
+	input := map[string]any{
+		rawInputCommandKey:  "sleep 999",
+		"run_in_background": true,
+	}
+	e.startTool(toolID, "Run detached background command", acp.ToolKindExecute, input)
+	e.completeTool(toolID, map[string]any{rawOutputKey: "started in background"})
+
+	e.text("Launching detached background work; this foreground turn is complete.")
+}
+
+// parseDurationArg parses raw as a Go duration, retrying with an "s" suffix
+// for a bare integer (e.g. "3" -> "3s"), and falls back to def on failure —
+// the same two-step parse parseBackgroundDuration applies to its own single
+// argument.
+func parseDurationArg(raw string, def time.Duration) time.Duration {
+	if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+		return parsed
+	}
+	if secs, err := time.ParseDuration(raw + "s"); err == nil && secs > 0 {
+		return secs
+	}
+	return def
 }
 
 // emitSleep sleeps for the requested duration (default 10s) then responds.
