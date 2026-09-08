@@ -271,6 +271,23 @@ type UISection struct {
 	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
 	Keybindings []UIKeybinding `yaml:"keybindings,omitempty" json:"keybindings,omitempty"`
+	WebApps     []WebApp       `yaml:"web_apps,omitempty" json:"web_apps,omitempty"`
+}
+
+const (
+	WebAppPlacementTask      = "task-canvas"
+	WebAppPlacementWorkspace = "workspace-canvas"
+)
+
+// WebApp declares one packaged static web application. The host owns its
+// placement, navigation, and permissions; the package only supplies the
+// immutable entry document and its supported host placements.
+type WebApp struct {
+	Key            string   `yaml:"key" json:"key"`
+	Title          string   `yaml:"title" json:"title"`
+	Entry          string   `yaml:"entry" json:"entry"`
+	Placements     []string `yaml:"placements" json:"placements"`
+	NetworkOrigins []string `yaml:"network_origins,omitempty" json:"network_origins,omitempty"`
 }
 
 // UIPage is a single UI page contributed by the plugin.

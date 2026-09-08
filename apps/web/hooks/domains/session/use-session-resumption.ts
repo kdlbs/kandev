@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
 import {
@@ -6,6 +6,11 @@ import {
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
 import { useSessionRecoveryFeedback } from "./use-session-recovery-feedback";
+import {
+  buildGuardedSetters,
+  isCurrentRequest,
+  type SessionRequestIdentity,
+} from "./use-session-resumption-request-guard";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
@@ -485,6 +490,9 @@ type ResetAndCheckParams = {
   preventAutoStart: boolean;
 };
 
+const getSessionRequestKey = (taskId: string | null, sessionId: string | null) =>
+  JSON.stringify([taskId, sessionId]);
+
 /** Extracted effects: reset state on session/task change, auto-check/resume, and remote retry. */
 function useSessionResetAndCheck({
   taskId,
@@ -494,20 +502,31 @@ function useSessionResetAndCheck({
   setters,
   preventAutoStart,
 }: ResetAndCheckParams): SessionResetAndCheckResult {
+  const requestKey = getSessionRequestKey(taskId, sessionId);
   const [sessionStatusState, setSessionStatus] = useState<{
-    id: string | null;
+    requestKey: string;
     status: SessionStatus | null;
-  }>({ id: sessionId, status: null });
-  // Reset sessionStatus when sessionId changes (derived, not in effect)
-  const sessionStatus = sessionStatusState.id === sessionId ? sessionStatusState.status : null;
+  }>({ requestKey, status: null });
+  const sessionStatus =
+    sessionStatusState.requestKey === requestKey ? sessionStatusState.status : null;
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
-  const activeSessionRef = useRef(sessionId);
+  const requestGenerationRef = useRef(0);
+  const activeRequestRef = useRef<SessionRequestIdentity>({ key: requestKey, generation: 0 });
+
+  // Publish the new identity during commit so callbacks from the previous
+  // request are rejected before passive effects or queued promise handlers run.
+  useLayoutEffect(() => {
+    requestGenerationRef.current += 1;
+    activeRequestRef.current = {
+      key: requestKey,
+      generation: requestGenerationRef.current,
+    };
+  }, [requestKey]);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
   useEffect(() => {
-    activeSessionRef.current = sessionId;
     hasAttemptedResume.current = false;
     remoteStatusRetryCount.current = 0;
     setters.setResumptionState("idle");
@@ -522,14 +541,17 @@ function useSessionResetAndCheck({
     if (!taskId || !sessionId || connectionStatus !== "connected" || hasAttemptedResume.current)
       return;
     hasAttemptedResume.current = true;
-    const guardedSetters = buildGuardedSetters(activeSessionRef, sessionId, setters);
+    const capturedRequest = activeRequestRef.current;
+    const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
     checkAndResume({
       taskId,
       sessionId,
       session,
       preventAutoStart,
       setSessionStatus: (s) => {
-        if (activeSessionRef.current === sessionId) setSessionStatus({ id: sessionId, status: s });
+        if (isCurrentRequest(activeRequestRef.current, capturedRequest)) {
+          setSessionStatus({ requestKey: capturedRequest.key, status: s });
+        }
       },
       setters: guardedSetters,
     });
@@ -542,6 +564,7 @@ function useSessionResetAndCheck({
     if (!sessionStatus?.is_remote_executor) return;
     if (sessionStatus.remote_checked_at || sessionStatus.remote_status_error) return;
     if (remoteStatusRetryCount.current >= 3) return;
+    const capturedRequest = activeRequestRef.current;
 
     const timer = window.setTimeout(async () => {
       const client = getWebSocketClient();
@@ -552,7 +575,9 @@ function useSessionResetAndCheck({
           task_id: taskId,
           session_id: sessionId,
         });
-        setSessionStatus({ id: sessionId, status: nextStatus });
+        if (isCurrentRequest(activeRequestRef.current, capturedRequest)) {
+          setSessionStatus({ requestKey: capturedRequest.key, status: nextStatus });
+        }
       } catch {
         // Best-effort refresh only.
       }
@@ -562,46 +587,6 @@ function useSessionResetAndCheck({
   }, [taskId, sessionId, connectionStatus, sessionStatus]);
 
   return { sessionStatus };
-}
-
-/** Wrap state setters with a guard that prevents stale async callbacks from updating state. */
-function buildGuardedSetters(
-  activeSessionRef: React.RefObject<string | null>,
-  capturedSessionId: string,
-  setters: ResumeStateSetter,
-): ResumeStateSetter {
-  const guard = () => activeSessionRef.current === capturedSessionId;
-  return {
-    ...setters,
-    setResumptionState: (s) => {
-      if (guard()) setters.setResumptionState(s);
-    },
-    setError: (e) => {
-      if (guard()) setters.setError(e);
-    },
-    setNotice: (notice) => {
-      if (guard()) setters.setNotice?.(notice);
-    },
-    setWorktreePath: (p) => {
-      if (guard()) setters.setWorktreePath(p);
-    },
-    setWorktreeBranch: (b) => {
-      if (guard()) setters.setWorktreeBranch(b);
-    },
-    // The remaining setters write store state keyed by session id, but a
-    // stale async callback completing after navigation can still touch the
-    // previous session's row (e.g. re-mark it resume-skipped or overwrite its
-    // status). Guard them all so a switched-away session is never mutated.
-    setTaskSession: (s) => {
-      if (guard()) setters.setTaskSession(s);
-    },
-    setAgentctlReady: (sid) => {
-      if (guard()) setters.setAgentctlReady?.(sid);
-    },
-    setResumeSkipped: (sid, skipped) => {
-      if (guard()) setters.setResumeSkipped?.(sid, skipped);
-    },
-  };
 }
 
 export function useSessionResumption(

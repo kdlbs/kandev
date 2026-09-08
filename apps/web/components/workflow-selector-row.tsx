@@ -2,13 +2,28 @@
 
 import { Fragment, memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
+import {
+  IconArrowBigRightLines,
+  IconCheck,
+  IconChevronDown,
+  IconLogicBuffer,
+} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 
 type StepItem = {
   id: string;
@@ -88,9 +103,96 @@ type WorkflowSelectorRowProps = {
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
   agentProfiles: AgentProfileOption[];
+  launchPreview?: TaskCreateLaunchPreview | null;
   clearLabel?: string;
   placeholder?: string;
 };
+
+function WorkflowSelectorTrigger({
+  selectedWorkflow,
+  placeholder,
+}: {
+  selectedWorkflow: WorkflowSelectorRowProps["workflows"][number] | undefined;
+  placeholder?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <PopoverTrigger asChild>
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11 w-auto min-w-0 max-w-full justify-between cursor-pointer md:min-h-7"
+        data-testid="workflow-selector-trigger"
+      >
+        <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">
+          {selectedWorkflow?.name ?? placeholder ?? t("workflows:selectWorkflow")}
+        </span>
+        <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    </PopoverTrigger>
+  );
+}
+
+function LaunchDestinationInfo() {
+  const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const label = t("task:launchDestinationHelpLabel");
+  const description = t("task:launchDestinationHelp");
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+      aria-label={label}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      data-testid="task-create-launch-step-info"
+    >
+      <IconArrowBigRightLines
+        className="h-3.5 w-3.5"
+        aria-hidden="true"
+        data-testid="task-create-launch-step-arrow"
+      />
+    </Button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent data-testid="task-create-launch-step-help-drawer">
+          <DrawerHeader>
+            <DrawerTitle>{label}</DrawerTitle>
+            <DrawerDescription>{description}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent className="max-w-[320px] text-xs leading-relaxed">
+        {description}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function LaunchDestinationLabel({ stepName }: { stepName: string }) {
+  return (
+    <span
+      className="min-w-0 max-w-[45vw] shrink truncate text-xs text-muted-foreground"
+      data-testid="task-create-launch-step"
+    >
+      {stepName}
+    </span>
+  );
+}
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   workflows,
@@ -98,6 +200,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   selectedWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  launchPreview,
   clearLabel,
   placeholder,
 }: WorkflowSelectorRowProps) {
@@ -111,20 +214,15 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11 w-auto justify-between cursor-pointer md:min-h-7"
-          data-testid="workflow-selector-trigger"
-        >
-          <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {selectedWorkflow?.name ?? placeholder ?? t("workflows:selectWorkflow")}
-          </span>
-          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
+      <div className="flex min-w-0 items-center gap-2" data-testid="workflow-selector-row">
+        <WorkflowSelectorTrigger selectedWorkflow={selectedWorkflow} placeholder={placeholder} />
+        {launchPreview && (
+          <>
+            <LaunchDestinationInfo />
+            <LaunchDestinationLabel stepName={launchPreview.stepName} />
+          </>
+        )}
+      </div>
       <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">
         <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
           {t("workflows:workflow")}

@@ -18,6 +18,7 @@ This design preserves the technical source detail for `REQ-EXECUTORS-SSH-EXECUTO
 | Requirement | Design section |
 | --- | --- |
 | `REQ-EXECUTORS-SSH-EXECUTOR-001` | [Migrated source detail](#migrated-source-detail) |
+| `AC-EXECUTORS-SSH-EXECUTOR-001.11` and `AC-EXECUTORS-SSH-EXECUTOR-001.12` | [Credential-file conflict policy](#credential-file-conflict-policy) |
 
 ## Migrated source detail
 
@@ -104,6 +105,13 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   `agentctl` starts. A non-zero exit, timeout, missing primary checkout, or conflicting `origin`
   fails the launch; Kandev does not
   start `agentctl` or the agent in an empty or ambiguous workspace.
+- Managed preparation text is shell-portable. The profile shell may be `sh`, `bash`, or `zsh`, so
+  every parameter expansion that a `:` follows is braced (`${name}:`); zsh otherwise parses `$name:r`
+  as a modifier and silently corrupts fetch refspecs.
+- A profile stores the generated prepare script, and a stored script wins over the managed default,
+  so preparation repairs the one fragment Kandev itself generated before that rule existed: an
+  unbraced `refs/heads/$name:refs/remotes/origin/$name` is braced when the stored script is
+  resolved. Any other expansion in a stored script is left exactly as its author wrote it.
 - On subsequent sessions for the same task on the same host, the default preparation path reuses the
   matching checkout without deleting local commits or untracked work. The profile prepare script may
   run again because it is a per-session pre-launch hook and must therefore be idempotent when the
@@ -135,10 +143,31 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - The existing `executor_sprites_credentials.go` selection + upload logic for `remote_credentials` / `remote_auth_secrets` is the reference; SSH v1 wires the uploader and writes credentials to the SSH user's home dir.
 - GitHub CLI token: same special case as Sprites (run `gh auth token` locally, inject as env var).
 
+### Credential-file conflict policy
+
+The agent descriptor owns the policy for an existing credential file. The transfer layer must not infer file semantics from a path or an executor type.
+
+OpenCode declares a top-level JSON-object merge for `auth.json`. The transfer layer reads the target before it writes the source file.
+
+The transfer layer preserves providers that exist only in the target. It adds providers that exist only in the source.
+
+When both files contain a provider, the source entry replaces the target entry. This rule preserves the selected host credential as the copy source.
+
+When the target does not exist, the transfer layer writes the source object. Other agent credential files keep the existing replace policy.
+
+The merge requires two valid JSON objects. An unreadable or malformed target causes a copy error and remains unchanged.
+
+The merge runs in the shared credential-upload path. Persistent transports expose target reads only for this policy and keep ordinary writes unchanged.
+
+An isolated transport has no pre-existing user file. It validates the source object and writes it without a target read.
+
+This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../../../decisions/2026-09-05-agent-owned-credential-file-conflicts.md).
+
 ### Recovery after backend restart
 
 - Persist in `ExecutorRunning.Metadata` (allow-listed in `persistentMetadataKeys`): `ssh_host`, `ssh_port`, `ssh_user`, `ssh_host_fingerprint`, `ssh_remote_task_dir`, `ssh_remote_session_dir`, `ssh_remote_agentctl_port`, `ssh_remote_agentctl_pid`, `ssh_local_forward_port`, `ssh_workdir_root`, `ssh_proxy_jump`, `ssh_identity_source`, `ssh_identity_file`.
-- `ResumeRemoteInstance` re-opens an SSH connection per surviving session using its full `(host, port, user, identity_source, identity_file, proxy_jump, host_fingerprint)` tuple — no sharing across sessions, so two profiles on the same host with different keys don't get merged. It re-establishes each session's local port forward to its recorded remote port, verifies the remote agentctl is alive (`kill -0 <pid>` for liveness, then HTTP probe on the forwarded port), and re-binds the stream manager. If the remote process is gone, the resume fails and the manager falls back to creating a fresh instance.
+- `ResumeRemoteInstance` re-opens an SSH connection per surviving session using its full `(host, port, user, identity_source, identity_file, proxy_jump, host_fingerprint)` tuple — no sharing across sessions, so two profiles on the same host with different keys don't get merged. It re-establishes each session's local port forward to its recorded remote port, verifies the remote agentctl is alive (`kill -0 <pid>` for liveness, then HTTP probe on the forwarded port), and re-binds the stream manager. If the remote process is confirmed gone, the resume preflight yields to normal creation of a fresh instance.
+- The liveness probe distinguishes a remote `kill -0` exit, which confirms that the recorded process is unavailable, from an SSH session or transport failure, which leaves liveness unknown. A confirmed-absent process clears only the stale session-runtime metadata (remote session directory, controller PID and port, and local-forward details), preserves the SSH connection configuration and remote task directory, and continues through normal instance creation. The new controller receives the existing ACP resume token so it loads the provider conversation. An unknown liveness result remains a hard resume error and does not create a competing controller.
 
 ### Settings UI
 

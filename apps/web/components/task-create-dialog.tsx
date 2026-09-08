@@ -24,6 +24,7 @@ import {
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import { MCPSessionSelector } from "@/components/task/mcp-session-selector";
+import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -108,6 +109,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
+        launchPreview={props.launchPreview}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
@@ -137,7 +139,9 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       onAgentProfileChange={props.onAgentProfileChange}
       onExecutorProfileChange={props.onExecutorProfileChange}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
     />
   );
@@ -199,6 +203,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
       <TaskCreateAdvancedSettings
@@ -207,7 +212,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
         mcpDefinitions={props.mcpDefinitions}
         mcpDefinitionsLoading={props.mcpDefinitionsLoading}
         mcpSelectionIds={props.fs.mcpServerIds}
@@ -216,7 +221,15 @@ function DialogFormBody(props: DialogFormBodyProps) {
           props.fs.setMcpServerIdsDirty(true);
         }}
         mcpInheritedSelections={props.mcpInheritedSelections}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
       />
+      {props.isEditMode && (
+        <TaskEditDialogDependencies
+          state={props.editDependencies}
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
     </div>
   );
 }

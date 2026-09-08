@@ -362,27 +362,43 @@ func TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable(t *test
 	}
 }
 
-// TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable
+// TestDispatcher_RecordDecision_NonActiveSessionFallsBackToUnresolvable
 // covers the other session_unresolvable case: a supplied session that
-// belongs to the right task but is in a terminal (non-active) state.
+// belongs to the right task but is not in an active state. The table is
+// derived from taskmodels.AllTaskSessionStates filtered by
+// !IsTaskLookupActiveSessionState, so it cannot fall out of sync with the
+// active-state set the same way the removed hand-written switch could.
 func TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable(t *testing.T) {
-	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
-	sessions := &fakeSessions{
-		byID: map[string]*taskmodels.TaskSession{
-			"sess-done": {ID: "sess-done", TaskID: "task-1", State: taskmodels.TaskSessionStateCompleted},
-		},
+	var nonActiveStates []taskmodels.TaskSessionState
+	for _, state := range taskmodels.AllTaskSessionStates {
+		if !taskmodels.IsTaskLookupActiveSessionState(state) {
+			nonActiveStates = append(nonActiveStates, state)
+		}
 	}
-	d := New(eng, sessions, logger.Default())
+	for _, state := range nonActiveStates {
+		t.Run(string(state), func(t *testing.T) {
+			eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+			sessions := &fakeSessions{
+				byID: map[string]*taskmodels.TaskSession{
+					"sess-done": {ID: "sess-done", TaskID: "task-1", State: state},
+				},
+			}
+			d := New(eng, sessions, logger.Default())
 
-	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
-		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
-		Decision: "approved", SessionID: "sess-done",
-	})
-	if err != nil {
-		t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
-	}
-	if eng.decisionSession != "" {
-		t.Errorf("session id = %q, want blank: terminal session must not be forwarded", eng.decisionSession)
+			_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+				TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+				Decision: "approved", SessionID: "sess-done",
+			})
+			if err != nil {
+				t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
+			}
+			if !eng.decisionCalled {
+				t.Fatal("engine RecordParticipantDecision not invoked")
+			}
+			if eng.decisionSession != "" {
+				t.Errorf("session id = %q, want blank: non-active session must not be forwarded", eng.decisionSession)
+			}
+		})
 	}
 }
 

@@ -47,7 +47,7 @@ Office supplies autonomous run producers and Office-specific maintenance. The pe
 A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event-driven, and reactive trigger flows through this queue before becoming an agent run. Each request:
 
 - Has a `source` discriminator (see table below) plus a typed payload.
-- Carries an `idempotency_key` for source-level dedup within a 24-hour window.
+- Carries an `idempotency_key` for source-level dedup. The queue checks recent rows within 24 hours and the persisted key remains unique for its lifetime.
 - Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
 - Produces exactly one `runs` row on successful claim; the run is the execution record, the wakeup-request is the dispatch record.
 
@@ -253,7 +253,7 @@ A 30-second buffer is added to any parsed time. If no pattern matches or the par
 
 Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `parsed_reset_at` (UTC).
 
-**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup.
+**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup. When the failing run's agent IS the coordinator itself, the `agent_error` wakeup is not escalated to it (no self-targeted run is queued) - the `agent.error` inbox item is still created.
 
 ### Recovery sweep (unstarted Office tasks)
 

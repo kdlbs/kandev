@@ -38,6 +38,10 @@ var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies al
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
 
+// ErrTaskEnvironmentOwnershipChanged reports that an ownership transfer's
+// expected owner or generation is no longer current.
+var ErrTaskEnvironmentOwnershipChanged = errors.New("task environment ownership changed")
+
 // ErrExternalIDConflict reports that a task insert lost the uniqueness race
 // on uniq_tasks_external_id — the TOCTOU backstop for the create sequence's
 // step-3 lookup (docs/specs/tasks/system-design/external-id-idempotency.md). Callers

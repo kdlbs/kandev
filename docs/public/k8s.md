@@ -17,6 +17,14 @@ Kandev ships example Kubernetes YAML in `k8s/`. The control-plane files are a si
 
 To run task sessions as Pods, follow [Configure the Kubernetes executor](#configure-the-kubernetes-executor) after the control plane is reachable. That is a separate cluster-authority decision.
 
+![Kubernetes placement showing one persistent Kandev control-plane Pod, its PVC and Service, optional task-session Pods, and external repositories and providers.](../screenshots/k8s.svg)
+
+[Open full-size SVG diagram][k8s-diagram]
+
+[k8s-diagram]: ../../docs/screenshots/k8s.svg
+
+The control-plane Pod owns the persistent home and API identity. Task-session Pods are a separate, opt-in workload path with their own service-account permissions.
+
 ## Architecture and limitations
 
 The example creates:
@@ -416,7 +424,7 @@ Tune from observed startup time. Keep liveness on `/health` and readiness on `/r
 
 ## Ingress and exposure
 
-Kandev has no built-in user-auth boundary. Do not expose the example Ingress publicly until an authenticated gateway and TLS are in place.
+Kandev ships with its experimental authentication boundary disabled. Do not expose the example Ingress publicly until authentication and TLS are in place; use an authenticated gateway when relying on a supported external identity boundary.
 
 Before applying `k8s/ingress.yaml`:
 

@@ -25,11 +25,9 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       // itself is covered by agent-profile-disable.spec.ts.
       await apiClient.updateAgentProfile(profile.id, { enabled: false });
 
-      // The Settings sidebar defaults to the flat menu; the per-profile
-      // Agents tree only renders in a tree mode. Accordion opens the branch
-      // whose page owns the current route, so /settings/agents shows the
-      // profile leaves. Seeded before every navigation (the page boots the
-      // mode from localStorage on the first render).
+      // The Settings sidebar defaults to Accordion tree. Seed the mode before
+      // every navigation so this test remains independent of a remembered
+      // device preference.
       await testPage.addInitScript(() => {
         // getLocalStorage JSON-parses the value, so the mode must be stored
         // the way setLocalStorage would write it.

@@ -75,6 +75,7 @@ func TestMCPCatalogRoutesCreateListUpdateDelete(t *testing.T) {
 	}
 	repo := &catalogHandlerRepository{definitions: make(map[string]*mcpconfig.MCPServerDefinition)}
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	RegisterRoutesWithMCPCatalog(router, nil, nil, log, "test-interlock", repo, allowCatalogWorkspace)
 
 	createBody := `{"runtime_name":"linear","display_name":"Linear","execution_mode":"remote","transport":"http","configuration":{"url":"https://mcp.example.test"}}`

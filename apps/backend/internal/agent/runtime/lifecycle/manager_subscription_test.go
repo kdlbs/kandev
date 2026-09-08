@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -200,6 +201,128 @@ func TestAggregator_RuntimeInterestRemovalYieldsPaused(t *testing.T) {
 	}
 	if runtimeEntries != 0 || workspaceEntries != 0 {
 		t.Errorf("runtime indexes not cleaned up: sessions=%d workspaces=%d", runtimeEntries, workspaceEntries)
+	}
+}
+
+func TestAggregator_RuntimeInterestRemovalDeliversPaused(t *testing.T) {
+	modes := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/poll-mode" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		modes <- body.Mode
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	mgr := newTestManagerForAggregator(t)
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	client := agentctl.NewClient("127.0.0.1", port, newTestLogger())
+	t.Cleanup(func() { client.Close() })
+	execution := &AgentExecution{
+		ID: "exec-s1", SessionID: "s1", WorkspacePath: "/tmp/ws1", agentctl: client,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+	select {
+	case got := <-modes:
+		if got != string(WorkspacePollModeSlow) {
+			t.Fatalf("initial runtime mode = %q, want slow", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for runtime poll mode")
+	}
+
+	mgr.pollAggregator.HandleRuntimeInterest("s1", false)
+	select {
+	case got := <-modes:
+		if got != string(WorkspacePollModePaused) {
+			t.Fatalf("final runtime mode = %q, want paused", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for paused poll mode")
+	}
+}
+
+func TestAggregator_FailedPausedPushIsRetriedOnUnchangedContribution(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		pausedCalls int
+		modes       = make(chan string, 4)
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		modes <- body.Mode
+		if body.Mode == string(WorkspacePollModePaused) {
+			mu.Lock()
+			pausedCalls++
+			call := pausedCalls
+			mu.Unlock()
+			if call == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	mgr := newTestManagerForAggregator(t)
+	addExecutionWithClient(t, mgr, "s1", "/tmp/ws1", srv.URL)
+
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+	if got := <-modes; got != string(WorkspacePollModeSlow) {
+		t.Fatalf("initial runtime mode = %q, want slow", got)
+	}
+	mgr.pollAggregator.HandleRuntimeInterest("s1", false)
+	if got := <-modes; got != string(WorkspacePollModePaused) {
+		t.Fatalf("first paused mode = %q, want paused", got)
+	}
+
+	// The first paused RPC failed. A repeated paused contribution must not be
+	// suppressed just because the desired mode was already recorded locally.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mgr.pollAggregator.mu.Lock()
+		dirty := mgr.pollAggregator.dirtyPush["/tmp/ws1"]
+		mgr.pollAggregator.mu.Unlock()
+		if dirty {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mgr.pollAggregator.mu.Lock()
+	dirty := mgr.pollAggregator.dirtyPush["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if !dirty {
+		t.Fatal("first paused RPC did not record a dirty retry state")
+	}
+	mgr.pollAggregator.HandleRuntimeInterest("s1", false)
+	if got := <-modes; got != string(WorkspacePollModePaused) {
+		t.Fatalf("retried paused mode = %q, want paused", got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if pausedCalls != 2 {
+		t.Fatalf("paused RPC calls = %d, want 2", pausedCalls)
 	}
 }
 
@@ -412,7 +535,7 @@ func TestAggregator_PushAsync_LastWriteWinsUnderRace(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	mgr := newTestManagerForAggregator(t)
 	addExecutionWithClient(t, mgr, "s1", "/tmp/ws1", srv.URL)

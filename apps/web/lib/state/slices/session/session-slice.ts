@@ -6,7 +6,7 @@ import type { SessionSlice, SessionSliceState } from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
-  mergePendingActionProjection,
+  mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
@@ -15,20 +15,15 @@ import {
   removePromptMessage,
   updatePromptMessage,
 } from "./prompt-message-actions";
-import {
-  migrateEnvKeyedData,
-  purgeSessionRuntimeState,
-} from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { mergeTaskSession } from "./session-merge";
+import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
-import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
 import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
 } from "@/lib/walkthrough-notification-storage";
-
-const debugEnv = createDebugLogger("session:env-mapping");
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -95,120 +90,6 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
 /** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
-}
-
-/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
- *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
-  if (!environmentId) return;
-  const previous = draft.environmentIdBySessionId[sessionId];
-  if (isDebug()) {
-    debugEnv("syncEnvironmentMapping", {
-      sessionId,
-      environmentId,
-      previous: previous ?? null,
-      changed: previous !== environmentId,
-      fallbackGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
-      ).length,
-      targetGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
-      ).length,
-    });
-  }
-  draft.environmentIdBySessionId[sessionId] = environmentId;
-  migrateEnvKeyedData(draft, sessionId, environmentId);
-}
-
-/**
- * Backfill the prepare-progress slice from a session's `metadata.prepare_result`
- * when sessions are loaded from the API (e.g. switching tasks client-side).
- *
- * Without this, prepare progress only ever arrives via SSR hydration or live WS
- * events, so switching to a task whose prepare already completed (common for
- * remote executors) showed an empty "Environment prepared" row until a full
- * page reload re-ran SSR. Only populates when no entry exists yet so we never
- * clobber live WS progress for an in-flight prepare.
- *
- * `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncPrepareProgress(draft: any, session: TaskSession) {
-  if (draft.prepareProgress.bySessionId[session.id]) return;
-  const prepareState = prepareResultToSessionState(session.id, session.metadata);
-  if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
-}
-
-/** Merge the runtime cancellation projection using its process-local revision. */
-function mergeCancellationProjection(
-  existing: TaskSession,
-  incoming: TaskSession,
-): Pick<TaskSession, "cancellation_pending" | "cancellation_revision"> {
-  const incomingRevision = incoming.cancellation_revision;
-  const existingRevision = existing.cancellation_revision;
-  const incomingIsCurrent =
-    incomingRevision !== undefined &&
-    (existingRevision === undefined || incomingRevision >= existingRevision);
-
-  if (incomingIsCurrent) {
-    return {
-      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
-      cancellation_revision: incomingRevision,
-    };
-  }
-
-  if (incomingRevision === undefined && existingRevision === undefined) {
-    return {
-      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
-      cancellation_revision: existingRevision,
-    };
-  }
-
-  return {
-    cancellation_pending: existing.cancellation_pending,
-    cancellation_revision: existingRevision,
-  };
-}
-
-/** Merge an incoming session update with an existing session, preserving nullable fields. */
-function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
-  const cancellation = mergeCancellationProjection(existing, incoming);
-  const incomingRouteGeneration = incoming.route_generation;
-  const existingRouteGeneration = existing.route_generation;
-  const routeIsStale =
-    existingRouteGeneration !== undefined &&
-    (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
-  const pendingAction = mergePendingActionProjection(existing, incoming);
-  return {
-    ...existing,
-    ...incoming,
-    ...cancellation,
-    ...(routeIsStale
-      ? {
-          execution_profile_id: existing.execution_profile_id,
-          route_generation: existing.route_generation,
-          route_state: existing.route_state,
-          route_reason: existing.route_reason,
-          route_error_code: existing.route_error_code,
-          route_error_class: existing.route_error_class,
-          route_catalogue_version: existing.route_catalogue_version,
-          route_retry_ordinal: existing.route_retry_ordinal,
-          route_deadline: existing.route_deadline,
-          route_pending_outcome: existing.route_pending_outcome,
-          downstream_acp_session_id: existing.downstream_acp_session_id,
-        }
-      : {}),
-    ...pendingAction,
-    agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
-    worktree_id: incoming.worktree_id ?? existing.worktree_id,
-    worktree_path: incoming.worktree_path ?? existing.worktree_path,
-    worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
-    workspace_path: incoming.workspace_path ?? existing.workspace_path,
-    repository_id: incoming.repository_id ?? existing.repository_id,
-    base_branch: incoming.base_branch ?? existing.base_branch,
-    task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
-  };
 }
 
 /** Normalize and merge a complete session record without erasing a newer live activity event. */
@@ -289,7 +170,12 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: { bySession: {}, metaBySession: {}, generationBySession: {} },
+  messagePrompts: {
+    bySession: {},
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -298,7 +184,13 @@ export const defaultSessionState: SessionSliceState = {
     settledBoundaryBySession: {},
   },
   taskSessions: { items: {}, activityEpochBySession: {} },
-  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
+  taskSessionsByTask: {
+    itemsByTaskId: {},
+    loadingByTaskId: {},
+    loadedByTaskId: {},
+    errorByTaskId: {},
+  },
+  pendingActionProjectionsBySessionId: {},
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
@@ -628,6 +520,38 @@ function nextPair(
   return [current[1], revisionId];
 }
 
+function buildRemoveTaskSessionAction(set: ImmerSet) {
+  return (taskId: string, sessionId: string) =>
+    set((draft) => {
+      delete draft.taskSessions.items[sessionId];
+      if (draft.taskSessions.activityEpochBySession) {
+        delete draft.taskSessions.activityEpochBySession[sessionId];
+      }
+      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+      if (sessionsByTask) {
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
+          (s) => s.id !== sessionId,
+        );
+      }
+      delete draft.pendingActionProjectionsBySessionId[sessionId];
+      // Drop the conversation history owned by this session.
+      delete draft.messages.bySession[sessionId];
+      delete draft.messages.metaBySession[sessionId];
+      delete draft.messagePrompts.bySession[sessionId];
+      delete draft.messagePrompts.metaBySession[sessionId];
+      const generations = (draft.messagePrompts.generationBySession ??= {});
+      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
+      delete draft.turns.bySession[sessionId];
+      delete draft.turns.activeBySession[sessionId];
+      delete draft.turns.loadedBySession[sessionId];
+      delete draft.turns.reconcileEpochBySession[sessionId];
+      delete draft.turns.settledBoundaryBySession[sessionId];
+      // Cascade into the runtime slice (shell/process/git buffers + per-session
+      // maps); this also removes the environmentIdBySessionId mapping.
+      purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
+    });
+}
+
 /** Build actions that reconcile complete session snapshots with partial live events. */
 function buildTaskSessionReconciliationActions(set: ImmerSet) {
   return {
@@ -639,16 +563,21 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
-          return mergeTaskSessionSnapshot(
+          const snapshot = mergeTaskSessionSnapshot(
             existing,
             session,
             draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
             activityEpochsAtRequestStart[session.id],
           );
+          return mergeOrphanPendingActionProjection(
+            draft.pendingActionProjectionsBySessionId,
+            snapshot,
+          );
         });
         draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
         draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
         draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+        (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
@@ -672,7 +601,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           // as repository_id instead of treating the old list as authoritative.
           draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
         }
-        const merged = existing ? mergeTaskSession(existing, session) : session;
+        const merged = mergeOrphanPendingActionProjection(
+          draft.pendingActionProjectionsBySessionId,
+          existing ? mergeTaskSession(existing, session) : session,
+        );
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
@@ -694,9 +626,10 @@ function buildTaskSessionActions(set: ImmerSet) {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
-        const mergedSession = existingSession
-          ? mergeTaskSession(existingSession, session)
-          : session;
+        const mergedSession = mergeOrphanPendingActionProjection(
+          draft.pendingActionProjectionsBySessionId,
+          existingSession ? mergeTaskSession(existingSession, session) : session,
+        );
         draft.taskSessions.items[session.id] = mergedSession;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -718,42 +651,15 @@ function buildTaskSessionActions(set: ImmerSet) {
           if (match) match.last_read_message_id = lastReadMessageId;
         }
       }),
-    /**
-     * Removes a session and all its per-session state: task session rows,
-     * messages, turns, reconciliation maps (loaded/epoch/boundary), and the
-     * cascaded runtime buffers.
-     */
-    removeTaskSession: (taskId: string, sessionId: string) =>
-      set((draft) => {
-        delete draft.taskSessions.items[sessionId];
-        if (draft.taskSessions.activityEpochBySession) {
-          delete draft.taskSessions.activityEpochBySession[sessionId];
-        }
-        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (sessionsByTask) {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
-            (s) => s.id !== sessionId,
-          );
-        }
-        // Drop the conversation history owned by this session.
-        delete draft.messages.bySession[sessionId];
-        delete draft.messages.metaBySession[sessionId];
-        delete draft.messagePrompts.bySession[sessionId];
-        delete draft.messagePrompts.metaBySession[sessionId];
-        const generations = (draft.messagePrompts.generationBySession ??= {});
-        generations[sessionId] = (generations[sessionId] ?? 0) + 1;
-        delete draft.turns.bySession[sessionId];
-        delete draft.turns.activeBySession[sessionId];
-        delete draft.turns.loadedBySession[sessionId];
-        delete draft.turns.reconcileEpochBySession[sessionId];
-        delete draft.turns.settledBoundaryBySession[sessionId];
-        // Cascade into the runtime slice (shell/process/git buffers + per-session
-        // maps); this also removes the environmentIdBySessionId mapping.
-        purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
-      }),
+    /** Removes a session and all its per-session state. */
+    removeTaskSession: buildRemoveTaskSessionAction(set),
     setTaskSessionsLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
         draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
+      }),
+    setTaskSessionsError: (taskId: string, error: string | null) =>
+      set((draft) => {
+        (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = error;
       }),
   };
 }

@@ -12,6 +12,7 @@ import (
 type configExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryRowxContext(context.Context, string, ...any) *sqlx.Row
+	Rebind(string) string
 }
 
 const configSelectColumns = `workspace_id, host, auth_method, username,
@@ -20,8 +21,8 @@ const configSelectColumns = `workspace_id, host, auth_method, username,
 // GetConfigForWorkspace returns one workspace's config or nil when absent.
 func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*GitLabConfig, error) {
 	var cfg GitLabConfig
-	err := s.ro.GetContext(ctx, &cfg, `SELECT `+configSelectColumns+`
-		FROM gitlab_configs WHERE workspace_id = ?`, workspaceID)
+	err := s.ro.GetContext(ctx, &cfg, s.ro.Rebind(`SELECT `+configSelectColumns+`
+		FROM gitlab_configs WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -43,7 +44,7 @@ func upsertConfigForWorkspace(ctx context.Context, execer configExecer, workspac
 	}
 	cfg.WorkspaceID = workspaceID
 	cfg.UpdatedAt = now
-	err := execer.QueryRowxContext(ctx, `
+	err := execer.QueryRowxContext(ctx, execer.Rebind(`
 		INSERT INTO gitlab_configs (
 			workspace_id, host, auth_method, username, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?)
@@ -53,7 +54,7 @@ func upsertConfigForWorkspace(ctx context.Context, execer configExecer, workspac
 			username = excluded.username,
 			updated_at = excluded.updated_at,
 			revision = gitlab_configs.revision + 1
-		RETURNING revision`,
+		RETURNING revision`),
 		workspaceID, cfg.Host, cfg.AuthMethod, cfg.Username, cfg.CreatedAt, cfg.UpdatedAt).
 		Scan(&cfg.Revision)
 	return err
@@ -85,7 +86,7 @@ func (s *Store) SaveConfigForWorkspace(ctx context.Context, workspaceID string, 
 
 // DeleteConfigForWorkspace removes only the selected workspace connection.
 func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_configs WHERE workspace_id = ?`, workspaceID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_configs WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 
@@ -103,10 +104,10 @@ func (s *Store) UpdateConfigHealthForRevision(ctx context.Context, workspaceID, 
 }
 
 func updateConfigHealthForRevision(ctx context.Context, execer configExecer, workspaceID, username string, ok bool, errMsg string, checkedAt time.Time, revision int64) (bool, error) {
-	result, err := execer.ExecContext(ctx, `
+	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE gitlab_configs
-		SET username = ?, last_ok = ?, last_error = ?, last_checked_at = ?, updated_at = ?
-		WHERE workspace_id = ? AND revision = ?`,
+		SET username = ?, last_ok = CASE WHEN ? THEN 1 ELSE 0 END, last_error = ?, last_checked_at = ?, updated_at = ?
+		WHERE workspace_id = ? AND revision = ?`),
 		username, ok, errMsg, checkedAt, checkedAt, workspaceID, revision)
 	if err != nil {
 		return false, err
@@ -121,11 +122,11 @@ func (s *Store) RestoreConfigForWorkspace(ctx context.Context, workspaceID strin
 	if cfg == nil {
 		return s.DeleteConfigForWorkspace(ctx, workspaceID)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_configs (
 			workspace_id, host, auth_method, username, last_ok, last_error,
 			last_checked_at, revision, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, CASE WHEN ? THEN 1 ELSE 0 END, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			host = excluded.host,
 			auth_method = excluded.auth_method,
@@ -135,7 +136,7 @@ func (s *Store) RestoreConfigForWorkspace(ctx context.Context, workspaceID strin
 			last_checked_at = excluded.last_checked_at,
 			revision = excluded.revision,
 			created_at = excluded.created_at,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		workspaceID, cfg.Host, cfg.AuthMethod, cfg.Username, cfg.LastOK, cfg.LastError,
 		cfg.LastCheckedAt, cfg.Revision, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
@@ -145,7 +146,7 @@ func (s *Store) RestoreConfigForWorkspace(ctx context.Context, workspaceID strin
 // operation.
 func (s *Store) WorkspaceIDForTask(ctx context.Context, taskID string) (string, error) {
 	var workspaceID string
-	err := s.ro.GetContext(ctx, &workspaceID, `SELECT workspace_id FROM tasks WHERE id = ?`, taskID)
+	err := s.ro.GetContext(ctx, &workspaceID, s.ro.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotConfigured
 	}

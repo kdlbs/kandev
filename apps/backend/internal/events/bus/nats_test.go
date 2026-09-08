@@ -33,7 +33,7 @@ func TestNATSCreateMsgHandler_MessageSubjectIsAuthoritative(t *testing.T) {
 
 	receivedCh := make(chan *Event, 1)
 	b := &NATSEventBus{logger: newTestLogger(t)}
-	handler := b.createMsgHandler(func(_ context.Context, e *Event) error {
+	handler := b.createMsgHandler("shell.output.*", func(_ context.Context, e *Event) error {
 		receivedCh <- e
 		return nil
 	})
@@ -74,7 +74,7 @@ func TestNATSCreateMsgHandler_StampsSubjectOnUnstampedEvent(t *testing.T) {
 
 	receivedCh := make(chan *Event, 1)
 	b := &NATSEventBus{logger: newTestLogger(t)}
-	handler := b.createMsgHandler(func(_ context.Context, e *Event) error {
+	handler := b.createMsgHandler("task.created", func(_ context.Context, e *Event) error {
 		receivedCh <- e
 		return nil
 	})
@@ -88,6 +88,37 @@ func TestNATSCreateMsgHandler_StampsSubjectOnUnstampedEvent(t *testing.T) {
 		}
 	default:
 		t.Fatal("handler did not invoke the EventHandler")
+	}
+}
+
+// TestNATSCreateMsgHandler_PanicDoesNotEscape is the regression test for the
+// panic guard on the NATS receive path. The NATS client invokes the returned
+// nats.MsgHandler on its own goroutine, so an unrecovered panic there would
+// kill the process rather than merely truncate a delivery loop — containment
+// matters even more here than on the in-memory bus.
+func TestNATSCreateMsgHandler_PanicDoesNotEscape(t *testing.T) {
+	data, err := json.Marshal(&Event{ID: "evt-3", Type: "task.created", Source: "test"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	b := &NATSEventBus{logger: newTestLogger(t)}
+	handler := b.createMsgHandler("task.created", func(_ context.Context, e *Event) error {
+		panic("handler blew up")
+	})
+
+	handlerReturnedNormally := func() (ok bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				ok = false
+			}
+		}()
+		handler(&nats.Msg{Subject: "task.created", Data: data})
+		return true
+	}()
+
+	if !handlerReturnedNormally {
+		t.Fatal("nats.MsgHandler panicked into the NATS client's goroutine instead of being contained")
 	}
 }
 

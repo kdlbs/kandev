@@ -293,7 +293,9 @@ func TestResetAgentContext_ResetMarkerPrecedesLifecycleCancellationWait(t *testi
 // before its final guarded claim, then starts reset while that claim is paused.
 // If reset wins the shared guard, the marker rejects the prompt while reset is
 // waiting on cancellation. If the prompt wins, reset must observe that turn
-// and cancel it before replacing the provider session.
+// and cancel it before replacing the provider session. Cancellation entry alone
+// does not identify the winner: a successful prompt can release the guard and
+// be descheduled before it reports its result.
 func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, manager, session := newActiveResetTestService(t)
@@ -334,23 +336,28 @@ func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 	releaseGuard()
 
 	var promptErr error
-	resetWonGuard := false
+	promptTimedOut := false
 	select {
 	case promptErr = <-promptDone:
 	case <-cancelEntered:
-		// Reset won the admission guard and is now waiting for its internal
-		// cancellation. The prompt must observe the still-published marker.
-		resetWonGuard = true
+		// Reset is waiting for its internal cancellation. If it won the guard,
+		// the prompt must observe the marker without waiting for cancellation.
+		// A nil result is also valid when the prompt won but reported after reset
+		// reached CancelAgent.
+		select {
+		case promptErr = <-promptDone:
+		case <-time.After(time.Second):
+			promptTimedOut = true
+		}
+	}
+	releaseCancel()
+	if promptTimedOut {
 		select {
 		case promptErr = <-promptDone:
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for reset-blocked prompt admission")
 		}
 	}
-	if resetWonGuard && !errors.Is(promptErr, ErrSessionResetInProgress) {
-		t.Fatalf("prompt admission after reset won guard = %v, want %v", promptErr, ErrSessionResetInProgress)
-	}
-	releaseCancel()
 	select {
 	case resetOK := <-resetDone:
 		if !resetOK {
@@ -360,7 +367,10 @@ func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 		t.Fatal("timed out waiting for context reset")
 	}
 
-	if !resetWonGuard && promptErr != nil && !errors.Is(promptErr, ErrSessionResetInProgress) {
+	if promptTimedOut {
+		t.Fatal("timed out waiting for reset-blocked prompt admission")
+	}
+	if promptErr != nil && !errors.Is(promptErr, ErrSessionResetInProgress) {
 		t.Fatalf("prompt admission error = %v, want reset sentinel or successful claim", promptErr)
 	}
 	// A prompt that won the guard must have been visible as the active turn to

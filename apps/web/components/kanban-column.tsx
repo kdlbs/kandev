@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Task, type KanbanPresentation } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
@@ -84,7 +84,59 @@ function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
   );
 }
 
-export function KanbanColumn({
+function taskItemsEqual(previous: Task[], next: Task[]): boolean {
+  return previous.length === next.length && previous.every((task, index) => task === next[index]);
+}
+
+function externalLinkAvailabilityEqual(
+  previous: KanbanExternalLinkAvailability,
+  next: KanbanExternalLinkAvailability,
+): boolean {
+  return (
+    previous.gitlab === next.gitlab &&
+    previous.jira === next.jira &&
+    previous.linear === next.linear &&
+    previous.sentry === next.sentry
+  );
+}
+
+function columnCallbacksEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.onPreviewTask === next.onPreviewTask &&
+    previous.onOpenTask === next.onOpenTask &&
+    previous.onEditTask === next.onEditTask &&
+    previous.onDeleteTask === next.onDeleteTask &&
+    previous.onArchiveTask === next.onArchiveTask &&
+    previous.onMoveTask === next.onMoveTask &&
+    previous.onToggleSelect === next.onToggleSelect &&
+    previous.onSelectRange === next.onSelectRange
+  );
+}
+
+function columnDisplayPropsEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.presentation === next.presentation &&
+    previous.steps === next.steps &&
+    previous.showMaximizeButton === next.showMaximizeButton &&
+    previous.deletingTaskId === next.deletingTaskId &&
+    previous.archivingTaskId === next.archivingTaskId &&
+    previous.hideHeader === next.hideHeader &&
+    previous.selectedIds === next.selectedIds &&
+    previous.isMultiSelectMode === next.isMultiSelectMode
+  );
+}
+
+function kanbanColumnPropsEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.step === next.step &&
+    taskItemsEqual(previous.tasks, next.tasks) &&
+    columnCallbacksEqual(previous, next) &&
+    columnDisplayPropsEqual(previous, next) &&
+    externalLinkAvailabilityEqual(previous.externalLinkAvailability, next.externalLinkAvailability)
+  );
+}
+
+export const KanbanColumn = memo(function KanbanColumn({
   step,
   tasks,
   presentation = "desktop",
@@ -161,4 +213,4 @@ export function KanbanColumn({
       />
     </div>
   );
-}
+}, kanbanColumnPropsEqual);

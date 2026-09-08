@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
 	"strings"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	executorpkg "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -69,6 +71,8 @@ func provideOrchestrator(
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
+	settingsStore *systemsettings.Store,
+	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -97,10 +101,15 @@ func provideOrchestrator(
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
+	if len(trackers) > 0 && trackers[0] != nil {
+		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
+		}
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
+	queueSettings := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg)).Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
@@ -125,6 +134,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
@@ -174,6 +184,11 @@ func provideOrchestrator(
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
 
+	// Let the task service read the orchestrator's task-level
+	// parked_on_background_work OR-aggregate and its own monotonic revision so
+	// task.updated events carry it (spec: docs/specs/disambiguate-waiting/spec.md).
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).
@@ -183,6 +198,17 @@ func provideOrchestrator(
 	// resolves sessions through its own repo handle, so it does not inherit the
 	// task service's authorize* checks.
 	orchestratorSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	orchestratorSvc.SetSessionControlChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionControl)
+	})
+	// Starting, resuming, steering and dispatching a turn are writes, so they
+	// need session.prompt rather than mere reach.
+	orchestratorSvc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
+		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt)
+	})
+	orchestratorSvc.SetTaskPromptChecker(func(ctx context.Context, taskID string) error {
+		return taskSvc.AuthorizeTaskScope(ctx, taskID, authz.ScopeSessionPrompt)
+	})
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
@@ -333,17 +359,29 @@ func resolveQueueSettings(
 	log *logger.Logger,
 	startup ...queuesettings.Configuration,
 ) queuesettings.Resolution {
+	return resolveQueueSettingsWithStore(nil, pool, log, startup...)
+}
+
+func resolveQueueSettingsWithStore(
+	settingsStore *systemsettings.Store,
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
-	if pool != nil {
-		rawStore, err := systemsettings.NewStore(pool)
+	if settingsStore == nil && pool != nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
 		if err != nil {
 			log.Warn("Failed to initialize message queue settings store", zap.Error(err))
+		}
+	}
+	if settingsStore != nil {
+		loaded, err := queuesettings.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
 		} else {
-			configured, err = queuesettings.NewStore(rawStore).Load(context.Background())
-			if err != nil {
-				log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
-				configured = nil
-			}
+			configured = loaded
 		}
 	}
 	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)

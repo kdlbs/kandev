@@ -75,7 +75,10 @@ test.describe.serial("mid-turn attachment delivery", () => {
     const attachmentPath = path.join(testInfo.outputDir, ATTACHMENT_NAME);
     fs.writeFileSync(attachmentPath, "mid-turn attachment bytes");
 
-    await testPage.locator('input[type="file"]').setInputFiles(attachmentPath);
+    await testPage
+      .getByTestId("chat-input-editor-shell")
+      .locator('input[type="file"]')
+      .setInputFiles(attachmentPath);
     await expect(testPage.getByText(ATTACHMENT_NAME, { exact: true })).toBeVisible({
       timeout: 10_000,
     });

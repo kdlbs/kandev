@@ -1443,6 +1443,16 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
+		// Workspace-only executions can be created from a session row that stores
+		// the task assignee. The launch request carries the acting Office identity,
+		// so refresh it before the execution starts emitting events.
+		if req.AgentProfileID != "" {
+			execution.OfficeAgentProfileID = req.AgentProfileID
+			// Persist the acting identity while the workspace-only execution is
+			// being promoted, so a restart before the first stream event can
+			// restore the same attribution.
+			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
+		}
 		agentTypeName, profileInfo, err := m.resolveAgentProfile(sharedCtx, req)
 		if err != nil {
 			return nil, err
@@ -1532,6 +1542,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+	if err := validateLaunchWorkspaceAdmission(ctx, req, workspacePath); err != nil {
+		return nil, err
+	}
 	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
@@ -1672,6 +1685,53 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+// validateLaunchWorkspaceAdmission checks host-side repository identity before
+// any durable folder or repository links are reconciled. A linked worktree is
+// valid when its Git common directory matches the selected repository. Remote
+// executors own a different filesystem and perform their checks in the
+// executor backend instead.
+func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, workspacePath string) error {
+	if req == nil || workspacePath == "" || models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
+		return nil
+	}
+	if req.ExecutorType != string(models.ExecutorTypeLocal) &&
+		req.ExecutorType != legacyExecutorTypeLocalPC &&
+		(req.ExecutorType != string(models.ExecutorTypeWorktree) || req.ACPSessionID == "") {
+		return nil
+	}
+	repositories := workspaceRepositorySpecsFromLaunch(req)
+	if len(repositories) == 0 {
+		return nil
+	}
+	for index, repository := range repositories {
+		candidate := workspacePath
+		if index > 0 {
+			candidate = filepath.Join(workspacePath, repository.RepoName)
+		} else if len(repositories) > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
+			candidate = filepath.Join(workspacePath, repository.RepoName)
+		}
+		// A missing worktree during ACP resume must reach WorktreePreparer.
+		// It classifies a deleted branch and returns the typed recovery error
+		// used by the explicit replacement action. The preparer still validates
+		// the saved worktree and task environment identity before any reuse.
+		if shouldDeferMissingWorktreeResumeValidation(req, candidate) {
+			continue
+		}
+		if err := validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath); err != nil {
+			return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, err)
+		}
+	}
+	return nil
+}
+
+func shouldDeferMissingWorktreeResumeValidation(req *LaunchRequest, workspacePath string) bool {
+	if req == nil || req.ExecutorType != string(models.ExecutorTypeWorktree) || req.ACPSessionID == "" || workspacePath == "" {
+		return false
+	}
+	_, err := os.Stat(workspacePath)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // buildExecutionFromInstance turns the spawned ExecutorInstance + request shape

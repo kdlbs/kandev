@@ -32,6 +32,7 @@ import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
 import { useTaskCreateDialogMCPSetup } from "@/components/task-create-dialog-mcp";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
+import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -114,6 +115,23 @@ function useLinearImportHandler(
   );
 }
 
+function useEditDialogDependencies(
+  open: boolean,
+  isEditMode: boolean,
+  workspaceId: string | null | undefined,
+  taskId: string | null | undefined,
+) {
+  return useTaskEditDialogDependencies({
+    open: open && isEditMode,
+    workspaceId,
+    taskId,
+  });
+}
+
+function isFreshBranchAvailable(fs: DialogFormState, isLocalExecutor: boolean): boolean {
+  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+}
+
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
@@ -123,6 +141,7 @@ type SubmitWiringArgs = {
   isSessionMode: boolean;
   isEditMode: boolean;
   autoTitle: boolean;
+  editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
   mcpSelectionEditor: ReturnType<typeof useMCPSelectionEditor>;
@@ -137,6 +156,7 @@ function useSubmitHandlersWiring({
   isSessionMode,
   isEditMode,
   autoTitle,
+  editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
   mcpSelectionEditor,
@@ -201,6 +221,7 @@ function useSubmitHandlersWiring({
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
+    priority: fs.priority,
     blockedBy: fs.blockedBy,
     mcpServerIds: fs.mcpServerIds,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
@@ -208,6 +229,28 @@ function useSubmitHandlersWiring({
       !isSessionMode && taskId && workspaceId
         ? (definitionIds: string[]) => mcpSelectionEditor.save(definitionIds)
         : undefined,
+    editDependencies,
+  });
+}
+
+function useDialogMCPSetup(
+  props: TaskCreateDialogProps,
+  fs: ReturnType<typeof useDialogFormState>,
+  workspaceId: string | null | undefined,
+  isSessionMode: boolean,
+  effectiveAgentProfileId: string,
+) {
+  return useTaskCreateDialogMCPSetup({
+    open: props.open,
+    workspaceId,
+    openCycle: fs.openCycle,
+    isSessionMode,
+    taskId: props.taskId ?? props.editingTask?.id ?? null,
+    effectiveAgentProfileId,
+    repositories: fs.repositories,
+    mcpServerIdsDirty: fs.mcpServerIdsDirty,
+    setMcpServerIds: fs.setMcpServerIds,
+    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
   });
 }
 
@@ -316,35 +359,13 @@ function useDialogSetupData(
   };
 }
 
-function useTaskCreateDialogInteractionSetup(args: SubmitWiringArgs) {
-  const { props, fs, computed } = args;
-  const submitHandlers = useSubmitHandlersWiring(args);
-  const guardedHandleSubmit = useGuardedSubmit(
-    submitHandlers.handleSubmit,
-    props.submitBlockedReason,
-  );
-  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    guardedHandleSubmit(event as unknown as FormEvent);
-  });
-  const enhance = useEnhanceForDialog(fs, props.taskId, props.open);
-  const freshBranchAvailable =
-    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
-  return {
-    submitHandlers,
-    guardedHandleSubmit,
-    handleKeyDown,
-    enhance,
-    freshBranchAvailable,
-  };
-}
-
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
 ) {
   const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
-  const { open, mode = "create", workspaceId, workflowId } = resolvedProps;
-  const { editingTask, initialValues } = resolvedProps;
+  const { open, workspaceId, workflowId, editingTask, initialValues } = resolvedProps;
+  const mode = resolvedProps.mode ?? "create";
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
@@ -359,59 +380,59 @@ export function useTaskCreateDialogSetup(
     initialValues,
     resolvedProps.lockedFields?.workflow === true,
   );
+  const editDependencies = useEditDialogDependencies(
+    open,
+    isEditMode,
+    workspaceId,
+    editingTask?.id ?? null,
+  );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const {
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-    computed,
-    handlers,
-    repositoryLocalPath,
-    refreshBranchPolicies,
-  } = data;
-  const mcp = useTaskCreateDialogMCPSetup({
-    open: resolvedProps.open,
+  const { computed, handlers, repositoryLocalPath, refreshBranchPolicies } = data;
+  const mcp = useDialogMCPSetup(
+    resolvedProps,
+    fs,
     workspaceId,
-    openCycle: fs.openCycle,
     isSessionMode,
-    taskId: resolvedProps.taskId ?? resolvedProps.editingTask?.id ?? null,
-    effectiveAgentProfileId: computed.effectiveAgentProfileId,
-    repositories: fs.repositories,
-    mcpServerIdsDirty: fs.mcpServerIdsDirty,
-    setMcpServerIds: fs.setMcpServerIds,
-    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
-  });
-  const interaction = useTaskCreateDialogInteractionSetup({
+    computed.effectiveAgentProfileId,
+  );
+  const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
     computed,
-    workspaceRepositories: repositories,
+    workspaceRepositories: data.repositories,
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
     autoTitle,
+    editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
     mcpSelectionEditor: mcp.editor,
   });
+  const guardedHandleSubmit = useGuardedSubmit(
+    submitHandlers.handleSubmit,
+    resolvedProps.submitBlockedReason,
+    !isTaskStarted && computed.noCompatibleAgent,
+  );
+  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
+    guardedHandleSubmit(event as unknown as FormEvent);
+  });
+  const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
+  const freshBranchAvailable = isFreshBranchAvailable(fs, computed.isLocalExecutor);
   const repositorySets = useRepositorySetsForDialog({
     workspaceId: resolvedProps.workspaceId ?? null,
     open: resolvedProps.open,
     rows: fs.repositories,
-    repositories,
+    repositories: data.repositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
-    userSettingsLoaded,
+    userSettingsLoaded: data.userSettingsLoaded,
   });
   return {
+    ...data,
     fs,
     isSessionMode,
     isEditMode,
@@ -419,21 +440,17 @@ export function useTaskCreateDialogSetup(
     autoTitle,
     isTaskStarted,
     sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
     computed,
     handlers,
-    ...interaction,
+    submitHandlers,
+    handleKeyDown,
+    freshBranchAvailable,
+    repositorySets,
+    guardedHandleSubmit,
+    enhance,
     handleJiraImport,
     handleLinearImport,
-    repositorySets,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-
+    editDependencies,
     mcpDefinitions: mcp.definitions,
     mcpDefinitionsLoading: mcp.definitionsLoading,
     mcpInheritedSelections: mcp.inheritedSelections,
@@ -490,8 +507,9 @@ function useRepositorySetsForDialog({
 function useGuardedSubmit(
   handleSubmit: (e: FormEvent) => void,
   blockedReason: string | null | undefined,
+  compatibilityBlocked: boolean,
 ) {
-  const blocked = Boolean(blockedReason);
+  const blocked = Boolean(blockedReason) || compatibilityBlocked;
   return useCallback(
     (e: FormEvent) => {
       if (blocked) e.preventDefault();

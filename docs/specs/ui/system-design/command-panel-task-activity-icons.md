@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-COMMAND-PANEL-TASK-ACTIVITY-001
 ---
 
-# Command Panel Task Activity Icons System Design
+# Command-panel activity icons
 
 ## Purpose and boundaries
 

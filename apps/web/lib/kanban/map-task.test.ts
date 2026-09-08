@@ -210,11 +210,50 @@ describe("toKanbanTask — pending and status fields", () => {
   });
 });
 
+describe("toKanbanTask — human assignee", () => {
+  // The kanban board and the task top bar both read the assignee out of the
+  // store, so this mapper is the only hop between the backend field and every
+  // kanban surface. Dropping it here reads as "nobody is assigned to anything"
+  // with no error anywhere.
+  it("carries the human assignee through both task shapes", () => {
+    const http = toKanbanTask(httpDTO({ assignee_user_id: "user-7" }));
+    const ws = toKanbanTask(wsPayload({ assignee_user_id: "user-7" }));
+
+    expect(http.assigneeUserId).toBe("user-7");
+    expect(ws.assigneeUserId).toBe("user-7");
+  });
+
+  it("leaves the assignee undefined when the backend omits it", () => {
+    expect(toKanbanTask(httpDTO()).assigneeUserId).toBeUndefined();
+  });
+});
+
 describe("toKanbanTask — autopilot", () => {
   it("preserves the immutable task creation mode for HTTP and websocket payloads", () => {
     expect(toKanbanTask(httpDTO({ autopilot: true }))).toMatchObject({ autopilot: true });
     expect(toKanbanTask(wsPayload({ autopilot: true }))).toMatchObject({ autopilot: true });
     expect(toKanbanTask(httpDTO()).autopilot).toBeUndefined();
+  });
+});
+
+describe("toKanbanTask — parked-on-background-work parity", () => {
+  it("maps parked-on-background-work + revision + epoch from HTTP and WS shapes", () => {
+    const parked = {
+      parked_on_background_work: true,
+      parked_revision: 4,
+      parked_epoch: 1723000000000,
+    } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(parked));
+    const ws = toKanbanTask(wsPayload(parked));
+
+    expect(http).toEqual(ws);
+    expect(http.parkedOnBackgroundWork).toBe(true);
+    expect(http.parkedRevision).toBe(4);
+    expect(http.parkedEpoch).toBe(1723000000000);
+    // Absent fields map to undefined so a partial update can never synthesize
+    // a parked reading.
+    expect(toKanbanTask(httpDTO()).parkedOnBackgroundWork).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).parkedOnBackgroundWork).toBeUndefined();
   });
 });
 

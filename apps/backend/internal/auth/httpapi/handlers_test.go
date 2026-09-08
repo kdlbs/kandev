@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
@@ -88,7 +90,33 @@ func newAPIFixtureWithCfg(t *testing.T, cfg *config.Config, trustedProxies ...st
 		t.Fatalf("set trusted proxies: %v", err)
 	}
 	router.Use(authhttpmw.Middleware(svc))
-	RegisterRoutes(router, svc, nil)
+	RegisterRoutes(router, svc, nil, nil)
+	return router, svc
+}
+
+// newAPIFixtureWithResolver is newAPIFixture with an explicit hostname
+// resolver wired into the registered routes.
+func newAPIFixtureWithResolver(
+	t *testing.T,
+	authEnabled bool,
+	resolver *hostnames.Resolver,
+	trustedProxies ...string,
+) (*gin.Engine, *auth.Service) {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Features.Auth = authEnabled
+	cfg.Auth.SessionTTLHours = 720
+	gin.SetMode(gin.TestMode)
+	svc := newAuthService(t, cfg)
+	router := gin.New()
+	if len(trustedProxies) == 0 {
+		trustedProxies = nil
+	}
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		t.Fatalf("set trusted proxies: %v", err)
+	}
+	router.Use(authhttpmw.Middleware(svc))
+	RegisterRoutes(router, svc, resolver, nil)
 	return router, svc
 }
 
@@ -115,9 +143,31 @@ func newCORSGatedAPIFixture(t *testing.T, cfg *config.Config, trustedProxies ...
 		c.Next()
 	})
 	router.Use(authhttpmw.Middleware(svc))
-	RegisterRoutes(router, svc, nil)
+	RegisterRoutes(router, svc, nil, nil)
 	return router, svc
 }
+
+type staticHostnameCache map[string]hostnames.CacheEntry
+
+func (c staticHostnameCache) GetMany(_ context.Context, ips []string) (map[string]hostnames.CacheEntry, error) {
+	entries := make(map[string]hostnames.CacheEntry)
+	for _, ip := range ips {
+		if entry, ok := c[ip]; ok {
+			entries[ip] = entry
+		}
+	}
+	return entries, nil
+}
+
+func (c staticHostnameCache) Get(_ context.Context, ip string) (hostnames.CacheEntry, error) {
+	entry, ok := c[ip]
+	if !ok {
+		return hostnames.CacheEntry{}, hostnames.ErrNotFound
+	}
+	return entry, nil
+}
+
+func (staticHostnameCache) Set(context.Context, string, string, time.Time) error { return nil }
 
 type apiClient struct {
 	t      *testing.T
@@ -317,6 +367,64 @@ func TestLoginSessionIPNoForwardedHeaderUsesPeer(t *testing.T) {
 	router, _ := newAPIFixture(t, true, "10.0.0.0/8")
 	if got := loginSessionIP(t, router, "10.0.0.5:1234", "", ""); got != "10.0.0.5" {
 		t.Fatalf("session IP = %q, want peer 10.0.0.5", got)
+	}
+}
+
+// Reviewer-requested contract coverage for cached and unresolved session hostnames.
+func TestListSessionsIncludesHostnameFields(t *testing.T) {
+	resolvedAt := time.Date(2026, 8, 18, 12, 0, 0, 123456789, time.UTC)
+	resolver := hostnames.NewResolver(
+		staticHostnameCache{
+			"192.0.2.1": {Hostname: "setup.example.test", ResolvedAt: &resolvedAt},
+		},
+		func(context.Context, string) (bool, error) { return true, nil },
+		nil,
+		nil,
+		nil,
+	)
+	router, _ := newAPIFixtureWithResolver(t, true, resolver)
+	client := &apiClient{t: t, router: router}
+	if rec := client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{
+		"email": "admin@x.dev", "password": "adminpass123", "display_name": "Admin",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("setup: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := client.do(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"email": "admin@x.dev", "password": "adminpass123",
+	}, func(req *http.Request) { req.RemoteAddr = "198.51.100.7:1234" }); rec.Code != http.StatusOK {
+		t.Fatalf("login: %d body=%s", rec.Code, rec.Body.String())
+	}
+	rec := client.do(http.MethodGet, "/api/v1/auth/sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sessions: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Sessions []struct {
+			IP         string  `json:"ip"`
+			Hostname   string  `json:"hostname"`
+			ResolvedAt *string `json:"hostname_resolved_at"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode sessions: %v", err)
+	}
+	byIP := make(map[string]struct {
+		Hostname   string
+		ResolvedAt *string
+	}, len(response.Sessions))
+	for _, session := range response.Sessions {
+		byIP[session.IP] = struct {
+			Hostname   string
+			ResolvedAt *string
+		}{session.Hostname, session.ResolvedAt}
+	}
+	resolved := byIP["192.0.2.1"]
+	if resolved.Hostname != "setup.example.test" || resolved.ResolvedAt == nil || *resolved.ResolvedAt != hostnames.FormatTimestamp(resolvedAt) {
+		t.Fatalf("resolved session = %#v, want cached hostname and timestamp", resolved)
+	}
+	unresolved := byIP["198.51.100.7"]
+	if unresolved.Hostname != "" || unresolved.ResolvedAt != nil {
+		t.Fatalf("unresolved session = %#v, want empty hostname and null timestamp", unresolved)
 	}
 }
 

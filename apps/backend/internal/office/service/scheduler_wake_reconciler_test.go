@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -321,4 +322,63 @@ func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *tes
 		}
 	}
 	t.Fatalf("zz-healthy-parent was never dispatched across 3 ticks behind 10 sticky candidates: %#v", dispatcher.Calls())
+}
+
+// TestWakeOperationID_UnifiedAcrossEdgeAndReconcilerPaths is the regression
+// test for the duplicate on_children_completed wake race: the edge-triggered
+// path (queueChildrenCompletedRun, fired off task.moved) and the
+// level-triggered ParentWakeReconciler can both dispatch a wake for the same
+// parent within one window. Before the fix they derived different operation
+// ids ("children_completed:<parent>" vs the sha256-based
+// "task_children_completed:<parent>:<hash>"), so idx_run_idempotency could
+// never dedupe them and both runs executed. Both producers must now derive
+// the identical operation id for the same parent + child set so the shared
+// idempotency key (and therefore the DB's unique index) actually collapses
+// the second dispatch.
+func TestWakeOperationID_UnifiedAcrossEdgeAndReconcilerPaths(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	// Edge-triggered path: a child lands in Done, firing
+	// finalizeDone -> queueChildrenCompletedRun for parent-1.
+	moveEvent := bus.NewEvent("task.moved", "test", map[string]string{
+		"task_id":                   "parent-1-child-0",
+		"workspace_id":              "ws-1",
+		"from_step_id":              "step-1",
+		"to_step_id":                "step-done",
+		"to_step_name":              "Done",
+		"from_step_name":            "In Progress",
+		"assignee_agent_profile_id": "worker-1",
+		"parent_id":                 "parent-1",
+	})
+	if err := eb.Publish(ctx, "task.moved", moveEvent); err != nil {
+		t.Fatalf("publish task.moved: %v", err)
+	}
+
+	// Level-triggered path: one reconciler tick sweeping the same
+	// still-stuck parent (the edge dispatch above never writes a receipt
+	// or a run row — fakeDispatcher only records the call — so
+	// ListStuckParents still finds parent-1).
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	calls := dispatcher.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("want 2 dispatcher calls (edge + reconciler), got %d: %#v", len(calls), calls)
+	}
+	edgeOpID, reconcilerOpID := calls[0].opID, calls[1].opID
+	if edgeOpID == "" || reconcilerOpID == "" {
+		t.Fatalf("expected non-empty operation ids, got edge=%q reconciler=%q", edgeOpID, reconcilerOpID)
+	}
+	if edgeOpID != reconcilerOpID {
+		t.Fatalf("edge and reconciler paths derived different operation ids for the same parent+child-set: edge=%q reconciler=%q",
+			edgeOpID, reconcilerOpID)
+	}
 }

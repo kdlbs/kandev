@@ -139,9 +139,10 @@ Do not use the inventory to claim that a route, package, ADR, test harness, or f
 
 ## Assets and diagrams
 
-- Store product screenshots under `docs/screenshots/` and reference them relatively.
+- Store product screenshots and diagram exports under `docs/screenshots/` and reference them relatively.
 - Do not hotlink mutable third-party images or commit temporary capture output.
-- Mermaid diagrams are supported. Keep them readable at docs-column width and explain the essential result in prose.
+- Mermaid diagrams are supported for quick, stable figures. When a page explains architecture, lifecycle, data flow, trust boundaries, or a multi-step workflow, use the repository `diagram-design` skill: redraw the source with the Kandev light/dark profile, publish a reviewed local SVG under `docs/screenshots/`, and explain the essential result in prose. Use PNG only when a raster fallback is required. Keep the standalone HTML source under `docs/diagrams/` so the image can be regenerated.
+- For dense diagrams, use a tighter viewBox and larger readable type before publishing. Use a plain Markdown image so the landing publisher copies it to `/docs/screenshots`; do not nest it inside a Markdown link. Add a separate reference-style Markdown link targeting `../../docs/screenshots/<file>.svg` for full-size inspection.
 - Prefer text and commands when the UI changes frequently.
 
 Use a short focused video only when motion or interaction order communicates something that prose and a still image cannot. Store reviewed deliverables under `docs/public/media/feature-guides/` as a WebM, an H.264 MP4 fallback, and a WebP poster. Keep raw captures, browser profiles, and temporary encoder output outside the repository.

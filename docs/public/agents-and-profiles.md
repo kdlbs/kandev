@@ -22,9 +22,13 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, and Hermes. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
+
+Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
+
+Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
 
 ### Pi command surfaces
 
@@ -55,9 +59,23 @@ Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence over the default until you choose **Use Kandev default**. Kandev
-does not store the default as a user selection, so later Kandev releases can
-move unmodified installations to their reviewed defaults.
+precedence for the current default generation. **Use Kandev default** clears
+it, and a later shipped package or reviewed default resets it during startup.
+Kandev does not store the default as a user selection.
+
+When a Kandev upgrade changes the managed package or its reviewed default,
+Kandev removes the older selection during startup before the service becomes
+ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
+When the package and default stay the same, Kandev preserves your selection
+across restarts and unrelated upgrades. A process that is already running is
+not replaced, so the new default applies when Kandev starts a future process.
+
+After startup, open the update control to select any validated stable version,
+including an older version. This lets you roll back the new default when a
+provider or environment requires it. The selection remains active until you
+change it or a later Kandev release changes that agent's package or default.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest
@@ -153,6 +171,31 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
+### Model IDs and executor catalogs
+
+The host model probe is an editing hint. The selected executor owns the model
+catalog at launch. Kandev resolves a saved model in this order:
+
+1. Use the exact requested model when the executor advertises it.
+2. Use the advertised explicit fallback when the requested model is absent.
+3. Use one unique bracketed variation when the requested model is absent and
+   the executor advertises exactly one matching ID.
+4. Use the agent's current or default model when no earlier choice applies.
+
+Profiles with automatic fallback enabled keep the legacy behavior when the
+saved model is absent: Kandev ignores the explicit fallback and does not infer
+a variation. It uses the agent's current or default model instead.
+
+For example, a saved `opus` model can launch as `opus[1m]` when that is the
+only advertised `opus[...]` ID. If the executor advertises both
+`opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
+Variation text is opaque and model IDs remain case-sensitive.
+
+Kandev shows a warning when the launch result differs from the saved model.
+The saved profile remains `opus`; Kandev does not rewrite it after applying a
+unique variation or using the agent default. Recheck the executor catalog when
+the warning repeats after credentials, copied configuration, or agent updates.
+
 ### Use a dynamic profile
 
 > [!EXPERIMENTAL]
@@ -210,13 +253,13 @@ The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
 model is missing from that host list.
 
-At task launch, the selected executor's ACP catalog is authoritative. Kandev
-sends the requested model only when the executor advertises it. If it does
-not, Kandev uses an advertised fallback when available, or sends no model
-request and continues with the agent's current or default model. Kandev stores
-one warning in task chat with the requested model and the effective model when
-known. The warning also identifies the agent and executor and asks you to
-check credentials, copied configuration, and the agent version.
+At task launch, the selected executor's ACP catalog is authoritative. For
+profiles without automatic fallback, Kandev follows the four-step order above.
+For profiles with automatic fallback enabled, an absent saved model causes no
+model request, and Kandev ignores the explicit fallback and any variation.
+Kandev stores one warning in task chat with the requested model and the
+effective model when known. The warning also identifies the agent and executor
+and asks you to check credentials, copied configuration, and the agent version.
 
 The saved profile model is not changed. Optional portable configuration can
 copy selected allowlisted files into a remote executor, but it cannot guarantee
@@ -267,6 +310,8 @@ apply.
 Each flag entry has a raw value, description, enabled state, and an agent-specific default where applicable. Only enabled entries reach the process. Kandev tokenizes each raw value as command arguments: `--add-dir /shared` becomes two arguments.
 
 The field is not a shell script. Pipes, redirects, variable expansion, and command substitution do not run as shell syntax. Empty or malformed quoting is rejected. Keep separate profiles for materially different permission or workspace flags, and recheck customized flags after upgrading the CLI.
+
+Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
 
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 

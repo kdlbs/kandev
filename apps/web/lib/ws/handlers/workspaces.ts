@@ -18,6 +18,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           default_environment_id: payload.default_environment_id ?? null,
           default_agent_profile_id: payload.default_agent_profile_id ?? null,
           default_config_agent_profile_id: payload.default_config_agent_profile_id ?? null,
+          unit_id: payload.unit_id ?? "",
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };
@@ -55,6 +56,15 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
                     "default_config_agent_profile_id" in message.payload
                       ? (message.payload.default_config_agent_profile_id ?? null)
                       : (item.default_config_agent_profile_id ?? null),
+                  // Placement decides who reaches this workspace, so a move
+                  // made in another tab has to land here. Presence-checked
+                  // like default_config_agent_profile_id above: an older
+                  // backend omits the key entirely, and reading it as ""
+                  // would silently unplace the workspace.
+                  unit_id:
+                    "unit_id" in message.payload
+                      ? (message.payload.unit_id ?? "")
+                      : (item.unit_id ?? ""),
                   updated_at: message.payload.updated_at ?? item.updated_at,
                 }
               : item,

@@ -72,6 +72,7 @@ func TestMCPMarketplaceRoutesRequireReviewAndInstallSelectedChoice(t *testing.T)
 	catalog := mcpconfig.NewCatalogService(repo)
 	marketplace := registry.NewMarketplaceService(syncer, catalog)
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	RegisterRoutesWithMCPCatalogAndMarketplace(router, nil, nil, log, "test-interlock", repo, allowCatalogWorkspace, marketplace)
 
 	search := performCatalogRequest(router, http.MethodGet, "/api/v1/mcp-marketplace?search=com.example/tools", "", "")

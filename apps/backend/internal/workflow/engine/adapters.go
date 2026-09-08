@@ -27,9 +27,8 @@ type QueueOutcome string
 const (
 	// QueueOutcomeQueued means a new runs row was inserted.
 	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same
-	// IdempotencyKey already exists within the dedupe window, so nothing
-	// was inserted.
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable queue identity, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
 	// queued row for the same agent + reason within the coalescing

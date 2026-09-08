@@ -17,6 +17,7 @@ export type FileBrowserHeaderProps = {
   onOpenFolder: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onUploadFiles?: (mode: "files" | "folder") => void;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
@@ -34,6 +35,7 @@ export function FileBrowserHeader({
   onOpenFolder,
   onCollapseAll,
   showCreateButton,
+  onUploadFiles,
   onAddSources,
   addSourcesButtonRef,
   addSourcesDisabledReason,
@@ -62,6 +64,7 @@ export function FileBrowserHeader({
       onStartSearch={() => search.setIsSearchActive(true)}
       onCollapseAll={onCollapseAll}
       showCreateButton={showCreateButton}
+      onUploadFiles={onUploadFiles}
       onAddSources={onAddSources}
       addSourcesButtonRef={addSourcesButtonRef}
       addSourcesDisabledReason={addSourcesDisabledReason}

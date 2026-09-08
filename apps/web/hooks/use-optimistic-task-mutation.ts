@@ -106,6 +106,12 @@ function toOfficeTaskPatch(patch: Partial<Task>): Partial<OfficeTask> {
   if (patch.assigneeAgentProfileId !== undefined) {
     out.assigneeAgentProfileId = patch.assigneeAgentProfileId;
   }
+  // hasOwnProperty, not !== undefined: clearing the human assignee sends
+  // undefined, and dropping it here would leave the stale name on screen
+  // until the refetch lands.
+  if (Object.prototype.hasOwnProperty.call(patch, "assigneeUserId")) {
+    out.assigneeUserId = patch.assigneeUserId;
+  }
   if (patch.projectId !== undefined) out.projectId = patch.projectId;
   if (Object.prototype.hasOwnProperty.call(patch, "parentId")) out.parentId = patch.parentId;
   if (patch.labels !== undefined) out.labels = patch.labels;

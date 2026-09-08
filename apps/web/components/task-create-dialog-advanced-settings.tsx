@@ -9,7 +9,9 @@ import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import { MCPSelectionPicker } from "@/components/mcp/mcp-selection-picker";
 import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
+import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { cn } from "@/lib/utils";
+import type { TaskPriority } from "@/lib/types/http";
 
 type TaskCreateAdvancedSettingsProps = {
   isCreateMode: boolean;
@@ -17,6 +19,8 @@ type TaskCreateAdvancedSettingsProps = {
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
+  priority: TaskPriority;
+  onPriorityChange: (next: TaskPriority) => void;
   dependenciesDisabled?: boolean;
   mcpDefinitions?: MCPServerDefinition[];
   mcpDefinitionsLoading?: boolean;
@@ -63,12 +67,28 @@ function TaskCreateMCPSettingRow({
   );
 }
 
+function TaskCreatePrioritySettingRow({
+  priority,
+  onPriorityChange,
+}: Pick<TaskCreateAdvancedSettingsProps, "priority" | "onPriorityChange">) {
+  return (
+    <div
+      className="md:col-start-2 md:justify-self-start"
+      data-testid="task-create-priority-setting-row"
+    >
+      <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
+    </div>
+  );
+}
+
 export function TaskCreateAdvancedSettings({
   isCreateMode,
   isEditMode = false,
   isTaskStarted,
   blockedBy,
   onBlockedByChange,
+  priority,
+  onPriorityChange,
   dependenciesDisabled,
   mcpDefinitions = [],
   mcpDefinitionsLoading = false,
@@ -153,6 +173,7 @@ export function TaskCreateAdvancedSettings({
             inherited={mcpInheritedSelections}
             disabled={dependenciesDisabled}
           />
+          <TaskCreatePrioritySettingRow priority={priority} onPriorityChange={onPriorityChange} />
         </div>
       </CollapsibleContent>
     </Collapsible>

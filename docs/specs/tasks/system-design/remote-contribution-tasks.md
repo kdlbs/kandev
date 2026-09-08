@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
 created: 2026-08-04
-updated: 2026-08-24
+updated: 2026-09-03
 owners:
   - product
 ---
@@ -81,6 +81,13 @@ Kandev must preserve both versions and ask for user intent before one version re
 - Provider commit history is optional enrichment for the Changes panel. Kandev shares identical
   provider reads across Changes consumers and retries one failed read. If the retry fails, the panel
   keeps the checkout history and does not show a provider-history warning.
+- Provider commit state separates the stable contribution identity from the provider sync version.
+  During a newer read for the same workspace, repository, and pull request, Changes can retain the
+  last successful commit list for display provenance. This rule also applies after a failed read. The
+  current provider head, completeness, loading state, and error remain version-specific. Thus,
+  retained display commits cannot prove alignment, divergence, or permission for a remote mutation.
+  A successful current response replaces the retained display list. A different workspace,
+  repository, or pull request never inherits it.
 - Kandev reconciles provider and checkout commits by SHA. Shared commits keep the normal commit
   marker. Provider-only commits use the current-PR color and label. Checkout-only commits in a
   confirmed divergence use a separate local-checkout color and label. The accessible label carries
@@ -238,6 +245,7 @@ recovery branch name after a successful reset. Neither action appears in the age
 | The user selects **Use PR version** with local file changes                                  | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
 | The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                                         |
 | Current provider commits cannot be loaded                                                    | Kandev retries once, keeps the checkout history without a warning, and derives remote actions only from sufficient evidence.             |
+| A same-contribution provider refresh is pending or fails after a successful read             | Changes retains the last confirmed commit provenance for display, while current-evidence action gates remain closed until refresh succeeds. |
 | Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
 | Contribution binding is missing, malformed, or an unknown version                            | Runtime preparation and managed source-scope issuance fail closed.                                                                       |
 | Agent attempts a normal create-PR action                                                     | Kandev reuses the existing association and does not open a second remote change.                                                         |
@@ -255,6 +263,10 @@ silently falling back to the target repository.
 The original contribution `head_sha` remains creation-time provenance. It is not changed after a
 provider rewrite. Live provider commits and Git status remain observed state. Drift detection does not
 reset, rebase, merge, or replace either version without a direct user action.
+
+The frontend provider-history resource can retain the latest successful commit list in memory across
+same-contribution evidence versions. This display cache is not persisted. It does not retain
+provider-head authority. The resource discards the cache when it evicts the bounded entry.
 
 A recovery branch created by **Use PR version** remains in the task repository across backend
 restarts. Kandev does not persist confirmation dialogs, provider snapshots, or replacement leases.
@@ -369,6 +381,15 @@ GIVEN Kandev cannot load the current provider commit list
 WHEN the Changes panel renders the checkout
 THEN it retries the provider read once and keeps the local checkout history without a warning
 AND it does not claim the branch was rewritten or compare commits by message or patch similarity
+
+### Keep confirmed provenance stable during a provider refresh
+
+GIVEN the Changes panel confirmed that checkout commits belong to an associated pull request
+AND Kandev starts a newer provider-history read for that same pull request
+WHEN the new read is pending or fails
+THEN those commits retain their confirmed published presentation instead of appearing newly unpushed
+AND Push, Pull, and replacement actions remain gated by the unavailable current evidence
+AND a successful response replaces the retained presentation with the refreshed commit history
 
 ### Distinguish commits when the provider is ahead
 

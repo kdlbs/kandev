@@ -47,6 +47,7 @@
   "pasteLink": "Ƥàśţē ĺĩńķ...",
   "planFormattingToolbar": "Ƥĺàń ƒōŕḿàţţĩńĝ ţōōĺƀàŕ",
   "pleaseTryAgain": "Ƥĺēàśē ţŕŷ àĝàĩń.",
+  "previewHtml": "Ƥŕēvĩēŵ ĤŢḾĹ",
   "previewMarkdown": "Ƥŕēvĩēŵ ḿàŕķďōŵń",
   "queuedForTheAgent": "Qũēũēď ƒōŕ ţĥē àĝēńţ.",
   "reload": "Ŕēĺōàď",
@@ -87,5 +88,6 @@
   "toggleCode": "Ţōĝĝĺē ćōďē",
   "toggleWordWrap": "Ţōĝĝĺē ŵōŕď ŵŕàƥ",
   "underlineCmdU": "Ũńďēŕĺĩńē (Ćḿď+Ũ)",
-  "failedToOpenEditor": "Ƒàĩĺēď ţō ōƥēń ēďĩţōŕ"
+  "failedToOpenEditor": "Ƒàĩĺēď ţō ōƥēń ēďĩţōŕ",
+  "downloadFile": "Ďōŵńĺōàď ƒĩĺē"
 }
