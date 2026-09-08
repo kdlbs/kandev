@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"expvar"
 	"fmt"
 	"testing"
 	"time"
@@ -189,6 +190,21 @@ func ResolveRunProjectForTest(svc *Service, ctx context.Context, payload string)
 	return pid, int(res)
 }
 
+// AdmitRunForTest exposes admitRun directly for external test packages, so
+// gate 1's "agent found but carries no workspace identifier" branch
+// (AC-OFFICE-BUDGET-001.13) can be tested against a constructed
+// *models.AgentInstance rather than through the full scheduler pipeline.
+// The repository's own agentInstanceFilter (workspace_id must be non-empty) makes an
+// empty-WorkspaceID agent unreachable via GetAgentFromConfig, the only real
+// caller processRun uses to obtain admitRun's agent argument -- the same
+// "structurally unreachable via the full pipeline, but a real and correctly
+// implemented branch of the function itself" situation already recorded for
+// resolveRunProject's task-not-found and lookup-error outcomes.
+func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance) bool {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	return si.admitRun(ctx, run, agent)
+}
+
 // LogPolicyObservabilityForTest exposes logPolicyObservability for external
 // test packages, so the skip/degraded-admitted entries and their
 // per-policy-per-day dedup (AC-OFFICE-BUDGET-002.13/-004.8) can be tested
@@ -234,6 +250,34 @@ func BuildSkillManifestForTest(
 // Skill delivery test helpers were removed in ADR 0005 Wave E along
 // with the office-tier delivery code. Coverage moved into
 // internal/agent/runtime/lifecycle/skill.
+
+// BudgetMetricValueForTest reads the current value of an AC-OFFICE-BUDGET-
+// 005.4 expvar counter for external test packages, by its published
+// /debug/vars name (e.g. "office_budget_blocked_by_limit_total") and map
+// key (e.g. "provenance=unattended"). Reading through the global expvar
+// registry, rather than the package-private *expvar.Map vars directly,
+// means a test also pins the exact published name a real /debug/vars
+// scrape would see. Returns 0 for a key that hasn't been incremented yet.
+func BudgetMetricValueForTest(t *testing.T, name, label string) int64 {
+	t.Helper()
+	v := expvar.Get(name)
+	if v == nil {
+		t.Fatalf("no expvar registered under %q", name)
+	}
+	m, ok := v.(*expvar.Map)
+	if !ok {
+		t.Fatalf("expvar %q is a %T, want *expvar.Map", name, v)
+	}
+	got := m.Get(label)
+	if got == nil {
+		return 0
+	}
+	i, ok := got.(*expvar.Int)
+	if !ok {
+		t.Fatalf("expvar %q[%q] is a %T, want *expvar.Int", name, label, got)
+	}
+	return i.Value()
+}
 
 // GetWakeReceiptForTest exposes the repo's parent_child_wake_receipts read
 // so ParentWakeReconciler tests can assert a paused/unresolved-assignee

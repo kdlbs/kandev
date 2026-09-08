@@ -47,6 +47,26 @@ func skipIssueLabels(issues models.PolicyValidationIssues) []string {
 	return out
 }
 
+// isDegradedAdmitted reports whether p's window was pricing-degraded but did
+// not itself block the run -- the condition AC-OFFICE-BUDGET-004.4/-004.7/
+// -004.8's activity entry and AC-OFFICE-BUDGET-005.4's "admitted against a
+// pricing-degraded window" counter share.
+func isDegradedAdmitted(p *models.PreLaunchPolicyResult) bool {
+	return p.Degraded && !p.DegradationBlocked && !p.LimitExceeded
+}
+
+// anyDegradedAdmitted reports whether any policy in policies satisfies
+// isDegradedAdmitted, for admitRun's AC-OFFICE-BUDGET-005.4 counter, which
+// must fire at most once per run regardless of how many policies qualify.
+func anyDegradedAdmitted(policies []models.PreLaunchPolicyResult) bool {
+	for i := range policies {
+		if isDegradedAdmitted(&policies[i]) {
+			return true
+		}
+	}
+	return false
+}
+
 // logPolicyObservability writes the operator-visible entries
 // AC-OFFICE-BUDGET-002.5/-002.11/-002.14 (a stored policy this build cannot
 // evaluate, skipped) and AC-OFFICE-BUDGET-004.4/-004.7/-004.8 (a policy's
@@ -73,7 +93,7 @@ func (si *SchedulerIntegration) logPolicyObservability(
 					"policy_id": p.PolicyID,
 					"issues":    strings.Join(skipIssueLabels(p.SkipIssues), ","),
 				})
-		case p.Degraded && !p.DegradationBlocked && !p.LimitExceeded:
+		case isDegradedAdmitted(p):
 			fields := map[string]string{"degraded": strconv.FormatBool(true)}
 			if p.IsDefault {
 				fields[activityFieldCeiling] = ceilingBuiltInDefault

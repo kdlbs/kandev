@@ -41,6 +41,7 @@ func (si *SchedulerIntegration) admitRun(
 	// identifier" branch is reachable and decidable here, from the
 	// already-fetched agent -- no second lookup is performed.
 	if agent.WorkspaceID == "" {
+		incBudgetCancelledNoWorkspace(provenance)
 		return si.cancelBudgetRun(ctx, run, agent, "no_resolvable_workspace",
 			"run_budget_workspace_unresolvable", nil)
 	}
@@ -50,6 +51,7 @@ func (si *SchedulerIntegration) admitRun(
 		if provenance == shared.RunProvenanceAttended {
 			return true
 		}
+		incBudgetBlockedAbsentEvaluator(provenance)
 		return si.cancelBudgetRun(ctx, run, agent, "no_budget_evaluator",
 			"run_budget_no_evaluator", nil)
 	}
@@ -80,14 +82,30 @@ func (si *SchedulerIntegration) admitRun(
 		return si.admitBudgetDeferral(ctx, run, agent, budgetDeferralEvaluatorFault, "")
 	}
 	si.logPolicyObservability(ctx, agent.WorkspaceID, run.ID, result.Policies, now)
+	degradedAdmitted := anyDegradedAdmitted(result.Policies)
 	if result.Decision != models.PreLaunchDecisionLaunch {
 		return si.finishPolicyBlock(ctx, run, agent, result.DecidingPolicy)
 	}
 
-	// Gate 5: the built-in default (AC-OFFICE-BUDGET-003.1/.4/.11). Applies
-	// to unattended runs only, and only when no workspace-scoped blocking-
-	// capable daily policy already supersedes it.
+	return si.admitDefaultCeilingGate(ctx, run, agent, provenance, result, degradedAdmitted, now)
+}
+
+// admitDefaultCeilingGate evaluates gate 5 (AC-OFFICE-BUDGET-003.1/.4/.11):
+// the built-in default ceiling, applied to unattended runs only, and only
+// when no workspace-scoped blocking-capable daily policy already supersedes
+// it. Split out of admitRun to keep its cyclomatic complexity within the
+// repo's golangci-lint limit; degradedAdmitted carries whether any of
+// result's stored policies were already degraded-admitted at gate 4, so the
+// AC-OFFICE-BUDGET-005.4 degraded-window counter still fires at most once
+// per run even when both gate 4 and gate 5 saw a degraded window.
+func (si *SchedulerIntegration) admitDefaultCeilingGate(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	provenance shared.RunProvenance, result models.PreLaunchResult, degradedAdmitted bool, now time.Time,
+) bool {
 	if provenance != shared.RunProvenanceUnattended || result.WorkspaceDailyBlockingSuperseded {
+		if degradedAdmitted {
+			incBudgetAdmittedDegradedWindow(provenance)
+		}
 		return true
 	}
 	def, defErr := si.svc.EvaluateDefaultCeiling(ctx, agent.WorkspaceID, now)
@@ -97,6 +115,10 @@ func (si *SchedulerIntegration) admitRun(
 	si.logPolicyObservability(ctx, agent.WorkspaceID, run.ID, []models.PreLaunchPolicyResult{def}, now)
 	if def.LimitExceeded || def.DegradationBlocked {
 		return si.finishPolicyBlock(ctx, run, agent, &def)
+	}
+	incBudgetAdmittedDefault(provenance)
+	if degradedAdmitted || isDegradedAdmitted(&def) {
+		incBudgetAdmittedDegradedWindow(provenance)
 	}
 	return true
 }
@@ -113,12 +135,16 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 ) bool {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
+	provenance := shared.ClassifyRunProvenance(run.Reason)
 
 	action := "run_budget_blocked"
 	outcome := RunOutcomeBudgetBlocked
 	if !p.LimitExceeded {
 		action = "run_budget_pricing_degraded_blocked"
 		outcome = RunOutcomeBudgetUnmeasurable
+		incBudgetBlockedPricingDegraded(provenance)
+	} else {
+		incBudgetBlockedByLimit(provenance)
 	}
 	_ = si.svc.FinishRun(ctx, run.ID, outcome)
 
@@ -274,6 +300,7 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 	cause budgetDeferralCause, policyID string,
 ) bool {
 	si.releaseCheckoutIfNeeded(ctx, run)
+	provenance := shared.ClassifyRunProvenance(run.Reason)
 
 	if run.RetryCount >= MaxRetryCount {
 		if err := si.svc.failRunNoEscalation(ctx, run, agent, cause, policyID); err != nil {
@@ -284,10 +311,14 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 	}
 
 	if stale, _ := isRetryStale(run); stale {
+		incBudgetCancelledStaleDeferral(provenance)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID, "scheduler", "office-scheduler",
 			"run_budget_deferral_stale_cancelled", "run", run.ID,
 			mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined, "cause": "budget_deferral"}), run.ID, "")
 	} else {
+		if cause == budgetDeferralEvaluatorFault {
+			incBudgetDeferredEvaluatorFault(provenance)
+		}
 		fields := map[string]string{
 			activityFieldCeiling: ceilingNotDetermined,
 			"attempt":            strconv.Itoa(run.RetryCount + 1),

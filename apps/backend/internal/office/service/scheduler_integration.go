@@ -206,6 +206,13 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
 			zap.String("run_id", runID), zap.Error(err))
+		// AC-OFFICE-BUDGET-001.13's workspace-lookup-error branch: per the
+		// recorded W2 human disposition this call site's error contract is
+		// not reshaped, so it rides the pre-existing HandleRunFailure retry
+		// path rather than admitRun/admitBudgetDeferral -- but
+		// AC-OFFICE-BUDGET-005.4 still names it as one of the nine required
+		// counters, so it is instrumented here, once per attempt.
+		incBudgetDeferredWorkspaceLookup(shared.ClassifyRunProvenance(run.Reason))
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
