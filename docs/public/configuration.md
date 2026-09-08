@@ -516,12 +516,13 @@ The database can contain canvas migrations, but Kandev does not read or change
 canvas data while the flag is off. See [Agent-authored Canvases](canvases.md)
 for the experimental user workflow.
 
-For a risky release feature, keep the flag off in the shipped profiles, enable it
-only on a selected install through an admin override or explicit environment,
-restart, and test it there. Promote the `prod` profile default only after the
-feature is ready for everyone; keep the registry entry as a kill-switch until
-the rollout is complete, then remove the live flag and move its key and
-environment variable to the runtime registry's append-only retired identities.
+For a risky release feature that has not graduated, keep the flag off in the
+shipped profiles, enable it only on a selected install through an admin override
+or explicit environment, restart, and test it there. Promote the `prod` profile
+default only after the feature is ready for everyone. Keep the registry entry as
+a kill-switch until the planned retirement release, then remove the live flag and
+move its key and environment variable to the runtime registry's append-only
+retired identities.
 Plugins are part of the base product and are not a runtime toggle.
 
 The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication, organizations, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.

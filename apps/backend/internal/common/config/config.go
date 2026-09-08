@@ -481,7 +481,8 @@ type FeaturesConfig struct {
 	// most-recently-started session. On in every embedded profile;
 	// pre-existing duplicate (task_id, agent_profile_id) rows stay safe by
 	// selection, not migration. The toggle remains a kill switch that restores
-	// runner-seat binding when disabled.
+	// runner-seat binding and task-active-session decision re-evaluation when
+	// disabled.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
 }
 

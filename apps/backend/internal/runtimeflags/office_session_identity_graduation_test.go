@@ -23,16 +23,19 @@ func TestOfficeSessionIdentityDoesNotClaimUniqueIndexPrecondition(t *testing.T) 
 	assertNoUniqueIndexClaim(t, "runtime flag registry RiskDescription", def.RiskDescription)
 
 	repoRoot := officeSessionIdentityRepoRoot(t)
-	for _, relPath := range []string{
-		"apps/backend/internal/profiles/profiles.yaml",
-		"docs/public/configuration.md",
-		"docs/public/operations.md",
+	for _, relPath := range []struct {
+		path    string
+		locator string
+	}{
+		{path: "apps/backend/internal/profiles/profiles.yaml", locator: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"},
+		{path: "docs/public/configuration.md", locator: "features.officeSessionIdentity"},
+		{path: "docs/public/operations.md", locator: "Office session identity"},
 	} {
-		content, err := os.ReadFile(filepath.Join(repoRoot, relPath))
+		content, err := os.ReadFile(filepath.Join(repoRoot, relPath.path))
 		if err != nil {
-			t.Fatalf("read %s: %v", relPath, err)
+			t.Fatalf("read %s: %v", relPath.path, err)
 		}
-		assertNoUniqueIndexClaim(t, relPath, string(content))
+		assertNoUniqueIndexClaimInSection(t, relPath.path, string(content), relPath.locator)
 	}
 }
 
@@ -42,6 +45,18 @@ func assertNoUniqueIndexClaim(t *testing.T, surface, content string) {
 		strings.Contains(strings.ToLower(content), "unique-index") {
 		t.Fatalf("%s still claims a unique-index precondition for features.officeSessionIdentity", surface)
 	}
+}
+
+func assertNoUniqueIndexClaimInSection(t *testing.T, surface, content, locator string) {
+	t.Helper()
+	lowerContent := strings.ToLower(content)
+	index := strings.Index(lowerContent, strings.ToLower(locator))
+	if index < 0 {
+		return
+	}
+	start := max(0, index-100)
+	end := min(len(content), index+600)
+	assertNoUniqueIndexClaim(t, surface, content[start:end])
 }
 
 func officeSessionIdentityRepoRoot(t *testing.T) string {

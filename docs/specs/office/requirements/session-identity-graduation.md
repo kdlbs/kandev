@@ -79,15 +79,15 @@ the live-preferring lookup (`REQ-OFFICE-SESSION-IDENTITY-002`). The precondition
 is **already satisfied, by selection rather than repair**; adding the index would
 regress `AC-OFFICE-SESSION-IDENTITY-004`.
 
-**Supersession — one tasks-owned rule is narrowed.**
+**Session-selection contract — Tasks owns the shared rule.**
 [`workflow-quorum-decision-recording-reevaluation.md`](../../tasks/requirements/workflow-quorum-decision-recording-reevaluation.md)
-`AC-TASKS-QUORUM-REEVALUATION-001.1`/`-001.4` bind the re-evaluation session, for
-a decision through *any* surface, to `GetActiveTaskSessionByTaskID`: the task's
-most recently started session in an *active state*, `started_at` descending, limit
-one, "unresolvable" meaning exactly that this returns no row. For the **agent**
-decider path this document supersedes that selection with the decider's own
-calling session (REQ-002); the **human** path still follows `-001.4`, the
-definition `AC-OFFICE-IDENTITY-GRADUATION-002.4` invokes.
+`AC-TASKS-QUORUM-REEVALUATION-001.1`/`-001.4` own re-evaluation session
+selection for every decision surface. A decision with a validated calling
+session uses that session. A decision without a calling session uses
+`GetActiveTaskSessionByTaskID`: the task's most recently started session in an
+active state, ordered by `started_at` descending, limit one. This document adds
+Office-specific acceptance criteria and does not supersede the shared Tasks
+contract.
 
 ## Requirements
 
@@ -325,9 +325,9 @@ release; only after that does the flag identity disappear, permanently.
 - **Cross-process concurrency on one database file**, and **convergence of
   concurrent recoveries carrying different execution profiles** (last-writer-wins).
   Both inherited unchanged from `task-session-identity.md`.
-- **Any new user-visible surface.** The only visible change is one row leaving the
-  Feature Toggles list and one leaving the public configuration reference. No new
-  copy, no i18n work, no route gate.
+- **Any new user-visible surface.** The default-on release updates existing
+  Feature Toggles and public configuration entries. The later retirement release
+  removes those entries. No new copy, no i18n work, no route gate.
 - **The stale DDL in `../system-design/tasks-01.md`.** Editorial, separate
   change.
 

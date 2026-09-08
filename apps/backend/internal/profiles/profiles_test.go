@@ -127,6 +127,14 @@ func TestOfficeSessionIdentityFeatureFlagIsEnabledInEveryProfile(t *testing.T) {
 			if got := defaults["KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"]; got != "true" {
 				t.Fatalf("KANDEV_FEATURES_OFFICE_SESSION_IDENTITY = %q in %s, want true", got, profile.name)
 			}
+
+			featureDefaults, err := FeatureFlagDefaults()
+			if err != nil {
+				t.Fatalf("FeatureFlagDefaults: %v", err)
+			}
+			if got := featureDefaults["office_session_identity"]; got != "true" {
+				t.Fatalf("office_session_identity = %q in %s, want true", got, profile.name)
+			}
 		})
 	}
 }
