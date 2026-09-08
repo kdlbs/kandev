@@ -1,9 +1,13 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/testutil"
 )
@@ -74,5 +78,58 @@ func TestPostgresCoordinatorGrantSchemaChecksCurrentSchema(t *testing.T) {
 	}
 	if !current {
 		t.Fatal("repaired current coordinator grant schema was not accepted")
+	}
+}
+
+// TestPostgresCoordinatorGrantSchemaCheckSurvivesConcurrentForeignSchemaTeardown
+// keeps the schema verifier away from pg_indexes. Its indexdef column invokes
+// PostgreSQL's relation deparser, which can observe an OID from a concurrently
+// dropped, unrelated schema and fail the migration check.
+func TestPostgresCoordinatorGrantSchemaCheckSurvivesConcurrentForeignSchemaTeardown(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := openIsolatedPostgresMultiConn(t, dsn, 2)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("initialize postgres schema: %v", err)
+	}
+
+	teardownDB, err := sqlx.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open foreign-schema teardown connection: %v", err)
+	}
+	t.Cleanup(func() { _ = teardownDB.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	teardownDone := make(chan error, 1)
+	go func() {
+		<-start
+		for i := 0; i < 200; i++ {
+			schema := "coordinator_grants_teardown_" + uuid.NewString()[0:8]
+			if _, err := teardownDB.ExecContext(ctx, fmt.Sprintf(`
+				CREATE SCHEMA %s;
+				CREATE TABLE %s.index_source (workspace_id TEXT NOT NULL, task_id TEXT NOT NULL);
+				CREATE INDEX index_source_workspace_task ON %s.index_source (workspace_id, task_id);
+				DROP SCHEMA %s CASCADE`, schema, schema, schema, schema)); err != nil {
+				teardownDone <- err
+				return
+			}
+		}
+		teardownDone <- nil
+	}()
+
+	close(start)
+	for i := 0; i < 500; i++ {
+		current, err := repo.coordinatorGrantSchemaCurrent()
+		if err != nil {
+			t.Fatalf("schema check during foreign-schema teardown: %v", err)
+		}
+		if !current {
+			t.Fatal("current coordinator grant schema was rejected")
+		}
+	}
+	if err := <-teardownDone; err != nil {
+		t.Fatalf("tear down foreign schema: %v", err)
 	}
 }
