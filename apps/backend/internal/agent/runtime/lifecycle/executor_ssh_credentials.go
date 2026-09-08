@@ -3,7 +3,10 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -116,14 +119,14 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 			zap.Error(err))
 		return
 	}
-	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
+	// `sshStdinEnvImport` evaluates the env lines fed via session.Stdin; `set -a`
 	// makes those assignments automatically exported so the user's setup
 	// script sees them in env without a per-key `export`. The script body
 	// itself runs in the same shell after stdin EOF, which means scripts
 	// that need their own stdin are unsupported here — none of the
 	// env-type SetupScripts in the catalog (gh_cli_env etc.) consume
 	// stdin, so this is fine in practice.
-	wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+method.SetupScript)
+	wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+method.SetupScript)
 	out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if err != nil {
 		r.logger.Warn("auth setup script failed",
@@ -275,6 +278,82 @@ var posixSSHEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // files.
 type sshFileUploader struct {
 	client *ssh.Client
+}
+
+func (u *sshFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	c, err := newSFTPClientContext(ctx, u.client)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	data, err := readSFTPFileContext(ctx, c, path)
+	if err != nil {
+		if isSFTPNotExist(err) {
+			return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+		}
+		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
+	}
+	return data, nil
+}
+
+type sftpClientResult struct {
+	client *sftp.Client
+	err    error
+}
+
+func newSFTPClientContext(ctx context.Context, client *ssh.Client) (*sftp.Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resultCh := make(chan sftpClientResult, 1)
+	go func() {
+		created, err := sftp.NewClient(client)
+		select {
+		case resultCh <- sftpClientResult{client: created, err: err}:
+		case <-ctx.Done():
+			if created != nil {
+				_ = created.Close()
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.client, result.err
+	}
+}
+
+type sftpReadResult struct {
+	data []byte
+	err  error
+}
+
+func readSFTPFileContext(ctx context.Context, client *sftp.Client, path string) ([]byte, error) {
+	resultCh := make(chan sftpReadResult, 1)
+	go func() {
+		file, err := client.Open(path)
+		if err != nil {
+			resultCh <- sftpReadResult{err: err}
+			return
+		}
+		data, readErr := io.ReadAll(file)
+		_ = file.Close()
+		resultCh <- sftpReadResult{data: data, err: readErr}
+	}()
+	select {
+	case <-ctx.Done():
+		_ = client.Close()
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.data, result.err
+	}
+}
+
+func isSFTPNotExist(err error) bool {
+	var statusErr *sftp.StatusError
+	return errors.As(err, &statusErr) && statusErr.FxCode() == sftp.ErrSSHFxNoSuchFile
 }
 
 func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {

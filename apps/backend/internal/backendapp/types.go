@@ -13,6 +13,7 @@ import (
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
+	canvasservice "github.com/kandev/kandev/internal/canvas"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/gitcredentials"
@@ -27,6 +28,7 @@ import (
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
@@ -34,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -50,10 +53,11 @@ import (
 )
 
 type Repositories struct {
-	Task          *sqliterepo.Repository
-	Analytics     analyticsrepository.Repository
-	AgentSettings settingsstore.Repository
-	User          userstore.Repository
+	RequiredStores *requiredstores.Tracker
+	Task           *sqliterepo.Repository
+	Analytics      analyticsrepository.Repository
+	AgentSettings  settingsstore.Repository
+	User           userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -68,7 +72,9 @@ type Repositories struct {
 	QuickTerminal *quickterminalrepository.Repository
 	RuntimeFlags  *runtimeflags.SQLiteStore
 	// Auth persists login identities, sessions, PATs, and invites.
-	Auth *authstore.Store
+	Auth           *authstore.Store
+	HostnameCache  *hostnames.Store
+	SystemSettings *systemsettings.Store
 }
 
 type Services struct {
@@ -119,6 +125,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// Canvas is the gated lifecycle service for agent-authored plugin web
+	// applications. It is nil while features.canvases is disabled.
+	Canvas *canvasservice.Service
 	// GitCredentials is the shared provider-neutral lease broker used by the
 	// GitHub HTTP endpoint and task executor helper leases.
 	GitCredentials *gitcredentials.Broker

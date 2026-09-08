@@ -445,6 +445,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 	assert.Contains(t, tools, "get_task_pr_automation_kandev")
 	assert.Contains(t, tools, "update_task_pr_automation_kandev")
+	assert.Contains(t, tools, "report_pr_auto_fix_outcome_kandev")
 	assert.Contains(t, tools, "get_diagnostic_bundle_kandev")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.Contains(t, tools, "update_task_mr_automation_kandev")
@@ -683,6 +684,7 @@ func TestServerModeTask_ProviderMembership(t *testing.T) {
 			tools := getRegisteredToolNames(s)
 			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantPR, containsTool(tools, "report_pr_auto_fix_outcome_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
 			assert.Contains(t, tools, "stop_task_kandev")
@@ -919,12 +921,13 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
 	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
-	// list_task_sessions + PR automation + MR automation) + 1 add_branch_to_task +
+	// list_task_sessions + PR automation + MR automation + PR auto-fix outcome) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
 	// + 2 task-dependency (add/remove) + 1 rich-output + 1 exact stale-session
-	// recovery + 2 durable delivery recovery tools = 41.
+	// recovery + 2 durable delivery recovery tools plus the current upstream
+	// task-mode catalog = 42.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -938,7 +941,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "settle_stale_session_kandev")
 	assert.Contains(t, tools, "get_message_delivery_kandev")
 	assert.Contains(t, tools, "retry_message_delivery_kandev")
-	assert.Equal(t, 41, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

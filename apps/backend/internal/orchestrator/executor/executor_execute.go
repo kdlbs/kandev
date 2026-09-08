@@ -66,7 +66,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil), nil
+		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -78,10 +78,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil), nil
+		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return mcpprofile.NewAutomation(), nil
+		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -98,7 +98,14 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return mcpprofile.New(surface, capabilities, nil), nil
+	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+}
+
+func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
+	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	return profile
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
@@ -1302,6 +1309,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		profileContext.Providers = deriveMCPProviders(allRepos)
 		req.McpProfile = &profileContext
 	}
+	if err := e.claimSharedTaskEnvironmentTaskDirName(ctx, existingEnv, req); err != nil {
+		return nil, err
+	}
 
 	// Carry the prior ACP session id forward so the agent CLI resumes the
 	// existing conversation (session/load) instead of opening a fresh one.
@@ -2372,6 +2382,22 @@ func (e *Executor) persistTaskEnvironment(
 		// session elected to materialize a still-CREATING canonical environment
 		// (shared_group), which must run the normal finalize path below.
 		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
+			// A parent can start without a worktree and later admit an inherited
+			// sessionless subtask that materializes the first worktree. Preserve the
+			// request's stable task-root identity on the shared environment so
+			// cleanup validates the physical root against its ownership marker.
+			if existingEnv.TaskDirName == "" && req.UseWorktree && req.TaskDirName != "" {
+				if _, ok := e.repo.(taskEnvironmentTaskDirNameStamper); ok {
+					if err := e.claimSharedTaskEnvironmentTaskDirName(ctx, existingEnv, req); err != nil {
+						return err
+					}
+				} else {
+					existingEnv.TaskDirName = req.TaskDirName
+					if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+						return fmt.Errorf("persist shared task directory name: %w", err)
+					}
+				}
+			}
 			bindSessionToTaskEnvironment(session, existingEnv)
 			return nil
 		}

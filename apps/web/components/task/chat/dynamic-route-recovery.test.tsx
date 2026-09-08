@@ -16,6 +16,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import type { TaskSession } from "@/lib/types/http";
+import { WebSocketRequestError } from "@/lib/ws/client";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 
 const session = {
@@ -64,5 +65,32 @@ describe("DynamicRouteRecovery", () => {
     expect(mocks.setTaskSession).toHaveBeenCalledWith(
       expect.objectContaining({ route_generation: 4, route_state: "starting" }),
     );
+  });
+
+  it("applies the authoritative route from a conflict response", async () => {
+    mocks.request.mockRejectedValueOnce(
+      new WebSocketRequestError("route changed", "CONFLICT", {
+        route: {
+          execution_profile_id: "profile-3",
+          route_generation: 5,
+          state: "action_required",
+          reason: "route_action_launch_failed",
+        },
+      }),
+    );
+    render(<DynamicRouteRecovery session={session} />);
+
+    fireEvent.click(screen.getByTestId("dynamic-route-retry"));
+
+    await waitFor(() => {
+      expect(mocks.setTaskSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          execution_profile_id: "profile-3",
+          route_generation: 5,
+          route_state: "action_required",
+          route_reason: "route_action_launch_failed",
+        }),
+      );
+    });
   });
 });

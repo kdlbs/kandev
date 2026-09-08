@@ -51,6 +51,7 @@
     "plugins-marketplace",
     "plugins-authoring",
     "plugins-manifest",
+    "canvases",
     "---Office---",
     "office-provider-routing",
     "office-config-sync",

@@ -92,6 +92,12 @@ func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash str
 	return nil
 }
 
+// DeleteIdentity removes one persisted login identity by its stable ID.
+func (s *Store) DeleteIdentity(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM auth_identities WHERE id = ?`), id)
+	return err
+}
+
 // CountAdminIdentities reports how many active admin users have a local
 // identity. Zero means the instance is in setup mode when auth is required.
 func (s *Store) CountAdminIdentities(ctx context.Context) (int, error) {

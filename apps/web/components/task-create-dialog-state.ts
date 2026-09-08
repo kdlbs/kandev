@@ -202,10 +202,6 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
-  // Source-mode toggle resets — without these, opening the dialog in "None"
-  // mode and reopening for a different task would land in None mode again.
-  resetters.setNoRepository(false);
-  resetters.setWorkspacePath("");
   // The dialog stays mounted between opens, so without this the previous
   // create's predecessor selection reappears on the next one.
   resetters.setBlockedBy([]);
@@ -326,6 +322,7 @@ function useFormStateValues(workflowId: string | null) {
   // optional workspacePath points the agent at an existing host folder; empty
   // means kandev creates a scratch workspace.
   const [noRepository, setNoRepository] = useState(false);
+  const [preferLocalExecutor, setPreferLocalExecutor] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
@@ -362,6 +359,8 @@ function useFormStateValues(workflowId: string | null) {
     prevOpenRef,
     noRepository,
     setNoRepository,
+    preferLocalExecutor,
+    setPreferLocalExecutor,
     workspacePath,
     setWorkspacePath,
     autopilot,
@@ -438,6 +437,7 @@ export function useDialogFormState(
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
+      setPreferLocalExecutor: form.setPreferLocalExecutor,
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
       setPriority: form.setPriority,

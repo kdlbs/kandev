@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -141,6 +142,11 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 //
 // Returns true if pollGitChanges should exit.
 func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiveFailures *int, cause error) bool {
+	if fsdiagnostics.IsAccessDenied(cause) {
+		wt.recordFilesystemFailure("workspace.git_poll", workspaceTrigger(ctx, "poll"), cause)
+		*consecutiveFailures = 0
+		return false
+	}
 	if errors.Is(cause, subproc.ErrAdmissionCanceled) {
 		wt.logger.Debug("git poll admission canceled; preserving tracker liveness",
 			zap.String("workDir", wt.workDir),
@@ -150,6 +156,11 @@ func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiv
 	}
 
 	probeErr := wt.runPollingGit(ctx, "rev-parse", "--git-dir")
+	if fsdiagnostics.IsAccessDenied(probeErr) {
+		wt.recordFilesystemFailure("workspace.git_poll", workspaceTrigger(ctx, "poll"), probeErr)
+		*consecutiveFailures = 0
+		return false
+	}
 	if errors.Is(probeErr, subproc.ErrAdmissionCanceled) {
 		wt.logger.Debug("git poll health probe admission canceled; preserving tracker liveness",
 			zap.String("workDir", wt.workDir),

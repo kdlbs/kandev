@@ -751,6 +751,23 @@ func purgeQueueRowSessions(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID
 // caller's transaction on PostgreSQL. The standalone PurgeTask passes nil and
 // locks only the sessions that currently hold queue rows.
 func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string, taskSessions []string) (int, error) {
+	// Task lifecycle operations can run before the optional queue repository has
+	// been initialized. PostgreSQL aborts a transaction on a missing-table
+	// statement, so inspect every queue table before issuing any queue query.
+	for _, table := range []string{
+		"queued_messages",
+		"lifecycle_queue_generations",
+		"queue_session_locks",
+	} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return 0, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return 0, nil
+		}
+	}
+
 	// Serialize with per-session tail operations: a purge that races a fold
 	// or insert could otherwise delete a row an admission just accepted, or
 	// admit into a queue being purged. Lock the AUTHORITATIVE session set —
@@ -992,6 +1009,37 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 		out = append(out, *msg)
 	}
 	return out, rows.Err()
+}
+
+// ListDurableLifecycleEntries returns durable lifecycle rows in stable FIFO
+// order across sessions. Startup recovery uses this view to remove queue rows
+// left by a crash between queue admission and attempt persistence.
+func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		ORDER BY session_id ASC, position ASC
+	`))
+	if err != nil {
+		return nil, fmt.Errorf("list durable lifecycle queued: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []QueuedMessage
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		if msg.IsDurableLifecycle() {
+			out = append(out, *msg)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list durable lifecycle queued rows: %w", err)
+	}
+	return out, nil
 }
 
 // CountBySession returns the number of entries for a session.

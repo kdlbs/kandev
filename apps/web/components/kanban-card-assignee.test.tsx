@@ -2,6 +2,12 @@ import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAppState = {
+  auth: {
+    mode: "enabled",
+    authenticated: true,
+    user: { id: "user-2" } as { id: string } | null,
+    ssoProviders: [],
+  },
   workspaces: { activeId: "ws-1" },
   kanban: { tasks: [] as Array<{ id: string; title: string }> },
   kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
@@ -35,11 +41,14 @@ import { KanbanCardBody } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
 const TASK: Task = { id: "task-1", title: "Fix the bug", workflowStepId: "step-1" };
+const ASSIGNEE_BADGE = "kanban-card-assignee";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   resetDirectoryCacheForTests();
+  mockAppState.auth.mode = "enabled";
+  mockAppState.auth.user = { id: "user-2" };
 });
 
 describe("KanbanCardBody — human assignee", () => {
@@ -47,13 +56,25 @@ describe("KanbanCardBody — human assignee", () => {
     render(<KanbanCardBody task={{ ...TASK, assigneeUserId: "user-1" }} repositoryChips={[]} />);
 
     await waitFor(() =>
-      expect(screen.getByTestId("kanban-card-assignee").textContent).toContain("Ada Lovelace"),
+      expect(screen.getByTestId(ASSIGNEE_BADGE).textContent).toContain("Ada Lovelace"),
     );
   });
 
   it("renders no assignee affordance on an unassigned task", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
-    expect(screen.queryByTestId("kanban-card-assignee")).toBeNull();
+    expect(screen.queryByTestId(ASSIGNEE_BADGE)).toBeNull();
+  });
+
+  it("hides a persisted assignee for the synthetic user when authentication is disabled", () => {
+    mockAppState.auth.mode = "disabled";
+    mockAppState.auth.user = { id: "default-user" };
+
+    render(
+      <KanbanCardBody task={{ ...TASK, assigneeUserId: "default-user" }} repositoryChips={[]} />,
+    );
+
+    expect(screen.queryByTestId(ASSIGNEE_BADGE)).toBeNull();
+    expect(listDirectoryUsers).not.toHaveBeenCalled();
   });
 
   it("fetches the directory once for a board full of cards", async () => {
@@ -71,7 +92,7 @@ describe("KanbanCardBody — human assignee", () => {
       </>,
     );
 
-    await waitFor(() => expect(screen.getAllByTestId("kanban-card-assignee")).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByTestId(ASSIGNEE_BADGE)).toHaveLength(3));
     expect(listDirectoryUsers).toHaveBeenCalledTimes(1);
   });
 });

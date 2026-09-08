@@ -199,6 +199,7 @@ const (
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
+	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -256,7 +257,8 @@ const (
 	MetadataKeyModelOverride = "model_override"
 
 	// Office metadata keys
-	MetadataKeySkillManifestJSON = "skill_manifest_json"
+	MetadataKeySkillManifestJSON    = "skill_manifest_json"
+	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
 	MetadataKeySSHHostAlias          = "ssh_host_alias"
@@ -375,11 +377,13 @@ var persistentMetadataKeys = map[string]bool{
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
 	MetadataKeyImageTagOverride:         true,
+	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyPromptGeneration:         true,
+	MetadataKeyOfficeAgentProfileID:     true,
 }
 
 func promptGenerationFromMetadata(metadata map[string]interface{}) uint64 {
@@ -422,6 +426,10 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	// Office identity belongs to the session that produced the runtime row and
+	// must not be inherited by a sibling session sharing the environment.
+	MetadataKeyOfficeAgentProfileID: true,
+
 	MetadataKeySSHRemoteSessionDir:             true,
 	MetadataKeySSHRemoteAgentctlPort:           true,
 	MetadataKeySSHRemoteAgentctlPID:            true,

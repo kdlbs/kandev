@@ -61,6 +61,31 @@ func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeCanvasMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.canvases")
+	if !ok {
+		t.Fatal("features.canvases definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_CANVASES" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_CANVASES", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskHigh)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
 // TestDefinitionsExcludePlugins pins the graduation of the plugin system out
 // of the feature-flag tier: plugins ship in the base product, so no toggle may
 // reappear in Settings > System > Feature Toggles.

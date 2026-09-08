@@ -1,8 +1,9 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001
+  - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002
 created: 2026-08-23
 owners:
   - kandev
@@ -11,13 +12,15 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` during migration.
+This design records risks for executor-authoritative model fallback and unique
+variation resolution.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Risks & Open Questions](#risks--open-questions) |
 
 ## Migrated source detail
 
@@ -51,3 +54,14 @@ This design preserves the technical source detail for `REQ-AGENTS-NO-SILENT-MODE
 - **Hover is supplementary**: every info icon is focusable, and coarse-pointer
   devices receive the same content in a drawer. The visible option helper copy
   remains the baseline explanation.
+- **Provider-specific labels remain opaque**: `1m`, `270k`, and `fast` have no
+  Kandev-defined order. More than one variation therefore fails closed to the
+  existing provider-default path.
+- **Host and executor decisions can differ**: a unique host variation is only
+  an advisory. The selected executor can advertise zero, one, or multiple
+  variations at launch.
+- **Bracketed requests do not drift sideways**: a request such as `opus[1m]`
+  does not infer `opus[270k]`. The user must select another explicit model.
+- **Legacy automatic fallback remains unchanged**: when `auto_fallback` is
+  enabled and the requested model is absent, Kandev does not apply an explicit
+  fallback or infer a variation. It continues with the provider default.

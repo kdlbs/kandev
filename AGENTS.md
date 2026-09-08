@@ -23,7 +23,7 @@ apps/
 - **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
-- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
+- **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
@@ -88,6 +88,14 @@ Production comments state the invariant, not the argument for it: no `AC-NN` ref
 ### Testing
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
+
+Every built-in SQL schema owner also belongs in
+`apps/backend/internal/persistence/requiredstores` and the fixed
+`apps/backend/internal/persistence/storeconformance` adapter set. Persistence
+changes must run the SQL guard, fresh/replay conformance, and the relevant
+SQLite/PostgreSQL boot or upgrade tests. Disabled features keep their required
+schema; external provider credentials and remote APIs remain a separate,
+degradable startup phase.
 
 ### Internationalization
 

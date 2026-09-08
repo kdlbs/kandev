@@ -265,6 +265,72 @@ func TestPersistTaskEnvironment_GuestDoesNotMutateOwnerEnvironment(t *testing.T)
 	}
 }
 
+// TestPersistTaskEnvironment_GuestWorktreeStampsSharedTaskDirName covers a
+// sessionless inherited subtask that materializes the first physical worktree
+// in an environment created by its parent. The environment row is shared, but
+// its stable task directory name is still needed for ownership validation when
+// the parent is later reset.
+func TestPersistTaskEnvironment_GuestWorktreeStampsSharedTaskDirName(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	owner := &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "task-parent",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			TaskEnvironmentID: "env-parent",
+			RepositoryID:      "repo-a",
+			WorktreeID:        "wt-parent",
+		}},
+	}
+	repo.taskEnvironments[owner.ID] = owner
+	session := &models.TaskSession{ID: "sess-child", TaskID: "task-child", TaskEnvironmentID: owner.ID}
+	req := &LaunchAgentRequest{
+		TaskID:       "task-child",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		UseWorktree:  true,
+		TaskDirName:  "sessionless-child_abc",
+		RepositoryID: "repo-a",
+	}
+	resp := &LaunchAgentResponse{
+		WorktreeID:     "wt-child",
+		WorktreePath:   "/tasks/sessionless-child_abc/repo-a",
+		WorktreeBranch: "feature/sessionless-child",
+	}
+
+	if err := exec.persistTaskEnvironment(context.Background(), "task-child", session, owner, req, resp, executorConfig{}); err != nil {
+		t.Fatalf("persistTaskEnvironment (guest worktree): %v", err)
+	}
+	if owner.TaskDirName != "sessionless-child_abc" {
+		t.Fatalf("owner TaskDirName = %q, want sessionless-child_abc", owner.TaskDirName)
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("guest worktree must not rewrite the shared env, got %d UpdateTaskEnvironment calls", len(repo.updateTaskEnvironmentCalls))
+	}
+	if len(repo.writeCallLog) != 1 || repo.writeCallLog[0] != "stamp_task_dir" {
+		t.Fatalf("guest worktree writes = %v, want only the environment stamp", repo.writeCallLog)
+	}
+}
+
+func TestClaimSharedTaskEnvironmentTaskDirNameRejectsConflictingWinner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-parent", TaskDirName: "winner-root_abc",
+	}
+
+	env := *repo.taskEnvironments["env-parent"]
+	env.TaskDirName = ""
+	err := exec.claimSharedTaskEnvironmentTaskDirName(context.Background(), &env, &LaunchAgentRequest{
+		TaskID: "task-child", UseWorktree: true, TaskDirName: "loser-root_def",
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("claimSharedTaskEnvironmentTaskDirName error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
 // TestPersistTaskEnvironment_GuestMaterializerRunsFinalizePath proves the guest
 // short-circuit does not swallow the shared_group case where a member session is
 // elected to materialize a still-CREATING canonical environment. Even though the

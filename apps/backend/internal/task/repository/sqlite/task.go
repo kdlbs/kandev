@@ -946,6 +946,68 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
 }
 
+// ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
+// and completed markers for a manual move only while the completed marker and
+// task update generation still match the recovery snapshot. A new move clears
+// the old completed marker in the same task write that creates its pending
+// marker, and a later completion reuses the boolean marker value, so the
+// generation predicate prevents either newer move from being erased.
+func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				#- ARRAY[?]::text[] #- ARRAY[?]::text[]
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			models.MetaKeyManualMoveLifecyclePending,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			r.nowUTC(),
+			taskID,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			completedAt,
+		}
+	} else {
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, ?
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			jsonPath(models.MetaKeyManualMoveLifecyclePending),
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			r.nowUTC(),
+			taskID,
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			completedAt,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 // RemoveTaskMetadataKeyIfStamp removes one metadata object only when its
 // nested stamp still equals expectedStamp. The comparison and key removal are
 // one statement so a successful launch cannot erase a newer failure.

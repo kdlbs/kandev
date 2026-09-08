@@ -85,6 +85,20 @@ const JOB: SystemJob = {
   started_at: TS,
 };
 
+const ANALYSIS = {
+  generation: 1,
+  state: "ready",
+  started_at: TS,
+  completed_at: TS,
+  duration_ms: 10,
+  cache_ttl_seconds: 900,
+  refresh_due_at: "2026-05-18T00:15:00Z",
+  stale: false,
+  error: null,
+  progress: { completed_sources: 5, total_sources: 5, sources: {} },
+  partial_summary: null,
+} as const;
+
 describe("system storage slice", () => {
   it("stores storage overview, runs, and quarantine state", () => {
     const store = makeStore();
@@ -131,6 +145,7 @@ describe("system storage slice", () => {
           managed_container_bytes: 0,
         },
       },
+      analysis: ANALYSIS,
       analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
@@ -142,6 +157,7 @@ describe("system storage slice", () => {
     expect(store.getState().system.storage).toEqual({
       policy,
       overview,
+      analysisRevision: 0,
       disk: null,
       runs: [],
       quarantine: [],
@@ -225,5 +241,13 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().clearSystemJob("does-not-exist");
     expect(store.getState().system.jobs).toEqual({});
+  });
+
+  it("advances the storage analysis revision for live updates", () => {
+    const store = makeStore();
+    expect(store.getState().system.storage.analysisRevision).toBe(0);
+    store.getState().bumpSystemStorageAnalysisRevision();
+    store.getState().bumpSystemStorageAnalysisRevision();
+    expect(store.getState().system.storage.analysisRevision).toBe(2);
   });
 });

@@ -1,7 +1,7 @@
 {
-  "@agentclientprotocol/claude-agent-acp": "0.70.0",
-  "@agentclientprotocol/codex-acp": "1.6.0",
-  "@github/copilot": "1.0.75",
-  "@google/gemini-cli": "0.52.0",
-  "opencode-ai": "1.18.18"
+  "@agentclientprotocol/claude-agent-acp": "0.75.1",
+  "@agentclientprotocol/codex-acp": "1.10.0",
+  "@github/copilot": "1.0.83",
+  "@google/gemini-cli": "0.58.0",
+  "opencode-ai": "1.18.29"
 }

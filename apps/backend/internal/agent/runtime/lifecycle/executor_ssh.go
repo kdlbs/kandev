@@ -332,7 +332,7 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 			return nil, err
 		}
 		input := strings.NewReader(envScript)
-		wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+command)
+		wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+command)
 		stdout, stderr, err := runSSHCommandStdin(ctx, client, wrapped, input)
 		return []byte(stdout + stderr), err
 	})

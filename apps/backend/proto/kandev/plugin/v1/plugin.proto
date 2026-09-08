@@ -364,6 +364,8 @@ message Task {
   string title = 4;
   string description = 5;
   string state = 6; // TaskState enum value as a string, stable
+  // One of critical, high, medium, or low. Create defaults to medium when
+  // omitted; updates validate the supplied value.
   string priority = 7;
   string created_by = 8;
   string created_at = 9; // RFC3339
@@ -394,9 +396,9 @@ message Task {
   // `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
   // same read-time projection kandev's own callers consume.
   string assignee_agent_profile_id = 22;
-  // Task labels. Stored as a JSON array string on the model; carried here as a
-  // real repeated field so a plugin does not have to re-parse it.
-  repeated string labels = 23;
+  // Deprecated compatibility field shipped in API v1. New plugins should keep
+  // provider-specific labels in plugin-owned task state and UI slot data.
+  repeated string labels = 23 [deprecated = true];
   bool autopilot = 24;
   // Whether the task consumes a slot in its current step's WIP capacity. A
   // queued task stays visible but admits nothing, so a capacity report that
@@ -822,6 +824,8 @@ message CreateTaskRequest {
   repeated PluginTaskRepository repositories = 8;
   optional PluginTaskLaunchOptions launch = 9;
   google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
+  // One of critical, high, medium, or low; empty defaults to medium.
+  string priority = 11;
 }
 message PluginTaskRepository {
   string repository_id = 1; // existing Kandev repository, or empty with remote below
@@ -860,6 +864,7 @@ message UpdateTaskRequest {
   optional string description = 3;
   optional string state = 4;
   optional string workflow_step_id = 5;
+  optional string priority = 6;
 }
 message UpdateTaskResponse {
   Task task = 1;

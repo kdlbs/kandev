@@ -40,7 +40,7 @@ func newSQLiteRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB boo
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -95,6 +95,7 @@ func (r *sqliteRepository) initSchema() error {
 		status TEXT NOT NULL DEFAULT 'idle'
 			CHECK (status IN ('idle','working','paused','stopped','pending_approval')),
 		pause_reason TEXT NOT NULL DEFAULT '',
+		working_run_id TEXT NOT NULL DEFAULT '',
 		last_run_finished_at TIMESTAMP,
 		max_concurrent_sessions INTEGER NOT NULL DEFAULT 1,
 		cooldown_sec INTEGER NOT NULL DEFAULT 0,
@@ -175,8 +176,11 @@ func (r *sqliteRepository) initSchema() error {
 	}
 
 	// Migration: ADR 0005 Wave A — enrich agent_profiles with office columns.
-	// Each ALTER is idempotent — duplicate-column errors are swallowed.
-	r.migrateOfficeEnrichmentColumns()
+	// Duplicate-column errors are the only replay result tolerated by the
+	// required migration logger.
+	if err := r.migrateOfficeEnrichmentColumns(); err != nil {
+		return fmt.Errorf("failed to migrate agent profile office columns: %w", err)
+	}
 
 	// command_prefix is added after the table-recreation migration above so a
 	// legacy DB that recreates agent_profiles (to drop the model CHECK) still
@@ -189,14 +193,17 @@ func (r *sqliteRepository) initSchema() error {
 	// recreates agent_profiles would otherwise lose columns added before it.
 	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required agent settings migration: %w", err)
+	}
 
 	return nil
 }
 
 // migrateOfficeEnrichmentColumns adds the office-enrichment columns introduced
-// in ADR 0005 Wave A. Each ALTER is idempotent: errors raised when the column
-// already exists are swallowed.
-func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
+// in ADR 0005 Wave A. Each ALTER is idempotent: only errors raised when the
+// column already exists are tolerated.
+func (r *sqliteRepository) migrateOfficeEnrichmentColumns() error {
 	type migration struct {
 		name string
 		stmt string
@@ -211,6 +218,7 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 		{"agent_profiles.custom_prompt", `ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.status", `ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`},
 		{"agent_profiles.pause_reason", `ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.working_run_id", `ALTER TABLE agent_profiles ADD COLUMN working_run_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.last_run_finished_at", `ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`},
 		{"agent_profiles.max_concurrent_sessions", `ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`},
 		{"agent_profiles.cooldown_sec", `ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`},
@@ -223,14 +231,26 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 		{"agent_profiles.permissions", `ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`},
 	}
 	for _, m := range migrations {
-		r.migrate.Apply(m.name, m.stmt)
+		if err := r.migrate.Apply(m.name, m.stmt); err != nil {
+			return err
+		}
 	}
 	// Indexes are idempotent via IF NOT EXISTS, but the partial-index variant
 	// required for role/reports_to needs the column to exist first - so create
 	// here after the ALTERs to handle databases upgraded from older schemas.
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_reports_to ON agent_profiles(reports_to) WHERE reports_to != ''`)
+	if err := r.migrate.Apply("idx_agent_profiles_workspace",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_agent_profiles_role",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_agent_profiles_reports_to",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_reports_to ON agent_profiles(reports_to) WHERE reports_to != ''`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
@@ -1136,7 +1156,19 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
-			status = ?, pause_reason = ?, last_run_finished_at = ?,
+			status = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
+				ELSE ?
+			END,
+			pause_reason = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN pause_reason
+				ELSE ?
+			END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' THEN working_run_id
+				ELSE ''
+			END,
+			last_run_finished_at = ?,
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
@@ -1150,7 +1182,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
-		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference,

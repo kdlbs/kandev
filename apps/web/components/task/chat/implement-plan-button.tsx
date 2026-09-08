@@ -55,6 +55,9 @@ function framedRootClass(framed?: boolean): string | undefined {
     : undefined;
 }
 
+const coarsePointerClass =
+  "[@media(pointer:coarse)]:relative [@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:-inset-3 [@media(pointer:coarse)]:after:content-['']";
+
 function DisabledImplementTooltip({
   disabledReason,
   children,
@@ -74,6 +77,7 @@ function DisabledImplementTooltip({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- split-button markup stays together
 export function ImplementPlanButton({
   onClick,
   presentation = "desktop",
@@ -146,6 +150,7 @@ function ImplementPrimaryButton({
         className={cn(
           "gap-1.5 px-2 text-violet-400 rounded-r-none pr-1.5 border-transparent",
           controlSize,
+          coarsePointerClass,
           "hover:bg-muted/40 focus-visible:border-transparent focus-visible:ring-violet-400/30",
           disabledInteractionClass(disabled),
         )}
@@ -193,6 +198,7 @@ function ImplementMenuButton({
           className={cn(
             "px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
             controlSize,
+            coarsePointerClass,
             "hover:bg-muted/40 focus-visible:border-y-0 focus-visible:border-r-0 focus-visible:border-l-violet-400/20 focus-visible:ring-0",
             disabledInteractionClass(disabled),
           )}

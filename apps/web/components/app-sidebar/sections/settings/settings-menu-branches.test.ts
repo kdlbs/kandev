@@ -56,6 +56,16 @@ function integrationSlugsOf(tabs: readonly SettingsMenuNode[]): Array<string | u
 }
 
 describe("buildWorkspacesBranch", () => {
+  it("includes the Canvases tab only for an enabled canvas feature", () => {
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [], {
+      canvasesEnabled: true,
+    });
+
+    expect(hrefsOf(workspace.children ?? [])).toContain(
+      `/settings/workspaces/${WORKSPACE_ID}/canvases`,
+    );
+  });
+
   it("places the active workspace first without disturbing the remaining order", () => {
     const branch = buildWorkspacesBranch(ORDERED_WORKSPACES, "ws-active");
 
@@ -128,7 +138,9 @@ describe("buildWorkspacesBranch", () => {
           icon: IntegrationIcon,
         },
       ],
-      (_integrationId, workspaceId) => enabledByWorkspace[workspaceId],
+      {
+        pluginIntegrationEnabled: (_integrationId, workspaceId) => enabledByWorkspace[workspaceId],
+      },
     );
 
     expect(integrationSlugsOf(disabled.children ?? [])).not.toContain("bitbucket");

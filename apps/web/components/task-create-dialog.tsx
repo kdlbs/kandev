@@ -108,6 +108,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
+        launchPreview={props.launchPreview}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
@@ -137,7 +138,9 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       onAgentProfileChange={props.onAgentProfileChange}
       onExecutorProfileChange={props.onExecutorProfileChange}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
     />
   );
@@ -188,6 +191,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
       <TaskCreateAdvancedSettings

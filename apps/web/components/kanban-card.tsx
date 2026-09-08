@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
+import { KanbanCardDialogs } from "@/components/kanban-card-dialogs";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 export { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import {
@@ -13,24 +14,18 @@ import {
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
-import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
-import {
-  TaskExternalLinkDialog,
-  type ExternalLinkProvider,
-} from "@/components/task/task-external-link-dialog";
+import { type ExternalLinkProvider } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
-import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
-import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
-import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
   type ForegroundActivity,
-  type Repository,
   type TaskPendingAction,
   type TaskPriority,
   type TaskState,
@@ -81,6 +76,17 @@ export interface Task {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   autoStartFailed?: boolean;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled
+   * background process still live (spec:
+   * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+   * and any live foregroundActivity. The revision/epoch fields backing the
+   * stale-update discard rule live on the store's KanbanState Task shape
+   * (kanban/types.ts) and the wire payload, not here — this board-rendering
+   * type only needs the resolved boolean.
+   */
+  parkedOnBackgroundWork?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -106,6 +112,7 @@ export interface Task {
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
+  statusSummary?: TaskStatusSummary | null;
 }
 
 export type RepositoryChip = {
@@ -136,8 +143,8 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: TaskActionOptions) => void;
+  onArchive?: (task: Task, opts?: TaskActionOptions) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
@@ -174,10 +181,7 @@ function useKanbanCardMoveMenuActions({
     });
   };
   const moveToStepFromDropdown = (stepId: string) => {
-    if (onMove) {
-      onMove(task, stepId);
-      return;
-    }
+    if (onMove) return onMove(task, stepId);
     if (moveTargets.currentWorkflowId) {
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
@@ -390,71 +394,7 @@ function useKanbanCardMenus({
   };
 }
 
-type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
-
-function KanbanCardDialogs({
-  task,
-  workspaceId,
-  repositories,
-  menu,
-  isDeleting,
-  onDelete,
-}: {
-  task: Task;
-  workspaceId: string | null;
-  repositories: Repository[];
-  menu: KanbanCardMenuState;
-  isDeleting?: boolean;
-  onDelete?: KanbanCardProps["onDelete"];
-}) {
-  return (
-    <>
-      <TaskDeleteConfirmDialog
-        open={menu.showDeleteConfirm}
-        onOpenChange={menu.setShowDeleteConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
-      />
-      <TaskGitHubPRDialog
-        workspaceId={workspaceId}
-        open={menu.showPRDialog}
-        onOpenChange={menu.setShowPRDialog}
-        task={task}
-        repositories={repositories}
-      />
-      <TaskGitHubIssueDialog
-        open={menu.showIssueDialog}
-        onOpenChange={menu.setShowIssueDialog}
-        task={task}
-        repositories={repositories}
-      />
-      {workspaceId && (
-        <TaskMRLinkDialog
-          open={menu.showMRDialog}
-          onOpenChange={menu.setShowMRDialog}
-          taskId={task.id}
-          workspaceId={workspaceId}
-          taskRepositories={task.repositories ?? []}
-          repositories={repositories}
-        />
-      )}
-      {menu.externalLinkProvider && workspaceId && (
-        <TaskExternalLinkDialog
-          open={true}
-          onOpenChange={(open) => {
-            if (!open) menu.setExternalLinkProvider(null);
-          }}
-          provider={menu.externalLinkProvider}
-          task={task}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
+export type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
 
 /**
  * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the
@@ -494,6 +434,7 @@ export function dispatchKanbanCardClick(
 
 function KanbanCardFrame({
   task,
+  presentation,
   repositoryChips,
   draggable,
   menu,
@@ -510,6 +451,7 @@ function KanbanCardFrame({
 }: Pick<
   KanbanCardProps,
   | "task"
+  | "presentation"
   | "repositoryChips"
   | "isSelected"
   | "isMultiSelectMode"
@@ -571,6 +513,7 @@ function KanbanCardFrame({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
+        forceDialog={presentation === "mobile"}
         onOpenChange={menu.setShowArchiveConfirm}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
@@ -634,6 +577,7 @@ export function KanbanCard({
     <>
       <KanbanCardFrame
         task={task}
+        presentation={presentation}
         repositoryChips={repositoryChips}
         draggable={draggable}
         menu={menu}

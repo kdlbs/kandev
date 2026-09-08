@@ -378,6 +378,7 @@ export function useTaskCreateDialogSetup(
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason,
+    !isTaskStarted && computed.noCompatibleAgent,
   );
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     guardedHandleSubmit(event as unknown as FormEvent);
@@ -468,8 +469,9 @@ function useRepositorySetsForDialog({
 function useGuardedSubmit(
   handleSubmit: (e: FormEvent) => void,
   blockedReason: string | null | undefined,
+  compatibilityBlocked: boolean,
 ) {
-  const blocked = Boolean(blockedReason);
+  const blocked = Boolean(blockedReason) || compatibilityBlocked;
   return useCallback(
     (e: FormEvent) => {
       if (blocked) e.preventDefault();

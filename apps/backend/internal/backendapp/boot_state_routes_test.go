@@ -67,6 +67,40 @@ func TestMapKanbanTaskStateIncludesAutoStartFailed(t *testing.T) {
 	}
 }
 
+// TestMapKanbanTaskStateIncludesParkedProjection regression-tests the same
+// whitelist-omission shape as TestMapKanbanTaskStateIncludesAutoStartFailed
+// above, this time for parked_on_background_work/parked_revision/parked_epoch:
+// EnrichTaskParkedProjection stamps these onto the TaskDTO before this mapper
+// runs, but the mapper dropped them, so a task already parked at the moment a
+// browser loaded /t/:id rendered with no affordance until the next live
+// task.updated WS event.
+func TestMapKanbanTaskStateIncludesParkedProjection(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-parked",
+		WorkflowStepID:         "step-review",
+		ParkedOnBackgroundWork: true,
+		ParkedRevision:         3,
+		ParkedEpoch:            99,
+	})
+	if task["parkedOnBackgroundWork"] != true {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want true", task["parkedOnBackgroundWork"])
+	}
+	if task["parkedRevision"] != uint64(3) {
+		t.Fatalf("kanban task parkedRevision = %#v, want 3", task["parkedRevision"])
+	}
+	if task["parkedEpoch"] != uint64(99) {
+		t.Fatalf("kanban task parkedEpoch = %#v, want 99", task["parkedEpoch"])
+	}
+
+	unparked := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-unparked",
+		WorkflowStepID: "step-review",
+	})
+	if unparked["parkedOnBackgroundWork"] != false {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want false for an unparked task", unparked["parkedOnBackgroundWork"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesPriority regression-tests that
 // mapKanbanTaskState is a camelCase whitelist: a DTO field with no entry here
 // is invisible on the board's first paint, before any WS event arrives.

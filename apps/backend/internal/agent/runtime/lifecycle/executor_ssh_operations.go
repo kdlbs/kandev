@@ -571,7 +571,7 @@ func startRemoteAgentctlOnPort(
 	// exactly the same resolved credentials as clone/setup commands.
 	innerScript := fmt.Sprintf(
 		`set -ae
-. /dev/stdin
+`+sshStdinEnvImport+`
 set +a
 set -e
 mkdir -p %[1]s

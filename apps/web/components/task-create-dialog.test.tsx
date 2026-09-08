@@ -344,6 +344,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setCurrentLocalBranchLoading: () => undefined,
     noRepository: false,
     setNoRepository: () => undefined,
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => undefined,
     workspacePath: "",
     setWorkspacePath: () => undefined,
   };

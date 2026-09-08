@@ -23,6 +23,17 @@ vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
   useRepositoryBranchPolicies: () => ({ policies: mockPolicies.value }),
 }));
 
+vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
+  useRemoteRepositories: () => ({
+    repos: [],
+    availableProviders: [],
+    loading: false,
+    unavailable: false,
+    error: null,
+    search: () => undefined,
+  }),
+}));
+
 // The Remote-mode branch of RepoChipsRow renders RemoteRepoChipsRow, which
 // in turn renders RemoteRepoChip — a heavy popover with its own GitHub
 // hook. Stub the chip here so tests for this row stay focused on the
@@ -30,6 +41,10 @@ vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
 vi.mock("./task-create-dialog-remote-repo-chip", () => ({
   RemoteRepoChip: () => <div data-testid="remote-repo-chip" />,
   selectedRemoteRepositoryIdentity: () => null,
+}));
+
+vi.mock("@/components/repository-discovery-controls", () => ({
+  RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
 }));
 
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
@@ -100,6 +115,23 @@ const renderInProvider = (ui: Parameters<typeof render>[0]) =>
   render(<TooltipProvider>{ui}</TooltipProvider>);
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
+  it("mounts discovery controls only inside the open repository selector", () => {
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+      />,
+    );
+
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+  });
+
   it("keeps the compact Repo, Remote, and None source-mode controls and test IDs", () => {
     const onToggleRemote = vi.fn();
     const onToggleNoRepository = vi.fn();
