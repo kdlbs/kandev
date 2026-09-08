@@ -979,6 +979,29 @@ func TestTaskMRAutomationToolsNoTaskIDArgument(t *testing.T) {
 	assert.NotContains(t, properties, "task_id")
 }
 
+func TestTaskPRLinkToolsBindCurrentTaskAndRequireCanonicalIdentity(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "link_task_pr_kandev", map[string]interface{}{
+		"provider": "gitlab", "repository_id": "repo-1", "number": 42,
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPLinkTaskPR, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "gitlab", payload["provider"])
+	assert.Equal(t, "repo-1", payload["repository_id"])
+	assert.Equal(t, float64(42), payload["number"])
+
+	properties := toolInputProperties(t, s, "link_task_pr_kandev")
+	assert.NotContains(t, properties, "task_id")
+	assert.Contains(t, properties, "provider")
+	assert.Contains(t, properties, "repository_id")
+	assert.Contains(t, properties, "number")
+}
+
 func TestTaskMRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

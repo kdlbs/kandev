@@ -295,6 +295,32 @@ func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) taskPRLinkHandler(name string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		actions := map[string]string{
+			"link_task_pr_kandev":    ws.ActionMCPLinkTaskPR,
+			"unlink_task_pr_kandev":  ws.ActionMCPUnlinkTaskPR,
+			"replace_task_pr_kandev": ws.ActionMCPReplaceTaskPR,
+		}
+		action, ok := actions[name]
+		if !ok {
+			return mcp.NewToolResultError("unsupported task PR link operation"), nil
+		}
+		payload := map[string]interface{}{"task_id": s.taskID}
+		for _, key := range []string{"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number"} {
+			if value, ok := req.GetArguments()[key]; ok {
+				payload[key] = value
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}

@@ -904,6 +904,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "task-pr-links", enabled: kanban, register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
@@ -1124,6 +1125,20 @@ func (s *Server) registerPRAutomationTools() {
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
 	)
+}
+
+func (s *Server) registerTaskPRLinkTools() {
+	for _, name := range []string{"link_task_pr_kandev", "unlink_task_pr_kandev", "replace_task_pr_kandev"} {
+		s.mcpServer.AddTool(
+			mcp.NewTool(name,
+				mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association for this task. Provide provider, canonical repository_id, and pull-request or merge-request number."),
+				mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
+				mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
+				mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
+			),
+			s.wrapHandler(name, s.taskPRLinkHandler(name)),
+		)
+	}
 }
 
 func (s *Server) registerMRAutomationTools() {
