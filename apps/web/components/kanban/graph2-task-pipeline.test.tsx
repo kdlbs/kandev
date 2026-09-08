@@ -577,6 +577,28 @@ describe("Graph2TaskPipeline — right-click on an interactive control does not 
 
     expect(queryContextMenuContent()).toBeNull();
   });
+
+  it("does not open the row context menu when right-clicking the title's own hover-card trigger", () => {
+    const task: Task = { ...makeTask("step-2"), parentTaskId: "parent-1" };
+    renderPipelineWithWorkflowSnapshot(task, STEPS);
+
+    fireEvent.contextMenu(screen.getByTestId("task-title-preview-trigger"));
+
+    expect(queryContextMenuContent()).toBeNull();
+  });
+
+  it("still opens the row context menu when right-clicking a short title with no hover-card trigger rendered", async () => {
+    // A short task with no description, parent or subtasks never mounts the
+    // hover-card's interactive trigger (TaskTitleHoverCard renders the plain
+    // title unwrapped), so the title area here is non-interactive and a
+    // right-click on it must fall through to the row's own context menu.
+    renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
+    expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+
+    fireEvent.contextMenu(screen.getByTestId("pipeline-row-title"));
+
+    await waitFor(() => expect(queryContextMenuContent()).not.toBeNull());
+  });
 });
 
 describe("excludeOrphanFromMoveMenu", () => {

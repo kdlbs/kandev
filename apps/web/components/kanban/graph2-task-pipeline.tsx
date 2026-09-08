@@ -334,11 +334,7 @@ function RowInfoColumn({
 
   return (
     <div className="w-[200px] min-w-0 shrink-0" data-testid="pipeline-row-info">
-      {/* Right-click on the title's own hover-card trigger must open that
-          trigger's behavior, not the row's context menu; stopped here rather
-          than in the shared CardTitle so the Kanban card's own right-click
-          behavior is untouched. */}
-      <div data-testid="pipeline-row-title" onContextMenu={(e) => e.stopPropagation()}>
+      <div data-testid="pipeline-row-title">
         <CardTitle task={task} enableTitleHover />
       </div>
       {/* Height is reserved whether or not the task has a repository, so a

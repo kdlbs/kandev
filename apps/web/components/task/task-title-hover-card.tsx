@@ -135,6 +135,7 @@ function DesktopTaskTitlePreview({
             event.stopPropagation();
           }}
           onClick={handleTriggerClick}
+          onContextMenu={(event) => event.stopPropagation()}
           className={cn(
             "min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
             triggerClassName,
