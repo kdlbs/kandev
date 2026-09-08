@@ -19,10 +19,49 @@ import (
 func TestParseCapabilitiesAllowsHostExecutionLease(t *testing.T) {
 	t.Parallel()
 
-	got := parseCapabilities("orchestrate, execute, inspect, execute")
+	got, valid := parseCapabilities("orchestrate, execute, inspect, execute")
 	want := []string{"orchestrate", "execute", "inspect"}
-	if !reflect.DeepEqual(got, want) {
+	if !valid || !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseCapabilities() = %v, want %v", got, want)
+	}
+}
+
+func TestCreateCoordinatorGrantRejectsMixedUnknownCapabilities(t *testing.T) {
+	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "coordinator", WorkspaceID: "ws-1", Title: "Coordinator"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "admin", Role: authn.RoleAdmin})
+		c.Next()
+	})
+	RegisterCoordinatorGrantRoutes(router, repo, svc, log)
+	body, err := json.Marshal(createGrantRequest{
+		CoordinatorTaskID: "coordinator",
+		ScopeKind:         "workspace",
+		Capabilities:      "inspect,unknown",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/coordinator-grants", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+	grants, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", true)
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("grants = %#v, %v; want none", grants, err)
 	}
 }
 

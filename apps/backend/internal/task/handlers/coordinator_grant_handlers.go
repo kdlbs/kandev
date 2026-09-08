@@ -279,8 +279,8 @@ func (h *CoordinatorGrantHandlers) validateCreateGrantRequest(c *gin.Context, wo
 			return nil, "", false
 		}
 	}
-	caps := parseCapabilities(req.Capabilities)
-	if len(caps) == 0 {
+	caps, valid := parseCapabilities(req.Capabilities)
+	if !valid || len(caps) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "capabilities must include at least one of: inspect, orchestrate, execute"})
 		return nil, "", false
 	}
@@ -454,19 +454,22 @@ func (h *CoordinatorGrantHandlers) httpListWorkspaceCoordinatorAudit(c *gin.Cont
 // ---- helpers ----
 
 // parseCapabilities normalizes a comma-separated capabilities string into a
-// sorted, deduplicated list of recognized values. Unknown values are silently
-// dropped.
-func parseCapabilities(raw string) []string {
+// deduplicated list of recognized values. A malformed or unknown value makes
+// the whole list invalid so the operator never receives a partial grant.
+func parseCapabilities(raw string) ([]string, bool) {
 	seen := make(map[string]bool)
 	var result []string
 	for _, s := range strings.Split(raw, ",") {
 		s = strings.TrimSpace(s)
-		if (s == "inspect" || s == "orchestrate" || s == "execute") && !seen[s] {
+		if s != "inspect" && s != "orchestrate" && s != "execute" {
+			return nil, false
+		}
+		if !seen[s] {
 			result = append(result, s)
 			seen[s] = true
 		}
 	}
-	return result
+	return result, true
 }
 
 // joinCapabilities joins capabilities into a comma-separated string.
