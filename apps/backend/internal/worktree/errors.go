@@ -10,9 +10,13 @@ import (
 // WorktreeRecoveryError reports an existing checkout that must be preserved
 // instead of passing through destructive recreation.
 type WorktreeRecoveryError struct {
-	TaskID   string
-	Checkout string
-	Reason   string
+	TaskID           string
+	Checkout         string
+	PointerTarget    string
+	ExpectedBacklink string
+	ActualBacklink   string
+	State            string
+	Reason           string
 }
 
 func (e *WorktreeRecoveryError) Error() string {

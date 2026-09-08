@@ -332,6 +332,110 @@ func TestManager_IsValid_RejectsMismatchedLinkedWorktreeBacklink(t *testing.T) {
 	}
 }
 
+func TestManager_AdmitTaskRecoveryRefusesBacklinkMismatchWithoutMutation(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "backlink-mismatch")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	wrongBacklink := filepath.Join(t.TempDir(), "foreign-checkout", ".git")
+	if err := os.WriteFile(filepath.Join(adminPath, "gitdir"), []byte(wrongBacklink+"\n"), 0644); err != nil {
+		t.Fatalf("write mismatched backlink: %v", err)
+	}
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", TaskID: "task-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	err = mgr.AdmitTaskRecovery(ctx, original.TaskID)
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("AdmitTaskRecovery() error = %v, want ErrWorktreeCorrupted", err)
+	}
+	if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); !os.IsNotExist(err) {
+		t.Fatalf("recovery record exists after ambiguous backlink refusal: %v", err)
+	}
+	if got := store.worktrees[original.ID]; got != original || got.Path != worktreePath {
+		t.Fatalf("durable worktree changed after refusal: %+v", got)
+	}
+	if matches, err := filepath.Glob(worktreePath + ".recovered-*"); err != nil || len(matches) != 0 {
+		t.Fatalf("replacement paths = %v, err = %v, want none", matches, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(adminPath, "gitdir")); err != nil || string(got) != wrongBacklink+"\n" {
+		t.Fatalf("admin backlink changed after refusal: %q, err=%v", got, err)
+	}
+}
+
+func TestCheckoutManifestIncludesEmptyDirectoriesAndDirectoryModes(t *testing.T) {
+	root := t.TempDir()
+	before, err := checkoutManifest(root)
+	if err != nil {
+		t.Fatalf("checkoutManifest before: %v", err)
+	}
+	emptyDirectory := filepath.Join(root, "empty")
+	if err := os.Mkdir(emptyDirectory, 0750); err != nil {
+		t.Fatalf("mkdir empty directory: %v", err)
+	}
+	withDirectory, err := checkoutManifest(root)
+	if err != nil {
+		t.Fatalf("checkoutManifest with directory: %v", err)
+	}
+	if before == withDirectory {
+		t.Fatal("checkout manifest did not include an empty directory")
+	}
+	if err := os.Chmod(emptyDirectory, 0700); err != nil {
+		t.Fatalf("chmod empty directory: %v", err)
+	}
+	withMode, err := checkoutManifest(root)
+	if err != nil {
+		t.Fatalf("checkoutManifest with mode: %v", err)
+	}
+	if withDirectory == withMode {
+		t.Fatal("checkout manifest did not include directory mode")
+	}
+}
+
+func TestManager_RecoverWorktreeRefusesRequestRepositoryMismatchBeforeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "repository-mismatch")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read git pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove fixture admin: %v", err)
+	}
+
+	store := newMockStore()
+	wt := &Worktree{ID: "wt-1", TaskID: "task-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[wt.ID] = wt
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	_, err = mgr.RecoverWorktree(ctx, wt, CreateRequest{TaskID: wt.TaskID, RepositoryID: "other-repo", RepositoryPath: repoPath, BaseBranch: "main"})
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("RecoverWorktree() error = %v, want ErrWorktreeCorrupted", err)
+	}
+	if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); !os.IsNotExist(err) {
+		t.Fatalf("recovery record exists after identity refusal: %v", err)
+	}
+}
+
 func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testing.T) {
 	ctx := context.Background()
 	cfg := newTestConfig(t)

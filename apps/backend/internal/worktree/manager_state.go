@@ -250,90 +250,117 @@ func (m *Manager) GetAllByTaskID(ctx context.Context, taskID string) ([]*Worktre
 	return m.store.GetWorktreesByTaskID(ctx, taskID)
 }
 
+type linkedWorktreeClass string
+
+const (
+	linkedWorktreeHealthy          linkedWorktreeClass = "healthy"
+	linkedWorktreeMissingAdmin     linkedWorktreeClass = "missing-admin-target"
+	linkedWorktreeBacklinkMismatch linkedWorktreeClass = "backlink-mismatch"
+	linkedWorktreeAmbiguous        linkedWorktreeClass = "ambiguous"
+)
+
+type linkedWorktreeInspection struct {
+	class            linkedWorktreeClass
+	adminPath        string
+	expectedBacklink string
+	actualBacklink   string
+	reason           string
+}
+
 // IsValid checks if a worktree directory is valid and usable.
 func (m *Manager) IsValid(path string) bool {
+	return inspectLinkedWorktree(path).class == linkedWorktreeHealthy
+}
+
+//nolint:cyclop // Each metadata boundary must classify independently and fail closed.
+func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "checkout path is not a directory"}
 	}
 
 	gitFile := filepath.Join(path, ".git")
 	gitInfo, err := os.Lstat(gitFile)
 	if err != nil || !gitInfo.Mode().IsRegular() {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "checkout git pointer is not a regular file"}
 	}
 	content, err := os.ReadFile(gitFile)
 	if err != nil {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "cannot read checkout git pointer"}
 	}
 	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
 	if !found {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "checkout git pointer has no gitdir target"}
 	}
 	adminPath = strings.TrimSpace(adminPath)
 	if adminPath == "" || !filepath.IsAbs(adminPath) {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "checkout git pointer has an invalid gitdir target"}
 	}
 	adminInfo, err := os.Lstat(adminPath)
 	if err != nil || !adminInfo.IsDir() || adminInfo.Mode()&os.ModeSymlink != 0 {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeMissingAdmin, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)}
+	}
+	commonDir, err := linkedWorktreeCommonDir(adminPath)
+	if err != nil {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: err.Error()}
+	}
+	if info, statErr := os.Lstat(commonDir); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree common directory %q is unavailable", commonDir)}
 	}
 
 	backlinkPath := filepath.Join(adminPath, "gitdir")
 	backlinkInfo, err := os.Lstat(backlinkPath)
 	if err != nil || !backlinkInfo.Mode().IsRegular() {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "linked-worktree admin target has no reciprocal gitdir backlink"}
 	}
 	backlink, err := os.ReadFile(backlinkPath)
 	if err != nil {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "cannot read linked-worktree admin backlink"}
 	}
 	backlinkTarget := strings.TrimSpace(string(backlink))
 	if backlinkTarget == "" {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "linked-worktree admin backlink is empty"}
 	}
 	expectedBacklink, err := filepath.Abs(gitFile)
 	if err != nil {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, actualBacklink: backlinkTarget, reason: "cannot resolve expected checkout backlink"}
 	}
 	actualBacklink, err := filepath.Abs(backlinkTarget)
 	if err != nil || actualBacklink != expectedBacklink {
-		return false
+		return linkedWorktreeInspection{class: linkedWorktreeBacklinkMismatch, adminPath: adminPath, expectedBacklink: expectedBacklink, actualBacklink: backlinkTarget, reason: fmt.Sprintf("linked-worktree admin target %q backlink mismatch", adminPath)}
 	}
 
-	return true
+	return linkedWorktreeInspection{class: linkedWorktreeHealthy, adminPath: adminPath, expectedBacklink: expectedBacklink, actualBacklink: actualBacklink}
+}
+
+func linkedWorktreeCommonDir(adminPath string) (string, error) {
+	commonDirPath := filepath.Join(adminPath, "commondir")
+	info, err := os.Lstat(commonDirPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("linked-worktree admin target %q has no commondir", adminPath)
+	}
+	contents, err := os.ReadFile(commonDirPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read linked-worktree commondir")
+	}
+	commonDir := strings.TrimSpace(string(contents))
+	if commonDir == "" || filepath.IsAbs(commonDir) {
+		return "", fmt.Errorf("linked-worktree commondir is invalid")
+	}
+	resolved, err := filepath.Abs(filepath.Join(adminPath, commonDir))
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve linked-worktree commondir")
+	}
+	return resolved, nil
 }
 
 func linkedWorktreeIntegrityReason(path string) string {
-	gitFile := filepath.Join(path, ".git")
-	content, err := os.ReadFile(gitFile)
-	if err != nil {
-		return fmt.Sprintf("cannot read git pointer %q", gitFile)
+	inspection := inspectLinkedWorktree(path)
+	if inspection.class == linkedWorktreeBacklinkMismatch {
+		return fmt.Sprintf("%s: expected %q, actual %q", inspection.reason, inspection.expectedBacklink, inspection.actualBacklink)
 	}
-	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
-	if !found {
-		return fmt.Sprintf("git pointer %q has no gitdir target", gitFile)
-	}
-	adminPath = strings.TrimSpace(adminPath)
-	if adminPath == "" {
-		return fmt.Sprintf("git pointer %q has an empty gitdir target", gitFile)
-	}
-	if info, statErr := os.Lstat(adminPath); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)
-	}
-	backlinkPath := filepath.Join(adminPath, "gitdir")
-	backlinkInfo, err := os.Lstat(backlinkPath)
-	if err != nil || !backlinkInfo.Mode().IsRegular() {
-		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
-	}
-	backlink, err := os.ReadFile(backlinkPath)
-	if err != nil {
-		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
-	}
-	expected, expectedErr := filepath.Abs(gitFile)
-	actual, actualErr := filepath.Abs(strings.TrimSpace(string(backlink)))
-	if expectedErr != nil || actualErr != nil || expected != actual {
-		return fmt.Sprintf("linked-worktree admin target %q backlink mismatch: expected %q, actual %q", adminPath, expected, strings.TrimSpace(string(backlink)))
+	if inspection.reason != "" {
+		return inspection.reason
 	}
 	return "linked-worktree metadata is invalid"
 }

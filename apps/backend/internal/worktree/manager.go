@@ -198,6 +198,8 @@ func (m *Manager) IsEnabled() bool {
 // AdmitTaskRecovery prevents a task from creating a session while one of its
 // persisted checkouts is present but no longer has trustworthy linked-worktree
 // metadata. Missing paths remain eligible for ordinary materialization.
+//
+//nolint:cyclop // Admission keeps the integrity decision and recovery claim in one boundary.
 func (m *Manager) AdmitTaskRecovery(ctx context.Context, taskID string) error {
 	if m == nil || taskID == "" || m.store == nil {
 		return nil
@@ -213,11 +215,19 @@ func (m *Manager) AdmitTaskRecovery(ctx context.Context, taskID string) error {
 		if _, statErr := os.Lstat(wt.Path); statErr != nil {
 			continue
 		}
-		if !m.IsValid(wt.Path) {
+		inspection := inspectLinkedWorktree(wt.Path)
+		if inspection.class != linkedWorktreeHealthy {
+			if inspection.class != linkedWorktreeMissingAdmin {
+				return &WorktreeRecoveryError{
+					TaskID: wt.TaskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+					ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
+					State: string(inspection.class), Reason: inspection.reason,
+				}
+			}
 			lockValue, _ := m.recoveryLocks.LoadOrStore(wt.ID, &sync.Mutex{})
 			lock := lockValue.(*sync.Mutex)
 			lock.Lock()
-			if m.IsValid(wt.Path) {
+			if inspectLinkedWorktree(wt.Path).class == linkedWorktreeHealthy {
 				lock.Unlock()
 				continue
 			}

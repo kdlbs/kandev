@@ -56,10 +56,30 @@ var errRecoveryOperationClaimed = errors.New("recovery operation is currently cl
 // the original. The original and snapshot are retained; callers can validate
 // and explicitly clean them up later.
 //
-//nolint:cyclop,gocognit,nestif // Recovery is one stateful transaction boundary.
+//nolint:cyclop,gocognit,nestif,funlen // Recovery is one stateful transaction boundary.
 func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateRequest) (*Worktree, error) {
 	if wt == nil || wt.TaskID == "" || wt.TaskID != req.TaskID || wt.Path == "" || req.RepositoryPath == "" {
 		return nil, fmt.Errorf("%w: recovery identity is incomplete", ErrWorktreeCorrupted)
+	}
+	if wt.RepositoryID == "" || wt.RepositoryID != req.RepositoryID ||
+		(wt.TaskEnvironmentID != "" && req.TaskEnvironmentID != "" && wt.TaskEnvironmentID != req.TaskEnvironmentID) {
+		return nil, fmt.Errorf("%w: recovery request does not match durable repository identity", ErrWorktreeCorrupted)
+	}
+	repositoryPath, err := filepath.Abs(req.RepositoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve requested repository path: %v", ErrWorktreeCorrupted, err)
+	}
+	durableRepositoryPath, err := filepath.Abs(wt.RepositoryPath)
+	if err != nil || filepath.Clean(repositoryPath) != filepath.Clean(durableRepositoryPath) {
+		return nil, fmt.Errorf("%w: recovery request does not match durable repository path", ErrWorktreeCorrupted)
+	}
+	inspection := inspectLinkedWorktree(wt.Path)
+	if inspection.class != linkedWorktreeMissingAdmin {
+		return nil, &WorktreeRecoveryError{
+			TaskID: wt.TaskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
+			State: string(inspection.class), Reason: inspection.reason,
+		}
 	}
 	if _, err := os.Lstat(wt.Path); err != nil {
 		return nil, fmt.Errorf("%w: original checkout is unavailable: %v", ErrWorktreeCorrupted, err)
@@ -365,6 +385,7 @@ func snapshotCheckout(source, destination string) error {
 	})
 }
 
+//nolint:cyclop // The manifest must record every supported filesystem entry explicitly.
 func checkoutManifest(root string) (string, error) {
 	var entries []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -384,14 +405,18 @@ func checkoutManifest(root string) (string, error) {
 			}
 			return nil
 		}
-		if entry.IsDir() {
-			return nil
-		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		entryValue := rel + "|" + info.Mode().String()
+		if entry.IsDir() {
+			entries = append(entries, entryValue)
+			return nil
+		}
+		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("unsupported recovery entry %q", rel)
+		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {
@@ -426,7 +451,16 @@ func restoreSnapshot(source, destination, expectedManifest string) error {
 	if current, err := checkoutManifest(source); err != nil || current != expectedManifest {
 		return fmt.Errorf("recovery snapshot changed during rematerialization")
 	}
-	return copySnapshotEntries(source, destination)
+	if err := copySnapshotEntries(source, destination); err != nil {
+		return err
+	}
+	if current, err := checkoutManifest(destination); err != nil || current != expectedManifest {
+		return fmt.Errorf("recovery replacement does not match verified snapshot")
+	}
+	if current, err := checkoutManifest(source); err != nil || current != expectedManifest {
+		return fmt.Errorf("recovery snapshot changed during restoration")
+	}
+	return nil
 }
 
 //nolint:cyclop // The copy walk handles each filesystem type explicitly.
