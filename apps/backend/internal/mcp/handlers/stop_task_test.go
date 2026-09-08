@@ -54,6 +54,45 @@ func TestHandleStopTask_CoordinatorGrantUsesCurrentSessionAndResolvesAudit(t *te
 	}
 }
 
+func TestHandleStopTaskRejectsCoordinatorProvenanceSpoofing(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: coordinator.TaskPrincipalInstallationID, LogicalKey: coordinator.TaskPrincipalLogicalKey(sender.ID),
+		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(context.Background(), principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+	if err := repo.CreateWorkspaceCoordinatorGrant(context.Background(), &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: sender.WorkspaceID, CoordinatorTaskID: sender.ID, CreatedByUserID: "operator", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceCoordinatorGrant: %v", err)
+	}
+	if err := repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
+		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateCoordinatorGrant: %v", err)
+	}
+	stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}}
+	h := stopTaskTestHandler(t, map[string]*models.Task{sender.ID: sender, target.ID: target}, nil, stopper)
+	h.SetCoordinatorAuthority(coordinator.New(repo, func() bool { return true }))
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{CallerTaskID: "attacker", CallerSessionID: "attacker-session"})
+
+	response, err := h.handleStopTask(ctx, makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
+		"task_id": target.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1",
+	}))
+	if err != nil {
+		t.Fatalf("handleStopTask: %v", err)
+	}
+	assertWSError(t, response, ws.ErrorCodeForbidden)
+	if len(stopper.calls) != 0 {
+		t.Fatalf("spoofed request invoked stopper: %v", stopper.calls)
+	}
+}
+
 type recordingTaskStopper struct {
 	result orchestrator.CoordinatorTaskStopResult
 	err    error

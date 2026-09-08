@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -12,6 +13,20 @@ import (
 func canDirectParentAccess(caller, target *models.Task) bool {
 	return caller != nil && target != nil && caller.WorkspaceID != "" &&
 		target.WorkspaceID == caller.WorkspaceID && target.ParentID == caller.ID
+}
+
+// canonicalMCPCaller prevents an agent-controlled request payload from
+// replacing the task and session bound to the inbound MCP connection.
+func canonicalMCPCaller(ctx context.Context, taskID, sessionID string) (string, string, bool) {
+	principal, scoped := mcpscope.PrincipalFromContext(ctx)
+	if !scoped {
+		return taskID, sessionID, true
+	}
+	if (taskID != "" && taskID != principal.CallerTaskID) ||
+		(sessionID != "" && sessionID != principal.CallerSessionID) {
+		return "", "", false
+	}
+	return principal.CallerTaskID, principal.CallerSessionID, true
 }
 
 func (h *Handlers) authorizeCoordinatorAction(ctx context.Context, caller, target *models.Task, actorSessionID, action string, capability coordinator.Capability) (coordinator.Decision, error) {

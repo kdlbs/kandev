@@ -39,6 +39,13 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 
 	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
 	automationCaller := hasPrincipal && principal.IsAutomation()
+	var provenanceOK bool
+	if !automationCaller {
+		req.SenderTaskID, req.SenderSessionID, provenanceOK = canonicalMCPCaller(ctx, req.SenderTaskID, req.SenderSessionID)
+		if !provenanceOK {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
+		}
+	}
 	var sender *models.Task
 	if !automationCaller {
 		var lookupError *stopTaskFailure

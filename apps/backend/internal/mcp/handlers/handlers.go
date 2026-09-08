@@ -2006,6 +2006,11 @@ func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Messag
 	if response != nil {
 		return response, nil
 	}
+	var provenanceOK bool
+	req.CallerTaskID, req.CallerSessionID, provenanceOK = canonicalMCPCaller(ctx, req.CallerTaskID, req.CallerSessionID)
+	if !provenanceOK {
+		return newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session"), nil
+	}
 	caller, response := h.verifyWorkspaceSourceCaller(ctx, msg, req)
 	if response != nil {
 		return response, nil
@@ -2556,6 +2561,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	var provenanceOK bool
+	req.SenderTaskID, req.SenderSessionID, provenanceOK = canonicalMCPCaller(ctx, req.SenderTaskID, req.SenderSessionID)
+	if !provenanceOK {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)

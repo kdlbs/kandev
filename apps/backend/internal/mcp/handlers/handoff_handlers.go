@@ -40,6 +40,11 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	var provenanceOK bool
+	req.CallerTaskID, req.CallerSessionID, provenanceOK = canonicalMCPCaller(ctx, req.CallerTaskID, req.CallerSessionID)
+	if !provenanceOK {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
+	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
@@ -75,6 +80,11 @@ func (h *Handlers) handleListTaskDocuments(ctx context.Context, msg *ws.Message)
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	var provenanceOK bool
+	req.CallerTaskID, req.CallerSessionID, provenanceOK = canonicalMCPCaller(ctx, req.CallerTaskID, req.CallerSessionID)
+	if !provenanceOK {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
+	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
@@ -106,6 +116,11 @@ func (h *Handlers) handleGetTaskDocument(ctx context.Context, msg *ws.Message) (
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	var provenanceOK bool
+	req.CallerTaskID, req.CallerSessionID, provenanceOK = canonicalMCPCaller(ctx, req.CallerTaskID, req.CallerSessionID)
+	if !provenanceOK {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
 	}
 	if req.TaskID == "" || req.DocumentKey == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and document_key are required", nil)
