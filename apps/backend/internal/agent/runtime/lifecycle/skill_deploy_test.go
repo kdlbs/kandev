@@ -173,6 +173,50 @@ func TestRunSkillDeploy_MergesMetadataOnPreparedRequest(t *testing.T) {
 	}
 }
 
+// TestRunSkillDeploy_OfficeRuntimeFromEnv verifies OfficeRuntime is derived
+// from the presence of KANDEV_CLI in the prepared (finalized) launch env —
+// present for an office scheduler launch, absent for a kanban launch (e.g.
+// a heavy-routine task), which is the signal system skills gate on.
+func TestRunSkillDeploy_OfficeRuntimeFromEnv(t *testing.T) {
+	rich := &settingsmodels.AgentProfile{ID: "p1", AgentID: "a1", SkillIDs: `["sk-foo"]`}
+
+	t.Run("KANDEV_CLI absent", func(t *testing.T) {
+		mgr := newSkillDeployTestManager(t)
+		rec := &recordingDeployer{}
+		mgr.skillDeployer = rec
+		mgr.agentProfileReader = &fakeProfileReader{profile: rich}
+
+		mgr.runSkillDeploy(context.Background(),
+			&LaunchRequest{AgentProfileID: "p1"},
+			&LaunchRequest{WorkspacePath: "/tmp/ws", Env: map[string]string{"GITLAB_TOKEN": "x"}})
+
+		if rec.called.Load() != 1 {
+			t.Fatalf("expected deployer once, got %d", rec.called.Load())
+		}
+		if rec.last.OfficeRuntime {
+			t.Errorf("OfficeRuntime should be false without KANDEV_CLI in env")
+		}
+	})
+
+	t.Run("KANDEV_CLI present", func(t *testing.T) {
+		mgr := newSkillDeployTestManager(t)
+		rec := &recordingDeployer{}
+		mgr.skillDeployer = rec
+		mgr.agentProfileReader = &fakeProfileReader{profile: rich}
+
+		mgr.runSkillDeploy(context.Background(),
+			&LaunchRequest{AgentProfileID: "p1"},
+			&LaunchRequest{WorkspacePath: "/tmp/ws", Env: map[string]string{"KANDEV_CLI": "/usr/local/bin/agentctl"}})
+
+		if rec.called.Load() != 1 {
+			t.Fatalf("expected deployer once, got %d", rec.called.Load())
+		}
+		if !rec.last.OfficeRuntime {
+			t.Errorf("OfficeRuntime should be true with KANDEV_CLI in env")
+		}
+	})
+}
+
 // TestRunSkillDeploy_NoProfileID verifies that a launch without a profile id
 // (legacy / pass-through executions) short-circuits.
 func TestRunSkillDeploy_NoProfileID(t *testing.T) {

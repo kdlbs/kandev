@@ -44,6 +44,7 @@ func (m *Manager) runSkillDeploy(ctx context.Context, original, prepared *Launch
 		ExecutorType:  prepared.ExecutorType,
 		WorkspaceID:   profile.WorkspaceID,
 		SessionID:     original.SessionID,
+		OfficeRuntime: prepared.Env["KANDEV_CLI"] != "",
 	}
 	result, err := m.skillDeployer.DeploySkills(ctx, req)
 	if err != nil {

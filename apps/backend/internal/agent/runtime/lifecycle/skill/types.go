@@ -27,6 +27,11 @@ type Skill struct {
 	// resolved upstream by the SkillReader before reaching the
 	// deployer.
 	SourceType string
+	// IsSystem marks a bundled Office skill (e.g. kandev-protocol,
+	// kandev-task-ops) rather than a user-authored one. System skills
+	// depend on Office runtime env (KANDEV_CLI, KANDEV_API_KEY, ...)
+	// that only the office scheduler launch path provides.
+	IsSystem bool
 }
 
 // SkillFile is a supporting file inside a skill package. Paths are

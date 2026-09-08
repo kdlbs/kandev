@@ -32,6 +32,10 @@ type SkillDeployRequest struct {
 	ExecutorType  string
 	WorkspaceID   string
 	SessionID     string
+	// OfficeRuntime reports whether the finalized launch env carries the
+	// Office runtime variables (KANDEV_CLI, KANDEV_API_KEY, ...) that
+	// bundled system skills depend on.
+	OfficeRuntime bool
 }
 
 // SkillDeployResult carries the side-effects a successful deploy produced

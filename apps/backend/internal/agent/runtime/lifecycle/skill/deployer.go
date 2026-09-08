@@ -85,6 +85,11 @@ type Request struct {
 	ExecutorType  string
 	WorkspaceID   string
 	SessionID     string
+	// OfficeRuntime reports whether the finalized launch env carries the
+	// Office runtime variables (KANDEV_CLI, KANDEV_API_KEY, ...) that
+	// bundled system skills depend on. When false, system skills are
+	// omitted from the manifest — see appendSkills.
+	OfficeRuntime bool
 }
 
 // Deploy materialises the profile's skills and instructions into the
@@ -95,7 +100,7 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) (DeployResult, error
 	if req.Profile == nil {
 		return DeployResult{}, errors.New("skill deploy: profile is required")
 	}
-	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID))
+	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID), req.OfficeRuntime)
 	result := d.deliver(ctx, manifest, req.ExecutorType, req.WorkspacePath)
 	return result, nil
 }
