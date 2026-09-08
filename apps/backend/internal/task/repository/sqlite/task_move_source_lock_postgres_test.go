@@ -36,6 +36,9 @@ func TestPostgresCrossStepMoveLocksSourceStepAgainstConcurrentReorder(t *testing
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "move-lock-ws", Name: "Move lock workspace"}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "move-lock-workflow", WorkspaceID: "move-lock-ws", Name: "Move lock workflow"}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
 	for _, step := range []string{sourceStep, targetStep} {
 		if _, err := db.Exec(db.Rebind(`
 			INSERT INTO workflow_steps (id, workflow_id, name, position)

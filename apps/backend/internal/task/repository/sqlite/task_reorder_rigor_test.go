@@ -178,6 +178,40 @@ func TestReorderStepTasksNamingTaskInAnotherStepIsMembershipDrift(t *testing.T) 
 	}
 }
 
+// TestReorderStepTasksNamingTaskInAnotherWorkspaceIsMalformed pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.18: a real task that belongs to a
+// different workspace entirely was never a candidate for this step's band
+// under any race, so it is the malformed case (400 invalid_reorder), not the
+// AC.26 membership-change conflict
+// (TestReorderStepTasksNamingTaskInAnotherStepIsMembershipDrift, whose named
+// task shares the reordered step's own workspace). Distinguishing the two
+// with different error codes also matters beyond correctness: per-user
+// scoping (apps/backend/AGENTS.md "no existence leak") requires that naming
+// a real task in a workspace the caller cannot see be indistinguishable from
+// naming a nonexistent id — 409 would confirm the id exists.
+func TestReorderStepTasksNamingTaskInAnotherWorkspaceIsMalformed(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-cross-tenant-reorder-id")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-cross-tenant-reorder-id", WorkspaceID: "ws-cross-tenant-reorder-id", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderStep(t, repo, "step-cross-tenant-reorder-id", "wf-cross-tenant-reorder-id")
+	mustCreateReorderTask(t, ctx, repo, "cross-tenant-visible-a", "ws-cross-tenant-reorder-id", "wf-cross-tenant-reorder-id", "step-cross-tenant-reorder-id")
+
+	seedWorkspace(t, repo, "ws-cross-tenant-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-cross-tenant-other", WorkspaceID: "ws-cross-tenant-other", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderStep(t, repo, "step-cross-tenant-other", "wf-cross-tenant-other")
+	mustCreateReorderTask(t, ctx, repo, "cross-tenant-secret", "ws-cross-tenant-other", "wf-cross-tenant-other", "step-cross-tenant-other")
+
+	_, _, err := repo.ReorderStepTasks(ctx, "step-cross-tenant-reorder-id", ReorderBandAdmitted, []string{"cross-tenant-visible-a", "cross-tenant-secret"})
+	if !errors.Is(err, repoerrors.ErrInvalidReorder) {
+		t.Fatalf("err = %v, want ErrInvalidReorder (a foreign-workspace task must read the same as a nonexistent one)", err)
+	}
+}
+
 // TestReorderStepTasksDepartureLeavesRemainingRelativeOrderIntact pins
 // AC-TASKS-KANBAN-TASK-REORDERING-001.30: when a task leaves a band (here, a
 // cross-step move), the remaining tasks keep their relative order; position

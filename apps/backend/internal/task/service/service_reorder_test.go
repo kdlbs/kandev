@@ -212,6 +212,50 @@ func TestService_ReorderStepTasksDeniesCallerWithoutWorkflowAccess(t *testing.T)
 	}
 }
 
+// TestService_ReorderStepTasksNamingTaskInAnotherWorkspaceDoesNotLeakExistence
+// pins the "no existence leak" invariant (service_access.go) against
+// ReorderStepTasks: authorizeWorkflowID only authorizes the step's own
+// workflow, never the individual submitted task ids, so naming a real task
+// id from a workspace the caller cannot see must resolve exactly like naming
+// a nonexistent id (ErrInvalidReorder) — not ErrStepChanged, which would
+// confirm the id exists somewhere the caller has no access to.
+func TestService_ReorderStepTasksNamingTaskInAnotherWorkspaceDoesNotLeakExistence(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-a-leak", Name: "A", OwnerID: "user-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-a-leak", WorkspaceID: "ws-a-leak", Name: "WF-A"}); err != nil {
+		t.Fatal(err)
+	}
+	// seedReorderTestStep wires the fake workflow-step getter to know only
+	// about the step being reordered, matching what the service actually
+	// resolves for this call.
+	seedReorderTestStep(t, svc, repo, "step-a-leak", "wf-a-leak", 0)
+	mustCreateReorderServiceTask(t, ctx, repo, "task-a-leak", "ws-a-leak", "wf-a-leak", "step-a-leak")
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-b-leak", Name: "B", OwnerID: "user-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-b-leak", WorkspaceID: "ws-b-leak", Name: "WF-B"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB().Exec(`INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"step-b-leak", "wf-b-leak", "step-b-leak", 0, time.Now().UTC(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	mustCreateReorderServiceTask(t, ctx, repo, "task-b-secret-leak", "ws-b-leak", "wf-b-leak", "step-b-leak")
+
+	// user-a is authorized for step-a-leak's own workflow, but has zero
+	// access to ws-b-leak. Naming task-b-secret-leak (real, but foreign)
+	// must not be distinguishable from naming an id that does not exist.
+	_, err := svc.ReorderStepTasks(ctxAs("user-a"), "step-a-leak", "admitted", []string{"task-a-leak", "task-b-secret-leak"})
+	if !errors.Is(err, repoerrors.ErrInvalidReorder) {
+		t.Fatalf("err = %v, want ErrInvalidReorder (a foreign-workspace task id must read the same as a nonexistent one)", err)
+	}
+}
+
 func TestService_ReorderStepTasksInvalidRequestReturnsNilResult(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
