@@ -125,6 +125,49 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionWaitsForLocalPacing(t *tes
 	})
 }
 
+func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWhenThrottleStartsDuringLocalPacing(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "paced-user",
+	}, nil)
+	ctx, cancel := context.WithCancel(WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	))
+	defer cancel()
+
+	firstRelease, err := admission.acquire(ctx, ResourceCore)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	firstRelease()
+
+	secondResult := make(chan error, 1)
+	go func() {
+		_, acquireErr := admission.acquire(ctx, ResourceCore)
+		secondResult <- acquireErr
+	}()
+	select {
+	case acquireErr := <-secondResult:
+		t.Fatalf("second acquire returned before pacing elapsed: %v", acquireErr)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	tracker.ObserveSecondary(
+		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
+	)
+	select {
+	case acquireErr := <-secondResult:
+		var deferred *AdmissionDeferredError
+		if !errors.As(acquireErr, &deferred) {
+			t.Fatalf("second acquire = %v, want AdmissionDeferredError", acquireErr)
+		}
+	case <-time.After(100 * time.Millisecond):
+		cancel()
+		<-secondResult
+		t.Fatal("second acquire remained blocked after the throttle started")
+	}
+}
+
 func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)

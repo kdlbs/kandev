@@ -246,15 +246,30 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 			reason = "provider_retry"
 		}
 	}
-	retryAt, retrySource := a.retryBoundary(resource, reason, now, wait)
 	if reason == rateLimitBlockBackgroundPacing {
-		return a.acquireBackground(ctx, resource)
+		if err := a.waitForLocalPacing(ctx, state, trackerChanged); err != nil {
+			return nil, err
+		}
+		return a.tryAcquireBackground(ctx, resource)
 	}
+	retryAt, retrySource := a.retryBoundary(resource, reason, now, wait)
 	incGitHubBackgroundDeferral(resource, reason)
 	return nil, &AdmissionDeferredError{
 		Resource: resource, Delay: wait, RetryAt: retryAt, RetrySource: retrySource, Changed: changed,
 		TrackerChanged: trackerChanged, Reason: reason,
 	}
+}
+
+func (a *RateAdmission) waitForLocalPacing(
+	ctx context.Context,
+	state *rateAdmissionState,
+	trackerChanged <-chan struct{},
+) error {
+	a.principal.mu.Lock()
+	wait := time.Until(state.nextBackgroundAt)
+	stateChanged := state.changed
+	a.principal.mu.Unlock()
+	return waitForAdmissionChange(ctx, wait, trackerChanged, stateChanged)
 }
 
 func (a *RateAdmission) retryBoundary(
