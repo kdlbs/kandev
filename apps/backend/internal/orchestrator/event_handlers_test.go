@@ -3148,9 +3148,8 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 	// handler sets the session to IDLE before stopping the agent, the
 	// resulting agent.stopped event must NOT clobber IDLE → CANCELLED.
 	// Without this guard, the next office run's EnsureSessionForAgent
-	// sees a terminal session, tries to INSERT a new row, and the partial
-	// unique index on (task_id, agent_profile_id) rejects it. Comments
-	// silently fail to wake the agent.
+	// creates a fresh row instead of reusing the durable conversation. The
+	// session then loses its expected Office conversation state.
 	t.Run("does not clobber IDLE state (office fire-and-forget)", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

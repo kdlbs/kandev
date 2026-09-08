@@ -2456,8 +2456,8 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	// stops the agent and parks the session for the next run. Either
 	// way, the AgentStopped event here is a side-effect of that stop —
 	// clobbering the state to CANCELLED would mark the row terminal and
-	// break the next office run (EnsureSessionForAgent then tries to
-	// INSERT a new row and the partial unique index rejects it).
+	// break the next office run because EnsureSessionForAgent then creates a
+	// fresh row instead of reusing the durable conversation.
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil {
 		if session.State == models.TaskSessionStateCancelled {
 			s.logger.Info("closing turn for explicitly cancelled session",
