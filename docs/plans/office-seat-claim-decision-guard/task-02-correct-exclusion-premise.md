@@ -1,7 +1,7 @@
 ---
 id: "02-correct-exclusion-premise"
 title: "Correct the stale exclusion premise"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-cover-claim-decision-guard"
@@ -107,4 +107,26 @@ git diff --check
 
 ## Results
 
-Pending.
+- Rewrote `TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision`'s
+  docstring to claim only what its assertions support: that the two writers
+  serialize on the shared seat exclusion, complete in either acquisition order
+  without deadlock, and leave no reattributed decision. It now says explicitly
+  that it does not, and cannot, show the NOT EXISTS condition to be
+  load-bearing, and points at the test that does.
+- Confirmed by diff that the change is comment-only: no assertion, iteration
+  count, or pool size was touched.
+- Corrected the claim fallthrough comment in `participants.go`, which described
+  the condition as a defensive backstop that "cannot actually interleave here".
+  It now states which defense covers which decision.
+- Also corrected `ParticipantRoleSeatLockKey`'s doc comment in
+  `phase2_sqlite.go`, which presented the shared exclusion as fully closing the
+  window. It is acquired only when the decision carries a role, and that
+  omission is the same false completeness this work order exists to remove.
+  This was a third site, beyond the two the work order named; the suite-wide
+  scan `AC-OFFICE-SEAT-GUARD-002.5` requires is what surfaced it.
+- The scan for the stale premise (`never contend with each other`,
+  `two different advisory-lock namespaces`, `cannot actually interleave`) now
+  returns nothing across `internal/`.
+- `internal/office/repository/sqlite` and `internal/workflow/repository` pass
+  with `-race`; `golangci-lint` reports 0 issues across `internal/office/...`
+  and `internal/workflow/...`; specification lint passes.

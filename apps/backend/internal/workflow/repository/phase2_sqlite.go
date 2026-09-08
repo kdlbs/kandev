@@ -785,6 +785,11 @@ const participantsLockNamespace = "workflow-participant-role-seat:"
 // writers previously locked on disjoint namespaces (participantsLockNamespace
 // vs decisionLockNamespace) and never actually contended.
 //
+// The exclusion is acquired only when the decision carries a role, so it does
+// not cover every decision the store accepts. A roleless decision still
+// commits without it, and claimAutoSeat's NOT EXISTS condition is what defends
+// the seat on that path.
+//
 // Keyed on task and role only, deliberately narrower than the namespace,
 // task, workflow and role EnsureRoleSeat locked on before this change.
 // Registration cannot know the task's workflow before it has resolved the

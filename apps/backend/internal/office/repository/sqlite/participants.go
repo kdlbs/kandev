@@ -166,11 +166,18 @@ func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, ro
 	}
 	// No claim landed — either no claimable auto seat existed, or the
 	// selected one was removed, reprovenanced, or decided since
-	// findClaimableAutoSeat's read (claimAutoSeat's guard is a defensive
-	// backstop: recordStepDecisionTx now shares this transaction's
-	// ParticipantRoleSeatLockKey exclusion, so it cannot actually interleave
-	// here). Either way, fall through to inserting a fresh seat rather than
-	// completing having written nothing.
+	// findClaimableAutoSeat's read. Either way, fall through to inserting a
+	// fresh seat rather than completing having written nothing.
+	//
+	// Which of the two defenses covers the decided case depends on the
+	// decision: recordStepDecisionTx acquires this transaction's
+	// ParticipantRoleSeatLockKey exclusion only when the decision carries a
+	// role, so a role-carrying decision cannot commit between
+	// findClaimableAutoSeat and claimAutoSeat. A roleless decision takes
+	// neither that exclusion nor the seat validation, and for it claimAutoSeat's
+	// NOT EXISTS condition is the whole defense — see
+	// participant_claim_decision_guard_test.go, which drives that window
+	// through claimWindowHook.
 
 	inserted, err := r.insertManualParticipant(ctx, tx, stepID, taskID, role, agentID)
 	if err != nil {

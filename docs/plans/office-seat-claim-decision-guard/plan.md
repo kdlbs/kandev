@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-status: draft
+status: implemented
 requirements:
   - REQ-OFFICE-SEAT-GUARD-001
   - REQ-OFFICE-SEAT-GUARD-002
@@ -164,8 +164,8 @@ user-visible change.
 
 ## Work orders
 
-- [ ] [Task 01: Cover The Claim Decision Guard](task-01-cover-claim-decision-guard.md)
-- [ ] [Task 02: Correct The Stale Exclusion Premise](task-02-correct-exclusion-premise.md)
+- [completed] [Task 01: Cover The Claim Decision Guard](task-01-cover-claim-decision-guard.md)
+- [completed] [Task 02: Correct The Stale Exclusion Premise](task-02-correct-exclusion-premise.md)
 
 ## Dependency order
 
@@ -178,7 +178,18 @@ roleless window. The package is sequential.
 
 ## Verification results
 
-Pending.
+- Four engine-agnostic guard tests pass; `internal/office/repository/sqlite`
+  and `internal/workflow/repository` pass with `-race`.
+- The by-hand acceptance check was performed: deleting `claimAutoSeat`'s
+  `NOT EXISTS` condition makes the guard tests fail with the seat reattributed
+  to the registering agent, and restoring it makes them pass.
+- The Postgres-gated variant compiles, vets, and skips cleanly, but has never
+  run against a real server: this runner has no PostgreSQL and the card forbids
+  Docker. CI is its first execution.
+- `golangci-lint` reports 0 issues across `internal/office/...` and
+  `internal/workflow/...`; specification lint passes; `git diff --check` is
+  clean.
+- The open question below was resolved as proposed.
 
 ## Risks
 
@@ -222,6 +233,12 @@ Pending.
   they constrain determinism and production inertness rather than the
   connection count. Confirm this deviation, or amend the system design's
   wording, before Task 01 starts.
+
+  **Resolved as proposed.** The hook takes the transaction, the deterministic
+  test writes through it and runs on every engine, and the literal
+  cross-connection reading is kept as the Postgres-gated variant. The setter
+  additionally lives in `export_test.go` rather than in an in-package test, so
+  a production build has no setter at all.
 
 ## Package handoff
 
