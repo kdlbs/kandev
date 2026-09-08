@@ -69,6 +69,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
