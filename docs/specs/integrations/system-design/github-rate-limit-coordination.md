@@ -85,8 +85,13 @@ Successful operations omit the object.
 
 Manual Workflow Sync returns this object beside its existing error and config.
 Automatic Workflow Sync stores its error class and next attempt. The scheduler,
-telemetry, and logs can read coordinator state without an agent-facing MCP tool.
-Direct `gh` commands from an agent shell stay outside this response path.
+telemetry, and logs read coordinator state directly. Kanban and Office task
+surfaces also expose `get_github_rate_limit_kandev`, a task-bound, read-only
+snapshot that derives workspace scope from the bound task and performs no
+credential resolution or GitHub request. It reports cached primary observations,
+observed secondary state, the shared quota principal, and current admission
+decisions. Direct `gh` commands from an agent shell stay outside this response
+path.
 
 ## Persistence and migration
 

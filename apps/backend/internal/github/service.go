@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/watchreset"
 )
 
+const legacyWorkspaceIdentity = "legacy"
+
 // Auth method constants.
 const (
 	AuthMethodNone = "none"
@@ -260,11 +262,11 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 }
 
 func (s *Service) coordinateLegacyClientAtConstruction(client Client) {
-	login := "legacy"
+	login := legacyWorkspaceIdentity
 	if tokenClient, ok := client.(*TokenClient); ok && tokenClient != nil {
 		login = strings.TrimSpace(tokenClient.username)
 		if login == "" {
-			login = "legacy"
+			login = legacyWorkspaceIdentity
 		}
 	}
 	s.coordinateLegacyClient(context.Background(), client, login)
@@ -334,7 +336,7 @@ func (s *Service) coordinateLegacyClient(ctx context.Context, client Client, log
 	}
 	principal := AuthPrincipal{
 		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
-		Login: login, WorkspaceID: "legacy",
+		Login: login, WorkspaceID: legacyWorkspaceIdentity,
 	}
 	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
 	wireRateTracker(client, tracker)
