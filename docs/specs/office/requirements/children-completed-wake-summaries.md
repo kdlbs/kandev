@@ -19,10 +19,11 @@ produced.
 The prompt has always had a section for exactly that. It renders only when the
 assembled prompt context carries child summaries, and nothing has ever put them
 there: the only code that populates them reads a `children` key out of the run
-payload, and no producer writes that key. Three of the four producers do assemble
-child summaries — two paying a database read and a pull-request lookup to do it —
-then discard them at a boundary that has no field to carry them. The result is a wake that costs a full agent turn and
-begins with the parent knowing nothing about the work it delegated.
+payload, and no producer writes that key. Three of the four producers assemble
+child summaries — two paying a database read and a pull-request lookup — then
+discard them at a boundary with no field to carry them. The result is a wake that
+costs a full agent turn and begins with the parent knowing nothing about the work
+it delegated.
 
 This capability makes the children-completed wake name its children. It defines
 what a child summary line reports, which children appear, in what order, and how
@@ -36,16 +37,15 @@ relationship, task state, comments and archival, and the workflow engine's
 
 This capability is constrained by
 [parent wake wave identity](parent-wake-wave-identity.md), a sibling capability
-that may not have merged yet. Its constraint is therefore restated here rather
-than delegated, so that REQ-OFFICE-WAKE-CHILD-SUMMARIES-002 stands without it:
-**four producers can queue this run, at most one survives per completion wave, no
-producer can observe which one won, and the surviving run must deliver a wake
-equivalent to the one any other producer would have delivered.** That is the link
-target's AC-OFFICE-WAKE-WAVE-IDENTITY-002.10; the link is a pointer to the
-capability that owns it, not a dependency a reader must resolve to build this. Producer-specific
-prompt content would make prompt quality a race outcome, so REQ-OFFICE-WAKE-
-CHILD-SUMMARIES-002 below is not a convenience — it is the condition under which
-this capability can ship at all.
+that may not have merged yet, so its constraint is restated here rather than
+delegated: **four producers can queue this run, at most one survives per
+completion wave, no producer can observe which one won, and the surviving run
+must deliver a wake equivalent to the one any other producer would have
+delivered.** That is the link target's AC-OFFICE-WAKE-WAVE-IDENTITY-002.10, and
+the link is a pointer, not a dependency a reader must resolve. Producer-specific
+prompt content would make prompt quality a race outcome, so
+REQ-OFFICE-WAKE-CHILD-SUMMARIES-002 is the condition under which this capability
+can ship at all.
 
 ## Prior art
 
@@ -64,9 +64,8 @@ preceding capability,
 [parent wake wave identity](parent-wake-wave-identity.md), took a position on
 this exact defect while specifying something else. Its "Wake equivalence between
 producers" section records that all four producers queue a **run row** payload
-carrying no child summaries — three do build summaries for the engine trigger,
-which is a different payload and never reaches the row — that this is why
-collapsing a racing pair is currently safe, and that "a change that starts
+carrying no child summaries — three build summaries for the engine trigger, a
+different payload that never reaches the row — and that "a change that starts
 populating `children` from one producer must populate it from all four." This
 capability adopts that position and satisfies it structurally, by removing the
 per-producer payload as the carrier.
@@ -108,10 +107,12 @@ that my first action can be judgement rather than discovery.
 #### Acceptance criteria
 
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.1:** When a children-completed wake
-  prompt is assembled for a parent that has at least one live direct child, the
-  prompt shall contain a child list section holding one child summary line for
-  each live direct child, subject to the display cap in
-  AC-OFFICE-WAKE-CHILD-SUMMARIES-003.4.
+  prompt is assembled for a parent that exists at prompt assembly time and has at
+  least one live direct child, the prompt shall contain a child list section
+  holding one child summary line for each live direct child, subject to the
+  display cap in AC-OFFICE-WAKE-CHILD-SUMMARIES-003.4. A parent that does not
+  exist is governed by AC-OFFICE-WAKE-CHILD-SUMMARIES-004.3 instead, even when
+  child rows still reference it.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.2:** Each child summary line shall report
   the child's task identifier, the child's title, and the child's task state.
 - **AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3:** When a child's most recent comment
@@ -153,7 +154,12 @@ that my first action can be judgement rather than discovery.
   sentence and its existing closing instruction shall be present and unchanged in
   every case, including the empty case in
   AC-OFFICE-WAKE-CHILD-SUMMARIES-001.10 and the failure cases in
-  REQ-OFFICE-WAKE-CHILD-SUMMARIES-004.
+  REQ-OFFICE-WAKE-CHILD-SUMMARIES-004. The lead-in reports the condition that
+  fired the wake — every child had reached a terminal state when the run was
+  queued — and not the present state of the list beneath it. A child that
+  restarted between queue time and prompt assembly time therefore appears in a
+  non-terminal state below a lead-in saying the children completed, which is
+  required by AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a and is a defect in neither.
 
 ### REQ-OFFICE-WAKE-CHILD-SUMMARIES-002: One rendering, whichever producer won
 
@@ -293,10 +299,9 @@ with a prompt that is honestly short rather than one that is wrong.
 
 - **The existing divergence in archived-child handling between readiness and
   membership.** Office readiness counts archived children as blocking; this
-  capability's list excludes them (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1). The two
+  capability's list excludes them (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1). They
   answer different questions deliberately: readiness asks whether anything is
-  still running, the list describes the wave the parent must review. The parent
-  capability leaves that divergence in place and this one does not close it. The
+  still running, the list describes the wave the parent must review. The
   consequence is bounded and named: a parent whose children are all archived and
   terminal can be woken with no child list section, which
   AC-OFFICE-WAKE-CHILD-SUMMARIES-001.10 defines as a valid rendering.
@@ -308,8 +313,7 @@ with a prompt that is honestly short rather than one that is wrong.
   to any deduplication decision.
 
 - **Removing `ChildSummaries` from the workflow engine's
-  `on_children_completed` trigger payload type.** That field is part of a
-  workflow-engine type shared across systems, and no consumer reads it today.
+  `on_children_completed` trigger payload type.**
   AC-OFFICE-WAKE-CHILD-SUMMARIES-002.5 stops Office producers paying for data that
   is discarded, but the field stays: deleting a field from a shared trigger payload
   changes the workflow engine's contract, with a different owner and blast radius.
@@ -325,8 +329,7 @@ with a prompt that is honestly short rather than one that is wrong.
   window can merge, because this reason is not task-scoped for coalescing. That is
   pre-existing and is not worsened here — deriving content at assembly time from
   the surviving run's own parent makes the merged prompt self-consistent rather
-  than less so. Which parent should have been woken is a separate question from
-  what the wake says.
+  than less so.
 
 - **User interface.** No control, view or setting is added. The output appears in
   two existing surfaces unchanged: the agent session's first message, and the
@@ -336,4 +339,4 @@ with a prompt that is honestly short rather than one that is wrong.
   reports the most recent comment by any author
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.3). Selecting a designated summary comment,
   or preferring an agent-authored one, is a different contract about what a
-  child's conclusion *is*, and is not decided here.
+  child's conclusion *is*.

@@ -144,35 +144,58 @@ slice operate on runes.
   any title containing a newline.
 - The comment segment is present only when the child has a most-recent comment
   **whose body is non-empty** (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.3, .4). The
-  schema permits an empty body (`task_comments.body TEXT NOT NULL DEFAULT ''`),
-  and an empty body carries no information, so such a child renders exactly as a
-  child with no comments does: the segment is omitted. Rendering `""` would spend
-  a segment to say nothing.
+  schema permits an empty body: `task_comments.body` is declared `TEXT NOT NULL`
+  with no default and no non-empty `CHECK`, so `NOT NULL` stops a null and stops
+  nothing else — an explicit `''` is storable. An empty body carries no
+  information, so such a child renders exactly as a child with no comments does:
+  the segment is omitted. Rendering `""` would spend a segment to say nothing.
+- **A cap bounds the RENDERED field, marker included.** All three capped fields
+  (comment, title, URL) share one rule: a value at or below its cap renders whole
+  with no marker; a value above it renders as a leading slice followed by
+  ` [truncated]`, and slice + marker never exceeds the cap. The marker is 12 code
+  points, so the slice is at most cap − 12. This is stated because "capped at N
+  followed by a marker" otherwise reads two ways — N then marker, or N including
+  marker — and the two differ by 12 code points on every field, which is the
+  difference between the size ceiling in [Persistence](#persistence) being exact
+  and being wrong by up to 144 code points per line.
 - `truncateComment` keeps its shape but counts runes: a body longer than 500 code
-  points renders as its first 485 code points followed by ` [truncated]`; a body
-  of 500 or fewer renders whole, with no marker
+  points renders as its first 485 code points followed by ` [truncated]`, for 497
+  in total; a body of 500 or fewer renders whole, with no marker
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.5). See
   [Child query contract](#child-query-contract) for why that branch becomes
   reachable at all.
-- The title is capped the same way, at 200 code points followed by
-  ` [truncated]`. The task system does not bound title length, so without a cap
-  neither the one-line shape nor the section's size ceiling means anything.
+- The title is capped the same way at 200 code points: a longer title renders as
+  its first 188 code points followed by ` [truncated]`. The task system does not
+  bound title length, so without a cap neither the one-line shape nor the
+  section's size ceiling means anything.
 - The pull-request segment is present only when the child has at least one link.
   URLs are sorted ascending by URL string, then joined by `, `
   (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.7, .8, -003.7). At most 10 render; a child
   with more gets ` (+N more)` after the tenth. Sorting before capping is what
   makes *which* URLs appear deterministic rather than a property of whatever
-  order the link projection returned.
+  order the link projection returned. **Each URL is itself capped at 200 code
+  points**, under the same rule: a longer URL renders as its first 188 code points
+  followed by ` [truncated]`. Neither the stored `pr_url` column nor the `TaskPRLink.URL` field it
+  populates bounds length, so without this cap
+  AC-OFFICE-WAKE-CHILD-SUMMARIES-001.6 is unsatisfied for this field and the
+  section has no size ceiling. Sorting and the 10-URL count both operate on the
+  untruncated values, so the cap decides how a URL is displayed and never which
+  URLs are selected. A cut URL is not a usable link, which is why the marker is
+  required rather than a silent slice.
 
 `ChildSummaryPrompt` gains a `PRLinks []string` field. The lead-in sentence, the
 closing instruction and the truncation notice text are unchanged
 (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.11). The section heading is **not**: it
-changes from "Completed children:" to a neutral label, because
-AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a deliberately lists a child that is no
-longer terminal, and a heading asserting completion would contradict the `[state]`
-on that child's own line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.12). The lead-in
-stays as it is because it describes why the wake fired — every child did reach a
-terminal state — whereas the heading labels a list describing the present.
+changes from `"\nCompleted children:\n"` to exactly `"\nChild tasks:\n"`,
+because AC-OFFICE-WAKE-CHILD-SUMMARIES-003.1a deliberately lists a child that is
+no longer terminal, and a heading asserting completion would contradict the
+`[state]` on that child's own line (AC-OFFICE-WAKE-CHILD-SUMMARIES-001.12). The
+literal is named here rather than left as "a neutral label" because
+AC-OFFICE-WAKE-CHILD-SUMMARIES-003.8 requires byte-identical sections: the heading
+is inside a byte-identity contract, so a test needs an oracle for it and a builder
+must not have to invent the copy. The lead-in stays as it is because it describes
+why the wake fired — every child did reach a terminal state — whereas the heading
+labels a list describing the present.
 
 ## Child query contract
 
@@ -227,11 +250,16 @@ correlated subqueries — is common to SQLite and PostgreSQL, and it performs no
 JSON extraction and no window function, so no dialect branch is introduced
 (AC-OFFICE-WAKE-CHILD-SUMMARIES-003.9).
 
-Read cost per assembled prompt is fixed at **two** database round trips: this one
-statement, and one `ListTaskPRsByTaskIDs` call for the returned ids. Neither
-grows with the number of live direct children
-(AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8). Both run only for the two
-children-completed reasons (AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6, -002.7).
+**This section's incremental read cost** is fixed at **two** database round
+trips: this one statement, and one `ListTaskPRsByTaskIDs` call for the returned
+ids. Two is what the child list section adds, not the total for an assembled
+prompt — `buildPromptContext` already reads for other sections before it reaches
+the child enricher, so a test asserting an absolute query count for the whole
+assembly is testing the wrong thing. What AC-OFFICE-WAKE-CHILD-SUMMARIES-004.8
+constrains is growth: neither read grows with the number of live direct children,
+so the observable is an equal query count for a parent with 3 children and one
+with 30. Both run only for the two children-completed reasons
+(AC-OFFICE-WAKE-CHILD-SUMMARIES-002.6, -002.7).
 
 ## Producer changes
 
@@ -324,9 +352,13 @@ No schema change and no migration. `runs.payload` gains no field; the run row is
 unchanged. `runs.assembled_prompt` grows by the rendered section, bounded by 20
 lines whose length is bounded in turn by the per-field caps in
 [Rendered line contract](#rendered-line-contract): 200 code points of title, 500
-of comment, and at most 10 pull-request URLs. Those caps are why this is a bound
-rather than an estimate — the task system limits neither title length nor link
-count, so without them the section would have no ceiling at all.
+of comment, and at most 10 pull-request URLs of at most 200 code points each —
+each of those figures bounding the rendered field with its truncation marker
+included. That puts the worst case a little under 60 KB and the ordinary case in
+the low kilobytes, since real pull-request URLs run well under 100 characters and
+most children have one. Those caps are why this is a bound rather than an estimate —
+the task system limits title length, link count and URL length nowhere, so without
+them the section would have no ceiling at all.
 
 Runs queued before this change and claimed after it render the section normally,
 because the section does not depend on anything the producer recorded. No
@@ -343,7 +375,14 @@ is rendered into HTML.
 ## Observability
 
 One structured log is added: a warn on child-read failure during prompt
-assembly, carrying the run id and the parent task id. No new metric — the section
-is visible in `runs.assembled_prompt` on every run it applies to, which is
-directly inspectable in the Office run detail prompt panel, so a counter would
-add no evidence the prompt itself does not already carry.
+assembly, carrying **the parent task id only**. It does not carry the run id, and
+must not be specified to: the enricher runs inside `buildPromptContext`, whereas
+`assembleAgentPrompt` assigns `pc.RunID` only after that function returns, so no
+run id is in scope at the failure site. Widening the enricher's signature to reach
+one would be plumbing bought for a single warn line, when the parent task id
+already identifies the failure and the run is correlatable from the surrounding
+launch logs. [Failure and recovery](#failure-and-recovery) states the same field.
+
+No new metric — the section is visible in `runs.assembled_prompt` on every run it
+applies to, which is directly inspectable in the Office run detail prompt panel,
+so a counter would add no evidence the prompt itself does not already carry.
