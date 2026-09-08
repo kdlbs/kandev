@@ -338,6 +338,110 @@ func TestNextCronTime_DSTFallBack_ZeroOffsetZone(t *testing.T) {
 	}
 }
 
+// TestNextCronTime_LordHoweSpringForward_MatchesWallClock is a regression
+// test for a wall-clock mismatch unique to Australia/Lord_Howe, the only IANA
+// zone with a 30-minute DST shift (+10:30 <-> +11:00 spring-forward). robfig's
+// minute loop advances in absolute time: searching forward from the first
+// occurrence of "30 1 * * *" (2026-10-04 01:30, still before the gap) for the
+// *next* occurrence crosses the gap and can land on a minute that satisfies
+// the schedule's minute mask under an hour the schedule never asked for
+// (local 02:30 on the same spring-forward day, instead of the following
+// day's 01:30).
+func TestNextCronTime_LordHoweSpringForward_MatchesWallClock(t *testing.T) {
+	loc, err := time.LoadLocation("Australia/Lord_Howe")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-10-04 is spring-forward in Australia/Lord_Howe: 02:00 -> 02:30.
+	after := time.Date(2026, 10, 3, 12, 0, 0, 0, loc)
+
+	cases := []struct {
+		name         string
+		expr         string
+		wantFire1Min int
+		wantFire2Day int
+		wantFire2Min int
+	}{
+		{"single slot", "30 1 * * *", 30, 5, 30},
+		{"first of two slots", "0,30 1 * * *", 0, 4, 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fire1, err := NextCronTime(tc.expr, "Australia/Lord_Howe", after)
+			if err != nil {
+				t.Fatalf("fire1: unexpected error: %v", err)
+			}
+			local1 := fire1.In(loc)
+			if local1.Day() != 4 || local1.Hour() != 1 || local1.Minute() != tc.wantFire1Min {
+				t.Fatalf("fire1: expr %q: got local %v, want 2026-10-04 01:%02d", tc.expr, local1, tc.wantFire1Min)
+			}
+
+			fire2, err := NextCronTime(tc.expr, "Australia/Lord_Howe", fire1)
+			if err != nil {
+				t.Fatalf("fire2: unexpected error: %v", err)
+			}
+			local2 := fire2.In(loc)
+			if local2.Day() != tc.wantFire2Day || local2.Hour() != 1 || local2.Minute() != tc.wantFire2Min {
+				t.Errorf("fire2: expr %q: got local %v (hour=%d), want 2026-10-%02d 01:%02d",
+					tc.expr, local2, local2.Hour(), tc.wantFire2Day, tc.wantFire2Min)
+			}
+		})
+	}
+}
+
+// TestNextCronTime_LordHoweSweep_WallClockMatchesExpression sweeps every fire
+// of several hour/minute expressions across calendar 2026 in
+// Australia/Lord_Howe and asserts each fire's local wall clock actually
+// satisfies the expression. It does not assert every slot fires (a separate,
+// documented limitation: robfig's day-loop DST correction only nudges by
+// whole hours, so some genuinely-existing slots are still skipped around the
+// 30-minute transition).
+func TestNextCronTime_LordHoweSweep_WallClockMatchesExpression(t *testing.T) {
+	loc, err := time.LoadLocation("Australia/Lord_Howe")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	cases := []struct {
+		expr        string
+		wantHour    int
+		wantMinutes map[int]bool
+	}{
+		{"0 0 * * *", 0, map[int]bool{0: true}},
+		{"0 2 * * *", 2, map[int]bool{0: true}},
+		{"30 1 * * *", 1, map[int]bool{30: true}},
+		{"0,30 1 * * *", 1, map[int]bool{0: true, 30: true}},
+	}
+	yearEnd := time.Date(2027, 1, 1, 0, 0, 0, 0, loc)
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			cursor := time.Date(2026, 1, 1, 0, 0, 0, 0, loc)
+			count := 0
+			for {
+				next, err := NextCronTime(tc.expr, "Australia/Lord_Howe", cursor)
+				if err != nil {
+					t.Fatalf("unexpected error at %v: %v", cursor, err)
+				}
+				if !next.Before(yearEnd) {
+					break
+				}
+				local := next.In(loc)
+				if local.Hour() != tc.wantHour || !tc.wantMinutes[local.Minute()] {
+					t.Errorf("expr %q: fire %v has hour=%d minute=%d, not one of the expression's slots",
+						tc.expr, local, local.Hour(), local.Minute())
+				}
+				cursor = next
+				count++
+				if count > 800 {
+					t.Fatalf("too many fires for a daily/twice-daily expression over one year; possible infinite loop")
+				}
+			}
+			if count == 0 {
+				t.Fatalf("expected at least one fire for %q", tc.expr)
+			}
+		})
+	}
+}
+
 // TestNextCronTime_Unsatisfiable verifies an impossible expression (Feb 30th)
 // returns ErrUnsatisfiableCron instead of a silent +24h fallback.
 func TestNextCronTime_Unsatisfiable(t *testing.T) {
