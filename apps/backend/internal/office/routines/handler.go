@@ -18,24 +18,35 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
-// fieldError/fieldPaused mirror the response field names already used
-// throughout this handler's other gin.H literals; named here so
-// writeDispatchError's new "error" occurrence doesn't trip goconst's
-// repeated-string threshold on its own.
+// fieldError/fieldPaused/fieldWorkspaceID/fieldReason mirror the response
+// field names already used throughout this handler's other gin.H literals;
+// named here so writeDispatchError's occurrences don't trip goconst's
+// repeated-string threshold on their own.
 const (
-	fieldError  = "error"
-	fieldPaused = "paused"
+	fieldError       = "error"
+	fieldPaused      = "paused"
+	fieldWorkspaceID = "workspace_id"
+	fieldReason      = "reason"
 )
 
 // writeDispatchError maps a routine-dispatch error to its HTTP status.
 // A confirmed pause is a 409 (the request is understood but the
 // workspace is stopped); a gate-read error is a 503 (retryable — the
-// pause state itself couldn't be determined). Both carry the workspace's
-// pause status so a caller can distinguish "blocked" from "unknown".
+// pause state itself couldn't be determined). A confirmed pause also
+// carries the blocking pause's workspace id and reason
+// (AC-OFFICE-KILL-SWITCH-002.3) when checkPauseGate attached them via
+// *pausedDispatchError; a gate-read error carries neither, since the pause
+// state itself is unknown.
 func writeDispatchError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, shared.ErrWorkspacePaused):
-		c.JSON(http.StatusConflict, gin.H{fieldError: err.Error(), fieldPaused: true})
+		body := gin.H{fieldError: err.Error(), fieldPaused: true}
+		var pausedErr *pausedDispatchError
+		if errors.As(err, &pausedErr) {
+			body[fieldWorkspaceID] = pausedErr.workspaceID
+			body[fieldReason] = pausedErr.reason
+		}
+		c.JSON(http.StatusConflict, body)
 	case errors.Is(err, shared.ErrPauseGateUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{fieldError: err.Error()})
 	default:
