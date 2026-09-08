@@ -45,17 +45,25 @@ func (s *Service) deleteChecked(ctx context.Context, id, workspaceID string, for
 	if force {
 		return s.deleteStored(ctx, id, workspaceID)
 	}
-	if s.referenceChecker == nil {
-		return fmt.Errorf("secret reference checking is unavailable")
-	}
-	refs, err := s.referenceChecker(ctx, id)
+	refs, err := s.listReferences(ctx, id)
 	if err != nil {
-		return fmt.Errorf("check secret references: %w", err)
+		return err
 	}
 	if len(refs) > 0 {
 		return &InUseError{References: refs}
 	}
 	return s.deleteStored(ctx, id, workspaceID)
+}
+
+func (s *Service) listReferences(ctx context.Context, id string) ([]Reference, error) {
+	if s.referenceChecker == nil {
+		return nil, fmt.Errorf("secret reference checking is unavailable")
+	}
+	refs, err := s.referenceChecker(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("check secret references: %w", err)
+	}
+	return refs, nil
 }
 
 func (s *Service) deleteStored(ctx context.Context, id, workspaceID string) error {

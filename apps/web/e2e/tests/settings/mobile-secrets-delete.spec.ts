@@ -92,12 +92,11 @@ test.describe("mobile-secrets-delete", () => {
         .toBe(true);
       await testPage.goto("/settings/general/secrets");
       const row = testPage.getByTestId(`secret-row-${secret.id}`);
-      await testPage.route(`**/api/v1/secrets/${secret.id}`, async (route) => {
+      await testPage.route(`**/api/v1/secrets/${secret.id}/references`, async (route) => {
         await route.fulfill({
-          status: 409,
+          status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            code: "secret_in_use",
             references: [
               {
                 kind: "agent_profile",
@@ -110,28 +109,24 @@ test.describe("mobile-secrets-delete", () => {
       });
 
       await row.getByRole("button", { name: `Delete secret ${name}` }).tap();
-      const inline = row.getByTestId("secret-delete-inline-confirmation");
-      await inline.getByTestId("secret-delete-confirm").tap();
-
-      const toast = testPage.getByTestId("toast-message");
-      await expect(toast).toContainText(
-        'This secret is in use by: Agent profile "E2E mobile review profile" (E2E_MOBILE_TOKEN). Remove or replace these references before deleting it.',
-      );
-      await expect
-        .poll(async () => {
-          const box = await toast.boundingBox();
-          const viewport = testPage.viewportSize();
-          return Boolean(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width);
-        })
-        .toBe(true);
+      const conflictDialog = testPage.getByTestId("secret-delete-conflict-dialog");
+      await expect(conflictDialog).toBeVisible();
+      await expect(conflictDialog).toContainText('Agent profile "E2E mobile review profile"');
+      await expect(conflictDialog).toContainText("E2E_MOBILE_TOKEN");
+      await expect(conflictDialog.getByTestId("secret-delete-confirm")).toHaveCount(0);
+      const dialogBox = await conflictDialog.boundingBox();
+      expect(dialogBox).not.toBeNull();
+      expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
+      expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile secret deletion conflict");
       await prCapture.screenshot("mobile-secrets-delete-conflict", {
-        caption: "Mobile secret deletion conflict toast",
+        caption: "Mobile secret deletion conflict dialog",
       });
       await expect(row).toBeVisible();
       await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
       await expect(testPage.locator("body")).not.toContainText("secret_in_use");
     } finally {
-      await testPage.unroute(`**/api/v1/secrets/${secret.id}`);
+      await testPage.unroute(`**/api/v1/secrets/${secret.id}/references`);
       await apiClient.deleteSecretIfPresent(secret.id).catch(() => undefined);
     }
   });

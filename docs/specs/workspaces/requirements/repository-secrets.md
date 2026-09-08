@@ -31,6 +31,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.9:** Secret deletion shall reject existing agent-profile, executor-profile, and repository environment references with a conflict response. The response identifies references without exposing secret values or unauthorized workspace-scoped reference metadata. An explicit force option permits deletion and preserves the broken bindings.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.10:** A missing secret shall block fresh launch and cold resume. The error names the environment key and source, identifies the agent profile when available, and directs the user to select the secret again. A replacement with the same name shall not repair the reference automatically.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.12:** Settings shall check references before enabling secret deletion. Existing references shall open a contained conflict dialog that lists visible resources and offers no destructive action. The final deletion request shall repeat the authoritative reference check.
 
 ## Migrated source detail
 
@@ -127,7 +128,7 @@ The existing HTTP and WebSocket secret CRUD contracts become scope-aware.
 - The default list returns Global secrets. A Workspace-filtered list returns that workspace's
   secrets, with an explicit option to include visible Global secrets for a repository selector.
 - Update changes name and/or value only; scope is immutable.
-- Reveal preserves its response shape while applying scope authorization. Delete returns a conflict for an in-use secret unless explicitly forced.
+- Reveal preserves its response shape while applying scope authorization. A read-only endpoint returns deletion references after applying the same scope authorization. Delete returns a conflict for an in-use secret unless explicitly forced.
 
 Repository create, get, list, update, and repository events include:
 

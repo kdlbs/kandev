@@ -11,6 +11,7 @@ acceptance_criteria:
   - AC-WORKSPACES-REPOSITORY-SECRETS-001.9
   - AC-WORKSPACES-REPOSITORY-SECRETS-001.10
   - AC-WORKSPACES-REPOSITORY-SECRETS-001.11
+  - AC-WORKSPACES-REPOSITORY-SECRETS-001.12
 system_design:
   - ../../specs/workspaces/system-design/repository-secrets.md
 ---
@@ -19,11 +20,11 @@ system_design:
 
 ## Summary
 
-Reject unsafe secret deletion and explain how to repair an existing missing reference.
+Show secret-reference conflicts before deletion, reject unsafe deletion, and explain how to repair an existing missing reference.
 
 ## In scope
 
-- Service guards, HTTP/WS conflict and force contracts, reference discovery, runtime errors, and public documentation.
+- Service guards, HTTP/WS conflict and force contracts, read-only reference preflight, responsive confirmation UI, runtime errors, and public documentation.
 
 ## Out of scope
 
@@ -32,6 +33,8 @@ Reject unsafe secret deletion and explain how to repair an existing missing refe
 ## Acceptance
 
 - Existing references block ordinary deletion. Force requires existing secret authorization.
+- The delete flow loads direct references before confirmation and replaces destructive actions with a contained conflict dialog when any exist.
+- The final delete operation repeats the reference scan so references created after preflight still block deletion.
 - Lookup errors fail closed. Responses disclose no secret values or unauthorized repository details.
 - Runtime errors identify the key and source and give a repair instruction.
 
@@ -56,8 +59,8 @@ git diff --check
 From `apps/web`:
 
 ```bash
-pnpm exec vitest run components/settings/secrets-settings.test.ts components/settings/secret-delete-error.test.ts
-pnpm exec eslint components/settings/secrets-settings.tsx components/settings/secret-delete-error.ts
+pnpm exec vitest run components/settings/secret-delete-error.test.ts components/settings/secrets-settings.test.ts components/settings/secrets-list-item-row.test.tsx
+pnpm exec eslint components/settings/secret-delete-error.ts components/settings/secrets-delete-dialog.tsx components/settings/secrets-list-item-row.tsx components/settings/secrets-settings.tsx
 pnpm run typecheck
 pnpm run i18n:check
 CAPTURE_PR_ASSETS=true pnpm e2e:run --host --project chromium e2e/tests/settings/secrets-delete.spec.ts
@@ -66,12 +69,12 @@ CAPTURE_PR_ASSETS=true pnpm e2e:run --host --project mobile-chrome e2e/tests/set
 
 ## Files likely touched
 
-- `apps/backend/internal/secrets/service.go`, `handlers.go`, and new deletion tests/helpers.
+- `apps/backend/internal/secrets/service.go`, `handlers.go`, `delete.go`, and deletion tests/helpers.
 - `apps/backend/internal/backendapp/main.go` and new reference checker/tests.
 - `apps/backend/internal/agent/runtime/environment/environment.go` and tests.
 - `apps/backend/internal/agent/runtime/lifecycle/environment_resolution.go` and tests.
 - `docs/public/agents-and-profiles.md` and `docs/public/websocket-api.md`.
-- `apps/web/components/settings/secrets-settings.tsx`, `secret-delete-error.ts`, their tests, and the settings locale catalogs.
+- `apps/web/components/settings/secrets-settings.tsx`, `secrets-delete-dialog.tsx`, `secrets-list-item-row.tsx`, `secret-delete-error.ts`, their tests, the secret API/types, and the settings locale catalogs.
 
 ## Dependencies
 
@@ -92,13 +95,13 @@ Cross-owner reference reads must fail closed. Internal store deletion remains av
 
 ## Results
 
-- `go test ./internal/secrets ./internal/agent/runtime/environment`: passed, 154 tests. Eight PostgreSQL tests were skipped because no test DSN was configured.
+- `go test ./internal/secrets ./internal/agent/runtime/environment`: passed, 157 tests. Eight PostgreSQL tests were skipped because no test DSN was configured.
 - `go test ./internal/backendapp -run TestSecretReference -count=1`: passed, nine tests. The integration test uses real encrypted SQLite storage and all three reference owners.
 - `go test ./internal/agent/runtime/lifecycle -run 'TestSecretRecovery|TestResolveStrict' -count=1`: passed, three tests.
-- The listed Vitest command passed all 13 tests. TypeScript, ESLint, and `i18n:check` passed.
-- The managed Chromium and Pixel 5 E2E runs passed two tests each and produced validated desktop/mobile conflict-toast captures.
-- Targeted `golangci-lint` over the four affected backend packages with `--new-from-rev=HEAD --timeout=5m` passed.
+- The listed Vitest command passed all 24 tests. TypeScript, ESLint, and `i18n:check` passed.
+- The managed Chromium and Pixel 5 E2E runs passed two tests each and produced validated desktop/mobile conflict-dialog captures.
+- `golangci-lint run ./... --new-from-rev=<PR-base> --timeout=5m` passed with no issues.
 - Specification lint, public-documentation validation, and `git diff --check` passed.
-- The existing desktop and mobile secret-deletion E2E specs now cover the structured conflict toast and retain the row after the failed delete. A fresh capture run will provide the PR screenshots.
+- The existing desktop and mobile secret-deletion E2E specs now cover the preflight conflict dialog, verify that no destructive action remains, and retain the secret row.
 - No live instance was changed or started. Temporary databases use test cleanup. Unrelated generated translation changes were removed.
-- No agents were delegated. The issue assignment was verified. The implementation is committed in PR #3503; review fixup is in progress.
+- No agents were delegated. The issue assignment was verified. The implementation is committed in PR #3503.

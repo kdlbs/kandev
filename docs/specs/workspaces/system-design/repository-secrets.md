@@ -12,7 +12,7 @@ owners:
 
 ## Scope and requirement mapping
 
-This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .11.
+This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .12.
 The existing repository-secrets requirement retains the other runtime and storage contracts during specification migration.
 
 ## Deletion boundary
@@ -26,6 +26,7 @@ Inaccessible references still block deletion, with their metadata omitted.
 
 HTTP deletion returns `409` with `error`, `code: secret_in_use`, and `references`.
 Each reference contains `kind`, `id`, `name`, and `key`. Hidden references contain only `kind`.
+`GET /api/v1/secrets/:id/references` returns the same authorized reference projection without changing the secret. Workspace secrets require the existing `workspace_id` query parameter.
 WebSocket deletion returns `CONFLICT` with equivalent details.
 HTTP `?force=true` and the WebSocket boolean `force` bypass the reference check after authorization.
 Missing or unauthorized secrets retain `404` behavior. Unexpected errors return sanitized `500` or `INTERNAL_ERROR` responses.
@@ -47,11 +48,12 @@ Existing scope-transfer operations remain unchanged in this repair.
 
 ## Settings feedback and mobile parity
 
-The existing deletion toast maps `secret_in_use` references to localized labels.
-Unknown responses retain the generic localized error. Raw server error text is never rendered by this path.
-The existing `SecretListItemRow` confirmation and toast are the desktop and mobile exemplars.
-No layout, navigation, touch target, or scroll behavior changes. The shared action retains the row after rejection.
-Component and formatter tests cover this response normalization in the existing surface.
+Opening a secret-delete confirmation starts the read-only reference request. While it is pending, the row-local desktop popover or mobile inline confirmation remains visible with its destructive action disabled.
+An unreferenced secret keeps that local confirmation and requires a separate Delete action.
+Existing references replace it with the same contained, internally scrolling conflict-dialog pattern used by agent-profile deletion. The dialog lists localized agent-profile, executor-profile, and repository labels and offers only Close.
+The dialog uses full-width touch actions below the small-screen breakpoint, remains within the dynamic viewport, and never exposes secret values or inaccessible resource metadata.
+The final Delete request repeats the service reference check. A reference created after preflight reopens the conflict dialog from the structured `409`; unknown failures retain the generic localized toast.
+Desktop and mobile Playwright coverage proves both the safe delete and preflight-conflict paths.
 
 ## Evidence
 

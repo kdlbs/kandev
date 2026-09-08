@@ -37,6 +37,7 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.POST("/secrets", h.httpCreateSecret)
 	api.GET("/secrets", h.httpListSecrets)
 	api.GET("/secrets/:id", h.httpGetSecret)
+	api.GET("/secrets/:id/references", h.httpListSecretReferences)
 	api.PUT("/secrets/:id", h.httpUpdateSecret)
 	api.DELETE("/secrets/:id", h.httpDeleteSecret)
 	api.POST("/secrets/:id/reveal", h.httpRevealSecret)
@@ -102,6 +103,31 @@ func (h *Handler) httpGetSecret(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, secret)
+}
+
+// httpListSecretReferences handles GET /api/v1/secrets/:id/references.
+func (h *Handler) httpListSecretReferences(c *gin.Context) {
+	id := c.Param("id")
+	var refs []Reference
+	var err error
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		refs, err = h.service.WorkspaceSecretReferences(c.Request.Context(), id, workspaceID)
+	} else {
+		refs, err = h.service.References(c.Request.Context(), id)
+	}
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrWorkspaceAccessDenied) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "secret not found"})
+			return
+		}
+		h.logger.Error("failed to list secret references", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list secret references"})
+		return
+	}
+	if refs == nil {
+		refs = []Reference{}
+	}
+	c.JSON(http.StatusOK, gin.H{"references": refs})
 }
 
 // httpUpdateSecret handles PUT /api/v1/secrets/:id.

@@ -91,6 +91,71 @@ func TestDeleteReferencesConflictAndForce(t *testing.T) {
 	}
 }
 
+// @covers AC-WORKSPACES-REPOSITORY-SECRETS-001.12
+func TestListReferencesReturnsConflictsWithoutDeleting(t *testing.T) {
+	svc := newSecretsHandlerService(t, nil, nil, nil)
+	id := seedGlobalViaService(t, svc, "MY_TOKEN", "private-value")
+	refs := []Reference{{Kind: "agent_profile", ID: "profile-1", Name: "Claude", Key: "MY_TOKEN"}}
+	svc.SetReferenceChecker(func(_ context.Context, checkedID string) ([]Reference, error) {
+		if checkedID != id {
+			t.Fatalf("checked wrong secret %q", checkedID)
+		}
+		return refs, nil
+	})
+
+	rec := doTransferHTTP(t, newSecretsHTTPRouter(t, svc), http.MethodGet, "/api/v1/secrets/"+id+"/references", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var response struct {
+		References []Reference `json:"references"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.References) != 1 || response.References[0] != refs[0] {
+		t.Fatalf("references = %+v", response.References)
+	}
+	if strings.Contains(rec.Body.String(), "private-value") || strings.Contains(rec.Body.String(), id) {
+		t.Fatalf("secret leaked: %s", rec.Body)
+	}
+	if _, err := svc.Get(context.Background(), id); err != nil {
+		t.Fatalf("reference lookup removed secret: %v", err)
+	}
+}
+
+func TestListReferencesReturnsEmptyArrayWhenUnused(t *testing.T) {
+	svc := newSecretsHandlerService(t, nil, nil, nil)
+	id := seedGlobalViaService(t, svc, "unused", "private-value")
+	svc.SetReferenceChecker(func(context.Context, string) ([]Reference, error) { return nil, nil })
+
+	rec := doTransferHTTP(t, newSecretsHTTPRouter(t, svc), http.MethodGet, "/api/v1/secrets/"+id+"/references", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"references":[]`) {
+		t.Fatalf("response = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestListReferencesPreservesScopeAuthorizationAndSanitizesFailures(t *testing.T) {
+	svc := newSecretsHandlerService(t, map[string]bool{"workspace-a": true}, nil, nil)
+	item := mustCreateViaService(t, svc, "workspace token", "private-value", ScopeWorkspace, "workspace-a")
+	svc.SetReferenceChecker(func(context.Context, string) ([]Reference, error) {
+		return nil, errors.New("private-database-error")
+	})
+	router := newSecretsHTTPRouter(t, svc)
+
+	missingScope := doTransferHTTP(t, router, http.MethodGet, "/api/v1/secrets/"+item.ID+"/references", "")
+	if missingScope.Code != http.StatusNotFound {
+		t.Fatalf("missing workspace status = %d, body = %s", missingScope.Code, missingScope.Body)
+	}
+	failure := doTransferHTTP(t, router, http.MethodGet, "/api/v1/secrets/"+item.ID+"/references?workspace_id=workspace-a", "")
+	if failure.Code != http.StatusInternalServerError || strings.Contains(failure.Body.String(), "private-") {
+		t.Fatalf("lookup failure = %d, body = %s", failure.Code, failure.Body)
+	}
+	if _, err := svc.GetWorkspaceSecret(context.Background(), item.ID, "workspace-a"); err != nil {
+		t.Fatalf("reference lookup removed secret: %v", err)
+	}
+}
+
 func TestDeleteUnreferencedSecret(t *testing.T) {
 	svc := newSecretsHandlerService(t, nil, nil, nil)
 	id := seedGlobalViaService(t, svc, "unused", "value")

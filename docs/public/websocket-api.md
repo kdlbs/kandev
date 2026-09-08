@@ -511,6 +511,7 @@ A Workspace secret requires its `workspace_id`. A referenced secret returns `CON
 References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
 An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
 The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
+`GET /api/v1/secrets/:id/references` performs the same authorized reference lookup without changing the secret and returns `{ "references": [...] }`. Add `?workspace_id=<workspace-id>` for a Workspace secret. Settings uses this endpoint before it enables deletion; the later `DELETE` still repeats the check.
 
 With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.
 The HTTP override is `?force=true`, combined with `workspace_id` for Workspace secrets.

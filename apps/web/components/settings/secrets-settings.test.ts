@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/api/client";
 
 const mocks = vi.hoisted(() => ({
   deleteSecret: vi.fn(),
+  listSecretReferences: vi.fn(),
   addSecret: vi.fn(),
   updateSecret: vi.fn(),
   removeSecret: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/lib/api/domains/secrets-api", () => ({
   createSecret: vi.fn(),
   updateSecret: mocks.updateSecret,
   deleteSecret: mocks.deleteSecret,
+  listSecretReferences: mocks.listSecretReferences,
 }));
 vi.mock("@/hooks/domains/settings/use-secrets", () => ({
   useSecrets: () => ({
@@ -63,11 +65,21 @@ function renderSettings() {
   render(createElement(SecretsSettings, { initialItems: mocks.items }));
 }
 
+async function openDeleteConfirmation() {
+  fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+  const popover = await screen.findByTestId(CONFIRM_POPOVER_TEST_ID);
+  const confirm = within(popover).getByTestId(CONFIRM_TEST_ID) as HTMLButtonElement;
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  return popover;
+}
+
 beforeEach(() => {
   mocks.items = [secret];
   mocks.responsive.isFinePointer = true;
   mocks.deleteSecret.mockReset();
   mocks.deleteSecret.mockResolvedValue(undefined);
+  mocks.listSecretReferences.mockReset();
+  mocks.listSecretReferences.mockResolvedValue([]);
   mocks.removeSecret.mockReset();
   mocks.toast.mockReset();
 });
@@ -92,8 +104,45 @@ describe("getSecretDraftMeta", () => {
   });
 });
 
-describe("SecretsSettings deletion lifecycle", () => {
-  it("shows affected references and retains the secret on an in-use conflict", async () => {
+describe("SecretsSettings deletion preflight", () => {
+  it("keeps deletion disabled while checking and ignores a cancelled lookup", async () => {
+    let resolveReferences!: (references: unknown[]) => void;
+    mocks.listSecretReferences.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReferences = resolve;
+      }),
+    );
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    const popover = await screen.findByTestId(CONFIRM_POPOVER_TEST_ID);
+    expect(within(popover).getByText("Checking where this secret is used…")).toBeTruthy();
+    expect((within(popover).getByTestId(CONFIRM_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
+    resolveReferences([{ kind: "repository", id: "repo-1", name: "App", key: "DEPLOY_TOKEN" }]);
+
+    await waitFor(() => expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull());
+    expect(screen.queryByTestId("secret-delete-conflict-dialog")).toBeNull();
+    expect(mocks.deleteSecret).not.toHaveBeenCalled();
+  });
+
+  it("shows references before deletion and does not offer an unsafe delete", async () => {
+    mocks.listSecretReferences.mockResolvedValue([
+      { kind: "agent_profile", id: "profile-1", name: "Claude review", key: "MY_TOKEN" },
+    ]);
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+
+    const dialog = await screen.findByTestId("secret-delete-conflict-dialog");
+    expect(within(dialog).getByText(/Claude review/)).toBeTruthy();
+    expect(within(dialog).getByText(/MY_TOKEN/)).toBeTruthy();
+    expect(within(dialog).queryByTestId(CONFIRM_TEST_ID)).toBeNull();
+    expect(mocks.deleteSecret).not.toHaveBeenCalled();
+  });
+
+  it("shows fresh references when deletion loses a race", async () => {
     mocks.deleteSecret.mockRejectedValue(
       new ApiError("private server details", 409, {
         code: "secret_in_use",
@@ -103,26 +152,22 @@ describe("SecretsSettings deletion lifecycle", () => {
       }),
     );
     renderSettings();
-    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    await openDeleteConfirmation();
     fireEvent.click(
       within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(CONFIRM_TEST_ID),
     );
-    await waitFor(() =>
-      expect(mocks.toast).toHaveBeenCalledWith({
-        description:
-          'This secret is in use by: Agent profile "Claude review" (MY_TOKEN). Remove or replace these references before deleting it.',
-        variant: "error",
-      }),
-    );
+    const dialog = await screen.findByTestId("secret-delete-conflict-dialog");
+    expect(within(dialog).getByText(/Claude review/)).toBeTruthy();
     expect(mocks.removeSecret).not.toHaveBeenCalled();
-    expect(JSON.stringify(mocks.toast.mock.calls)).not.toContain("private server details");
+    expect(document.body.textContent).not.toContain("private server details");
   });
+});
 
-  it("cancels locally without dispatching deletion", () => {
+describe("SecretsSettings confirmed deletion", () => {
+  it("cancels locally without dispatching deletion", async () => {
     renderSettings();
 
-    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
-    const popover = screen.getByTestId(CONFIRM_POPOVER_TEST_ID);
+    const popover = await openDeleteConfirmation();
     fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
 
     expect(mocks.deleteSecret).not.toHaveBeenCalled();
@@ -136,7 +181,7 @@ describe("SecretsSettings deletion lifecycle", () => {
     });
     renderSettings();
 
-    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    await openDeleteConfirmation();
     fireEvent.click(
       within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(CONFIRM_TEST_ID),
     );
@@ -155,7 +200,7 @@ describe("SecretsSettings deletion lifecycle", () => {
     );
     renderSettings();
 
-    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    await openDeleteConfirmation();
     fireEvent.click(
       within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(CONFIRM_TEST_ID),
     );
@@ -172,7 +217,7 @@ describe("SecretsSettings deletion lifecycle", () => {
     mocks.deleteSecret.mockRejectedValue(new Error("server details must stay out of copy"));
     renderSettings();
 
-    fireEvent.click(screen.getByRole("button", { name: DELETE_BUTTON }));
+    await openDeleteConfirmation();
     fireEvent.click(
       within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(CONFIRM_TEST_ID),
     );

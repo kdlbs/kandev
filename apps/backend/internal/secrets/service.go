@@ -267,6 +267,24 @@ func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID str
 	return s.deleteChecked(ctx, id, workspaceID, forceDelete)
 }
 
+// References returns the environment bindings for a Global secret without
+// exposing the secret value or changing stored state.
+func (s *Service) References(ctx context.Context, id string) ([]Reference, error) {
+	if _, err := s.Get(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.listReferences(ctx, id)
+}
+
+// WorkspaceSecretReferences returns the environment bindings for a Workspace
+// secret after checking the caller's workspace access.
+func (s *Service) WorkspaceSecretReferences(ctx context.Context, id, workspaceID string) ([]Reference, error) {
+	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.listReferences(ctx, id)
+}
+
 // List returns all secrets without values.
 func (s *Service) List(ctx context.Context) ([]*SecretListItem, error) {
 	return s.ListScoped(ctx, SecretListOptions{Scope: ScopeGlobal})
