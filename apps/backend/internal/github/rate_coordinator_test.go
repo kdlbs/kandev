@@ -168,6 +168,22 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWhenThrottleStartsDu
 	}
 }
 
+func TestRateAdmissionWaitForLocalPacingReturnsWhenDeadlineHasElapsed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := waitForLocalPacing(ctx, -time.Millisecond, make(chan struct{}), make(chan struct{})); err != nil {
+		t.Fatalf("wait for elapsed pacing deadline: %v", err)
+	}
+}
+
+func TestRateAdmissionWaitForLocalPacingUsesCapturedStateChange(t *testing.T) {
+	stateChanged := make(chan struct{})
+	close(stateChanged)
+	if err := waitForLocalPacing(context.Background(), time.Hour, make(chan struct{}), stateChanged); err != nil {
+		t.Fatalf("wait for captured state change: %v", err)
+	}
+}
+
 func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)

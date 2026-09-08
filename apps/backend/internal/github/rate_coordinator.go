@@ -247,7 +247,7 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 		}
 	}
 	if reason == rateLimitBlockBackgroundPacing {
-		if err := a.waitForLocalPacing(ctx, state, trackerChanged); err != nil {
+		if err := waitForLocalPacing(ctx, time.Until(nextBackgroundAt), trackerChanged, changed); err != nil {
 			return nil, err
 		}
 		return a.tryAcquireBackground(ctx, resource)
@@ -260,15 +260,15 @@ func (a *RateAdmission) tryAcquireBackground(ctx context.Context, resource Resou
 	}
 }
 
-func (a *RateAdmission) waitForLocalPacing(
+func waitForLocalPacing(
 	ctx context.Context,
-	state *rateAdmissionState,
+	wait time.Duration,
 	trackerChanged <-chan struct{},
+	stateChanged <-chan struct{},
 ) error {
-	a.principal.mu.Lock()
-	wait := time.Until(state.nextBackgroundAt)
-	stateChanged := state.changed
-	a.principal.mu.Unlock()
+	if wait <= 0 {
+		return nil
+	}
 	return waitForAdmissionChange(ctx, wait, trackerChanged, stateChanged)
 }
 
