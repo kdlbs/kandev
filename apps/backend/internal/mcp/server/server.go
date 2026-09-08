@@ -1129,13 +1129,22 @@ func (s *Server) registerPRAutomationTools() {
 
 func (s *Server) registerTaskPRLinkTools() {
 	for _, name := range []string{"link_task_pr_kandev", "unlink_task_pr_kandev", "replace_task_pr_kandev"} {
+		options := []mcp.ToolOption{
+			mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("Target task identifier")),
+			mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
+			mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
+			mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
+		}
+		if name == "replace_task_pr_kandev" {
+			options = append(options,
+				mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
+				mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),
+				mcp.WithNumber("old_number", mcp.Required(), mcp.Description("Current pull request or merge request number")),
+			)
+		}
 		s.mcpServer.AddTool(
-			mcp.NewTool(name,
-				mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association for this task. Provide provider, canonical repository_id, and pull-request or merge-request number."),
-				mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
-				mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
-				mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
-			),
+			mcp.NewTool(name, options...),
 			s.wrapHandler(name, s.taskPRLinkHandler(name)),
 		)
 	}

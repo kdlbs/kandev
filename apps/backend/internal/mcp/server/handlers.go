@@ -306,7 +306,14 @@ func (s *Server) taskPRLinkHandler(name string) server.ToolHandlerFunc {
 		if !ok {
 			return mcp.NewToolResultError("unsupported task PR link operation"), nil
 		}
-		payload := map[string]interface{}{"task_id": s.taskID}
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID:     taskID,
+			"caller_task_id": s.taskID,
+		}
 		for _, key := range []string{"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number"} {
 			if value, ok := req.GetArguments()[key]; ok {
 				payload[key] = value
