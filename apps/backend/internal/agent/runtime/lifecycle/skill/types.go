@@ -28,9 +28,8 @@ type Skill struct {
 	// deployer.
 	SourceType string
 	// IsSystem marks a bundled Office skill (e.g. kandev-protocol,
-	// kandev-task-ops) rather than a user-authored one. System skills
-	// depend on Office runtime env (KANDEV_CLI, KANDEV_API_KEY, ...)
-	// that only the office scheduler launch path provides.
+	// kandev-task-ops) rather than a user-authored one. The deployer
+	// includes system skills only when the launch has Office runtime support.
 	IsSystem bool
 }
 
