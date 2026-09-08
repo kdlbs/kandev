@@ -51,9 +51,13 @@ type RunContext struct {
 	AvailableActions []string     `json:"available_actions,omitempty"`
 }
 
-// CanMutateTask reports whether the run may mutate the given task.
+// CanMutateTask reports whether the run may mutate the given task. The
+// wildcard sentinel is never a real task id, so a target of exactly
+// WildcardTaskScope is refused outright — otherwise a run whose own TaskID
+// is the sentinel (a payload that injected task_id="*" stays task-bound,
+// see context_builder.go#build) would self-match against it.
 func (c RunContext) CanMutateTask(taskID string) bool {
-	if taskID == "" {
+	if taskID == "" || taskID == WildcardTaskScope {
 		return false
 	}
 	if taskID == c.TaskID {

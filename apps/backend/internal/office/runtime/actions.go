@@ -398,8 +398,13 @@ func (a *Actions) authorizeTaskWorkspace(ctx context.Context, runCtx RunContext,
 // taskless run never falls back to its (absent) task id. A cross-workspace
 // target and a nonexistent one refuse with the same sentinel so annotation
 // cannot be used as an existence oracle; a failed lookup is returned as-is
-// so an outage is not read as a refusal.
+// so an outage is not read as a refusal. The wildcard sentinel is never a
+// real task id, so it is refused outright before either branch — otherwise
+// a run whose own TaskID is the sentinel would self-match against it.
 func (a *Actions) canAnnotateTask(ctx context.Context, runCtx RunContext, taskID string) error {
+	if taskID == WildcardTaskScope {
+		return ErrTaskOutOfScope
+	}
 	if strings.TrimSpace(runCtx.TaskID) != "" {
 		if taskID != runCtx.TaskID {
 			return ErrTaskOutOfScope

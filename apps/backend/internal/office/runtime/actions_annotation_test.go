@@ -230,6 +230,32 @@ func TestPostComment_TaskBoundRunPaddedTargetMatchingOwnTaskSucceeds(t *testing.
 	}
 }
 
+func TestPostComment_WildcardBoundRunRefusesSelfMatchTarget(t *testing.T) {
+	// A run whose payload injected task_id="*" stays task-bound with
+	// RunContext.TaskID == WildcardTaskScope (context_builder.go#build). An
+	// omitted request task_id defaults to runCtx.TaskID (handler.go), so
+	// the resolved target here is the sentinel itself — the self-match must
+	// still refuse rather than treat "*" as an ordinary bound task id.
+	tasks := &annotationTaskCreator{}
+	comments := &recordingCommentWriter{}
+	actions := NewActions(ActionDependencies{Comments: comments, Tasks: tasks})
+	runCtx := RunContext{
+		AgentID:      "agent-1",
+		WorkspaceID:  "ws-1",
+		TaskID:       WildcardTaskScope,
+		RunID:        "run-1",
+		Capabilities: Capabilities{CanPostComments: true},
+	}
+
+	err := actions.PostComment(context.Background(), runCtx, WildcardTaskScope, "hello")
+	if !errors.Is(err, ErrTaskOutOfScope) {
+		t.Fatalf("error = %v, want ErrTaskOutOfScope — a wildcard-bound run must never self-match", err)
+	}
+	if len(comments.comments) != 0 {
+		t.Fatalf("expected no comment recorded on refusal, got %v", comments.comments)
+	}
+}
+
 func TestPostComment_AnnotationIsNotIdempotent(t *testing.T) {
 	tasks := &annotationTaskCreator{workspaces: map[string]string{"task-x": "ws-1"}}
 	runCtx, actions, writer := tasklessAnnotationRunCtxWithWriter("ws-1", tasks)

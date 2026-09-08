@@ -17,16 +17,26 @@ import (
 
 // runnerSetQueryCounter counts how many times a query matching
 // isRunnerSetQuery reaches the driver. It has no synchronization needs (no
-// concurrency scenario, unlike commentWindowDriver) — just a counter.
+// concurrency scenario, unlike commentWindowDriver) — just a counter plus
+// the last matched query text, so a test can assert not only how many
+// queries matched but that the surviving one is still the right shape.
 type runnerSetQueryCounter struct {
-	count int32
+	count    int32
+	lastText string
 }
 
-func (c *runnerSetQueryCounter) inc()        { atomic.AddInt32(&c.count, 1) }
+func (c *runnerSetQueryCounter) inc(query string) {
+	atomic.AddInt32(&c.count, 1)
+	c.lastText = query
+}
 func (c *runnerSetQueryCounter) load() int32 { return atomic.LoadInt32(&c.count) }
 
+// isRunnerSetQuery matches any query against the tasks table, not just the
+// exact expected shape — a regression that adds a second, differently
+// shaped query (e.g. a separate pre-count) must be caught too, not only a
+// wholesale removal of the `COUNT(*) OVER()` clause.
 func isRunnerSetQuery(query string) bool {
-	return strings.Contains(strings.ToUpper(query), "COUNT(*) OVER() AS TOTAL FROM TASKS T")
+	return strings.Contains(strings.ToUpper(query), "FROM TASKS")
 }
 
 var runnerSetCounterGlobal struct {
@@ -64,7 +74,7 @@ func (c *runnerSetCountConn) QueryContext(
 		return nil, driver.ErrSkip
 	}
 	if c.counter != nil && isRunnerSetQuery(query) {
-		c.counter.inc()
+		c.counter.inc(query)
 	}
 	return queryer.QueryContext(ctx, query, args)
 }
@@ -130,6 +140,10 @@ func TestListRunnerSetTaskIDs_IssuesExactlyOneQuery(t *testing.T) {
 	}
 	if got := counter.load(); got != 1 {
 		t.Fatalf("query count = %d, want 1 — ListRunnerSetTaskIDs must issue a single "+
-			"COUNT(*) OVER() query, not a count-then-list pair", got)
+			"query against tasks, not a count-then-list pair", got)
+	}
+	if !strings.Contains(strings.ToUpper(counter.lastText), "COUNT(*) OVER()") {
+		t.Fatalf("surviving query = %q, want it to contain COUNT(*) OVER() — the single "+
+			"query permitted must still be the atomic window-function shape", counter.lastText)
 	}
 }
