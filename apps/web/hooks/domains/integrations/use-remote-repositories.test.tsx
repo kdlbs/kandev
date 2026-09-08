@@ -418,7 +418,9 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1);
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("useRemoteRepositories provider refreshes", () => {
   it("re-evaluates provider eligibility before a manual refresh", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([]);
     mocks.listUserProjects.mockResolvedValue({ projects: [] });
@@ -458,6 +460,31 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     expect(result.current.availableProviders).toEqual(["github"]);
 
     act(() => resolveRefresh?.([]));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it("clears a provider error while its refresh retry is loading", async () => {
+    setBuiltInAvailability({ gitlab: false, azureDevOps: false });
+    mocks.fetchAccessibleRepos.mockRejectedValueOnce(new Error("GitHub unavailable"));
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sourceErrors).toEqual([
+      { provider: "github", error: new Error("GitHub unavailable") },
+    ]);
+
+    let resolveRetry: ((repos: never[]) => void) | undefined;
+    mocks.fetchAccessibleRepos.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveRetry = resolve)),
+    );
+
+    act(() => result.current.refresh?.());
+
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(true);
+    expect(result.current.sourceErrors).toEqual([]);
+
+    act(() => resolveRetry?.([]));
     await waitFor(() => expect(result.current.loading).toBe(false));
   });
 });

@@ -317,9 +317,7 @@ function useBuiltInRepositorySource(
     setAvailableProviders((current) =>
       sameWorkspace ? current.filter((provider) => eligibility.providers.has(provider)) : [],
     );
-    setSourceErrors((current) =>
-      sameWorkspace ? current.filter(({ provider }) => eligibility.providers.has(provider)) : [],
-    );
+    setSourceErrors([]);
     setLoading(true);
     if (eligibility.loading) {
       return () => {
