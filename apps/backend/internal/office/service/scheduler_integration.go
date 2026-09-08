@@ -606,12 +606,19 @@ func (si *SchedulerIntegration) launchAgent(
 		return launched
 	}
 	var err error
-	if starter, ok := si.svc.taskStarter.(TaskStarterWithLaunchContext); ok {
+	var sessionID string
+	switch starter := si.svc.taskStarter.(type) {
+	case TaskStarterWithLaunchContextSession:
+		sessionID, err = starter.StartTaskWithLaunchContextReturningSession(ctx, taskID, launch.ProfileID, launch)
+	case TaskStarterWithLaunchContext:
 		err = starter.StartTaskWithLaunchContext(ctx, taskID, launch.ProfileID, launch)
-	} else if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
+	case TaskStarterWithSession:
+		sessionID, err = starter.StartTaskWithEnvReturningSession(ctx, taskID, launch.ProfileID, "", "", "",
+			launch.Prompt, "", false, nil, launch.Env)
+	case TaskStarterWithEnv:
 		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil, launch.Env)
-	} else {
+	default:
 		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil)
 	}
@@ -626,7 +633,33 @@ func (si *SchedulerIntegration) launchAgent(
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
+	IncLoopLaunch(agent.WorkspaceID)
+	si.persistLaunchedSession(ctx, runID, agent.WorkspaceID, sessionID)
 	return true
+}
+
+// persistLaunchedSession stores the session id a successful direct
+// launch produced (AC-OFFICE-LOOP-LIVENESS-002.7) — the scheduler-side
+// counterpart to scheduler.SchedulerService.persistLaunchedSession for
+// the routed launch path. See that method's doc comment for the
+// without-session / persist-failed counter semantics (AC-002.8, .11).
+func (si *SchedulerIntegration) persistLaunchedSession(
+	ctx context.Context, runID, workspaceID, sessionID string,
+) {
+	if sessionID == "" {
+		IncLoopLaunchWithoutSession(workspaceID)
+		return
+	}
+	wrote, err := si.svc.repo.SetRunSessionID(ctx, runID, sessionID)
+	if err != nil {
+		si.logger.Warn("persist launched session id failed",
+			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+		IncLoopSessionPersistFailed(workspaceID)
+		return
+	}
+	if !wrote {
+		IncLoopLaunchWithoutSession(workspaceID)
+	}
 }
 
 // failTasklessRun terminally fails a run that launchAgent determined has

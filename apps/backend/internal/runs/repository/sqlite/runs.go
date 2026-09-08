@@ -41,13 +41,13 @@ func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.R
 			id, agent_profile_id, reason, payload, status, coalesced_count,
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
 			output_summary, failure_reason, session_id, retry_count, scheduled_retry_at,
-			requested_at, error_message, cancel_reason, continuation_scope
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			requested_at, error_message, cancel_reason, continuation_scope, causation_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), req.ID, req.AgentProfileID, req.Reason, req.Payload, req.Status,
 		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot,
 		req.Capabilities, req.InputSnapshot, req.OutputSummary, req.FailureReason,
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
-		req.ErrorMessage, req.CancelReason, req.ContinuationScope)
+		req.ErrorMessage, req.CancelReason, req.ContinuationScope, req.CausationID)
 	return err
 }
 
@@ -101,6 +101,34 @@ func (r *Repository) UpdateRunRuntimeSnapshot(
 		WHERE id = ?
 	`), capabilities, inputSnapshot, sessionID, id)
 	return err
+}
+
+// SetRunSessionID persists the session id a launch produced
+// (AC-OFFICE-LOOP-LIVENESS-002.7/.8/.10). A no-op when sessionID is
+// empty — the caller counts that as a without-session launch rather
+// than clobbering whatever the column already held. Given the single-
+// launch-in-flight invariant, an unconditional write on a non-empty id
+// is "last non-empty wins" by construction: nothing else writes this
+// column between a claim and its terminal outcome. Returns whether the
+// row existed so the caller can distinguish a real write from a stale
+// run id.
+func (r *Repository) SetRunSessionID(
+	ctx context.Context, runID, sessionID string,
+) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs SET session_id = ? WHERE id = ?
+	`), sessionID, runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // UpdateRunPromptArtifacts persists the assembled prompt the agent

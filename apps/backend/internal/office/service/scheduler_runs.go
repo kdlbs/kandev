@@ -28,6 +28,11 @@ func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
 		zap.String("id", req.ID),
 		zap.String("agent", req.AgentProfileID),
 		zap.String("reason", req.Reason))
+	workspaceID := LoopUnattributedWorkspace
+	if agent, err := s.GetAgentFromConfig(ctx, req.AgentProfileID); err == nil && agent != nil {
+		workspaceID = agent.WorkspaceID
+	}
+	IncLoopRunClaimed(workspaceID)
 	return req, nil
 }
 
@@ -83,8 +88,29 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, 
 	if err := s.repo.FinishRun(ctx, id, status, outcome); err != nil {
 		return err
 	}
+	s.recordTerminalShape(ctx, run, status, outcome)
 	s.publishRunProcessed(ctx, id, status, run)
 	return nil
+}
+
+// recordTerminalShape classifies the just-persisted terminal transition
+// (REQ-OFFICE-LOOP-LIVENESS-005) and increments office_loop_terminal_total
+// by the resulting shape. run is nil when transitionRunTerminal's
+// pre-fetch failed; there is nothing to classify in that case. The
+// workspace label falls back to LoopUnattributedWorkspace when the
+// owning agent can't be resolved, matching AC-003.8 — never dropped,
+// never guessed into a real workspace's totals.
+func (s *Service) recordTerminalShape(ctx context.Context, run *models.Run, status string, outcome *string) {
+	if run == nil {
+		return
+	}
+	activationInstant, activationPublished := s.repo.LoopLivenessActivation()
+	shape := ClassifyTerminalRun(status, outcome, run.SessionID, run.RequestedAt, activationInstant, activationPublished)
+	workspaceID := LoopUnattributedWorkspace
+	if agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID); err == nil && agent != nil {
+		workspaceID = agent.WorkspaceID
+	}
+	IncLoopTerminal(workspaceID, string(shape))
 }
 
 // releaseTaskCheckoutForRun releases the run's task checkout. Call this

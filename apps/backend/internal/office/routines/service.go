@@ -60,7 +60,6 @@ type Repository interface {
 	// read-then-write race between them.
 	UpdateRunStatusIfTaskCreated(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) (bool, error)
 	UpdateRunCoalesced(ctx context.Context, runID, coalescedIntoRunID string) error
-	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 	// GetTaskTerminalStatus reads a task's real lifecycle state directly
 	// (not via the TaskMoved event — see applyConcurrencyPolicy) and
 	// reports "" when it is active, "done", "failed", "cancelled", or
@@ -93,6 +92,10 @@ type WakeupRequest struct {
 	Payload        string
 	IdempotencyKey string
 	RequestedAt    time.Time
+	// CausationID is copied from the firing RoutineRun
+	// (AC-OFFICE-LOOP-LIVENESS-002.2) so downstream runs and wakeup
+	// requests correlate back to the fire that produced them.
+	CausationID string
 }
 
 // RoutineWorkflowEnsurer materialises (lazily) the routine system
@@ -373,6 +376,7 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 
 // TickScheduledTriggers queries due cron triggers, claims each, and dispatches.
 func (s *RoutineService) TickScheduledTriggers(ctx context.Context, now time.Time) error {
+	service.IncLoopCronTick(now.Format(time.RFC3339))
 	triggers, err := s.repo.GetDueTriggers(ctx, now)
 	if err != nil {
 		return fmt.Errorf("get due triggers: %w", err)
@@ -398,6 +402,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	if err != nil {
 		return fmt.Errorf("get routine: %w", err)
 	}
+	service.IncLoopTriggerClaimed(routine.WorkspaceID)
 	// Catch-up cap: count how many cron ticks elapsed between the missed
 	// trigger.NextRunAt (inclusive) and now, capped at routine.CatchUpMax.
 	// Mirror of the agent_heartbeat catch-up math, adapted for cron
@@ -562,6 +567,9 @@ func (s *RoutineService) dispatchRoutineRun(
 		TriggerPayload:      string(payloadJSON),
 		DispatchFingerprint: fingerprint,
 		StartedAt:           &now,
+		// CausationID is minted once per fire (AC-OFFICE-LOOP-LIVENESS-002.1)
+		// and copied onto every wakeup request and run this fire produces.
+		CausationID: uuid.New().String(),
 	}
 	if err := s.repo.CreateRoutineRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
@@ -584,12 +592,14 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, err
 	}
 	if status != "" {
+		service.IncLoopRoutineRun(routine.WorkspaceID, source, string(status))
 		return run, nil
 	}
 
 	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks); err != nil {
 		return run, err
 	}
+	service.IncLoopRoutineRun(routine.WorkspaceID, source, string(models.RoutineRunStatusTaskCreated))
 
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),
@@ -695,6 +705,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		Payload:        payloadStr,
 		IdempotencyKey: idemKey,
 		RequestedAt:    time.Now().UTC(),
+		CausationID:    run.CausationID,
 	}
 	if err := s.wakeup.CreateWakeupRequest(ctx, req); err != nil {
 		if errors.Is(err, ErrWakeupAlreadyRequested) {
@@ -706,6 +717,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 			zap.String("routine", routine.Name), zap.Error(err))
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
 	}
+	service.IncLoopWakeupCreated(routine.WorkspaceID, req.Source)
 	if err := s.wakeup.Dispatch(ctx, req.ID); err != nil {
 		s.logger.Warn("dispatch routine wakeup request",
 			zap.String("routine", routine.Name),

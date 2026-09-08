@@ -300,11 +300,11 @@ func (r *Repository) CreateRoutineRun(ctx context.Context, run *models.RoutineRu
 		INSERT INTO office_routine_runs (
 			id, routine_id, trigger_id, source, status, trigger_payload,
 			linked_task_id, coalesced_into_run_id, dispatch_fingerprint,
-			started_at, completed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			started_at, completed_at, created_at, causation_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), run.ID, run.RoutineID, run.TriggerID, run.Source, run.Status,
 		run.TriggerPayload, run.LinkedTaskID, run.CoalescedIntoRunID,
-		run.DispatchFingerprint, run.StartedAt, run.CompletedAt, run.CreatedAt)
+		run.DispatchFingerprint, run.StartedAt, run.CompletedAt, run.CreatedAt, run.CausationID)
 	return err
 }
 

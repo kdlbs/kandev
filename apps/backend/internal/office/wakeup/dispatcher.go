@@ -290,6 +290,10 @@ func (d *Dispatcher) createFreshRun(
 		CoalescedCount:  1,
 		ContextSnapshot: payload,
 		RequestedAt:     time.Now().UTC(),
+		// AC-OFFICE-LOOP-LIVENESS-002.3: copied from the requesting
+		// wake, including on the lost-CAS fresh-run path — that run
+		// still carries the requesting wake's id, not a new one.
+		CausationID: req.CausationID,
 	}
 	if err := d.repo.CreateRun(ctx, run); err != nil {
 		return fmt.Errorf("create run for wakeup %s: %w", req.ID, err)
