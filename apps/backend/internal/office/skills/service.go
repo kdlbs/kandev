@@ -169,13 +169,12 @@ func prepareSkillPackageMetadata(skill *models.Skill) {
 }
 
 // ValidateSkillUpdate validates a skill update for slug uniqueness. Slug
-// handling mirrors ValidateAndPrepareSkill: reject a not-well-formed slug
-// outright (AC-001.11), otherwise normalize to canonical before the
-// uniqueness check (AC-001.12).
+// handling mirrors ValidateAndPrepareSkill: an empty slug is not
+// well-formed and is rejected like any other not-well-formed slug; the
+// caller omits the field entirely to leave the slug unchanged. A
+// well-formed slug is normalized to canonical form before the uniqueness
+// check runs.
 func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
-	if skill.Slug == "" {
-		return nil
-	}
 	if !skillslug.WellFormed(skill.Slug) {
 		return fmt.Errorf("invalid skill slug %q: must contain only letters, digits, underscore, and hyphen", skill.Slug)
 	}
