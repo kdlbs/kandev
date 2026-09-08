@@ -55,6 +55,33 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	}
 }
 
+func TestExecuteQueuedMessage_PreservesPermanentFailureForRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{isAgentRunning: true, promptErr: fmt.Errorf("permanent prompt failure")}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	queued := &messagequeue.QueuedMessage{ID: "q-permanent", SessionID: "s1", TaskID: "t1", Content: "do not lose this", QueuedBy: "test"}
+
+	svc.executeQueuedMessage("s1", queued)
+
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 || status.Entries[0].Content != queued.Content {
+		t.Fatalf("permanent failure lost queued message: %+v", status.Entries)
+	}
+}
+
 func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

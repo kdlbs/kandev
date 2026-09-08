@@ -95,6 +95,26 @@ func TestIsOriginalTaskSessionUsesImmutableOriginMarker(t *testing.T) {
 	}))
 }
 
+func TestLoadSessionSpawnSupervisionRequiresVerifiedIdentity(t *testing.T) {
+	spawnedAt := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	supervision, ok := LoadSessionSpawnSupervision(map[string]interface{}{
+		SessionMetaKeySpawnSupervision: map[string]interface{}{
+			"supervisor_task_id":    "task-parent",
+			"supervisor_session_id": "session-parent",
+			"spawned_at":            spawnedAt.Format(time.RFC3339Nano),
+		},
+	})
+	require.True(t, ok)
+	require.Equal(t, "task-parent", supervision.SupervisorTaskID)
+	require.Equal(t, "session-parent", supervision.SupervisorSessionID)
+	require.Equal(t, spawnedAt, supervision.SpawnedAt)
+
+	_, ok = LoadSessionSpawnSupervision(map[string]interface{}{
+		SessionMetaKeySpawnSupervision: map[string]interface{}{"supervisor_task_id": "task-parent"},
+	})
+	require.False(t, ok)
+}
+
 func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
 	baseline, ok := LoadSessionACPConfigBaseline(map[string]interface{}{
 		SessionMetaKeyACPConfigBaseline: map[string]interface{}{

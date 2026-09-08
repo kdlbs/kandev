@@ -401,6 +401,13 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 			t.Fatalf("failed to create message %s: %v", msg.ID, err)
 		}
 	}
+	pendingBefore, err := repo.HasPendingToolCallsForTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("HasPendingToolCallsForTurn before completion: %v", err)
+	}
+	if !pendingBefore {
+		t.Fatal("expected running tool calls to keep the turn pending")
+	}
 
 	// Execute
 	affected, err := repo.CompletePendingToolCallsForTurn(ctx, turnID)
@@ -476,6 +483,13 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 	}
 	if affected2 != 0 {
 		t.Errorf("expected 0 affected rows on second call, got %d", affected2)
+	}
+	pendingAfter, err := repo.HasPendingToolCallsForTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("HasPendingToolCallsForTurn after completion: %v", err)
+	}
+	if pendingAfter {
+		t.Fatal("expected no pending tool calls after completion sweep")
 	}
 }
 

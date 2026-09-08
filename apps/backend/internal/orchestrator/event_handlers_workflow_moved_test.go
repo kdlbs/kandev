@@ -649,6 +649,14 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 	t.Run("queues auto-start prompt on enter", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		task.WorkflowStepID = "step2"
+		if err := repo.UpdateTask(ctx, task); err != nil {
+			t.Fatalf("set task workflow step: %v", err)
+		}
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -687,6 +695,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 				}
 				if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
 					t.Fatalf("expected queued_by workflow, got %s", status.Entries[0].QueuedBy)
+				}
+				if !status.Entries[0].IsWorkflowControl() {
+					t.Fatalf("expected transition-keyed workflow control delivery, metadata = %+v", status.Entries[0].Metadata)
 				}
 				meta := status.Entries[0].Metadata
 				if got := meta["workflow_message"]; got != true {

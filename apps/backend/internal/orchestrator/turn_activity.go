@@ -526,6 +526,48 @@ func (s *Service) hasBackgroundTask(sessionID, toolCallID string, executionIDs .
 	return work.executionID == executionIDs[0]
 }
 
+// hasOutstandingBackgroundWork is the conservative stale-settlement guard for
+// live adapter-attested background work. This is observation state, not a
+// persistence authority: if it is present, an exact-turn settlement must not
+// interrupt the still-owned work; if it is absent after a restart, the durable
+// completion intent and its quiet grace remain the settlement evidence.
+func (s *Service) hasOutstandingBackgroundWork(sessionID string) bool {
+	ta := s.lockTurnActivity(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	defer ta.mu.Unlock()
+	return len(ta.background) > 0
+}
+
+// persistBackgroundWorkAttestation is a fail-closed restart bridge for
+// completion settlement. It persists only a boolean ownership barrier, never
+// provider payload or command content; a later terminal frame writes false.
+//
+// Callers reach this from unrelated event paths (stream handlers, execution
+// retirement) holding different per-session guards or none at all. Reading
+// the current state and writing it are therefore serialized here, under a
+// lock dedicated to this one piece of persisted state: without it, two
+// concurrent callers for the same session could commit their writes in
+// either order — an older "true" landing after a newer "false" would leave a
+// stale attested=true that blocks completion settlement forever. Because
+// hasOutstandingBackgroundWork always re-reads the live turnActivity map at
+// call time (never a value captured earlier by the triggering event),
+// serializing just this read-then-write is sufficient: whichever call
+// executes second observes the state as it truly is by then.
+func (s *Service) persistBackgroundWorkAttestation(ctx context.Context, sessionID string) {
+	if sessionID == "" || s.repo == nil {
+		return
+	}
+	lockAny, _ := s.backgroundAttestationLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := lockAny.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyBackgroundWorkAttested, s.hasOutstandingBackgroundWork(sessionID)); err != nil {
+		s.logger.Warn("failed to persist background work attestation", zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // completeBackgroundTaskForExecution clears a previously-registered background
 // task, scoped to the execution that owns it (an empty executionID matches any
 // owner — see the test-only completeBackgroundTask wrapper). When no
@@ -795,6 +837,12 @@ func (s *Service) retireExecutionActivityAndPublish(
 	taskID, sessionID, executionID string,
 ) {
 	publication, changed := s.retireExecutionActivitySnapshot(sessionID, executionID)
+	// A definitively dead execution can retire its background work with no
+	// accompanying background-complete/tool-update frame (the only other
+	// call sites for this attestation). Without recomputing it here, a
+	// persisted background_work_attested=true survives indefinitely and
+	// rearms every later completion intent on a resumed session forever.
+	s.persistBackgroundWorkAttestation(ctx, sessionID)
 	if changed {
 		s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 	}

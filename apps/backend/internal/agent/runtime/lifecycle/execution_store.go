@@ -13,6 +13,10 @@ import (
 // ErrExecutionNotFound is returned when an execution doesn't exist in the store.
 var ErrExecutionNotFound = errors.New("execution not found")
 
+// ErrPromptGenerationUnknown prevents a recovered execution from reusing a
+// generation when its durable prompt identity could not be restored.
+var ErrPromptGenerationUnknown = errors.New("recovered prompt generation is unknown")
+
 // ErrPromptActivityNotOwned means a cancellation snapshot no longer belongs
 // to the execution and prompt that were captured.
 var ErrPromptActivityNotOwned = errors.New("prompt activity no longer owned")
@@ -286,7 +290,34 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if !exists || current != execution {
 		return 0, ErrExecutionNotFound
 	}
+	if current.promptGenerationUnknown {
+		return 0, ErrPromptGenerationUnknown
+	}
 	return beginExecutionPrompt(current), nil
+}
+
+func (s *ExecutionStore) restoreRecoveredPromptGeneration(executionID string, generation uint64) error {
+	if generation == 0 {
+		return ErrPromptGenerationUnknown
+	}
+	execution, exists := s.Get(executionID)
+	if !exists {
+		return ErrExecutionNotFound
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.executions[executionID]
+	if !exists || current != execution {
+		return ErrExecutionNotFound
+	}
+	if current.promptGenerationUnknown {
+		current.promptGeneration = generation
+		current.promptGenerationUnknown = false
+	}
+	return nil
 }
 
 func beginExecutionPrompt(execution *AgentExecution) uint64 {

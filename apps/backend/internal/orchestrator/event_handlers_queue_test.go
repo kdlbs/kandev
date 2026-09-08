@@ -679,6 +679,97 @@ func TestArchiveTask_PersistentQueueCallbackDoesNotPurgeReacceptedGeneration(t *
 	}
 }
 
+// TestDeliveryWorkerPromotionWakesIdleSession covers a P1 gap: a durable
+// cross-task delivery promoted into an idle session's FIFO by the background
+// delivery worker (queueMessageWithMetadataSeparate, called directly by
+// processClaimedDelivery) could sit "queued" indefinitely. The ordinary
+// queue only drains one entry per turn completion, and a session that is
+// already WAITING_FOR_INPUT when the worker admits the message has no
+// future turn-completion event to trigger that drain. The orchestrator's
+// SetQueuePromotionNotifier wiring must also attempt a guarded drain, not
+// just publish the WS status event.
+func TestDeliveryWorkerPromotionWakesIdleSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set waiting session: %v", err)
+	}
+
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	persistentRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("new persistent queue repository: %v", err)
+	}
+	persistentQueue := messagequeue.NewService(persistentRepo, messagequeue.DefaultMaxPerSession, testLogger())
+
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: promptDone}
+	// The real constructor, not createTestService's struct literal: only
+	// NewService wires SetQueuePromotionNotifier onto the supplied queue.
+	svc := NewService(ServiceConfig{}, nil, agentMgr, newMockTaskRepo(), repo, nil, nil, persistentQueue, testLogger())
+
+	delivery, _, err := persistentQueue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{
+		SenderTaskID:    "sender-task",
+		SenderSessionID: "sender-session",
+		SourceTurnID:    "sender-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "t1",
+		TargetSessionID: "s1",
+		Content:         "cross-task report",
+		State:           messagequeue.DeliveryPendingCapacity,
+	})
+	if err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	if delivery.State != messagequeue.DeliveryPendingCapacity {
+		t.Fatalf("delivery state = %q, want pending_capacity before the worker runs", delivery.State)
+	}
+
+	// Simulate one worker tick directly rather than starting the background
+	// ticker: ProcessDueDeliveries is exactly what StartDeliveryRecovery's
+	// goroutine calls on each interval.
+	processed, err := persistentQueue.ProcessDueDeliveries(ctx, time.Now().UTC(), "worker-a")
+	if err != nil {
+		t.Fatalf("process due deliveries: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("processed = %d, want 1", processed)
+	}
+
+	if got := persistentQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("queue count after promotion = %d, want 0: promoting into an idle session must drain it, not leave it queued forever", got)
+	}
+	// dispatchTakenQueuedMessage hands the reserved entry to an async
+	// goroutine (executeQueuedMessageWithReservation); join it via the mock's
+	// promptDone signal rather than asserting immediately after the
+	// synchronous FIFO reservation above.
+	select {
+	case <-promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("delivery worker promotion did not dispatch a prompt to the idle session")
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("captured prompts = %d, want exactly 1 dispatched to the idle session", len(agentMgr.capturedPrompts))
+	}
+	// Join the rest of the async dispatch (acknowledgement, in-flight token
+	// release) before the test returns and setupTestRepo's t.Cleanup closes
+	// the database out from under it.
+	deadline := time.Now().Add(time.Second)
+	for svc.isQueuedDispatchInFlight("s1") {
+		if time.Now().After(deadline) {
+			t.Fatal("queued dispatch never left the in-flight state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // Archive cancels accepted lifecycle work even when the currently selected
 // session is busy and therefore cannot drain it immediately. Unarchiving must
 // not resurrect that historical observation into a fresh agent prompt.

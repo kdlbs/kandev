@@ -951,7 +951,10 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
+				sendPromptCallbacks{
+					onDispatched: execution.takeInitialPromptAcceptedCallback(),
+					onFailure:    sm.initialPromptFailure,
+				},
 				false,
 			)
 			if err != nil {

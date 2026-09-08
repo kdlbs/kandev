@@ -325,13 +325,15 @@ func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
 	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
 
-	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
 		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker)},
 		&LaunchAgentResponse{ContainerID: "container-1", Metadata: map[string]interface{}{
 			lifecycle.MetadataKeyBootstrapNonceSecret:       "bootstrap-secret-1",
 			lifecycle.MetadataKeyContainerControlAuthSecret: "container-control-secret-1",
 		}},
-		executorConfig{ExecutorID: "docker"})
+		executorConfig{ExecutorID: "docker"}); err != nil {
+		t.Fatalf("persist task environment: %v", err)
+	}
 
 	persisted := repo.taskEnvironments[env.ID]
 	if persisted.ContainerID != "container-1" {
@@ -369,12 +371,14 @@ func TestPersistTaskEnvironment_FinalizesCreatingEnvironmentWithInventory(t *tes
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
 	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
 
-	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
 		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
 		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
 			RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
 		}}},
-		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+		executorConfig{ExecutorID: models.ExecutorIDWorktree}); err != nil {
+		t.Fatalf("persist task environment: %v", err)
+	}
 
 	if len(repo.finalizeTaskEnvironmentCalls) != 1 {
 		t.Fatalf("FinalizeTaskEnvironmentMaterialization calls = %d, want 1", len(repo.finalizeTaskEnvironmentCalls))

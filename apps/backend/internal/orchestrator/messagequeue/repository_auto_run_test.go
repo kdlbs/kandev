@@ -116,6 +116,41 @@ func TestRepositories_ReserveHeadIfAutoRunDistinguishesPausedAndEmpty(t *testing
 	}
 }
 
+func TestRepositories_ReserveHeadPrioritizesWorkflowControlOverOrdinaryBacklog(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			base := factory.new(t)
+			ctx := context.Background()
+			ordinary := &QueuedMessage{SessionID: "session-1", TaskID: "task-1", Content: "old ordinary work", QueuedBy: QueuedByUser}
+			staleControl := &QueuedMessage{
+				SessionID: "session-1", TaskID: "task-1", Content: "enter old step", QueuedBy: QueuedByWorkflow,
+				Metadata: map[string]interface{}{
+					MetadataLifecycleDurable:     true,
+					MetadataWorkflowControl:      true,
+					MetadataWorkflowTransitionID: int64(41),
+				},
+			}
+			currentControl := &QueuedMessage{
+				SessionID: "session-1", TaskID: "task-1", Content: "enter current step", QueuedBy: QueuedByWorkflow,
+				Metadata: map[string]interface{}{
+					MetadataLifecycleDurable:     true,
+					MetadataWorkflowControl:      true,
+					MetadataWorkflowTransitionID: int64(42),
+				},
+			}
+			require.NoError(t, base.Insert(ctx, ordinary, 10))
+			require.NoError(t, base.Insert(ctx, staleControl, 0))
+			require.NoError(t, base.Insert(ctx, currentControl, 0))
+
+			reserved, err := base.ReserveHead(ctx, "session-1")
+			require.NoError(t, err)
+			require.NotNil(t, reserved)
+			assert.Equal(t, currentControl.ID, reserved.ID)
+			assert.True(t, reserved.IsWorkflowControl())
+		})
+	}
+}
+
 func TestRepositories_ClaimSendNowResumesOnlyAcceptedClaim(t *testing.T) {
 	for _, factory := range autoRunRepositoryFactories {
 		t.Run(factory.name, func(t *testing.T) {
