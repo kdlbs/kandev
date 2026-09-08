@@ -915,7 +915,10 @@ func (s *DashboardService) runReactivityForAssigneeChange(
 	// Flip the prev assignee's office session row to COMPLETED so it leaves
 	// the active sessions list. The reactivity pipeline already hard-cancels
 	// the running execution above; this is the persistent-row counterpart.
-	if prevAssigneeID != "" && s.sessionTerm != nil {
+	// A same-agent reassignment is not a handoff — the pipeline above never
+	// interrupts it — so this must not terminate the agent's own live
+	// session out from under it.
+	if prevAssigneeID != "" && prevAssigneeID != newAssigneeID && s.sessionTerm != nil {
 		if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, prevAssigneeID, sessionTermReasonReassigned); err != nil {
 			s.logger.Warn("terminate prev-assignee office session failed",
 				zap.String("task_id", taskID),

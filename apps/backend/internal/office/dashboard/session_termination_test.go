@@ -106,3 +106,29 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 		t.Errorf("term call: got %+v", got)
 	}
 }
+
+// TestSetTaskAssignee_SameAgent_DoesNotTerminateSession is the regression
+// test for Review round 3 Finding 5: a repeat assignment to the agent that
+// already holds the seat must not flip that agent's own live session row to
+// COMPLETED. The reactivity pipeline correctly declines to hard-cancel this
+// case (AC-OFFICE-RUN-DEDUP-001.3 treats it as a real occurrence, not an
+// interrupt), and the persisted-row side effect must agree.
+func TestSetTaskAssignee_SameAgent_DoesNotTerminateSession(t *testing.T) {
+	deps := newTestDeps(t)
+	rt := &recordingTerminator{}
+	deps.svc.SetSessionTerminator(rt)
+	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
+
+	insertTestTask(t, deps.db, "task-same", "ws-r", "Reassign", "todo", 2)
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "task-same", "agent-x"); err != nil {
+		t.Fatalf("seed prev assignee: %v", err)
+	}
+
+	if err := deps.svc.SetTaskAssigneeAsAgent(context.Background(), "", "task-same", "agent-x"); err != nil {
+		t.Fatalf("set assignee: %v", err)
+	}
+
+	if len(rt.calls) != 0 {
+		t.Fatalf("same-agent reassignment must not terminate the agent's own session, got %d calls (%+v)", len(rt.calls), rt.calls)
+	}
+}
