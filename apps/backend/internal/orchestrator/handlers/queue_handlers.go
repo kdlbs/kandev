@@ -8,7 +8,6 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
-	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -45,10 +44,14 @@ const (
 	queueAccessDenied           = "Session not found"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
-	fieldSessionID = "session_id"
-	fieldEntryID   = "entry_id"
-	fieldQueueSize = "queue_size"
-	fieldMax       = "max"
+	fieldTaskID             = "task_id"
+	fieldSessionID          = "session_id"
+	fieldSessionIncarnation = "session_incarnation_id"
+	fieldEntryID            = "entry_id"
+	fieldQueueSize          = "queue_size"
+	fieldMax                = "max"
+	fieldAutoRun            = "auto_run"
+	fieldAutoMergeEnabled   = "auto_merge_enabled"
 )
 
 // QueueService is the surface the handlers depend on. Real implementation lives
@@ -65,16 +68,83 @@ type QueueService interface {
 	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
+type QueueSnapshotService interface {
+	Snapshot(context.Context, messagequeue.QueueSessionIdentity) (*messagequeue.QueueStatus, error)
+}
+type QueueIdentityAdmissionService interface {
+	QueueMessageWithMetadataForSession(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		string,
+		string,
+		bool,
+		[]messagequeue.MessageAttachment,
+		map[string]interface{},
+	) (*messagequeue.QueuedMessage, error)
+	QueueMessageWithMetadataForSessionAfterInsert(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		string,
+		string,
+		bool,
+		[]messagequeue.MessageAttachment,
+		map[string]interface{},
+		func(context.Context, *messagequeue.QueuedMessage) error,
+	) (*messagequeue.QueuedMessage, error)
+}
+type QueueIdentityAttachmentAdmissionService interface {
+	QueueMessageWithMetadataForSessionWithClaim(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		string,
+		string,
+		bool,
+		[]messagequeue.MessageAttachment,
+		map[string]interface{},
+		messagequeue.QueueAttachmentClaim,
+	) (*messagequeue.QueuedMessage, error)
+}
+
+type QueueIdentityMutationService interface {
+	AppendContentForSession(context.Context, messagequeue.QueueSessionIdentity, string, string, string, bool, []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
+	UpdateMessageWithMetadataForSession(context.Context, messagequeue.QueueSessionIdentity, string, string, []messagequeue.MessageAttachment, map[string]interface{}, string) error
+	RemoveEntryForSession(context.Context, messagequeue.QueueSessionIdentity, string) (*messagequeue.QueueRemovalResult, error)
+	MergeIntoAboveForSession(context.Context, messagequeue.QueueSessionIdentity, string, string) (*messagequeue.QueuedMessage, error)
+	ReorderEntriesForSession(context.Context, messagequeue.QueueSessionIdentity, []string) error
+	CancelAllForSession(context.Context, messagequeue.QueueSessionIdentity) (*messagequeue.QueueRemovalResult, error)
+}
+
+type QueueIdentityEntryService interface {
+	GetEntryForSession(context.Context, messagequeue.QueueSessionIdentity, string) (*messagequeue.QueuedMessage, error)
+}
+
+type QueueIdentityAttachmentMutationService interface {
+	UpdateMessageWithMetadataForSessionWithClaim(context.Context, messagequeue.QueueSessionIdentity, string, string, []messagequeue.MessageAttachment, map[string]interface{}, string, messagequeue.QueueAttachmentClaim) error
+}
 
 // QueueDrainer drains a single queued entry when the session is promptable.
 type QueueDrainer interface {
 	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
+}
+type QueueIdentityDrainer interface {
+	DrainQueuedMessageForSession(context.Context, messagequeue.QueueSessionIdentity) (bool, error)
 }
 
 // QueueAutoRunController persists queue policy and may immediately dispatch
 // one FIFO head when enabling an eligible session.
 type QueueAutoRunController interface {
 	SetQueueAutoRun(ctx context.Context, sessionID string, enabled bool) (autoRun bool, dispatched bool, err error)
+}
+type QueueIdentityAutoRunController interface {
+	SetQueueAutoRunForSession(context.Context, messagequeue.QueueSessionIdentity, bool) (bool, bool, error)
+}
+
+// QueueAutoMergeController persists and resolves per-session automatic-merge policy.
+type QueueAutoMergeController interface {
+	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.AutoMergePolicy, error)
 }
 
 // QueueSendNowDispatcher is implemented by the orchestrator service. It is
@@ -83,11 +153,17 @@ type QueueAutoRunController interface {
 type QueueSendNowDispatcher interface {
 	SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error)
 }
+type QueueIdentitySendNowDispatcher interface {
+	SendQueuedNowForSession(context.Context, messagequeue.QueueSessionIdentity, string, string) (int, error)
+}
 
 // QueueAccessAuthorizer scopes queue reads and mutations to visible sessions.
 type QueueAccessAuthorizer interface {
 	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
 	AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error
+}
+type QueueSessionIdentityAuthorizer interface {
+	AuthorizeTaskSessionIncarnationAccess(ctx context.Context, taskID, sessionID, incarnationID string) error
 }
 
 // SessionTaskResolver returns the task that owns a session. It enriches the
@@ -100,6 +176,10 @@ type SessionTaskResolver func(ctx context.Context, sessionID string) (string, er
 // after a queue entry has been durably accepted.
 type QueueAttachmentClaimer interface {
 	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type QueueAttachmentClaimPreparer interface {
+	PrepareQueueAttachmentClaim(context.Context, string, []v1.MessageAttachment) (messagequeue.QueueAttachmentClaim, error)
 }
 
 type QueueAttachmentReleaser interface {
@@ -174,21 +254,23 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
 	d.RegisterFunc(ws.ActionMessageQueueSendNow, h.wsSendNow)
 	d.RegisterFunc(ws.ActionMessageQueueAutoRunSet, h.wsSetAutoRun)
+	d.RegisterFunc(ws.ActionMessageQueueAutoMergeSet, h.wsSetAutoMerge)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
 	d.RegisterFunc(ws.ActionMessageQueueReorder, h.wsReorder)
 }
 
 type wsQueueMessageRequest struct {
-	SessionID        string                           `json:"session_id"`
-	TaskID           string                           `json:"task_id"`
-	Content          string                           `json:"content"`
-	Model            string                           `json:"model,omitempty"`
-	PlanMode         bool                             `json:"plan_mode,omitempty"`
-	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	ContextFiles     []v1.ContextFileMeta             `json:"context_files,omitempty"`
-	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
-	UserID           string                           `json:"user_id,omitempty"`
+	SessionID            string                           `json:"session_id"`
+	TaskID               string                           `json:"task_id"`
+	SessionIncarnationID string                           `json:"session_incarnation_id"`
+	Content              string                           `json:"content"`
+	Model                string                           `json:"model,omitempty"`
+	PlanMode             bool                             `json:"plan_mode,omitempty"`
+	Attachments          []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	ContextFiles         []v1.ContextFileMeta             `json:"context_files,omitempty"`
+	EntityReferences     []v1.EntityReference             `json:"entity_references,omitempty"`
+	UserID               string                           `json:"user_id,omitempty"`
 }
 
 // wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
@@ -204,7 +286,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if denied := h.authorizeTaskSession(ctx, msg, req.TaskID, req.SessionID); denied != nil {
+	if h.requiresQueueIdentity() && req.SessionIncarnationID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, and session_incarnation_id are required", nil)
+	}
+	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
 	if req.Content == "" && len(req.Attachments) == 0 {
@@ -241,12 +326,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	queued, err := h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status := h.queueService.GetStatus(ctx, req.SessionID)
-			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full",
-				map[string]interface{}{
-					fieldQueueSize: status.Count,
-					fieldMax:       status.Max,
-				})
+			return h.queueFullResponse(ctx, msg, messagequeue.QueueSessionIdentity{
+				TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+			})
 		}
 		if errors.Is(err, messagequeue.ErrTaskInactive) {
 			// The task was archived or deleted between the caller's
@@ -264,7 +346,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	h.publishStatus(ctx, req.SessionID, queued)
+	h.publishStatusForIdentity(ctx, messagequeue.QueueSessionIdentity{TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID}, queued)
 	return ws.NewResponse(msg.ID, msg.Action, queued)
 }
 
@@ -274,243 +356,118 @@ var (
 )
 
 func (h *QueueHandlers) admitQueuedMessage(ctx context.Context, req *wsQueueMessageRequest, queuedBy string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
-	if h.attachmentClaimer == nil || len(req.Attachments) == 0 {
-		return h.queueService.QueueMessageWithMetadata(
+	if !h.requiresQueueIdentity() {
+		if h.attachmentClaimer == nil || len(req.Attachments) == 0 {
+			return h.queueService.QueueMessageWithMetadata(
+				ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+			)
+		}
+		return h.queueService.QueueMessageWithMetadataAfterInsert(
 			ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+			h.claimQueuedAttachmentsAfterInsert(req),
 		)
 	}
-	return h.queueService.QueueMessageWithMetadataAfterInsert(
-		ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
-		func(admittedCtx context.Context, source *messagequeue.QueuedMessage) error {
-			claimErr := h.attachmentClaimer.ClaimMessageAttachments(
-				admittedCtx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments),
-			)
-			if claimErr == nil {
-				return nil
-			}
-			if rollbackErr := h.rollbackQueuedAttachmentClaim(admittedCtx, req.SessionID, source.ID); rollbackErr != nil {
-				h.logger.Error("failed to roll back queued attachment", zap.Error(rollbackErr))
-				return fmt.Errorf("%w: %v", errQueuedAttachmentRollback, rollbackErr)
-			}
-			return fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, claimErr)
-		},
+	admissions, ok := h.queueService.(QueueIdentityAdmissionService)
+	if !ok {
+		return nil, errors.New("identity-bound queue admission is unavailable")
+	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+	}
+	if h.attachmentClaimer == nil || len(req.Attachments) == 0 {
+		return admissions.QueueMessageWithMetadataForSession(
+			ctx, identity, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+		)
+	}
+	if preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer); ok {
+		claim, err := preparer.PrepareQueueAttachmentClaim(ctx, req.TaskID, queueAttachmentsToV1(req.Attachments))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
+		}
+		atomicAdmissions, ok := h.queueService.(QueueIdentityAttachmentAdmissionService)
+		if !ok {
+			return nil, errors.New("transactional attachment admission is unavailable")
+		}
+		return atomicAdmissions.QueueMessageWithMetadataForSessionWithClaim(
+			ctx, identity, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata, claim,
+		)
+	}
+	return admissions.QueueMessageWithMetadataForSessionAfterInsert(
+		ctx, identity, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+		h.claimQueuedAttachmentsAfterInsert(req),
 	)
 }
 
-type wsCancelAllRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-// wsCancelAll handles ActionMessageQueueCancel, clearing every pending entry for a session.
-func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsCancelAllRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-
-	removed, err := h.queueService.CancelAll(ctx, req.SessionID)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		fieldSessionID: req.SessionID,
-		"removed":      removed,
-	})
-}
-
-type wsDrainQueueRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-// wsDrainQueue handles ActionMessageQueueDrain, dispatching one queued entry when the session is promptable.
-func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDrainQueueRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if h.queueDrainer == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
-	}
-
-	drained, err := h.queueDrainer.DrainQueuedMessage(ctx, req.SessionID)
-	if err != nil {
-		switch {
-		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
-		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
-		default:
-			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
+func (h *QueueHandlers) claimQueuedAttachmentsAfterInsert(req *wsQueueMessageRequest) func(context.Context, *messagequeue.QueuedMessage) error {
+	return func(admittedCtx context.Context, source *messagequeue.QueuedMessage) error {
+		claimErr := h.attachmentClaimer.ClaimMessageAttachments(
+			admittedCtx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments),
+		)
+		if claimErr == nil {
+			return nil
 		}
+		if rollbackErr := h.rollbackQueuedAttachmentClaim(admittedCtx, req.SessionID, source.ID); rollbackErr != nil {
+			h.logger.Error("failed to roll back queued attachment", zap.Error(rollbackErr))
+			return fmt.Errorf("%w: %v", errQueuedAttachmentRollback, rollbackErr)
+		}
+		return fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, claimErr)
 	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		fieldSessionID: req.SessionID,
-		"drained":      drained,
-	})
-}
-
-type wsSetAutoRunRequest struct {
-	SessionID string `json:"session_id"`
-	Enabled   *bool  `json:"enabled"`
-}
-
-// wsSetAutoRun persists automatic queue processing and optionally starts the
-// promptable FIFO head when enabling it.
-func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsSetAutoRunRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if req.Enabled == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "enabled is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if h.queueAutoRun == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue Auto-run is unavailable", nil)
-	}
-	autoRun, dispatched, err := h.queueAutoRun.SetQueueAutoRun(ctx, req.SessionID, *req.Enabled)
-	if err != nil {
-		h.logger.Error("failed to set queue Auto-run", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set queue Auto-run", nil)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		fieldSessionID: req.SessionID,
-		"auto_run":     autoRun,
-		"dispatched":   dispatched,
-	})
-}
-
-type wsSendNowRequest struct {
-	SessionID string `json:"session_id"`
-	Scope     string `json:"scope"`
-	EntryID   string `json:"entry_id,omitempty"`
-}
-
-// wsSendNow handles ActionMessageQueueSendNow, interrupting the active turn with an exact queue selection.
-func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsSendNowRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if validation := validateSendNowRequest(req); validation != "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
-	}
-	if h.queueDispatcher == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue send-now is unavailable", nil)
-	}
-
-	sentCount, err := h.queueDispatcher.SendQueuedNow(ctx, req.SessionID, req.Scope, req.EntryID)
-	if err != nil {
-		return h.sendNowErrorResponse(msg, req.SessionID, err)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		fieldSessionID: req.SessionID,
-		"dispatched":   true,
-		"sent_count":   sentCount,
-	})
-}
-
-// validateSendNowRequest validates the send-now scope and entry id combination.
-func validateSendNowRequest(req wsSendNowRequest) string {
-	switch {
-	case req.Scope != orchestrator.QueueSendNowScopeEntry && req.Scope != orchestrator.QueueSendNowScopeAll:
-		return "scope must be entry or all"
-	case req.Scope == orchestrator.QueueSendNowScopeEntry && req.EntryID == "":
-		return "entry_id is required for entry scope"
-	case req.Scope == orchestrator.QueueSendNowScopeAll && req.EntryID != "":
-		return "entry_id is not allowed for all scope"
-	default:
-		return ""
-	}
-}
-
-// sendNowErrorResponse maps send-now failures to their stable websocket error codes.
-func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, err error) (*ws.Message, error) {
-	switch {
-	case errors.Is(err, orchestrator.ErrSendNowEntryNotFound):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
-	case errors.Is(err, orchestrator.ErrSendNowQueueEmpty):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueEmpty, "Queue is empty", nil)
-	case errors.Is(err, orchestrator.ErrSendNowQueueChanged):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueChanged, "Queue changed before Send Now could start", nil)
-	case errors.Is(err, orchestrator.ErrSendNowConflict):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowConflict, "Another cancellation or Send Now operation is in progress", nil)
-	case errors.Is(err, orchestrator.ErrSendNowTurnChanged):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowTurnChanged, "The active turn changed before Send Now could start", nil)
-	case errors.Is(err, messagequeue.ErrSendNowAttachmentOverflow):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowAttachmentOverflow, "Combined attachments exceed the message limits", nil)
-	case errors.Is(err, messagequeue.ErrSendNowReferenceOverflow):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowReferenceOverflow, "Combined entity references exceed the message limit", nil)
-	case errors.Is(err, orchestrator.ErrSessionNotPromptable):
-		return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
-	default:
-		h.logger.Error("failed to send queued message now", zap.String(fieldSessionID, sessionID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to send queued message now", nil)
-	}
-}
-
-type wsGetQueueStatusRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-// wsGetQueueStatus handles ActionMessageQueueGet, returning the pending list and capacity.
-func (h *QueueHandlers) wsGetQueueStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetQueueStatusRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-
-	status := h.queueService.GetStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, status)
 }
 
 type wsUpdateMessageRequest struct {
-	SessionID        string                           `json:"session_id"`
-	EntryID          string                           `json:"entry_id"`
-	Content          string                           `json:"content"`
-	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
-	UserID           string                           `json:"user_id,omitempty"`
+	SessionID            string                           `json:"session_id"`
+	TaskID               string                           `json:"task_id"`
+	SessionIncarnationID string                           `json:"session_incarnation_id"`
+	EntryID              string                           `json:"entry_id"`
+	Content              string                           `json:"content"`
+	Attachments          []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	EntityReferences     []v1.EntityReference             `json:"entity_references,omitempty"`
+	UserID               string                           `json:"user_id,omitempty"`
+}
+
+// updateQueuedMessage selects the identity-bound mutation and optional atomic attachment claim.
+func (h *QueueHandlers) updateQueuedMessage(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	req wsUpdateMessageRequest,
+	metadataUpdates map[string]interface{},
+	queuedBy string,
+	atomicClaim *messagequeue.QueueAttachmentClaim,
+) error {
+	if !h.requiresQueueIdentity() {
+		return h.queueService.UpdateMessageWithMetadata(
+			ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy,
+		)
+	}
+	if atomicClaim == nil {
+		return h.queueService.(QueueIdentityMutationService).UpdateMessageWithMetadataForSession(
+			ctx, identity, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy,
+		)
+	}
+	atomicMutations, ok := h.queueService.(QueueIdentityAttachmentMutationService)
+	if !ok {
+		return errors.New("transactional attachment update is unavailable")
+	}
+	return atomicMutations.UpdateMessageWithMetadataForSessionWithClaim(
+		ctx, identity, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy, *atomicClaim,
+	)
+}
+
+func (h *QueueHandlers) releaseFailedQueueAttachmentClaims(
+	ctx context.Context,
+	releaser QueueAttachmentReleaser,
+	previous *messagequeue.QueuedMessage,
+	sessionID string,
+	attachments []messagequeue.MessageAttachment,
+) {
+	if releaser == nil || previous == nil {
+		return
+	}
+	if err := releaser.ReleaseMessageAttachments(
+		ctx, previous.TaskID, sessionID, queueAttachmentsToV1(attachments),
+	); err != nil {
+		h.logger.Warn("failed to release attachments after queue update failure", zap.Error(err))
+	}
 }
 
 // wsUpdateMessage handles ActionMessageQueueUpdate, replacing a queued entry's content.
@@ -520,11 +477,12 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.SessionID == "" {
-		// Required so publishStatus can broadcast the post-update list to other
-		// connected clients; without it they'd be left with a stale view.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+	if h.requiresQueueIdentity() && (req.TaskID == "" || req.SessionIncarnationID == "") {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, and session_incarnation_id are required", nil)
+	}
+	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
 	if req.EntryID == "" {
@@ -571,34 +529,57 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		}
 		metadataUpdates = map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
 	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+	}
 	var previous *messagequeue.QueuedMessage
 	var releaseClaims QueueAttachmentReleaser
 	var newlyAdded []messagequeue.MessageAttachment
+	var atomicClaim *messagequeue.QueueAttachmentClaim
 	if h.attachmentClaimer != nil {
 		var err error
-		previous, err = h.queueService.GetEntry(ctx, req.SessionID, req.EntryID)
+		if h.requiresQueueIdentity() {
+			entryService, ok := h.queueService.(QueueIdentityEntryService)
+			if !ok {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Identity-bound queue lookup is unavailable", nil)
+			}
+			previous, err = entryService.GetEntryForSession(ctx, identity, req.EntryID)
+		} else {
+			previous, err = h.queueService.GetEntry(ctx, req.SessionID, req.EntryID)
+		}
 		if err != nil {
 			if errors.Is(err, messagequeue.ErrEntryNotFound) {
 				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 			}
+			if isQueueIdentityError(err) {
+				return queueAccessDeniedResponse(msg), nil
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		newlyAdded = newlyAddedQueueAttachments(previous.Attachments, req.Attachments)
-		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); err != nil {
+		if preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer); ok && h.requiresQueueIdentity() {
+			prepared, prepareErr := preparer.PrepareQueueAttachmentClaim(ctx, previous.TaskID, queueAttachmentsToV1(newlyAdded))
+			if prepareErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
+			}
+			atomicClaim = &prepared
+		} else if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
 		releaseClaims, _ = h.attachmentClaimer.(QueueAttachmentReleaser)
 	}
-	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
-		if releaseClaims != nil && previous != nil {
-			if releaseErr := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); releaseErr != nil {
-				h.logger.Warn("failed to release attachments after queue update failure", zap.Error(releaseErr))
-			}
+	updateErr := h.updateQueuedMessage(ctx, identity, req, metadataUpdates, queuedBy, atomicClaim)
+	if updateErr != nil {
+		if atomicClaim == nil {
+			h.releaseFailedQueueAttachmentClaims(ctx, releaseClaims, previous, req.SessionID, newlyAdded)
 		}
-		if errors.Is(err, messagequeue.ErrEntryNotFound) {
+		if errors.Is(updateErr, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		if isQueueIdentityError(updateErr) {
+			return queueAccessDeniedResponse(msg), nil
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, updateErr.Error(), nil)
 	}
 	if releaseClaims != nil && previous != nil {
 		if superseded := supersededQueueAttachments(previous.Attachments, req.Attachments); len(superseded) > 0 {
@@ -607,7 +588,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 			}
 		}
 	}
-	h.publishStatus(ctx, req.SessionID)
+	h.publishStatusForIdentity(ctx, identity)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
@@ -755,150 +736,14 @@ func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.Mes
 	return converted
 }
 
-type wsRemoveEntryRequest struct {
-	SessionID string `json:"session_id"`
-	EntryID   string `json:"entry_id"`
-}
-
-// wsRemoveEntry handles ActionMessageQueueRemove, deleting a single queued entry.
-func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsRemoveEntryRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		// Required so publishStatus can broadcast the post-removal list.
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if req.EntryID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
-	}
-
-	if err := h.queueService.RemoveEntry(ctx, req.SessionID, req.EntryID); err != nil {
-		if errors.Is(err, messagequeue.ErrEntryNotFound) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
-}
-
-// wsMergeIntoAboveRequest is the payload for ActionMessageQueueMerge: the
-// session whose queue is modified and the id of the entry to fold into the
-// entry directly above it. user_id is forwarded for ownership checks and is
-// optional (the server defaults to the reserved "user" identity).
-type wsMergeIntoAboveRequest struct {
-	SessionID string `json:"session_id"`
-	EntryID   string `json:"entry_id"`
-	UserID    string `json:"user_id,omitempty"`
-}
-
-// wsMergeIntoAbove handles ActionMessageQueueMerge, folding the referenced
-// queued entry into the entry above it and broadcasting the updated queue.
-func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsMergeIntoAboveRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		// Required so publishStatus can broadcast the post-merge list.
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if req.EntryID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
-	}
-	if messagequeue.IsReservedQueuedBy(req.UserID) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
-	}
-	// Default empty user_id to QueuedByUser so the merge ownership guard runs
-	// against a non-empty owner, mirroring wsUpdateMessage.
-	queuedBy := req.UserID
-	if queuedBy == "" {
-		queuedBy = messagequeue.QueuedByUser
-	}
-
-	merged, err := h.queueService.MergeIntoAbove(ctx, req.SessionID, req.EntryID, queuedBy)
-	if err != nil {
-		if errors.Is(err, messagequeue.ErrEntryNotFound) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
-		}
-		if errors.Is(err, messagequeue.ErrNoMergeTarget) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "No mergeable message above this entry", nil)
-		}
-		if errors.Is(err, messagequeue.ErrMergeReferenceOverflow) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeReferenceOverflow, err.Error(), nil)
-		}
-		if errors.Is(err, messagequeue.ErrMergeDisabled) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeDisabled, "Message merging is disabled", nil)
-		}
-		h.logger.Error("failed to merge queued message", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: merged.ID})
-}
-
-// wsReorderRequest is the payload for ActionMessageQueueReorder: the session
-// whose queue is modified and the complete ordered list of visible pending
-// entry ids the caller wants as the new FIFO order.
-type wsReorderRequest struct {
-	SessionID  string   `json:"session_id"`
-	OrderedIDs []string `json:"ordered_ids"`
-}
-
-// wsReorder handles ActionMessageQueueReorder, rewriting the session's visible
-// pending order to match ordered_ids and broadcasting the updated queue. Any
-// drift from the persisted visible set (a drain/remove/merge raced the drag)
-// is rejected atomically with queue_changed so the client refetches.
-func (h *QueueHandlers) wsReorder(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsReorderRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
-		return denied, nil
-	}
-	if len(req.OrderedIDs) == 0 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "ordered_ids is required", nil)
-	}
-	if hasDuplicateIDs(req.OrderedIDs) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "ordered_ids must not contain duplicates", nil)
-	}
-
-	if err := h.queueService.ReorderEntries(ctx, req.SessionID, req.OrderedIDs); err != nil {
-		if errors.Is(err, messagequeue.ErrQueueChanged) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeQueueChanged, "Queue changed before the reorder could be applied", nil)
-		}
-		h.logger.Error("failed to reorder queued messages", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder queued messages", nil)
-	}
-
-	h.publishStatus(ctx, req.SessionID)
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		fieldSessionID: req.SessionID,
-		"reordered":    len(req.OrderedIDs),
-	})
-}
-
 type wsAppendToQueueRequest struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Content   string `json:"content"`
-	Model     string `json:"model,omitempty"`
-	PlanMode  bool   `json:"plan_mode,omitempty"`
-	UserID    string `json:"user_id,omitempty"`
+	SessionID            string `json:"session_id"`
+	TaskID               string `json:"task_id"`
+	SessionIncarnationID string `json:"session_incarnation_id"`
+	Content              string `json:"content"`
+	Model                string `json:"model,omitempty"`
+	PlanMode             bool   `json:"plan_mode,omitempty"`
+	UserID               string `json:"user_id,omitempty"`
 }
 
 // wsAppendToQueue handles ActionMessageQueueAppend, appending or inserting a user message.
@@ -914,7 +759,10 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if denied := h.authorizeTaskSession(ctx, msg, req.TaskID, req.SessionID); denied != nil {
+	if h.requiresQueueIdentity() && req.SessionIncarnationID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, and session_incarnation_id are required", nil)
+	}
+	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
 	if req.Content == "" {
@@ -928,25 +776,63 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	queued, appended, err := h.queueService.AppendContent(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, nil)
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+	}
+	var queued *messagequeue.QueuedMessage
+	var appended bool
+	var err error
+	if h.requiresQueueIdentity() {
+		queued, appended, err = h.queueService.(QueueIdentityMutationService).AppendContentForSession(ctx, identity, req.Content, req.Model, queuedBy, req.PlanMode, nil)
+	} else {
+		queued, appended, err = h.queueService.AppendContent(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, nil)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status := h.queueService.GetStatus(ctx, req.SessionID)
-			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full",
-				map[string]interface{}{
-					fieldQueueSize: status.Count,
-					fieldMax:       status.Max,
-				})
+			return h.queueFullResponse(ctx, msg, identity)
+		}
+		if isQueueIdentityError(err) {
+			return queueAccessDeniedResponse(msg), nil
 		}
 		h.logger.Error("failed to append to queue", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	h.publishStatus(ctx, req.SessionID)
+	h.publishStatusForIdentity(ctx, identity)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		fieldEntryID: queued.ID,
 		"was_append": appended,
 	})
+}
+
+func (h *QueueHandlers) queueFullResponse(
+	ctx context.Context,
+	msg *ws.Message,
+	identity messagequeue.QueueSessionIdentity,
+) (*ws.Message, error) {
+	if !h.requiresQueueIdentity() {
+		return queueFullErrorResponse(msg, h.queueService.GetStatus(ctx, identity.SessionID))
+	}
+	snapshots, ok := h.queueService.(QueueSnapshotService)
+	if !ok {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue status is unavailable", nil)
+	}
+	status, err := snapshots.Snapshot(ctx, identity)
+	if err == nil {
+		return queueFullErrorResponse(msg, status)
+	}
+	if isQueueIdentityError(err) {
+		return queueAccessDeniedResponse(msg), nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to read queue status", nil)
+}
+
+func queueFullErrorResponse(msg *ws.Message, status *messagequeue.QueueStatus) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full",
+		map[string]interface{}{
+			fieldQueueSize: status.Count,
+			fieldMax:       status.Max,
+		})
 }
 
 // hasDuplicateIDs reports whether ids contains any id more than once.
@@ -994,44 +880,34 @@ func (h *QueueHandlers) authorizeTaskSession(
 	}
 	return nil
 }
+func (h *QueueHandlers) requiresQueueIdentity() bool {
+	_, ok := h.accessAuthorizer.(QueueSessionIdentityAuthorizer)
+	return ok
+}
+
+func (h *QueueHandlers) authorizeQueueIdentity(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID, sessionID, incarnationID string,
+) *ws.Message {
+	if taskID == "" {
+		return h.authorizeSession(ctx, msg, sessionID)
+	}
+	if incarnationID == "" {
+		return h.authorizeTaskSession(ctx, msg, taskID, sessionID)
+	}
+	authorizer, ok := h.accessAuthorizer.(QueueSessionIdentityAuthorizer)
+	if !ok {
+		return h.authorizeTaskSession(ctx, msg, taskID, sessionID)
+	}
+	if err := authorizer.AuthorizeTaskSessionIncarnationAccess(ctx, taskID, sessionID, incarnationID); err != nil {
+		return queueAccessDeniedResponse(msg)
+	}
+	return nil
+}
 
 // queueAccessDeniedResponse builds the non-enumerating session-not-found error response.
 func queueAccessDeniedResponse(msg *ws.Message) *ws.Message {
 	response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, queueAccessDenied, nil)
 	return response
-}
-
-// publishStatus emits the latest QueueStatus on the event bus so the frontend
-// updates its store after every mutation.
-func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string, admitted ...*messagequeue.QueuedMessage) {
-	if h.eventBus == nil {
-		return
-	}
-	status := h.queueService.GetStatus(ctx, sessionID)
-	eventData := map[string]interface{}{
-		fieldSessionID:  sessionID,
-		"entries":       status.Entries,
-		"count":         status.Count,
-		fieldMax:        status.Max,
-		"auto_run":      status.AutoRun,
-		"merge_enabled": status.MergeEnabled,
-	}
-	if len(admitted) > 0 && admitted[0] != nil && admitted[0].QueuedBy != "" && !messagequeue.IsReservedQueuedBy(admitted[0].QueuedBy) {
-		eventData["queued_by"] = admitted[0].QueuedBy
-		eventData["queued_at"] = admitted[0].QueuedAt
-	}
-	if h.sessionTaskResolver != nil {
-		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {
-			h.logger.Warn("resolve session task for queue status event",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		} else if taskID != "" {
-			eventData["task_id"] = taskID
-		}
-	}
-	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
-		events.MessageQueueStatusChanged,
-		"queue-handlers",
-		eventData,
-	))
 }

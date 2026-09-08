@@ -554,6 +554,8 @@ export type TaskSessionWorktree = {
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
+  /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
+  queue_incarnation_id?: string;
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;

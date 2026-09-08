@@ -168,7 +168,9 @@ var registrations = []runtimeFlagRegistration{
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
-				"Pre-existing duplicate (task_id, agent_profile_id) rows stay safe by selection, not migration. Disabling this toggle and restarting reverts to runner-seat binding.",
+				"A live (task_id, agent_profile_id) pair is guarded in-transaction on the office session creation path, not by a table-level constraint; pre-existing duplicate rows are deliberately retained and resolved by selection rather than repaired. " +
+				"The guard relies on SQLite's process-local single-writer pool or PostgreSQL's database task-row lock. Two Kandev processes must not write the same SQLite file. " +
+				"Disabling this toggle and restarting reverts to runner-seat binding and task-active-session decision re-evaluation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

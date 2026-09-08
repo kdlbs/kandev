@@ -54,6 +54,12 @@ import type {
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
 
+export type QueueSessionIdentityInput = {
+  taskId: string;
+  sessionId: string;
+  sessionIncarnationId: string;
+};
+
 // --- GitHub Mock Types ---
 
 export type MockPR = {
@@ -2357,6 +2363,7 @@ export class ApiClient {
     sessions: Array<{
       id: string;
       task_id: string;
+      queue_incarnation_id: string;
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
@@ -2376,6 +2383,22 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async getQueueSessionIdentity(
+    taskId: string,
+    sessionId: string,
+  ): Promise<QueueSessionIdentityInput> {
+    const { sessions } = await this.listTaskSessions(taskId);
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (!session?.queue_incarnation_id) {
+      throw new Error(`Queue identity is unavailable for session ${sessionId}`);
+    }
+    return {
+      taskId,
+      sessionId,
+      sessionIncarnationId: session.queue_incarnation_id,
+    };
   }
 
   /**
@@ -2720,34 +2743,46 @@ export class ApiClient {
   }
 
   async queueMessage(
-    taskId: string,
-    sessionId: string,
+    identity: QueueSessionIdentityInput,
     content: string,
     attachments?: MessageAttachmentInput[],
   ): Promise<void> {
     await this.wsRequest("message.queue.add", {
-      task_id: taskId,
-      session_id: sessionId,
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
       content,
       attachments,
     });
   }
 
-  /** Removes every pending queued message for a session (message.queue.cancel). */
-  async clearQueue(sessionId: string): Promise<void> {
-    await this.wsRequest("message.queue.cancel", { session_id: sessionId });
+  /** Removes every pending queued message for an immutable session identity. */
+  async clearQueue(identity: QueueSessionIdentityInput): Promise<void> {
+    await this.wsRequest("message.queue.cancel", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+    });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
-    return this.wsRequest("message.queue.get", { session_id: sessionId });
+  async getQueueStatus(
+    identity: QueueSessionIdentityInput,
+  ): Promise<{ count: number; auto_run: boolean; auto_merge_enabled: boolean }> {
+    return this.wsRequest("message.queue.get", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+    });
   }
 
   async setQueueAutoRun(
-    sessionId: string,
+    identity: QueueSessionIdentityInput,
     enabled: boolean,
   ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
     return this.wsRequest("message.queue.auto_run.set", {
-      session_id: sessionId,
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
       enabled,
     });
   }

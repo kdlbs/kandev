@@ -186,6 +186,63 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	}
 }
 
+func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
+	if err != nil {
+		t.Fatalf("resolve queue identity: %v", err)
+	}
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+	source, err := svc.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, "old prompt", "", messagequeue.QueuedByUser, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue old prompt: %v", err)
+	}
+	claim, err := svc.messageQueue.ClaimSendNowForSession(
+		ctx,
+		identity,
+		[]messagequeue.QueuedMessage{*source},
+	)
+	if err != nil {
+		t.Fatalf("claim old prompt: %v", err)
+	}
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, claim.Dispatch.ID, nil)
+	reservation.liveEligible.Store(true)
+
+	if _, err := repo.DB().ExecContext(
+		ctx,
+		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+		"replacement-incarnation",
+		session.ID,
+	); err != nil {
+		t.Fatalf("replace session incarnation: %v", err)
+	}
+	svc.executeSendNowClaimWithContext(ctx, claim, reservation)
+
+	if got := len(agentMgr.capturedPrompts); got != 0 {
+		t.Fatalf("replacement session prompts = %d, want 0", got)
+	}
+	if got := len(messageCreator.userMessages); got != 0 {
+		t.Fatalf("replacement user messages = %d, want 0", got)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, identity.SessionID).Count; got != 0 {
+		t.Fatalf("old claim restored into replacement queue: count=%d", got)
+	}
+}
+
 func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

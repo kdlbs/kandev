@@ -24,6 +24,12 @@ func newAttachmentTestService(t *testing.T) (*AttachmentService, *sqliterepo.Rep
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "ws-att", Name: "attachments"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	if err := repo.CreateTask(context.Background(), &models.Task{ID: "task-1", WorkspaceID: "ws-att", Title: "task one"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTask(context.Background(), &models.Task{ID: "task-2", WorkspaceID: "ws-att", Title: "task two"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
 	root := t.TempDir()
 	auth := &recordingWorkspaceAuthorizer{}
 	svc, err := NewAttachmentService(repo, root, auth.authorize, accessTestLogger(t))

@@ -190,7 +190,7 @@ func TestWorkflowAutoStartPromptClaimRejectsSessionTerminalizedAfterPromotion(t 
 	errCh := make(chan error, 1)
 	go func() {
 		_, _, _, _, _, claimErr := svc.claimSessionRunningForPrompt(
-			ctx, session.TaskID, session.ID, "", false, nil, nil, "", true,
+			ctx, session.TaskID, session.ID, "", false, nil, nil, "", true, nil,
 		)
 		errCh <- claimErr
 	}()
@@ -227,7 +227,7 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 		allowClaim:           make(chan struct{}),
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
-	queue := messagequeue.NewServiceMemory(testLogger())
+	queue := newAuthoritativeMemoryQueue(repo, testLogger())
 	if _, err := queue.QueueMessage(ctx, session.ID, session.TaskID, "handoff", "", messagequeue.QueuedByUser, true, nil); err != nil {
 		t.Fatalf("queue handoff: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenPostClaimReloadFails(t *testin
 		err:                  reloadErr,
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
-	queue := messagequeue.NewServiceMemory(testLogger())
+	queue := newAuthoritativeMemoryQueue(repo, testLogger())
 	if _, err := queue.QueueMessage(ctx, session.ID, session.TaskID, "handoff", "", messagequeue.QueuedByUser, true, nil); err != nil {
 		t.Fatalf("queue handoff: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 		allowReload:          make(chan struct{}),
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
-	queue := messagequeue.NewServiceMemory(testLogger())
+	queue := newAuthoritativeMemoryQueue(repo, testLogger())
 	if _, err := queue.QueueMessage(ctx, session.ID, session.TaskID, "handoff", "", messagequeue.QueuedByUser, true, nil); err != nil {
 		t.Fatalf("queue handoff: %v", err)
 	}

@@ -909,7 +909,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1023,7 +1023,7 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 		taskEvents:         publisher,
@@ -1112,7 +1112,7 @@ func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBefore
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	svc := &Service{
 		logger: log, workflowStepGetter: newMockStepGetter(), taskRepo: taskRepo, agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		messageQueue: newAuthoritativeMemoryQueue(repo, log), executor: exec,
 		scheduler: scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{}),
 	}
 	barrierRepo := &terminalizeCandidateBeforePromotionRepo{
@@ -1243,7 +1243,7 @@ func TestSwitchSessionForStep_CompletedSessionNotReused(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1406,7 +1406,7 @@ func TestSwitchSessionForStep_FailedSessionNotReused(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1520,7 +1520,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			workflowStepGetter: sg,
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1799,7 +1799,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			workflowStepGetter: sg,
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1876,7 +1876,7 @@ func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}

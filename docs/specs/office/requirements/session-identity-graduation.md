@@ -23,8 +23,8 @@ unconditional, then retires the identity.
 Office owns this contract because it owns the notion that a `(task, agent)` pair
 names one durable conversation. The platform owns the toggle machinery
 (`REQ-PLATFORM-FEATURE-TOGGLES-001`); the task system owns `task_sessions` and
-every non-Office creation path. This document changes neither, but narrows one
-tasks-owned re-evaluation rule; see *Supersession*.
+every non-Office creation path. This document changes neither, and it references
+the Tasks-owned re-evaluation rule below.
 
 ## Terminology
 

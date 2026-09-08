@@ -46,9 +46,11 @@ var (
 // at its original position and every durable lifecycle row can be acknowledged
 // only after the replacement prompt is accepted.
 type SendNowClaim struct {
-	Sources           []QueuedMessage  `json:"sources"`
-	Dispatch          QueuedMessage    `json:"dispatch"`
-	SourceGenerations map[string]int64 `json:"source_generations,omitempty"`
+	Identity            QueueSessionIdentity `json:"identity"`
+	OperationGeneration int64                `json:"operation_generation"`
+	Sources             []QueuedMessage      `json:"sources"`
+	Dispatch            QueuedMessage        `json:"dispatch"`
+	SourceGenerations   map[string]int64     `json:"source_generations,omitempty"`
 }
 
 func sendNowSourceGenerationChanged(claim *SendNowClaim, source QueuedMessage, current int64) bool {
@@ -125,6 +127,22 @@ func validateSendNowSnapshot(selected []*QueuedMessage, expected []QueuedMessage
 		}
 	}
 	return nil
+}
+
+func bindSendNowLifecycleReservations(
+	sources []QueuedMessage,
+	identity QueueSessionIdentity,
+) {
+	if identity.SessionIncarnationID == "" {
+		return
+	}
+	for index := range sources {
+		if !sources[index].IsDurableLifecycle() {
+			continue
+		}
+		sources[index].reservedLifecycleDelivery = true
+		sources[index].reservationIdentity = identity
+	}
 }
 
 // BuildSendNowEnvelope validates and combines an exact, FIFO-ordered source

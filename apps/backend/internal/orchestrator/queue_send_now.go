@@ -37,6 +37,15 @@ var (
 // shared cancellation coordinator, then the exact claim is handed to one
 // replacement prompt. The explicit Cancel path is deliberately not involved.
 func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error) {
+	return s.sendQueuedNow(ctx, nil, sessionID, scope, entryID)
+}
+
+// SendQueuedNowForSession dispatches the selection only for the exact session incarnation.
+func (s *Service) SendQueuedNowForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, scope, entryID string) (int, error) {
+	return s.sendQueuedNow(ctx, &identity, identity.SessionID, scope, entryID)
+}
+
+func (s *Service) sendQueuedNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope, entryID string) (int, error) {
 	// Dispatching a queued prompt puts an agent to work: session.prompt.
 	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 		return 0, err
@@ -52,7 +61,7 @@ func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID s
 	if err != nil {
 		return 0, err
 	}
-	return s.sendQueuedNowAfterCapture(ctx, sessionID, scope, entryID, turnBefore)
+	return s.sendQueuedNowAfterCapture(ctx, identity, sessionID, scope, entryID, turnBefore)
 }
 
 type sendNowGuard struct {
@@ -90,6 +99,7 @@ func (guard *sendNowGuard) close() {
 
 func (s *Service) sendQueuedNowAfterCapture(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, scope, entryID, turnBefore string,
 ) (int, error) {
 	guard := newSendNowGuard(s, sessionID)
@@ -105,12 +115,13 @@ func (s *Service) sendQueuedNowAfterCapture(
 		return 0, err
 	}
 
-	taskID, sessionState, entries, err := s.loadSendNowSelection(ctx, sessionID, scope, entryID)
+	taskID, sessionState, entries, err := s.loadSendNowSelection(ctx, identity, sessionID, scope, entryID)
 	if err != nil {
 		return 0, err
 	}
 	return s.dispatchSendNowSelection(
 		ctx,
+		identity,
 		sessionID,
 		taskID,
 		sessionState,
@@ -147,7 +158,7 @@ func (s *Service) restorePendingQueuedDispatchForSendNow(ctx context.Context, se
 			zap.String("queue_id", reservation.source.ID),
 			zap.Error(err),
 		)
-		s.publishQueueStatusEvent(ctx, sessionID)
+		s.publishQueueStatusEventForIdentity(ctx, reservation.identity)
 		return ErrSendNowQueueChanged
 	}
 	return s.supersedeQueuedDispatchForSendNow(sessionID, reservation)
@@ -158,6 +169,7 @@ func (s *Service) sendNowRestoreClaimForReservation(
 	reservation *queuedDispatchReservation,
 ) (*messagequeue.SendNowClaim, error) {
 	restore := &messagequeue.SendNowClaim{
+		Identity:          reservation.identity,
 		Sources:           []messagequeue.QueuedMessage{*reservation.source},
 		SourceGenerations: make(map[string]int64),
 	}
@@ -208,6 +220,7 @@ func (s *Service) verifySendNowTurn(ctx context.Context, sessionID, expectedTurn
 
 func (s *Service) loadSendNowSelection(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, scope, entryID string,
 ) (string, models.TaskSessionState, []messagequeue.QueuedMessage, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -217,7 +230,16 @@ func (s *Service) loadSendNowSelection(
 	if session == nil {
 		return "", "", nil, ErrSessionNotPromptable
 	}
-	entries, _, err := selectSendNowEntries(s.messageQueue.GetStatus(ctx, sessionID), scope, entryID)
+	var status *messagequeue.QueueStatus
+	if identity != nil {
+		status, err = s.messageQueue.Snapshot(ctx, *identity)
+		if err != nil {
+			return "", "", nil, err
+		}
+	} else {
+		status = s.messageQueue.GetStatus(ctx, sessionID)
+	}
+	entries, _, err := selectSendNowEntries(status, scope, entryID)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -229,6 +251,7 @@ func (s *Service) loadSendNowSelection(
 
 func (s *Service) dispatchSendNowSelection(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, taskID string,
 	sessionState models.TaskSessionState,
 	scope string,
@@ -238,7 +261,7 @@ func (s *Service) dispatchSendNowSelection(
 ) (int, error) {
 	promptabilityErr := s.checkSessionPromptable(taskID, sessionID, sessionState)
 	if promptabilityErr == nil {
-		dispatched, err := s.claimAndDispatchSendNow(ctx, sessionID, scope, entries)
+		dispatched, err := s.claimAndDispatchSendNow(ctx, identity, sessionID, scope, entries)
 		if err != nil {
 			return 0, err
 		}
@@ -258,7 +281,7 @@ func (s *Service) dispatchSendNowSelection(
 		unlockGuard,
 		relockGuard,
 		func(actionCtx context.Context) (bool, error) {
-			return s.claimAndDispatchSendNow(actionCtx, sessionID, scope, entries)
+			return s.claimAndDispatchSendNow(actionCtx, identity, sessionID, scope, entries)
 		},
 		cancellationKindQueueSendNow,
 		turnBefore,
@@ -292,13 +315,24 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 	return entries, entryIDs, nil
 }
 
-func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
-	claim, err := s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
+func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
+	var claim *messagequeue.SendNowClaim
+	var err error
+	if identity != nil {
+		claim, err = s.messageQueue.ClaimSendNowForSession(ctx, *identity, entries)
+	} else {
+		claim, err = s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
+	}
 	if err != nil {
 		return false, mapSendNowClaimError(scope, err)
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
-	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
+	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
+	var reservation *queuedDispatchReservation
+	if claim.Identity.SessionIncarnationID != "" {
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(claim.Identity, claim.Dispatch.ID, nil)
+	} else {
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
+	}
 	if reservation != nil {
 		reservation.liveEligible.Store(true)
 	}
@@ -308,7 +342,7 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope 
 				zap.String("session_id", sessionID), zap.Error(restoreErr))
 		}
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.publishQueueStatusEvent(context.Background(), sessionID)
+		s.publishQueueStatusEventForIdentity(context.Background(), claim.Identity)
 		return false, nil
 	}
 	return true, nil
@@ -408,7 +442,7 @@ func (s *Service) executeSendNowClaimWithContext(
 			s.logger.Error("failed to restore send-now queue claim",
 				zap.String("session_id", sessionID), zap.Error(err))
 		}
-		s.publishQueueStatusEvent(ctx, sessionID)
+		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	}
 	if s.isSessionResetInProgress(sessionID) {
 		restore()
@@ -420,6 +454,20 @@ func (s *Service) executeSendNowClaimWithContext(
 		restore()
 		return
 	}
+	if claim.Identity.SessionIncarnationID != "" {
+		current, err := s.messageQueue.ResolveSessionIdentity(
+			ctx,
+			claim.Identity.TaskID,
+			claim.Identity.SessionID,
+		)
+		if err != nil || current != claim.Identity {
+			s.logger.Info("discarding send-now dispatch for replaced session",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", claim.Identity.TaskID))
+			restore()
+			return
+		}
+	}
 	if err := s.promptSendNowClaim(ctx, claim); err != nil {
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))
@@ -429,10 +477,10 @@ func (s *Service) executeSendNowClaimWithContext(
 	if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
 		s.logger.Error("failed to acknowledge accepted send-now queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))
-		s.publishQueueStatusEvent(context.Background(), sessionID)
+		s.publishQueueStatusEventForIdentity(context.Background(), claim.Identity)
 		return
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
+	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 }
 
 func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
@@ -463,26 +511,30 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
 	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(claim.Dispatch.Metadata))
-	if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
-		s.logger.Warn("failed to record send-now user message before prompt",
-			zap.String("session_id", sessionID), zap.Error(err))
-	} else if s.messageCreator != nil {
-		for i := range claim.Sources {
-			markQueuedUserMessageRecorded(&claim.Sources[i])
-		}
-	}
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
-		// This transition is intentionally not rolled back if promptTask later
-		// rejects the replacement. The ordinary FIFO handoff uses the same
-		// ordering: workflow admission precedes executor prompt acceptance, and
-		// the restored claim is retried through the normal ready path.
-		if !turnStartAlreadyProcessed(claim.Dispatch.Metadata) {
-			s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
-		}
-	}
 
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
-		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{claimEntryID: claim.Dispatch.ID})
+		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{
+			claimEntryID: claim.Dispatch.ID,
+			afterClaim: func() error {
+				if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
+					return errLifecyclePromptReservationSuperseded
+				}
+				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+					s.logger.Warn("failed to record send-now user message after prompt claim",
+						zap.String("session_id", sessionID), zap.Error(err))
+				} else if s.messageCreator != nil {
+					for i := range claim.Sources {
+						markQueuedUserMessageRecorded(&claim.Sources[i])
+					}
+				}
+				if session, loadErr := s.repo.GetTaskSession(ctx, sessionID); loadErr == nil &&
+					s.queuedSessionMatchesIdentity(session, claim.Identity) &&
+					!turnStartAlreadyProcessed(claim.Dispatch.Metadata) {
+					s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
+				}
+				return nil
+			},
+		})
 	return err
 }
 

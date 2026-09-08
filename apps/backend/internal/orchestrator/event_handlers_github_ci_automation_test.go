@@ -2576,7 +2576,7 @@ func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeReco
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
+	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
 	svc.messageCreator = messageCreator
 	session, err := repo.GetTaskSession(ctx, "session-1")
