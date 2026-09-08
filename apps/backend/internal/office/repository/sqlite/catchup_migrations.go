@@ -47,6 +47,13 @@ func (r *Repository) migrateRoutineCatchUp() {
 	if r.log != nil {
 		r.log.Info("migration applied", zap.String("name", "office_routines.catch_up_policy_default_rebuild"))
 	}
+
+	// migrateRoutineDefaultPolicyRebuild above only ever fires on SQLite
+	// (its staleness probe queries sqlite_master/PRAGMA table_info, which
+	// don't exist on Postgres); this covers the same DEFAULT correction on
+	// Postgres, which needs no table rebuild — see
+	// migrateRoutineDefaultPolicyRebuildPostgres.
+	r.applyRoutineDefaultPolicyRebuildPostgres()
 }
 
 // routineTableExists returns true when office_routines is present. Mirrors
