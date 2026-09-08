@@ -246,7 +246,11 @@ type ApprovalRequester interface {
 
 // RunSpawner is the run queue dependency used by runtime actions.
 type RunSpawner interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	QueueRunWithActor(
+		ctx context.Context,
+		agentInstanceID, reason, payload, idempotencyKey string,
+		actorKind models.ActorKind, actorID string,
+	) error
 }
 
 // AgentModifier is the agent update dependency used by runtime actions.
@@ -557,7 +561,13 @@ type SpawnAgentRunInput struct {
 	IdempotencyKey string                 `json:"idempotency_key"`
 }
 
-// SpawnAgentRun queues a run for an agent in the same workspace.
+// SpawnAgentRun queues a run for an agent in the same workspace, attributed
+// to the invoking agent (runCtx.AgentID) as the actor
+// (AC-OFFICE-RUN-CAUSATION-001.15). This is always a genuine agent actor:
+// this method only runs inside an already-executing agent's own tool-call
+// session, so runCtx.AgentID is never empty or unverified. When the target
+// agent is the invoking agent itself, this is exactly the self-trigger case
+// REQ-OFFICE-LAUNCH-SAFETY-004's refusal gate exists to bound.
 func (a *Actions) SpawnAgentRun(
 	ctx context.Context,
 	runCtx RunContext,
@@ -584,7 +594,8 @@ func (a *Actions) SpawnAgentRun(
 	if err != nil {
 		return err
 	}
-	return a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), input.IdempotencyKey)
+	return a.deps.Runs.QueueRunWithActor(ctx, target.ID, input.Reason, string(payload),
+		input.IdempotencyKey, models.ActorKindAgent, runCtx.AgentID)
 }
 
 // ModifyAgentInput contains agent fields an authorized runtime may update.

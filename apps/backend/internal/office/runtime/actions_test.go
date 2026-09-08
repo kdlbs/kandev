@@ -987,6 +987,88 @@ func TestActionsSpawnAgentRunDeniesCrossWorkspaceTarget(t *testing.T) {
 	}
 }
 
+// TestActionsSpawnAgentRunThreadsInvokingAgentAsActor covers
+// AC-OFFICE-RUN-CAUSATION-001.15: SpawnAgentRun previously always called the
+// actor-blind QueueRun, so a run spawned by one agent for another was
+// silently attributed to the system actor even though the invoking agent's
+// identity (runCtx.AgentID) was already known. It must now reach
+// QueueRunWithActor as (ActorKindAgent, runCtx.AgentID).
+func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-2": {ID: "agent-2", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-2",
+		Reason:  "heartbeat",
+	})
+	if err != nil {
+		t.Fatalf("spawn agent run: %v", err)
+	}
+	if len(runs.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runs.calls))
+	}
+	call := runs.calls[0]
+	if call.AgentID != "agent-2" {
+		t.Errorf("agent_id = %q, want agent-2", call.AgentID)
+	}
+	if call.ActorKind != models.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", call.ActorKind, models.ActorKindAgent)
+	}
+	if call.ActorID != "agent-1" {
+		t.Errorf("actorID = %q, want agent-1 (the invoking agent)", call.ActorID)
+	}
+}
+
+// TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor pins the
+// self-trigger case: when an agent spawns a run for itself, the actor id
+// and the target agent id must be the same value, since that equality is
+// exactly what REQ-OFFICE-LAUNCH-SAFETY-004's self-trigger refusal gate
+// keys on downstream (runs/service.checkSelfTriggerAllowance).
+func TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  "self_check",
+	})
+	if err != nil {
+		t.Fatalf("spawn agent run: %v", err)
+	}
+	if len(runs.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runs.calls))
+	}
+	call := runs.calls[0]
+	if call.AgentID != call.ActorID {
+		t.Errorf("agent_id = %q, actorID = %q, want equal for a self-targeted spawn",
+			call.AgentID, call.ActorID)
+	}
+}
+
 func TestActionsModifyAgentUpdatesSameWorkspaceAgent(t *testing.T) {
 	name := "Runtime QA"
 	agents := &recordingAgentModifier{
@@ -1198,17 +1280,22 @@ type spawnRunCall struct {
 	Reason         string
 	Payload        string
 	IdempotencyKey string
+	ActorKind      models.ActorKind
+	ActorID        string
 }
 
-func (r *recordingRunSpawner) QueueRun(
+func (r *recordingRunSpawner) QueueRunWithActor(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
 ) error {
 	r.calls = append(r.calls, spawnRunCall{
 		AgentID:        agentInstanceID,
 		Reason:         reason,
 		Payload:        payload,
 		IdempotencyKey: idempotencyKey,
+		ActorKind:      actorKind,
+		ActorID:        actorID,
 	})
 	return nil
 }
