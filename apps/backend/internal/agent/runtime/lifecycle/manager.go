@@ -151,6 +151,9 @@ type Manager struct {
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
 	runningWriter ExecutorRunningWriter
+	// terminalPersistenceRetries keeps one durable-terminal-state retry per
+	// execution while a stopped runtime waits for its executor row to be updated.
+	terminalPersistenceRetries sync.Map
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env

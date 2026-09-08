@@ -1010,23 +1010,74 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// MCP operations revalidate this durable mirror in their transaction, so a
 	// stopped execution must never leave a live-looking attestation behind.
 	if err := m.persistStoppedExecutorRunning(context.WithoutCancel(ctx), execution); err != nil {
+		if errors.Is(err, models.ErrExecutionRotated) {
+			m.RemoveExecution(executionID)
+			return nil
+		}
+		m.scheduleStoppedExecutorPersistence(execution)
 		return fmt.Errorf("persist terminal status for execution %q: %w", executionID, err)
 	}
-
-	// End session trace span
-	execution.EndSessionSpan()
-
-	m.RemoveExecution(executionID)
-	m.clearRemoteStatus(execution.SessionID)
-
-	m.logger.Info("agent stopped and removed from tracking",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", execution.TaskID))
-
-	// Publish stopped event
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	m.finishStoppedExecution(ctx, execution)
 
 	return nil
+}
+
+const terminalPersistenceRetryDelay = 100 * time.Millisecond
+
+func (m *Manager) scheduleStoppedExecutorPersistence(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	if _, loaded := m.terminalPersistenceRetries.LoadOrStore(execution.ID, struct{}{}); loaded {
+		return
+	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer m.terminalPersistenceRetries.Delete(execution.ID)
+		for {
+			timer := time.NewTimer(terminalPersistenceRetryDelay)
+			select {
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+
+			execution.remoteInstanceLifecycleMu.Lock()
+			current, exists := m.executionStore.Get(execution.ID)
+			if !exists || current != execution {
+				execution.remoteInstanceLifecycleMu.Unlock()
+				return
+			}
+			err := m.persistStoppedExecutorRunning(context.Background(), execution)
+			execution.remoteInstanceLifecycleMu.Unlock()
+			if errors.Is(err, models.ErrExecutionRotated) {
+				m.RemoveExecution(execution.ID)
+				return
+			}
+			if err != nil {
+				m.logger.Warn("retrying terminal executor persistence",
+					zap.String("execution_id", execution.ID), zap.Error(err))
+				continue
+			}
+			m.finishStoppedExecution(context.Background(), execution)
+			return
+		}
+	}()
+}
+
+func (m *Manager) finishStoppedExecution(ctx context.Context, execution *AgentExecution) {
+	current, exists := m.executionStore.Get(execution.ID)
+	if !exists || current != execution {
+		return
+	}
+	execution.EndSessionSpan()
+	m.RemoveExecution(execution.ID)
+	m.clearRemoteStatus(execution.SessionID)
+	m.logger.Info("agent stopped and removed from tracking",
+		zap.String("execution_id", execution.ID), zap.String("task_id", execution.TaskID))
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 }
 
 func (m *Manager) stopExecutionAgentctl(

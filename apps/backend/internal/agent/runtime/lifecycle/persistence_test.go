@@ -43,6 +43,13 @@ func (w *captureExecutorRunningWriter) UpdateExecutorRunningStatus(_ context.Con
 	return w.statusErr
 }
 
+func (w *captureExecutorRunningWriter) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, _ string, _ string, status string,
+) error {
+	w.status = status
+	return w.statusErr
+}
+
 func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
 	w.deleteCalls++
 	return nil
@@ -188,6 +195,61 @@ func TestPersistStoppedExecutorRunningUsesNarrowStatusUpdate(t *testing.T) {
 	if writer.status != models.ExecutorRunningStatusStopped || writer.running != nil {
 		t.Fatalf("status=%q full-row=%#v, want narrow stopped update", writer.status, writer.running)
 	}
+}
+
+func TestPersistStoppedExecutorRunningUsesExecutionCAS(t *testing.T) {
+	writer := &executionCASStatusWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	err := mgr.persistStoppedExecutorRunning(context.Background(), &AgentExecution{
+		ID: "exec-stop", SessionID: "session-stop",
+	})
+	if err != nil {
+		t.Fatalf("persistStoppedExecutorRunning: %v", err)
+	}
+	if writer.legacyCalled {
+		t.Fatal("stopped status persistence used the session-only status update")
+	}
+	if writer.executionID != "exec-stop" || writer.sessionID != "session-stop" || writer.status != models.ExecutorRunningStatusStopped {
+		t.Fatalf("CAS status update = execution=%q session=%q status=%q", writer.executionID, writer.sessionID, writer.status)
+	}
+}
+
+func TestPersistStoppedExecutorRunningReturnsRotatedExecution(t *testing.T) {
+	writer := &executionCASStatusWriter{statusErr: models.ErrExecutionRotated}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	err := mgr.persistStoppedExecutorRunning(context.Background(), &AgentExecution{
+		ID: "exec-old", SessionID: "session-stop",
+	})
+	if !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("persistStoppedExecutorRunning error = %v, want ErrExecutionRotated", err)
+	}
+}
+
+type executionCASStatusWriter struct {
+	captureExecutorRunningWriter
+	legacyCalled bool
+	executionID  string
+	sessionID    string
+	status       string
+	statusErr    error
+}
+
+func (w *executionCASStatusWriter) UpdateExecutorRunningStatus(_ context.Context, _ string, _ string) error {
+	w.legacyCalled = true
+	return nil
+}
+
+func (w *executionCASStatusWriter) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, sessionID, executionID, status string,
+) error {
+	w.sessionID = sessionID
+	w.executionID = executionID
+	w.status = status
+	return w.statusErr
 }
 
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {
