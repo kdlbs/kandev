@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 import { Extension } from "@tiptap/core";
 import {
   TIPTAP_EDITOR_TEXT_SIZE_CLASS,
   buildEditorExtensions,
   decideSubmitShortcut,
   shouldRestoreFocusOnEnable,
+  useSyncDisabledState,
 } from "./use-tiptap-editor";
 import * as tiptapEditor from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
@@ -213,6 +215,63 @@ describe("shouldRestoreFocusOnEnable", () => {
     expect(document.activeElement).toBe(document.body);
 
     expect(shouldRestoreFocusOnEnable(false)).toBe(false);
+  });
+});
+
+// Regression: exercises the actual effect wiring, not just the pure
+// predicate above -- a mock editor stands in for TipTap's `Editor` since
+// jsdom cannot reproduce the browser's disable-blurs-the-element behavior
+// the effect exists to work around.
+describe("useSyncDisabledState", () => {
+  function makeEditor(hasFocus: boolean) {
+    return {
+      view: { hasFocus: () => hasFocus },
+      setEditable: vi.fn(),
+      commands: { focus: vi.fn() },
+    };
+  }
+
+  it("captures focus before disabling, then restores it on re-enable", () => {
+    const editor = makeEditor(true);
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    expect(editor.setEditable).toHaveBeenLastCalledWith(false);
+    expect(editor.commands.focus).not.toHaveBeenCalled();
+
+    rerender({ disabled: false });
+    expect(editor.setEditable).toHaveBeenLastCalledWith(true);
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+  });
+
+  it("does not steal focus back when another control has since claimed it", () => {
+    const editor = makeEditor(true);
+    const claimant = document.createElement("input");
+    document.body.append(claimant);
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    claimant.focus();
+    rerender({ disabled: false });
+
+    expect(editor.commands.focus).not.toHaveBeenCalled();
+    claimant.remove();
+  });
+
+  it("does not focus on re-enable when the editor never had focus before disabling", () => {
+    const editor = makeEditor(false);
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    rerender({ disabled: false });
+
+    expect(editor.commands.focus).not.toHaveBeenCalled();
   });
 });
 

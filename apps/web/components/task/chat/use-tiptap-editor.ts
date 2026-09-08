@@ -338,22 +338,22 @@ type SyncEditorOptions = {
   onChangeRef: React.RefObject<(value: string) => void>;
 };
 
-function useSyncEditor({
-  editor,
-  disabled,
-  placeholder,
-  sessionId,
-  value,
-  isSyncingRef,
-  initialSyncDoneRef,
-  onChangeRef,
-}: SyncEditorOptions) {
-  // Sync disabled state. ProseMirror maps `editable` onto the DOM
-  // `contenteditable` attribute, and a real browser blurs the element when
-  // that attribute flips to `false` without restoring focus when it flips
-  // back. Capture focus before disabling and restore it on re-enable, but
-  // only when nothing else has since claimed focus (a user who clicked
-  // another control mid-send should keep it there).
+/** Editor surface `useSyncDisabledState` needs -- narrowed from the full
+ *  TipTap `Editor` so the effect is testable against a plain mock instead of
+ *  a mounted editor instance. */
+type DisabledStateEditor = {
+  view: { hasFocus: () => boolean };
+  setEditable: (editable: boolean) => void;
+  commands: { focus: () => void };
+};
+
+/** Sync disabled state onto the editor. ProseMirror maps `editable` onto the
+ *  DOM `contenteditable` attribute, and a real browser blurs the element when
+ *  that attribute flips to `false` without restoring focus when it flips
+ *  back. Capture focus before disabling and restore it on re-enable, but only
+ *  when nothing else has since claimed focus (a user who clicked another
+ *  control mid-send should keep it there). */
+export function useSyncDisabledState(editor: DisabledStateEditor | null, disabled: boolean) {
   const hadFocusBeforeDisableRef = useRef(false);
   useEffect(() => {
     if (!editor) return;
@@ -368,6 +368,19 @@ function useSyncEditor({
     }
     hadFocusBeforeDisableRef.current = false;
   }, [editor, disabled]);
+}
+
+function useSyncEditor({
+  editor,
+  disabled,
+  placeholder,
+  sessionId,
+  value,
+  isSyncingRef,
+  initialSyncDoneRef,
+  onChangeRef,
+}: SyncEditorOptions) {
+  useSyncDisabledState(editor, disabled);
 
   // Sync placeholder via editor.storage. The DynamicPlaceholder extension reads
   // from editor.storage.dynamicPlaceholder.text at decoration time.
