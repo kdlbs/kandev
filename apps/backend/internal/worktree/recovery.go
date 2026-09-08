@@ -487,36 +487,58 @@ func copySnapshotEntries(source, destination string) error {
 		if err != nil {
 			return err
 		}
-		if path == source || entry.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, rel)
-		if entry.Type()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			_ = os.Remove(target)
-			return os.Symlink(link, target)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-			return err
-		}
-		return os.Chmod(target, info.Mode().Perm())
+		return copySnapshotEntry(source, destination, path, entry)
 	})
+}
+
+func copySnapshotEntry(source, destination, path string, entry os.DirEntry) error {
+	if path == source {
+		return nil
+	}
+	rel, err := filepath.Rel(source, path)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(destination, rel)
+	if entry.IsDir() {
+		return copySnapshotDirectory(entry, target)
+	}
+	if entry.Type()&os.ModeSymlink != 0 {
+		link, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(target)
+		return os.Symlink(link, target)
+	}
+	return copySnapshotFile(path, target, entry)
+}
+
+func copySnapshotDirectory(entry os.DirEntry, target string) error {
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Chmod(target, info.Mode().Perm())
+}
+
+func copySnapshotFile(source, target string, entry os.DirEntry) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Chmod(target, info.Mode().Perm())
 }

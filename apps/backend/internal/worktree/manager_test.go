@@ -666,6 +666,54 @@ func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T)
 	}
 }
 
+func TestManager_RecoverWorktreePreservesEmptyDirectories(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree-empty-directories")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/recover-empty-directories", worktreePath, "main")
+	emptyDirectory := filepath.Join(worktreePath, "preserved", "nested", "empty")
+	if err := os.MkdirAll(emptyDirectory, 0750); err != nil {
+		t.Fatalf("create empty directory: %v", err)
+	}
+	if err := os.Chmod(emptyDirectory, 0700); err != nil {
+		t.Fatalf("set empty directory mode: %v", err)
+	}
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover-empty-directories", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/recover-empty-directories", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+	if err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	recoveredDirectory := filepath.Join(replacement.Path, "preserved", "nested", "empty")
+	info, err := os.Stat(recoveredDirectory)
+	if err != nil {
+		t.Fatalf("stat recovered empty directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("recovered empty entry is not a directory: %s", info.Mode())
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("recovered empty directory mode = %04o, want 0700", got)
+	}
+}
+
 func TestIsAdminDirectoryMissing(t *testing.T) {
 	repoPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
