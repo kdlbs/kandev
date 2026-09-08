@@ -70,11 +70,13 @@ func (w *externalProcessTaskWriter) MoveTask(context.Context, TaskMoveInput) (*T
 }
 
 type externalPriorityProbeResult struct {
-	CreateHighReadback    string `json:"create_high_readback"`
-	CreateDefaultReadback string `json:"create_default_readback"`
-	UpdateHighReadback    string `json:"update_high_readback"`
-	InvalidCreateError    string `json:"invalid_create_error"`
-	InvalidUpdateError    string `json:"invalid_update_error"`
+	CreateHighReadback     string `json:"create_high_readback"`
+	CreateDefaultReadback  string `json:"create_default_readback"`
+	UpdateHighReadback     string `json:"update_high_readback"`
+	InvalidCreateError     string `json:"invalid_create_error"`
+	InvalidCreateTaskCount int    `json:"invalid_create_task_count"`
+	InvalidUpdateError     string `json:"invalid_update_error"`
+	InvalidUpdateReadback  string `json:"invalid_update_readback"`
 }
 
 // TestPluginPriorityWirePayload pins the exact protobuf representation compiled
@@ -146,7 +148,9 @@ func TestPluginHost_ExternalProcessPersistsPriorityThroughTaskService(t *testing
 	require.Equal(t, "medium", probe.CreateDefaultReadback)
 	require.Equal(t, "high", probe.UpdateHighReadback)
 	require.NotEmpty(t, probe.InvalidCreateError)
+	require.Zero(t, probe.InvalidCreateTaskCount)
 	require.NotEmpty(t, probe.InvalidUpdateError)
+	require.Equal(t, "high", probe.InvalidUpdateReadback)
 	require.Equal(t, []string{workspaces[0].ID, workspaces[0].ID}, writer.createWorkspaceIDs)
 	require.Equal(t, []string{workflows[0].ID, workflows[0].ID}, writer.createWorkflowIDs)
 	require.Equal(t, []string{"high", ""}, writer.createPriorities)

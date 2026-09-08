@@ -173,11 +173,13 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 // priorityProbeResult is deliberately limited to the Host contract values the
 // external-process integration test needs to observe after each write.
 type priorityProbeResult struct {
-	CreateHighReadback    string `json:"create_high_readback"`
-	CreateDefaultReadback string `json:"create_default_readback"`
-	UpdateHighReadback    string `json:"update_high_readback"`
-	InvalidCreateError    string `json:"invalid_create_error"`
-	InvalidUpdateError    string `json:"invalid_update_error"`
+	CreateHighReadback     string `json:"create_high_readback"`
+	CreateDefaultReadback  string `json:"create_default_readback"`
+	UpdateHighReadback     string `json:"update_high_readback"`
+	InvalidCreateError     string `json:"invalid_create_error"`
+	InvalidCreateTaskCount int    `json:"invalid_create_task_count"`
+	InvalidUpdateError     string `json:"invalid_update_error"`
+	InvalidUpdateReadback  string `json:"invalid_update_readback"`
 }
 
 // priorityProbe performs Create and Update writes through the injected Host,
@@ -227,8 +229,22 @@ func (p *fixturePlugin) priorityProbe(ctx context.Context) (*pluginsdk.WebhookRe
 	}); err != nil {
 		result.InvalidCreateError = err.Error()
 	}
+	tasks, _, err := host.Tasks().List(ctx, pluginsdk.TaskFilter{WorkspaceIDs: []string{createdHigh.WorkspaceID}}, pluginsdk.Page{})
+	if err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	for _, task := range tasks {
+		if task.Title == "invalid priority" {
+			result.InvalidCreateTaskCount++
+		}
+	}
 	if _, err := host.Tasks().Update(ctx, pluginsdk.UpdateTaskInput{ID: createdDefault.ID, Priority: &invalid}); err != nil {
 		result.InvalidUpdateError = err.Error()
+	}
+	if readback, readErr := host.Tasks().Get(ctx, createdDefault.ID); readErr != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(readErr.Error())}, nil
+	} else {
+		result.InvalidUpdateReadback = readback.Priority
 	}
 	body, err := json.Marshal(result)
 	if err != nil {
