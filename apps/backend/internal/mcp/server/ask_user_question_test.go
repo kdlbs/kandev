@@ -470,16 +470,17 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
 }
 
-// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor pins
+// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline pins
 // askQuestionKeepAliveInterval comfortably below the measured 300000ms idle
 // watchdog default that Claude Code's CLI applies to non-stdio MCP transports
 // at Kandev's managed MCP_TOOL_TIMEOUT (see
-// docs/specs/agents/system-design/mcp-timeout-budgets.md). The <= 60s bound
-// is a chosen safety margin, not a value derived from that 300s default:
-// raising the production constant past it would silently break every
-// question that outlives it, and TestAskUserQuestion_StreamsKeepAliveDuringWait
-// wouldn't catch it because it overrides the interval before running.
-func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleFloor(t *testing.T) {
+// docs/specs/agents/system-design/mcp-timeout-budgets.md). The <= 60s bound is
+// a chosen safety margin, not a value derived from that 300s default: crossing
+// it does not by itself abort a call at the managed default, it spends the
+// margin that also covers a lowered MCP_TOOL_TIMEOUT shrinking the idle
+// deadline. TestAskUserQuestion_StreamsKeepAliveDuringWait cannot catch a
+// regression here because it overrides the interval before running.
+func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
 	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
 	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
 }

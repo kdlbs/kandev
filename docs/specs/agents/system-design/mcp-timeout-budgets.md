@@ -52,7 +52,7 @@ read by the CLI but not currently set by Kandev (see
 | --- | --- | --- |
 | `MCP_TIMEOUT` | MCP connect deadline, and the deadline of the CLI's first-turn wait on the `subscriptions/listen` stream. CLI default is 30000 ms, clamped to at most 2147483647. | `30000` |
 | `MCP_TOOL_TIMEOUT` | Per-call tool budget, clamped to `[1000, 2147483647]` by the idle watchdog's `toolTimeoutMs` helper (see [Idle watchdog](#idle-watchdog)); separately floors the per-request fetch deadline at `[60000, 2147483647]` (see below). | `7200000` |
-| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long, independent of `MCP_TOOL_TIMEOUT`. | Not set by Kandev. |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long. A separate mechanism from `MCP_TOOL_TIMEOUT`, but capped by the effective tool-call timeout (see [Idle watchdog](#idle-watchdog)). | Not set by Kandev. |
 
 Verified against the shipped CLI (version 2.1.258):
 
@@ -103,7 +103,9 @@ function idleTimeoutMs(server) {
     ?? (transport === "stdio" ? 1800000 : 300000);
   if (idle <= 0) return 0;
   const perServerTimeout = server?.timeout >= 1000 ? server.timeout : 0;
-  // toolTimeoutMs(server) = clamp(perServerTimeout ?? MCP_TOOL_TIMEOUT ?? 1e8, 1000, 2147483647)
+  // toolTimeoutMs(server) = clamp(
+  //   server?.timeout >= 1000 ? server.timeout : (MCP_TOOL_TIMEOUT ?? 1e8),
+  //   1000, 2147483647)
   return Math.min(Math.max(idle, perServerTimeout, 1000), toolTimeoutMs(server));
 }
 ```
@@ -121,7 +123,7 @@ below 300000 ms — e.g. `MCP_TOOL_TIMEOUT=10000` yields a 10s idle deadline. A
 tool call that goes past its idle deadline without emitting a response or a
 `notifications/progress` frame is aborted by the CLI with "sent no response or
 progress for <n>s; aborting". Kandev's managed default keeps the 20s keepalive
-below comfortably inside the deadline, but an override under roughly 20000 ms
+comfortably inside the deadline, but an override under roughly 20000 ms
 drives the idle deadline below the keepalive interval and would abort a
 blocking `ask_user_question_kandev` call outright: this is a real edge in the
 supported override path, not just a record-accuracy nit.
@@ -131,7 +133,7 @@ is the only Kandev MCP tool that blocks on a person, so it is the only one
 this watchdog can plausibly hit. It survives because
 `apps/backend/internal/mcp/server/handlers.go` streams a
 `notifications/progress` frame every `askQuestionKeepAliveInterval` (20s),
-comfortably inside the 300s floor.
+comfortably inside that 300000 ms default.
 
 Four throwaway experiments against that binary (`claude -p --mcp-config
 --allowedTools`, a minimal streamable-HTTP MCP server whose tool never
@@ -139,17 +141,17 @@ returns) confirmed the formula and ruled out the obvious alternative fix:
 
 | Config | Server-observed lifetime | Outcome |
 | --- | --- | --- |
-| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=10000` (10s), silent | ~35s | aborted at the overridden floor, not at 300s — confirms the CLI reads this env var |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=10000` (10s), silent | ~35s | aborted at the overridden idle deadline, not at 300s — confirms the CLI reads this env var |
 | Default env, `MCP_TOOL_TIMEOUT=7200000`, silent (no progress) | 304.0s | aborted: "sent no response or progress for 300s; aborting" |
 | `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=7200000`, `MCP_TOOL_TIMEOUT=7200000`, silent | 358.1s (reproduced twice) | `The operation timed out.` — a second, lower client-side ceiling the env var does not lift |
 | Default env, SSE + `notifications/progress` every 20s | 535.1s, still alive | ended only by the harness's own external kill |
 
 Setting `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` alongside `MCP_TOOL_TIMEOUT` is
-**not** a viable fix on its own: it raises the floor from 300s to only
-~358s, not to two hours, because of the second ceiling above. The progress
+**not** a viable fix on its own: it raises the idle deadline from 300s to
+only ~358s, not to two hours, because of the second ceiling above. The progress
 keepalive is what actually delivers the two-hour budget, and it already
 ships. There is no per-server `timeout` field on the ACP wire
-(`types.McpServer`, `jsonrpc.McpServer`) to raise the idle floor from
+(`types.McpServer`, `jsonrpc.McpServer`) to raise the idle deadline from
 Kandev's side either.
 
 ## Control flow
