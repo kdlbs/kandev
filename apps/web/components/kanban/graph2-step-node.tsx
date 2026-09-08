@@ -118,6 +118,7 @@ function MoveButton({
       aria-label={label}
       disabled={isMoving}
       onClick={onClick}
+      onContextMenu={(e) => e.stopPropagation()}
       className={cn(
         `absolute ${posClass} top-1/2 -translate-y-1/2 z-10`,
         "h-5 w-5 rounded-full bg-background border border-border shadow-sm",

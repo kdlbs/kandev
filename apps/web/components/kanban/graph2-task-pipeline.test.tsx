@@ -548,6 +548,37 @@ describe("Graph2TaskPipeline — multi-select mode hides the actions cluster (AC
   });
 });
 
+describe("Graph2TaskPipeline — right-click on an interactive control does not open the row context menu (AC-UI-PIPELINE-ROW-002.3)", () => {
+  function queryContextMenuContent() {
+    return screen.queryByTestId("task-context-move-to");
+  }
+
+  it("opens the row context menu when right-clicking a non-interactive area", async () => {
+    renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
+
+    fireEvent.contextMenu(screen.getByTestId("pipeline-task-task-1"));
+
+    await waitFor(() => expect(queryContextMenuContent()).not.toBeNull());
+  });
+
+  it("does not open the row context menu when right-clicking the row menu trigger", () => {
+    renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: moreOptionsLabel() }));
+
+    expect(queryContextMenuContent()).toBeNull();
+  });
+
+  it("does not open the row context menu when right-clicking a move chevron", () => {
+    renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: IN_PROGRESS_TITLE }).parentElement!);
+
+    fireEvent.contextMenu(screen.getAllByRole("button", { name: /move to/i })[0]);
+
+    expect(queryContextMenuContent()).toBeNull();
+  });
+});
+
 describe("excludeOrphanFromMoveMenu", () => {
   it("drops the synthetic orphan step so it cannot appear as a move-to-step destination", () => {
     const real = [...STEPS];

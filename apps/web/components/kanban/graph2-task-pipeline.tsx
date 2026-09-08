@@ -13,19 +13,14 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
-import {
-  useKanbanCardMenus,
-  KanbanCardDialogs,
-  type KanbanCardMenuState,
-} from "@/components/kanban-card-menu";
+import { useKanbanCardMenus, type KanbanCardMenuState } from "@/components/kanban-card-menu";
 import { TaskCardIndicators } from "@/components/kanban-card-plugin-slots";
 import { KanbanCardBadges, RepoChipRow } from "@/components/kanban-card-status-strip";
 import { CardTitle } from "@/components/kanban-card-title";
 import { renderSubagentCountChip } from "@/components/kanban-card-content";
 import { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
-import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
-import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { PipelineDialogs } from "./graph2-task-pipeline-dialogs";
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { formatRelativeTime } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
@@ -303,6 +298,7 @@ function RowMenuTrigger({
           data-testid={`pipeline-row-menu-trigger-${taskId}`}
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.stopPropagation()}
           className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           aria-label={t("kanban:moreOptions")}
         >
@@ -324,8 +320,7 @@ function RowMenuTrigger({
  * the step run start at a different x position on every row, so the runs stop
  * reading as one shared track down the board. Holding all rows at 200px is
  * what keeps them aligned; each line truncates rather than widening the
- * column, and the title's full text stays reachable through the hover card
- * (REQ-UI-PIPELINE-ROW-004).
+ * column, and the title's full text stays reachable through the hover card.
  */
 function RowInfoColumn({
   task,
@@ -339,7 +334,11 @@ function RowInfoColumn({
 
   return (
     <div className="w-[200px] min-w-0 shrink-0" data-testid="pipeline-row-info">
-      <div data-testid="pipeline-row-title">
+      {/* Right-click on the title's own hover-card trigger must open that
+          trigger's behavior, not the row's context menu; stopped here rather
+          than in the shared CardTitle so the Kanban card's own right-click
+          behavior is untouched. */}
+      <div data-testid="pipeline-row-title" onContextMenu={(e) => e.stopPropagation()}>
         <CardTitle task={task} enableTitleHover />
       </div>
       {/* Height is reserved whether or not the task has a repository, so a
@@ -537,66 +536,6 @@ function PipelineRow({
         </div>
       )}
     </div>
-  );
-}
-
-/** The row's dialogs/confirmations, sourced from the shared menu module. */
-function PipelineDialogs({
-  task,
-  workspaceId,
-  repositories,
-  menu,
-  isDeleting,
-  isArchiving,
-  onDeleteTask,
-  onArchiveTask,
-}: {
-  task: Task;
-  workspaceId: string | null;
-  repositories: Repository[];
-  menu: KanbanCardMenuState;
-  isDeleting?: boolean;
-  isArchiving?: boolean;
-  onDeleteTask: (
-    task: Task,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
-  ) => void;
-  onArchiveTask?: (
-    task: Task,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
-  ) => void;
-}) {
-  return (
-    <>
-      <KanbanCardDialogs
-        task={task}
-        workspaceId={workspaceId}
-        repositories={repositories}
-        menu={menu}
-        isDeleting={isDeleting}
-        onDelete={onDeleteTask}
-      />
-      <TaskDetachConfirmationSurface
-        open={menu.showDetachConfirm}
-        anchorRef={menu.detachAnchorRef}
-        focusReturnRef={menu.detachFocusReturnRef}
-        taskTitle={task.title}
-        sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
-        onOpenChange={menu.setShowDetachConfirm}
-        onConfirm={menu.handleDetachConfirm}
-      />
-      <TaskArchiveConfirmation
-        open={menu.showArchiveConfirm}
-        anchorRef={menu.archiveAnchorRef}
-        focusReturnRef={menu.archiveFocusReturnRef}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isArchiving={isArchiving}
-        onOpenChange={menu.setShowArchiveConfirm}
-        onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
-      />
-    </>
   );
 }
 
