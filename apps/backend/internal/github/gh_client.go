@@ -964,6 +964,12 @@ func ghServerErrStatusCode(err error) (int, bool) {
 // to a bare wrapped error — which is exactly right, since an unclassified
 // status belongs in the residue class by exclusion, not by a guess here.
 func ghClassifyContentsErr(err error, endpoint string) *GitHubAPIError {
+	var existing *GitHubAPIError
+	if errors.As(err, &existing) {
+		classified := *existing
+		classified.Endpoint = endpoint
+		return &classified
+	}
 	switch {
 	case isNotFoundErr(err):
 		return &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: endpoint, Body: err.Error()}
