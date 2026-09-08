@@ -567,6 +567,37 @@ describe("useNativeScrollManagement transcript pagination", () => {
     }
   });
 
+  it("logs when initial placement delegates to the unread divider", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 11 };
+    try {
+      render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          sessionId="session-b"
+          enabled
+          hasUnreadDivider
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain(
+        "[messages:scroll-placement] final placement delegated sessionId=session-b owner=unread-divider",
+      );
+    } finally {
+      consoleDebug.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
   it("does not defer a same-env session placement without an env-switch token", () => {
     const metrics = { scrollHeight: 900, scrollTop: 125, clientHeight: 400 };
@@ -1363,6 +1394,24 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(scrollContainer.scrollTop).toBe(123);
   });
 
+  it("logs a work-start bottom write separately from initial placement", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    try {
+      const { rerender } = render(
+        <AutoScrollHarness isWorking={false} hasUnreadDivider={false} sessionId="session-1" />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      setScrollMetrics(scrollContainer);
+
+      rerender(<AutoScrollHarness isWorking hasUnreadDivider={false} sessionId="session-1" />);
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain("[messages:scroll-placement] work-start bottom sessionId=session-1");
+    } finally {
+      consoleDebug.mockRestore();
+    }
+  });
+
   it("does not follow appended messages after the divider scroll marks the reader away from bottom", () => {
     const markRef: { current?: () => void } = {};
     const { rerender } = render(
@@ -1424,6 +1473,38 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     }).not.toThrow();
     expect(writes).toBe(1);
     expect(scrollTop).toBe(2_147_483_647);
+  });
+
+  it("logs a message-update bottom write separately from initial placement", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    try {
+      const { rerender } = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={TEST_MESSAGES}
+          sessionId="session-1"
+        />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      setScrollMetrics(scrollContainer);
+
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          sessionId="session-1"
+        />,
+      );
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain(
+        "[messages:scroll-placement] message-update bottom sessionId=session-1",
+      );
+    } finally {
+      consoleDebug.mockRestore();
+    }
   });
 
   it("restores the disabled offset after a transient layout clamp", () => {

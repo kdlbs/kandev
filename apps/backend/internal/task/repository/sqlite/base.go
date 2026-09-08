@@ -151,7 +151,7 @@ func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*R
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {

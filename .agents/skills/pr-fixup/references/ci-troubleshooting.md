@@ -92,9 +92,9 @@ verify the exact head and re-enqueue only after the push. Treat the new
 `merge_group` SHA and run as fresh evidence; a base race or queue-state change
 invalidates prior head checks.
 
-Treat an unavailable log stream as unknown evidence, not a product failure.
-If the direct job-log request returns 404 while the job is queued or in progress,
-wait for that job to complete before retrying; it is not missing evidence.
+Treat unavailable/transport-only logs as unknown, not product failure. For a
+queued 404 wait for terminal state; then download `test-results-<shard>` and inspect
+`error-context.md`, traces, and screenshots before rerunning or editing.
 
 **Malformed or truncated GitHub API responses:** If a workflow fails while
 parsing `gh api` JSON, reports an unexpected end of input, or receives a

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test, type SeedData } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import {
   GitHelper,
@@ -41,7 +41,12 @@ async function openFilesPanel(
   return session;
 }
 
-function seedRepo(backend: { tmpDir: string }, files: Record<string, string | Buffer>) {
+function seedRepo(
+  backend: { tmpDir: string },
+  seedData: SeedData,
+  files: Record<string, string | Buffer>,
+) {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
@@ -58,7 +63,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "existing.ts": "seed" });
+    seedRepo(backend, seedData, { "existing.ts": "seed" });
 
     const session = await openFilesPanel(
       testPage,
@@ -88,7 +93,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "taken.txt": "original" });
+    seedRepo(backend, seedData, { "taken.txt": "original" });
 
     const session = await openFilesPanel(
       testPage,
@@ -129,7 +134,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "taken.txt": "original" });
+    seedRepo(backend, seedData, { "taken.txt": "original" });
 
     const session = await openFilesPanel(
       testPage,
@@ -171,7 +176,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "existing.ts": "seed" });
+    seedRepo(backend, seedData, { "existing.ts": "seed" });
 
     const session = await openFilesPanel(
       testPage,
@@ -202,7 +207,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, {
+    seedRepo(backend, seedData, {
       "archive.zip": Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01, 0x02, 0xff, 0xfe]),
     });
 

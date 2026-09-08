@@ -82,7 +82,9 @@ unknown, do not call review clean/blocked; retry once, then use
 is nonzero while visible threads are empty, fetch the authoritative thread list
 and full bodies with `scripts/pr-resolve show <PR> <THREAD_ID>`; use
 `scripts/pr-state --comment <comment_id>` only when a flat comment view is all
-that is available.
+that is available. The numeric ID may identify either a review comment or a
+top-level issue comment; the helper falls back between both endpoints and emits
+`comment_type`, but it does not resolve a review thread.
 
 If `branch:"unknown"` or PR-view resolution is transient, retry the explicit
 PR-number command once before using direct targeted GitHub fallback. Do not

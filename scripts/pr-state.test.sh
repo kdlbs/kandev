@@ -64,7 +64,7 @@ if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
   exit 1
 fi
 
-if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kandev/pulls/comments/* ]]; then
+if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && ("$2" == repos/kdlbs/kandev/pulls/comments/* || "$2" == repos/kdlbs/kandev/issues/comments/*) ]]; then
   echo "comment api failed" >&2
   exit 1
 fi
@@ -136,6 +136,20 @@ if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
   "html_url": "https://github.com/kdlbs/kandev/pull/123#discussion_r111",
   "created_at": "2026-06-01T10:00:00Z",
   "updated_at": "2026-06-01T10:01:00Z"
+}
+JSON
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/issues/comments/222" ]]; then
+  cat <<'JSON'
+{
+  "id": 222,
+  "user": { "login": "github-actions[bot]" },
+  "body": "<!-- kandev-docs-cloudflare-preview -->\nPreview is ready.",
+  "html_url": "https://github.com/kdlbs/kandev/issues/123#issuecomment-222",
+  "created_at": "2026-06-01T11:00:00Z",
+  "updated_at": "2026-06-01T11:01:00Z"
 }
 JSON
   exit 0
@@ -1523,11 +1537,29 @@ test_comment_mode_returns_full_review_comment() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "comment id" '.comment_id == 111' "$json"
+  assert_jq "comment type" '.comment_type == "review"' "$json"
   assert_jq "comment body is full" '.body | contains("Full rationale here.")' "$json"
   assert_jq "comment path" '.path == "apps/web/file.ts"' "$json"
   assert_jq "comment line" '.line == 42' "$json"
   assert_jq "comment author" '.author == "greptile-apps[bot]"' "$json"
   pass "--comment returns full review comment"
+}
+
+test_comment_mode_falls_back_to_top_level_issue_comment() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 222 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "issue comment id" '.comment_id == 222' "$json"
+  assert_jq "issue comment type" '.comment_type == "issue"' "$json"
+  assert_jq "issue comment body is full" '.body | contains("Preview is ready.")' "$json"
+  assert_jq "issue comment has no review path" '.path == null and .line == null' "$json"
+  assert_jq "issue comment author" '.author == "github-actions[bot]"' "$json"
+  pass "--comment falls back to top-level issue comments"
 }
 
 test_comment_mode_reports_fetch_failure() {
@@ -1756,6 +1788,7 @@ test_summary_all_flag_includes_historical_unresolved_threads
 test_job_log_mode_emits_bounded_failure_context
 test_job_log_mode_unpacks_zip_responses
 test_comment_mode_returns_full_review_comment
+test_comment_mode_falls_back_to_top_level_issue_comment
 test_comment_mode_reports_fetch_failure
 test_comment_mode_rejects_incompatible_flags
 test_array_expansions_are_safe_under_set_u

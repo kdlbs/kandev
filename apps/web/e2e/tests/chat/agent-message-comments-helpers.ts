@@ -165,6 +165,7 @@ export async function openSeededQuickChatReply(
   await expect(dialog.getByTestId("quick-chat-messages")).toBeVisible();
   await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
 
+  await waitForAgentSessionInput(apiClient, quickChat.task_id, quickChat.session_id);
   await apiClient.seedSessionMessage(quickChat.session_id, {
     type: "message",
     content: AGENT_REPLY,

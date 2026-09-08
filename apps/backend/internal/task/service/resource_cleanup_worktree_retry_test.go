@@ -95,6 +95,7 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	_, _, repo := createTestService(t)
 	const taskID = "task-audited-cleanup-discard"
 	const sessionID = "session-audited-cleanup-discard"
+	const taskDirName = "task-audited-cleanup-discard_root"
 	seedCleanupTaskAndSession(t, repo, taskID, sessionID)
 
 	repoPath := initSimpleGitRepo(t)
@@ -108,14 +109,14 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	wt, err := mgr.Create(ctx, worktree.CreateRequest{
 		TaskID: taskID, SessionID: sessionID, TaskTitle: "Audited cleanup discard",
 		RepositoryID: "repo-audited-cleanup-discard", RepositoryPath: repoPath,
-		BaseBranch: "main", TaskDirName: taskID, RepoName: "repo-audited-cleanup-discard",
+		BaseBranch: "main", TaskDirName: taskDirName, RepoName: "repo-audited-cleanup-discard",
 	})
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-" + taskID, TaskID: taskID, ExecutorType: "worktree",
-		WorkspacePath: filepath.Dir(wt.Path), Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: filepath.Dir(wt.Path), TaskDirName: taskDirName, Status: models.TaskEnvironmentStatusReady,
 		Repos: []*models.TaskEnvironmentRepo{{
 			ID: "env-repo-audited-cleanup-discard", RepositoryID: "repo-audited-cleanup-discard",
 			WorktreeID: wt.ID, WorktreePath: wt.Path, WorktreeBranch: wt.Branch, Status: "active",

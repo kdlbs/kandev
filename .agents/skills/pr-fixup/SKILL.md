@@ -47,6 +47,8 @@ mergeability separately through `references/merge-conflicts.md`.
 
 Immediately after the snapshot, sequentially run `gh pr view <PR> --json baseRefName,headRefOid,mergeable,mergeStateStatus`;
 require matching `headRefOid` and re-query before CI or review triage if it disagrees.
+Compare the PR base SHA with the current base-ref tip (branches API or `git ls-remote`);
+stale base metadata is a blocker for CI triage.
 
 Treat coordinator or agent alerts as advisory until their reported SHA matches
 a fresh `pr.headRefOid`. If it differs, mark the alert stale and do not rerun
@@ -119,19 +121,16 @@ Enqueue and dequeue are external writes and require explicit user
 authorization; `pr-await` does not monitor the synthetic merge-group commit.
 
 For pending CI, wait with `scripts/pr-await <PR>`. It blocks below the
-conversation and prints one report when every check is terminal, so a wait of
-any length costs a single round-trip. Do not re-run `scripts/pr-state
---summary` on a timer instead: each snapshot is a separate model turn that
-re-reads the whole context, and waiting is only about 6% of what such a turn
-actually does.
+conversation and prints one text report when every check is terminal. Keep
+interactive output in this default format; redirect JSON to a file and project
+only the fields needed for triage. Do not re-run `scripts/pr-state
+--summary` on a timer instead: each snapshot is a separate model turn.
 
-Default `--mode all-terminal` is the cost-correct choice and returns only when
-no check is pending, so every failure arrives in one report and is fixed in one
-pass. It is also the correct choice for a reason unrelated to cost: a failed job
-can be visible while its parent workflow is still running, so an early return
-reports a partial failure set. Use `--mode first-failure` only when the user
-wants the first failure interactively; it costs an extra full CI cycle per
-failure. The helper defaults to a 45-minute deadline. For a user-stated wait
+Default `--mode all-terminal` returns only when no check is pending, so it
+reports the complete failure set after parent workflows finish. Use
+`--mode first-failure` only when the user wants the first failure interactively;
+it costs an extra CI cycle. The helper defaults to a 45-minute deadline. For a
+user-stated wait
 limit, run `scripts/pr-await <PR> --deadline-min <N>` after converting the
 duration to minutes; the canonical bounded form is
 `scripts/pr-await <PR> --mode all-terminal --deadline-min <N>`. Never rely on
@@ -140,7 +139,7 @@ means that the waiter reached its deadline, not that CI passed or failed. If no
 user limit was reached, rerun with a larger deadline. Report "CI in progress"
 only when the user's limit or the workflow's own timeout prevents further
 waiting, and name the pending checks or unconfirmed terminal rollup. This is an
-upper deadline, not a minimum hold time: `pr-await` may return early when all checks are terminal, so do not claim it waited for the full duration. If a fresh PR query reports `MERGED` or `CLOSED` while it runs or after a deadline snapshot, stop polling and queue work; refresh once only if needed, never re-enqueue, rebase, push, or recreate the stale branch. Peer or poller notices remain advisory until revalidated against current PR state.
+upper deadline, not a minimum hold time: `pr-await` may return early when all checks are terminal, so do not claim it waited for the full duration. If a fresh PR query reports `MERGED` or `CLOSED` while it runs or after a deadline snapshot, refresh once only if needed; for `MERGED`, report `mergedAt`/`mergeCommit.oid` and stop. Never re-enqueue, rebase, push, or recreate the stale branch. Peer or poller notices remain advisory until revalidated against current PR state.
 
 Read the final tool result's `exit_code`, including when the command runs in a
 PTY or session, rather than re-deriving state from stdout: 0 clean, 1 terminal
@@ -373,10 +372,10 @@ local upstream tip; after the push, require the PR head OID to equal local
 stale push: preserve the local fix and ask before creating a clean follow-up.
 
 After any rebase or force-push, fetch the PR base and compare local `HEAD`, the upstream tip, and `pr.head_ref_oid`; rerun affected checks.
-A rebase onto a newer base invalidates prior evidence: rerun the exact failed
-command and any package-level gate required by whole-file rules (for example
-max-lines). Then rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`; distinguish stale/current
-failures and report pending checks separately. Use `--force-with-lease`, never an unconditional force-push.
+A merge-commit head requires `--rebase-merges` or a verified merge-only delta;
+after long hooks/tests, compare the latest authoritative base with the rebase
+base and reconcile if changed; otherwise a rebase invalidates prior evidence:
+rerun affected checks, `scripts/pr-resolve list <PR>`, and `scripts/pr-state --summary <PR>`; use `--force-with-lease`, never an unconditional force-push.
 If the rebase or conflict resolution touched `AGENTS.md`, `CLAUDE.md`, or a
 skill/reference file, run the shared harness validation in
 `.agents/skills/harness-improvement/references/validation.md` before pushing.
@@ -433,8 +432,9 @@ review jobs are terminal; otherwise report the exact pending check names.
 When remediation changes tests or validation, reconcile any validation commands
 or counts claimed in the live PR description with the final verification before
 declaring fixup complete. Reuse `/pr`'s live-body preservation and REST-fallback
-procedure, preserve intervening bot or maintainer text, and re-fetch the exact
-head after the update to verify both the intended description and head SHA.
+procedure, preserve intervening bot or maintainer text, and re-fetch exact-head
+state afterward; a body PATCH triggers workflows, so restart `pr-state`/`pr-await`
+before treating pre-PATCH CI as current.
 
 If the user explicitly requested a persistent Kandev plan update and the task
 has an external Kandev plan, call `get_task_plan_kandev` before fixup and

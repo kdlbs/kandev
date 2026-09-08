@@ -28,6 +28,7 @@ import (
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
@@ -35,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -51,10 +53,11 @@ import (
 )
 
 type Repositories struct {
-	Task          *sqliterepo.Repository
-	Analytics     analyticsrepository.Repository
-	AgentSettings settingsstore.Repository
-	User          userstore.Repository
+	RequiredStores *requiredstores.Tracker
+	Task           *sqliterepo.Repository
+	Analytics      analyticsrepository.Repository
+	AgentSettings  settingsstore.Repository
+	User           userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -69,7 +72,9 @@ type Repositories struct {
 	QuickTerminal *quickterminalrepository.Repository
 	RuntimeFlags  *runtimeflags.SQLiteStore
 	// Auth persists login identities, sessions, PATs, and invites.
-	Auth *authstore.Store
+	Auth           *authstore.Store
+	HostnameCache  *hostnames.Store
+	SystemSettings *systemsettings.Store
 }
 
 type Services struct {

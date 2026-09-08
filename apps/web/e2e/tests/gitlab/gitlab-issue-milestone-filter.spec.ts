@@ -157,8 +157,19 @@ test.describe("GitLab issue milestone filter", () => {
 
     // Deleting the selected saved query clears the milestone in the same update.
     await savedMenu.click();
+    const deleteAction = testPage.getByRole("menuitem", {
+      name: "Delete Sprint 42 saved query",
+    });
+    await deleteAction.click();
+    const confirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Sprint 42?");
+    await expect(testPage.getByRole("menu")).toBeVisible();
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(testPage.getByRole("menuitem", { name: "Sprint 42", exact: true })).toBeVisible();
+
+    await deleteAction.click();
     const deleted = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
-    await testPage.getByRole("menuitem", { name: "Delete Sprint 42 saved query" }).click();
+    await confirmation.getByRole("button", { name: "Delete Sprint 42" }).click();
     await deleted;
     await expect(milestoneInput).toHaveValue("");
     await expect(gitlab.issueRow(602)).toBeVisible();

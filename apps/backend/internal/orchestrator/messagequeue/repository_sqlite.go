@@ -742,6 +742,23 @@ func purgeQueueRowSessions(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID
 // caller's transaction on PostgreSQL. The standalone PurgeTask passes nil and
 // locks only the sessions that currently hold queue rows.
 func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string, taskSessions []string) (int, error) {
+	// Task lifecycle operations can run before the optional queue repository has
+	// been initialized. PostgreSQL aborts a transaction on a missing-table
+	// statement, so inspect every queue table before issuing any queue query.
+	for _, table := range []string{
+		"queued_messages",
+		"lifecycle_queue_generations",
+		"queue_session_locks",
+	} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return 0, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return 0, nil
+		}
+	}
+
 	// Serialize with per-session tail operations: a purge that races a fold
 	// or insert could otherwise delete a row an admission just accepted, or
 	// admit into a queue being purged. Lock the AUTHORITATIVE session set —

@@ -104,17 +104,14 @@ See [resource-safety.md](references/resource-safety.md) before any full local te
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
-`--no-build` reuses every production E2E artifact, including Vite assets, the backend executable,
-and packaged fixtures. Global setup requires `apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`;
-if absent, run without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
-Prefer a normal managed build after source or base-branch changes and reserve `--no-build` for
-unchanged artifacts. If intentional after either kind of change, rebuild and verify both artifacts with `make -C apps/backend build` and `make -C apps/backend e2e-plugin-package`.
+`--no-build` reuses Vite, backend, and packaged fixtures; prefer normal managed builds
+after source/base changes. If intentional, rebuild both with `make -C apps/backend build`
+and `make -C apps/backend e2e-plugin-package`; global setup requires the plugin tarball.
 
-For a raw Docker/SSH/container run, `make build-backend` alone does not build
-the Linux mock-agent fixture. Prefer the managed runner; otherwise run
-`make build-backend build-backend-remote-helpers build-web`. If the fixture
-reports a missing `KANDEV_MOCK_AGENT_LINUX_BINARY`, run
-`make -C apps/backend build-mock-agent-linux` before diagnosing product code.
+For raw Docker/SSH/container runs, `make build-backend` does not build the Linux
+mock-agent fixture. Prefer managed; otherwise run `make build-backend
+build-backend-remote-helpers build-web`. If `KANDEV_MOCK_AGENT_LINUX_BINARY` is
+missing, run `make -C apps/backend build-mock-agent-linux` before diagnosing code.
 
 ### Raw commands (when you need fine control)
 
@@ -126,7 +123,10 @@ cd apps && pnpm --filter @kandev/web e2e:raw -- --grep "task creation" # workspa
 
 ### Flake reproduction
 
-Start by matching CI as closely as possible, then add pressure deliberately:
+Start by matching CI as closely as possible. CI uses duration-aware manifests: replay the
+matching manifest with `E2E_SHARD=<n> bash e2e/scripts/run-planned-shard.sh <manifest.json>`;
+`--shard=N/14` is only approximate. Regenerate the manifest after source changes and never
+overlap another managed/raw E2E run. Then add pressure deliberately:
 
 1. Run the exact failed shard in the CI runtime image with CI env enabled:
    ```bash

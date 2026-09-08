@@ -109,6 +109,11 @@ deferred response/event tests to prove ordering. React loading state does not
 serialize same-tick callbacks; use an immediate ref or shared in-flight promise
 when request identity must be single-flight.
 
+For hooks writing shared workspace or global caches, test the ownership matrix:
+a second consumer preserves valid cached data; an initiator unmount before a
+deferred response still reaches terminal state; the latest same-key response
+wins over stale completion; and workspace/key switches remain isolated.
+
 During cancellation or recovery, do not broadly suppress stream frames. Suppress
 only allowlisted cancellation acknowledgements with immutable operation identity;
 same-identity message, thinking, and tool frames remain authoritative activity.

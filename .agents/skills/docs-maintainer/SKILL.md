@@ -42,6 +42,9 @@ Skip public docs when the change is:
 1. Identify docs impact from the diff and changed behavior.
 2. Search `docs/public/**`, the root `README.md`, and `docs/screenshots.md`
    first for affected terms, features, integrations, and screenshots.
+   For behavior changes, also search the same contract and old precedence/reset
+   wording across `docs/public`, `docs/specs`, and `docs/decisions`; ensure the
+   introductory summary agrees with later upgrade and recovery sections.
 3. If public docs exist, update them with the same PR as the behavior change.
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
    When adding a page, include `title` and `description` frontmatter and list its page slug or path without the `.md` extension in `docs/public/meta.json` exactly once, for example `cli`. See `docs/public/README.md`.

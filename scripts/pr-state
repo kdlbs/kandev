@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/pr-state [--summary] [--all] [--trusted-reviewer <login>] <PR>
-#   scripts/pr-state --comment <comment_id>
+#   scripts/pr-state --comment <comment_id>  # review or top-level issue comment
 #   scripts/pr-state --job-log <job_id>
 #
 # Raw output:
@@ -61,8 +61,9 @@
 #   - errors: [{ source, message }]
 #
 # Comment output (--comment):
-#   JSON object for one PR review comment:
-#   - comment_id, author, body, path, line, original_line, commit_id, html_url, created_at, updated_at
+#   JSON object for one PR review or top-level issue comment:
+#   - comment_id, comment_type, author, body, path, line, original_line,
+#     commit_id, html_url, created_at, updated_at
 #
 # Job-log output (--job-log):
 #   Bounded context around the most likely failing test or step. The GitHub
@@ -195,6 +196,7 @@ emit_comment_json() {
   local owner
   local repo
   local comment_json
+  local comment_type
 
   repo_json="$(gh_json repo view --json owner,name)"
   owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
@@ -204,13 +206,18 @@ emit_comment_json() {
     return 1
   fi
 
-  if ! comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+  if comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+    comment_type='review'
+  elif comment_json="$(gh_json api "repos/$owner/$repo/issues/comments/$comment_id")"; then
+    comment_type='issue'
+  else
     printf 'failed to fetch PR comment %s\n' "$comment_id" >&2
     return 1
   fi
 
-  jq -c '{
+  jq -c --arg comment_type "$comment_type" '{
     comment_id: (.id // null),
+    comment_type: $comment_type,
     author: (.user.login // "unknown"),
     body: (.body // ""),
     path: (.path // null),

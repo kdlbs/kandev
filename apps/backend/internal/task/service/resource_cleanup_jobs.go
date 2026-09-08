@@ -43,6 +43,7 @@ type taskResourceCleanupSnapshot struct {
 	Sessions               []*models.TaskSession     `json:"sessions,omitempty"`
 	Worktrees              []*worktree.Worktree      `json:"worktrees,omitempty"`
 	WorktreeHeadOIDs       map[string]string         `json:"worktree_head_oids,omitempty"`
+	WorktreeTaskDirNames   map[string]string         `json:"worktree_task_dir_names,omitempty"`
 	DiscardWorktreeChanges bool                      `json:"discard_worktree_changes,omitempty"`
 	StopTargets            []persistedTaskStopTarget `json:"stop_targets,omitempty"`
 	TaskEnvironment        *models.TaskEnvironment   `json:"task_environment,omitempty"`
@@ -85,8 +86,10 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, err
 	}
+	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	snapshot := taskResourceCleanupSnapshot{
 		Sessions: sessions, Worktrees: worktrees, WorktreeHeadOIDs: worktreeHeadOIDs,
+		WorktreeTaskDirNames:   worktreeTaskDirNames,
 		StopTargets:            persistStopTargets(stopTargets),
 		TaskEnvironment:        envCleanup.env,
 		DeleteEnvironmentRow:   envCleanup.deleteRow,
@@ -136,6 +139,23 @@ func (s *Service) captureWorktreeCleanupHeadOIDs(
 		return nil, fmt.Errorf("capture worktree cleanup identities: %w", err)
 	}
 	return identities, nil
+}
+
+func captureWorktreeTaskDirNames(worktrees []*worktree.Worktree) map[string]string {
+	if len(worktrees) == 0 {
+		return nil
+	}
+	names := make(map[string]string, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil || wt.ID == "" || wt.TaskDirName == "" {
+			continue
+		}
+		names[wt.ID] = wt.TaskDirName
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return names
 }
 
 func persistStopTargets(targets []taskStopTarget) []persistedTaskStopTarget {
@@ -374,8 +394,14 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		snapshot.DeleteEnvironmentRow = false
 	}
 	for _, wt := range snapshot.Worktrees {
-		if wt != nil && snapshot.WorktreeHeadOIDs != nil {
+		if wt == nil {
+			continue
+		}
+		if snapshot.WorktreeHeadOIDs != nil {
 			wt.CleanupHeadOID = snapshot.WorktreeHeadOIDs[wt.ID]
+		}
+		if snapshot.WorktreeTaskDirNames != nil {
+			wt.TaskDirName = snapshot.WorktreeTaskDirNames[wt.ID]
 		}
 	}
 	defer s.signalCleanupDoneForTest()
@@ -697,6 +723,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	if err != nil {
 		return err
 	}
+	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("lookup task environment for cleanup snapshot: %w", err)
@@ -707,6 +734,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	}
 	snapshot := taskResourceCleanupSnapshot{
 		Sessions: sessions, Worktrees: worktrees, WorktreeHeadOIDs: worktreeHeadOIDs,
+		WorktreeTaskDirNames:   worktreeTaskDirNames,
 		StopTargets:            persistStopTargets(stopTargets),
 		TaskEnvironment:        taskEnv,
 		DeleteEnvironmentRow:   deleteEnvironmentRow,

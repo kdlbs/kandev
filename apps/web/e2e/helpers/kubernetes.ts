@@ -1,10 +1,10 @@
-import { expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { KubernetesCluster, KubernetesPod, KubernetesPVC } from "../fixtures/kubernetes-tools";
 import type { ApiClient } from "./api-client";
 import { DatabaseSync } from "./node-sqlite";
+import { pollUntil } from "./poll-until";
 
 type KubernetesList<T> = { items: T[] };
 
@@ -62,30 +62,30 @@ export async function waitForKubernetesPod(
   sessionId: string,
   timeout = 120_000,
 ): Promise<KubernetesPod> {
-  let found: KubernetesPod | undefined;
-  await expect
-    .poll(
-      () => {
-        const pods = cluster.json<KubernetesList<KubernetesPod>>([
-          "-n",
-          cluster.namespace,
-          "get",
-          "pods",
-          "-l",
-          `kandev.ai/task-id=${taskId},kandev.ai/session-id=${sessionId}`,
-        ]).items;
-        found = selectExactKubernetesResource(pods, { taskId, sessionId }, "Pod");
-        const main = found?.status?.containerStatuses?.find(
-          (container) => container.name === "kandev-agent",
-        );
-        return found?.status?.phase === "Running" && main?.ready === true && main.state?.running
-          ? found.metadata.uid
-          : "";
-      },
-      { timeout, message: `Waiting for Kubernetes Pod for task ${taskId}, session ${sessionId}` },
-    )
-    .not.toBe("");
-  return found!;
+  const result = await pollUntil(
+    () => {
+      const pods = cluster.json<KubernetesList<KubernetesPod>>([
+        "-n",
+        cluster.namespace,
+        "get",
+        "pods",
+        "-l",
+        `kandev.ai/task-id=${taskId},kandev.ai/session-id=${sessionId}`,
+      ]).items;
+      const found = selectExactKubernetesResource(pods, { taskId, sessionId }, "Pod");
+      const main = found?.status?.containerStatuses?.find(
+        (container) => container.name === "kandev-agent",
+      );
+      return {
+        found,
+        ready: found?.status?.phase === "Running" && main?.ready === true && main.state?.running,
+      };
+    },
+    (value) => Boolean(value.ready),
+    timeout,
+    `Waiting for Kubernetes Pod for task ${taskId}, session ${sessionId}`,
+  );
+  return result.found!;
 }
 
 export async function waitForKubernetesPVC(
@@ -94,25 +94,24 @@ export async function waitForKubernetesPVC(
   sessionId: string,
   timeout = 120_000,
 ): Promise<KubernetesPVC> {
-  let found: KubernetesPVC | undefined;
-  await expect
-    .poll(
-      () => {
-        const claims = cluster.json<KubernetesList<KubernetesPVC>>([
-          "-n",
-          cluster.namespace,
-          "get",
-          "persistentvolumeclaims",
-          "-l",
-          `kandev.ai/task-id=${taskId},kandev.ai/session-id=${sessionId}`,
-        ]).items;
-        found = selectExactKubernetesResource(claims, { taskId, sessionId }, "PVC");
-        return found?.metadata.uid ?? "";
-      },
-      { timeout, message: `Waiting for Kubernetes PVC for task ${taskId}, session ${sessionId}` },
-    )
-    .not.toBe("");
-  return found!;
+  const result = await pollUntil(
+    () => {
+      const claims = cluster.json<KubernetesList<KubernetesPVC>>([
+        "-n",
+        cluster.namespace,
+        "get",
+        "persistentvolumeclaims",
+        "-l",
+        `kandev.ai/task-id=${taskId},kandev.ai/session-id=${sessionId}`,
+      ]).items;
+      const found = selectExactKubernetesResource(claims, { taskId, sessionId }, "PVC");
+      return { found, ready: Boolean(found?.metadata.uid) };
+    },
+    (value) => value.ready,
+    timeout,
+    `Waiting for Kubernetes PVC for task ${taskId}, session ${sessionId}`,
+  );
+  return result.found!;
 }
 
 export async function waitForKubernetesResourceAbsent(
@@ -121,16 +120,16 @@ export async function waitForKubernetesResourceAbsent(
   name: string,
   timeout = 120_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        cluster.kubectl(
-          ["-n", cluster.namespace, "get", kind, name, "--ignore-not-found", "-o", "name"],
-          { quiet: true },
-        ) === "",
-      { timeout, message: `Waiting for ${kind}/${name} deletion` },
-    )
-    .toBe(true);
+  await pollUntil(
+    () =>
+      cluster.kubectl(
+        ["-n", cluster.namespace, "get", kind, name, "--ignore-not-found", "-o", "name"],
+        { quiet: true },
+      ) === "",
+    (absent) => absent,
+    timeout,
+    `Waiting for ${kind}/${name} deletion`,
+  );
 }
 
 export async function waitForKubernetesRestart(
@@ -139,18 +138,19 @@ export async function waitForKubernetesRestart(
   previousRestarts: number,
   timeout = 120_000,
 ): Promise<KubernetesPod> {
-  let pod: KubernetesPod | undefined;
-  await expect
-    .poll(
-      () => {
-        pod = cluster.json<KubernetesPod>(["-n", cluster.namespace, "get", "pod", podName]);
-        return pod.status?.containerStatuses?.find((row) => row.name === "kandev-agent")
-          ?.restartCount;
-      },
-      { timeout, message: `Waiting for main-container restart in ${podName}` },
-    )
-    .toBeGreaterThan(previousRestarts);
-  return pod!;
+  const result = await pollUntil(
+    () => {
+      const pod = cluster.json<KubernetesPod>(["-n", cluster.namespace, "get", "pod", podName]);
+      const restarts = pod.status?.containerStatuses?.find(
+        (row) => row.name === "kandev-agent",
+      )?.restartCount;
+      return { pod, ready: restarts !== undefined && restarts > previousRestarts };
+    },
+    (value) => value.ready,
+    timeout,
+    `Waiting for main-container restart in ${podName}`,
+  );
+  return result.pod;
 }
 
 export async function waitForFailedSession(
@@ -159,19 +159,18 @@ export async function waitForFailedSession(
   expected: RegExp,
   timeout = 120_000,
 ): Promise<string> {
-  let error = "";
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        const failed = sessions.find((session) => session.state === "FAILED");
-        error = failed?.error_message ?? "";
-        return error;
-      },
-      { timeout, message: `Waiting for causal Kubernetes failure matching ${expected}` },
-    )
-    .toMatch(expected);
-  return error;
+  const result = await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const failed = sessions.find((session) => session.state === "FAILED");
+      const error = failed?.error_message ?? "";
+      return { error, ready: expected.test(error) };
+    },
+    (value) => value.ready,
+    timeout,
+    `Waiting for causal Kubernetes failure matching ${expected}`,
+  );
+  return result.error;
 }
 
 export async function waitForTaskSessionState(
@@ -181,15 +180,15 @@ export async function waitForTaskSessionState(
   expectedState: string,
   timeout = 120_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        return sessions.find((session) => session.id === sessionId)?.state ?? "";
-      },
-      { timeout, message: `Waiting for session ${sessionId} to reach ${expectedState}` },
-    )
-    .toBe(expectedState);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      return sessions.find((session) => session.id === sessionId)?.state ?? "";
+    },
+    (state) => state === expectedState,
+    timeout,
+    `Waiting for session ${sessionId} to reach ${expectedState}`,
+  );
 }
 
 export async function waitForTaskResourceCleanupAttempt(
@@ -199,34 +198,38 @@ export async function waitForTaskResourceCleanupAttempt(
   timeout = 60_000,
 ): Promise<{ attempts: number; last_error: string; state: string }> {
   const database = path.join(backendTmpDir, "kandev.db");
-  let result = { attempts: 0, last_error: "", state: "" };
-  await expect
-    .poll(
-      () => {
-        const sqlite = new DatabaseSync(database, { readOnly: true });
-        try {
-          result =
-            (sqlite
-              .prepare(
-                `SELECT state, attempts, last_error
-                   FROM task_resource_cleanup_jobs
-                  WHERE task_id = ?
-                    AND trigger IN ('archive', 'cascade_archive')
-                  ORDER BY created_at DESC
-                  LIMIT 1`,
-              )
-              .get(taskId) as typeof result | undefined) ?? result;
-        } finally {
-          sqlite.close();
-        }
-        return result.attempts > 0 && ["retry_wait", "failed"].includes(result.state)
-          ? result.last_error
-          : "";
-      },
-      { timeout, message: `Waiting for archive cleanup attempt for task ${taskId}` },
-    )
-    .toMatch(expectedError);
-  return result;
+  const result = await pollUntil(
+    () => {
+      const sqlite = new DatabaseSync(database, { readOnly: true });
+      let result = { attempts: 0, last_error: "", state: "" };
+      try {
+        result =
+          (sqlite
+            .prepare(
+              `SELECT state, attempts, last_error
+                 FROM task_resource_cleanup_jobs
+                WHERE task_id = ?
+                  AND trigger IN ('archive', 'cascade_archive')
+                ORDER BY created_at DESC
+                LIMIT 1`,
+            )
+            .get(taskId) as typeof result | undefined) ?? result;
+      } finally {
+        sqlite.close();
+      }
+      return {
+        result,
+        ready:
+          result.attempts > 0 &&
+          ["retry_wait", "failed"].includes(result.state) &&
+          expectedError.test(result.last_error),
+      };
+    },
+    (value) => value.ready,
+    timeout,
+    `Waiting for archive cleanup attempt for task ${taskId}`,
+  );
+  return result.result;
 }
 
 export function execInKubernetesPod(

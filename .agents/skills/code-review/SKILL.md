@@ -172,6 +172,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - There is a single clear source of truth; state or business rules are not duplicated across layers
 - Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
 - Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+- Persistence conformance tests call real production stores and assert a non-zero domain write/read-back; synthetic tables and no-op SQL are not semantic coverage. Startup tests trace errors through bootstrap and auth/middleware order, not readiness alone.
 - Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
 - Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
 
