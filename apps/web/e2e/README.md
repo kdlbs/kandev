@@ -248,8 +248,9 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 existing two-retry policy while the summary makes retry groups visible.
 
 Container-backed CI jobs also cache the browser directory used by the host
-runner. Each job first resolves the `runtime-latest` convenience tag to a
-sha256 image digest. The cache key includes the runner OS, the Playwright
+runner. The workflow resolves the `runtime-latest` convenience tag once to a
+sha256 image digest and shares that immutable reference with every container
+shard. The cache key includes the runner OS, the Playwright
 `v1.61.1-noble` browser source, that digest, and a run-specific primary-key
 suffix. Its stable restore prefix selects the newest compatible entry without
 making a rejected cache entry win forever. A verified exact or prefix match
@@ -305,11 +306,11 @@ pnpm exec tsx e2e/scripts/flake-report.ts --summary /tmp/retry-summary.json
 
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
-`e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
+`e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs a resource-bounded number of shards concurrently, enforces one Playwright worker per shard, strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
 
 ```bash
 pnpm e2e:run                                  # auto: docker if the daemon + CI image are available, else host
-pnpm e2e:run --shards 3                        # 3 shards concurrently (isolated containers, or host procs with distinct ports)
+pnpm e2e:run --shards 3                        # up to 3 local shards (isolated containers, or host procs with distinct ports)
 pnpm e2e:run tests/chat/foo.spec.ts            # extra args pass straight through to Playwright
 pnpm e2e:run --project auth tests/auth/auth-lifecycle.spec.ts
 pnpm e2e:run --host --no-build -- --grep "x"   # force host, skip rebuild, forward flags after --
@@ -327,7 +328,11 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 
 > **Profile-managed environment variables:** when adding an environment variable with an `e2e:` or `dev:` profile default, add it to `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` so inherited shell/task values cannot override the selected profile. Keep explicit `backend.restart({ ... })` overrides applied after baseline sanitization, so a spec can still opt into a deliberate per-test value.
 
-> **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. Use 2-3 concurrent shards locally for a clean signal; see "flake triage" in the `/e2e` skill.
+> **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. The managed runner allows at most three local shards and one Playwright worker per shard, with a lower shard limit on hosts with less available memory. Use the default single shard or two to three concurrent shards locally for a clean signal. A deliberate pressure experiment must set `KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1`.
+
+> **Worker flag aliases:** the local guard rejects every Playwright worker override above one, including `--workers`, `--workers=N`, `-j N`, `-j=N`, and compact `-jN`. Shard limits use the lower of host `MemAvailable` and remaining cgroup v1/v2 memory when E2E runs in a memory-limited container.
+
+> **Frontend unit-test workers:** do not run a local full Vitest suite with `VITEST_MAX_WORKERS=100%` or another all-worker override. The local Vitest config clamps unsafe values to its 20-percent budget. Set `KANDEV_ALLOW_UNSAFE_TEST_PARALLELISM=1` only for a deliberate, resource-monitored experiment.
 
 ## Backend isolation per worker
 
@@ -750,9 +755,9 @@ change the checked-in default:
 
 ```bash
 cd apps/web
-E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1 E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
   e2e/manifests/normal/2.json -- --workers=1
-E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1 E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
   e2e/manifests/normal/2.json -- --workers=2
 ```
 

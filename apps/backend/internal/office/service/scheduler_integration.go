@@ -244,6 +244,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
@@ -290,6 +291,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	runCtx, err := (&officeruntime.ContextBuilder{
 		Agents: si.svc,
 		Runs:   si.svc.repo,
+		Seats:  si.svc,
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
@@ -336,14 +338,27 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		Env:       env,
 		ProfileID: profileID,
 	}
-	// launchAgent only returns true when the adapter was actually
-	// invoked. Leave the run `claimed` and let the
-	// AgentCompleted/AgentStopped event subscribers in
-	// event_subscribers.go finish it. This serves as the "agent is
-	// busy on this task" lock that ClaimNextEligibleRun respects, so
-	// new runs (comments, status changes) for the same agent + task
-	// queue up rather than racing the active turn.
-	si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx)
+	// launchAgent returns true only when the adapter was actually invoked.
+	// When it was, leave the run `claimed` and let the AgentCompleted/
+	// AgentStopped event subscribers in event_subscribers.go finish it.
+	// This serves as the "agent is busy on this task" lock that
+	// ClaimNextEligibleRun respects, so new runs (comments, status changes)
+	// for the same agent + task queue up rather than racing the active turn.
+	//
+	// Mark before launching, not after: launchAgent returns only once the
+	// adapter has been invoked, by which point a fast run's completion
+	// event may already have been processed — a mark-after-launch would
+	// race that reset and strand the agent showing "working" forever.
+	si.svc.markAgentWorking(ctx, agent, run.ID)
+	if !si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
+		// No adapter was invoked, so no AgentCompleted/AgentStopped/
+		// AgentFailed event will ever arrive to clear the status — every
+		// non-launch exit (taskless/unlaunchable failure, routing parked,
+		// routing dispatch error, legacy start failure) must clear here.
+		// The underlying CAS makes this a safe no-op on paths that already
+		// cleared it themselves (e.g. HandleAgentFailure).
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
+	}
 }
 
 // assembleAgentPrompt builds the wake-context prompt, decides whether the
@@ -363,7 +378,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
 	pc.TaskScope = append([]string(nil), runCtx.Capabilities.AllowedTaskIDs...)
-	pc.AllowedActions = runCtx.Capabilities.AllowedKeys()
+	pc.AllowedActions = append(runCtx.Capabilities.AllowedKeys(), runCtx.AvailableActions...)
 	wakeContext := BuildPrompt(pc)
 
 	// Resume = the (task, agent_instance) session has run before. On resume
@@ -493,6 +508,10 @@ func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Ru
 		return true
 	}
 	if si.isTaskTreeGated(ctx, run.ID, taskID) {
+		// This run may have been requeued after an earlier launch (e.g. a
+		// post-start provider fallback) that left the agent "working" with
+		// no launch/complete cycle left to clear it.
+		si.svc.clearAgentWorking(ctx, agentInstanceID, run.ID)
 		return false
 	}
 	return si.tryCheckout(ctx, run, taskID, agentInstanceID)
@@ -569,8 +588,8 @@ func (si *SchedulerIntegration) launchAgent(
 		"executor_type": executorType,
 		"prompt_len":    len(launch.Prompt),
 	})
-	if si.tryRoutingDispatch(ctx, run, agent, taskID, launch) {
-		return true
+	if handled, launched := si.tryRoutingDispatch(ctx, run, agent, taskID, launch); handled {
+		return launched
 	}
 	var err error
 	if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
@@ -703,16 +722,18 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 }
 
 // tryRoutingDispatch routes through the provider-routing dispatcher when
-// one is wired. Returns true when the dispatcher took over (launched OR
-// parked OR error-handled); false to fall through to the legacy launch
-// path (routing disabled / not configured).
+// one is wired. handled is true when the dispatcher took over (launched OR
+// parked OR error-handled), telling the caller not to fall through to the
+// legacy launch path. launched is true only when the adapter was actually
+// invoked — parked and error-handled outcomes are "handled" but not
+// "launched", and callers must not treat them as if a process is running.
 func (si *SchedulerIntegration) tryRoutingDispatch(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	taskID string, launch LaunchContext,
-) bool {
+) (handled bool, launched bool) {
 	rd := si.svc.routingDispatcher
 	if rd == nil {
-		return false
+		return false, false
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
@@ -724,16 +745,16 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
-		return true
+		return true, false
 	}
 	if launched {
-		return true
+		return true, true
 	}
 	if parked {
 		si.releaseCheckoutIfNeeded(ctx, run)
-		return true
+		return true, false
 	}
-	return false
+	return false, false
 }
 
 // checkoutContendedRetryDelay is the backoff before a run that lost the
@@ -826,6 +847,7 @@ func (si *SchedulerIntegration) checkBudget(
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
@@ -948,6 +970,12 @@ func (si *SchedulerIntegration) buildPromptContext(
 
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
+	if reason == RunReasonAgentError {
+		pc.FailedAgentID = parsed["failed_agent_id"]
+		pc.FailedSessionID = parsed["failed_session_id"]
+		pc.AgentErrorMessage = parsed["error"]
 	}
 
 	return pc

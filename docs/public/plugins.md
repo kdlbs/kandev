@@ -1,19 +1,25 @@
 ---
 title: "Plugins"
-description: "Install and manage kandev plugins: Go backends kandev spawns and supervises, with an optional native frontend bundle."
+description: "Install and manage kandev plugins: supervised Go backends, optional native UI bundles, and isolated web apps for experimental canvases."
 status: experimental
 ---
 
 # Plugins
 
-Plugins extend kandev without forking core: a plugin ships a **Go backend**
-that kandev spawns and supervises as a subprocess over a strict typed gRPC
-protocol, and can optionally ship a **native frontend bundle** that kandev
-loads into the SPA. This page covers what plugins are, how to install and
-manage them, and the current security posture. To discover and install plugins
-from the in-app catalog, see the [Plugin marketplace](plugins-marketplace.md).
-For building a plugin, see [Authoring a plugin](plugins-authoring.md). For the
-manifest schema, see [Plugin manifest reference](plugins-manifest.md).
+Plugins extend kandev without forking core. A managed plugin ships a **Go
+backend** that kandev spawns and supervises as a subprocess over a strict typed
+gRPC protocol. It can also ship a **native frontend bundle** that kandev loads
+into the SPA. The experimental canvas system also uses plugin manifests for
+isolated static web apps that can omit the backend. This page covers what
+plugins are, how to install and manage them, and the current security posture.
+To discover and install plugins from the in-app catalog, see the [Plugin
+marketplace](plugins-marketplace.md). For building a plugin, see [Authoring a
+plugin](plugins-authoring.md). For the manifest schema, see [Plugin manifest
+reference](plugins-manifest.md).
+
+See [Agent-authored Canvases](canvases.md) for the isolated web-app lifecycle.
+These apps run inside a sandboxed iframe and do not join the native plugin UI
+surface.
 
 Plugins are an operator-level, instance-wide capability, there is no
 per-user plugin access. Installing a plugin requires an administrator when
@@ -21,6 +27,10 @@ authentication is enabled. They ship in the base product with no feature flag
 to turn on: **Settings > Plugins** is always available in the sidebar. Because
 loaded plugin code runs with backend privileges, install only plugins you
 trust, see [Security posture](#security-posture).
+
+This operator-level rule applies to installed plugin records. Agent-authored
+canvas instances use task or workspace scope and the human review described in
+[Agent-authored Canvases](canvases.md).
 
 ## Quick path
 
@@ -310,6 +320,11 @@ disk on its first restart after upgrading to this version.
   a failing bundle or `initialize` is caught and never breaks boot; slot
   components render behind error boundaries. Hard sandboxing (a worker or
   realm boundary) is explicit future work: see below.
+- **Isolated web apps use a separate browser boundary.** Kandev serves their
+  packaged files in a sandboxed iframe with an opaque origin. The app receives
+  only reviewed Kandev capabilities and exact HTTPS network origins. It cannot
+  use the host DOM, cookies, host authentication headers, or an injected
+  JavaScript API. See [Security and trust](security.md#isolated-web-applications).
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
 - **Curated marketplace, no auto-install.** The [Plugin

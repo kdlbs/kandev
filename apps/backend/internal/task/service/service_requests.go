@@ -1,6 +1,8 @@
 package service
 
 import (
+	"time"
+
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -135,6 +137,10 @@ type UpdateTaskRequest struct {
 	// leaves the relationship untouched; a pointer to "" clears it (un-nests
 	// back to a root task); a non-empty value nests it under that parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. A nil pointer leaves it alone; a
+	// pointer to "" unassigns. It is independent of the agent assignee and
+	// never clears it.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow
@@ -176,6 +182,12 @@ type UpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	// Visibility is "private" or "org". Unknown values normalize to private:
+	// unrecognized input must never widen access.
+	Visibility *string `json:"visibility,omitempty"`
+	// UnitID moves the workspace to another organization unit, which is the
+	// only way to change who reaches it.
+	UnitID *string `json:"unit_id,omitempty"`
 }
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
@@ -286,12 +298,13 @@ type CreateExecutorProfileRequest struct {
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
-	Name          *string                `json:"name,omitempty"`
-	McpPolicy     *string                `json:"mcp_policy,omitempty"`
-	Config        map[string]string      `json:"config,omitempty"`
-	PrepareScript *string                `json:"prepare_script,omitempty"`
-	CleanupScript *string                `json:"cleanup_script,omitempty"`
-	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	Name              *string                `json:"name,omitempty"`
+	McpPolicy         *string                `json:"mcp_policy,omitempty"`
+	Config            map[string]string      `json:"config,omitempty"`
+	PrepareScript     *string                `json:"prepare_script,omitempty"`
+	CleanupScript     *string                `json:"cleanup_script,omitempty"`
+	EnvVars           []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	ExpectedUpdatedAt *time.Time             `json:"-"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment

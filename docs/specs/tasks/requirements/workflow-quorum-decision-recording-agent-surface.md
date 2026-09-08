@@ -49,11 +49,16 @@ An Office participant can submit a validated verdict with a reason, and the resu
   the call with a permission error and write no row.
 - **AC-TASKS-QUORUM-RECORDING-001.4:** WHEN the caller holds both `reviewer` and `approver` seats at
   the task's current `workflow_step_id`, THE SYSTEM SHALL record the decision
-  under `approver`. WHEN the caller holds those two roles at different steps,
-  THE SYSTEM SHALL record the decision under the role whose seat sits at the
-  task's current `workflow_step_id` (which is guaranteed to be one of the two
-  roles by the precondition of AC-TASKS-QUORUM-RECORDING-001.1), and SHALL NOT
-  apply approver-wins across steps.
+  under `approver`. WHEN exactly one of those seats sits at the task's current
+  `workflow_step_id`, THE SYSTEM SHALL record the decision under that seat's
+  role and SHALL NOT apply approver-wins across steps. WHEN neither seat sits
+  at the task's current `workflow_step_id`, whether both seats share one
+  earlier step or the seats occupy different earlier steps, THE SYSTEM SHALL
+  record the decision under the role named by the current step's own
+  eligible automatic `on_turn_complete` `wait_for_quorum` guard, when that
+  step names exactly one role; only WHEN the current step names both roles,
+  names neither, or cannot be resolved SHALL approver-wins apply as the final
+  tiebreak.
 - **AC-TASKS-QUORUM-RECORDING-001.4a:** THE SYSTEM SHALL apply
   AC-TASKS-QUORUM-RECORDING-001.4 to the agent decision surface only. The human decision path
   resolves the role step-blind and retains unconditional approver-wins, so the

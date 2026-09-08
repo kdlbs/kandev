@@ -23,6 +23,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
+	log := newTestLogger(t)
+	rootDir, cleanupRoot := setupTestRepo(t)
+	t.Cleanup(cleanupRoot)
+	repoDir, cleanupRepo := setupTestRepo(t)
+	t.Cleanup(cleanupRepo)
+	thirdDir, cleanupThird := setupTestRepo(t)
+	t.Cleanup(cleanupThird)
+
+	root := NewWorkspaceTracker(rootDir, log)
+	firstRepo := NewWorkspaceTrackerForRepo(repoDir, "first", log)
+	secondRepo := NewWorkspaceTrackerForRepo(thirdDir, "second", log)
+	t.Cleanup(root.Stop)
+	t.Cleanup(firstRepo.Stop)
+	t.Cleanup(secondRepo.Stop)
+
+	trackers := []*WorkspaceTracker{root, firstRepo, secondRepo}
+	for _, tracker := range trackers {
+		tracker.SetPollMode(PollModePaused)
+		tracker.accessDenied.Store(true)
+	}
+
+	mgr := &Manager{
+		logger:           log,
+		workspaceTracker: root,
+		repoTrackers:     []*WorkspaceTracker{firstRepo, secondRepo},
+	}
+	mgr.RefreshWorkspace(context.Background(), "unsupported_trigger")
+
+	for i, tracker := range trackers {
+		if got := tracker.GetPollMode(); got != PollModeFast {
+			t.Errorf("tracker %d poll mode = %q, want fast", i, got)
+		}
+		if tracker.accessDenied.Load() {
+			t.Errorf("tracker %d retained access denial after manual refresh", i)
+		}
+	}
+}
+
 func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
 	m := &Manager{
 		updatesCh: make(chan adapter.AgentEvent, 1),

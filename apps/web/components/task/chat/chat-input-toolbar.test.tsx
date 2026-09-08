@@ -89,7 +89,11 @@ vi.mock("./context-popover", () => ({
 }));
 
 vi.mock("./implement-plan-button", () => ({
-  ImplementPlanButton: () => <button type="button">Implement plan</button>,
+  ImplementPlanButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
+    <button type="button" data-testid="mock-implement-plan-button" data-presentation={presentation}>
+      Implement plan
+    </button>
+  ),
 }));
 
 vi.mock("./reset-context-button", () => ({
@@ -106,9 +110,14 @@ vi.mock("./chat-input-plugin-actions", () => ({
 
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import type { ChatInputToolbarProps } from "./chat-input-toolbar";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import type { ChatSubmitDecorationSlotProps } from "./chat-submit-plugin-decoration";
 
 const MOBILE_TOOLBAR_TEST_ID = "mobile-chat-input-toolbar";
 const CANCEL_AGENT_BUTTON_TEST_ID = "cancel-agent-button";
+const SUBMIT_MESSAGE_BUTTON_TEST_ID = "submit-message-button";
+const DECORATION_PROBE_TEST_ID = "decoration-probe";
+const PRESENTATION_ATTRIBUTE = "data-presentation";
 const SESSION_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 function deferred<T>() {
@@ -134,6 +143,28 @@ function renderToolbar(onCancel: () => void | Promise<void>) {
         onCancel={onCancel}
         onSubmit={() => {}}
         minimalToolbar
+      />
+    </StateProvider>,
+  );
+}
+
+function renderMinimalToolbar(overrides: Partial<ChatInputToolbarProps> = {}) {
+  return render(
+    <StateProvider>
+      <ChatInputToolbar
+        planModeEnabled={false}
+        onPlanModeChange={() => {}}
+        sessionId="s1"
+        taskId="t1"
+        taskDescription=""
+        isAgentBusy
+        hasContent
+        isDisabled={false}
+        isSending={false}
+        onCancel={() => {}}
+        onSubmit={() => {}}
+        minimalToolbar
+        {...overrides}
       />
     </StateProvider>,
   );
@@ -290,7 +321,7 @@ describe("ChatInputToolbar cancel button", () => {
     renderFullToolbar({ isAgentBusy: true, canCancelAgent: false });
 
     expect(screen.queryByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeNull();
-    expect(screen.getByTestId("submit-message-button")).toBeTruthy();
+    expect(screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.getByText("Queue message")).toBeTruthy();
   });
 
@@ -367,12 +398,61 @@ describe("ChatInputToolbar submit button", () => {
       </StateProvider>,
     );
 
-    expect((screen.getByTestId("submit-message-button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByText("The agent is still being set up.")).toBeTruthy();
   });
 });
 
 describe("ChatInputToolbar responsive wrapper", () => {
+  it("gives mobile composer controls 44px touch targets", () => {
+    responsiveMock.breakpoint = "mobile";
+    renderFullToolbar({
+      hidePlanMode: false,
+      isAgentBusy: true,
+      canCancelAgent: true,
+    });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      "cancel-agent-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("min-h-11");
+      expect(control.className).toContain("min-w-11");
+    }
+  });
+
+  it("keeps compact composer geometry on desktop", () => {
+    responsiveMock.breakpoint = "desktop";
+    renderFullToolbar({ hidePlanMode: false });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("h-7");
+      expect(control.className).not.toContain("min-h-11");
+      expect(control.className).not.toContain("min-w-11");
+    }
+  });
+
+  it("passes the touch presentation to plan implementation on tablets", () => {
+    responsiveMock.breakpoint = "tablet";
+    renderFullToolbar({ planModeEnabled: true, onImplementPlan: () => {} });
+
+    expect(
+      screen.getByTestId("mock-implement-plan-button").getAttribute(PRESENTATION_ATTRIBUTE),
+    ).toBe("mobile");
+  });
+
   it("routes mobile breakpoints to the compact toolbar without a duplicate sessions control", () => {
     responsiveMock.breakpoint = "mobile";
     renderFullToolbar();
@@ -433,4 +513,118 @@ describe("ChatInputToolbar responsive wrapper", () => {
       expect(screen.queryByTestId(MOBILE_TOOLBAR_TEST_ID)).toBeNull();
     },
   );
+});
+
+describe("ChatInputToolbar chat-submit-decoration slot", () => {
+  const SLOT = "chat-submit-decoration";
+  const PLUGIN_ID = "plugin-decoration";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function registerProbe() {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, ({ slotProps }) => {
+      const ctx = slotProps as ChatSubmitDecorationSlotProps;
+      return (
+        <i
+          data-testid={DECORATION_PROBE_TEST_ID}
+          data-task={String(ctx.taskId)}
+          data-session={String(ctx.activeSessionId)}
+          data-presentation={ctx.presentation}
+          data-sending={String(ctx.isSending)}
+          data-busy={String(ctx.isAgentBusy)}
+          data-disabled={String(ctx.disabled)}
+          data-plan={String(ctx.planModeEnabled)}
+        />
+      );
+    });
+  }
+
+  // Renders the real toolbar rather than the slot wrapper: every prop below
+  // travels toolbar -> SubmitButton -> SendSubmitButton -> the slot, and a
+  // dropped hop anywhere on that chain is invisible to a leaf-level test.
+  it("reaches the slot through the desktop toolbar with the live button state", () => {
+    registerProbe();
+
+    renderFullToolbar({ isSending: true, isDisabled: true, planModeEnabled: true });
+
+    const probe = screen.getByTestId(DECORATION_PROBE_TEST_ID);
+    expect(probe.getAttribute("data-task")).toBe("t1");
+    expect(probe.getAttribute("data-session")).toBe("s1");
+    expect(probe.getAttribute(PRESENTATION_ATTRIBUTE)).toBe("desktop");
+    expect(probe.getAttribute("data-sending")).toBe("true");
+    expect(probe.getAttribute("data-disabled")).toBe("true");
+    expect(probe.getAttribute("data-plan")).toBe("true");
+  });
+
+  // A coarse-pointer tablet renders the compact toolbar, so the minimal
+  // composer must not disagree with it about which presentation is in play.
+  it.each(["mobile", "tablet"] as const)(
+    "reports the compact presentation on %s for the minimal toolbar too",
+    (breakpoint) => {
+      responsiveMock.breakpoint = breakpoint;
+      registerProbe();
+
+      renderMinimalToolbar();
+
+      expect(
+        screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute(PRESENTATION_ATTRIBUTE),
+      ).toBe("mobile");
+    },
+  );
+
+  it("reaches the slot through the mobile toolbar", () => {
+    responsiveMock.breakpoint = "mobile";
+    registerProbe();
+
+    renderFullToolbar();
+
+    expect(screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute(PRESENTATION_ATTRIBUTE)).toBe(
+      "mobile",
+    );
+  });
+
+  it("reaches the slot through the minimal toolbar, which renders only the submit button", () => {
+    registerProbe();
+
+    renderMinimalToolbar();
+
+    const probe = screen.getByTestId(DECORATION_PROBE_TEST_ID);
+    expect(probe.getAttribute("data-task")).toBe("t1");
+    expect(probe.getAttribute("data-busy")).toBe("true");
+  });
+
+  // The decoration belongs to the send button, not to the toolbar: when the
+  // agent is mid-turn with an empty composer the send button is replaced by
+  // Cancel, and a ring with nothing to sit on must go with it.
+  it("does not render when the send button itself is hidden", () => {
+    registerProbe();
+
+    renderToolbar(() => {});
+
+    expect(screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(DECORATION_PROBE_TEST_ID)).toBeNull();
+  });
+
+  it("renders no decoration layer at all when no plugin registered one", () => {
+    renderFullToolbar();
+
+    expect(screen.queryByTestId(DECORATION_PROBE_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("chat-submit-decoration-layer")).toBeNull();
+  });
+
+  it("positions the layer inside the send button's own box", () => {
+    registerProbe();
+
+    renderFullToolbar();
+
+    const button = screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID);
+    const layer = screen.getByTestId("chat-submit-decoration-layer");
+    // Same positioned parent as the button: the plugin can size against
+    // inset-0 without measuring the DOM.
+    expect(layer.parentElement).toBe(button.parentElement);
+    expect(button.parentElement?.className).toContain("relative");
+  });
 });

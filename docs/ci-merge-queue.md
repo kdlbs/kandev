@@ -115,6 +115,79 @@ and it closes the gap where a subject outside their hand-maintained lists
 changed and nothing checked it. Their contract tests were updated to assert the
 absence of a filter rather than the presence of specific entries.
 
+### External CI runner capacity
+
+The normal Linux CI workflows have one activation switch, one percentage
+control, and two runner tiers. The switch and percentage are unset by default,
+so the workflows use GitHub-hosted runners.
+
+| Variable | Pilot value | Purpose |
+| -------- | ----------- | ------- |
+| `KANDEV_CI_EXTERNAL_ENABLED` | unset | Set to `true` to allow external assignments |
+| `KANDEV_CI_EXTERNAL_PERCENT` | unset or `0` | Assign 0 to 100 percent of eligible jobs |
+| `KANDEV_CI_RUNNER_LIGHT` | `ubicloud-standard-2-ubuntu-2404` | Control and aggregate jobs |
+| `KANDEV_CI_RUNNER_STANDARD` | `ubicloud-standard-4-ubuntu-2404` | Eligible browser and frontend test jobs |
+
+Set `KANDEV_CI_EXTERNAL_ENABLED` to the exact value `true` when the Actions queue
+needs extra capacity. Set it to `false`, or remove it, after the queue returns
+to its normal level. The two tier variables stay configured between bursts, so
+changing the instance type requires only an Actions variable update.
+
+Set `KANDEV_CI_EXTERNAL_PERCENT` to `50` for a pilot. The E2E matrix then sends
+seven of fourteen normal shards to the standard tier. Backend checkout and
+report-token jobs remain on GitHub-hosted runners; the aggregate backend gate
+and frontend jobs are eligible. Singleton jobs use a stable hash cohort, so
+their share approaches the percentage across workflow runs.
+
+Leave the percentage unset for the default GitHub-only mode. Set it to `100`
+to send every eligible job with a non-empty tier label to external capacity.
+Malformed or out-of-range values fail closed to GitHub-hosted runners and emit
+a planner warning.
+
+The reusable `.github/actions/plan-external-runners` composite action runs on
+the planner job's `ubuntu-latest` checkout. Each workflow declares its eligible
+families as JSON, and the action returns one JSON plan with resolved runner
+labels:
+
+```yaml
+runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
+runs-on: ${{ matrix.runner }}
+```
+
+If a tier variable is empty, that tier uses `ubuntu-latest`. If a non-empty
+label is unavailable, GitHub leaves the job queued or fails it. Clear the
+invalid label and rerun the workflow. Jobs already queued or running keep their
+original runner. New jobs use the current variables.
+
+The E2E build and report jobs, Docker/Kind shards, Kubernetes compatibility
+jobs, Playwright image job, desktop smoke job, backend checkout/static/test
+shards, Postgres service job, architecture and harness linters, and Windows job
+stay on GitHub-hosted runners. Release, publishing, signing, deployment, and
+credential-bearing jobs stay on their existing runners. The workflows do not
+add permissions, secrets, or persistent state.
+
+The same switch and tier labels apply to eligible E2E, backend-gate, and
+frontend jobs. Architecture-lint, action-pinning, and harness-lint stay hosted
+and do not create planner jobs. The planner does not change job names, test
+selection, matrix values, artifacts, dependencies, timeouts, permissions, or
+required conclusions.
+
+Pilot procedure:
+
+1. Merge the workflow change while `KANDEV_CI_EXTERNAL_ENABLED` and
+   `KANDEV_CI_EXTERNAL_PERCENT` are unset.
+2. Install the [Ubicloud GitHub App](https://www.ubicloud.com/docs/github-actions-integration) for this repository.
+3. Set both tier variables to the pilot labels in the table. Leave Premium
+   Runners disabled. Premium is an account-level setting, not a per-job tier.
+4. Set `KANDEV_CI_EXTERNAL_PERCENT=50` for the first pilot.
+5. Set `KANDEV_CI_EXTERNAL_ENABLED=true` while the queue is full.
+6. Compare at least three runs for queue delay, job duration, runner label,
+   image setup, and failures.
+7. Set the switch to `false` after the queue recovers. Keep the labels and
+   percentage for the next burst.
+
+Use the [Ubicloud runner type reference](https://www.ubicloud.com/docs/github-actions-integration/runner-types) when changing a tier. Use GitHub's [runner selection reference](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job) for `runs-on` expressions. Do not enable [Ubicloud Premium Runners](https://www.ubicloud.com/docs/github-actions-integration/use-premium-runners) for this pilot.
+
 ### PR context in a merge group
 
 A `merge_group` run has no `github.event.pull_request` and no

@@ -4,6 +4,7 @@ import {
   isNativeSubmitDisabled,
   resolveDisabledReason,
   REASON_NO_COMPATIBLE_AGENT,
+  REASON_SELECTED_AGENT_INCOMPATIBLE,
   REASON_TITLE,
   REASON_REPO,
   REASON_BRANCH,
@@ -40,6 +41,8 @@ function makeProps(
     effectiveWorkflowId: "wf-1",
     executorHint: null,
     noCompatibleAgent: false,
+    agentCompatState: "compatible",
+    selectedAgentProfileName: null,
     executorProfileName: null,
     onCancel: () => {},
     onUpdateWithoutAgent: () => {},
@@ -292,5 +295,41 @@ describe("computeDisabledReason (submitBlockedReason)", () => {
   it("ignores empty/null reason and falls back to normal logic", () => {
     expect(computeDisabledReason(makeProps({ submitBlockedReason: null }), KIND_START)).toBeNull();
     expect(computeDisabledReason(makeProps({ submitBlockedReason: "" }), KIND_START)).toBeNull();
+  });
+});
+
+describe("computeDisabledReason — agent compatibility states", () => {
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.7
+  it("names the selected agent, not a missing executor, when a compatible agent exists", () => {
+    const props = makeProps({
+      noCompatibleAgent: true,
+      agentCompatState: "selected-incompatible",
+      selectedAgentProfileName: "OpenCode",
+      executorProfileName: "Fly",
+    });
+    expect(computeDisabledReason(props, KIND_START)).toBe(REASON_SELECTED_AGENT_INCOMPATIBLE);
+    expect(computeDisabledReason({ ...props, isSessionMode: true }, KIND_DEFAULT)).toBe(
+      REASON_SELECTED_AGENT_INCOMPATIBLE,
+    );
+  });
+
+  it("resolves the selected-agent key with the agent and executor names", () => {
+    const text = resolveDisabledReason(t, REASON_SELECTED_AGENT_INCOMPATIBLE, "Fly", "OpenCode");
+    expect(text).toContain("OpenCode");
+    expect(text).toContain("Fly");
+    expect(text).toContain("credentials");
+  });
+
+  it("uses an unavailable-agent reason while an unlocked selection is replaced", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({
+          noCompatibleAgent: true,
+          agentCompatState: "selected-unavailable" as never,
+          selectedAgentProfileName: "Disabled agent",
+        }),
+        KIND_START,
+      ),
+    ).toBe("task:selectedAgentProfileUnavailable");
   });
 });

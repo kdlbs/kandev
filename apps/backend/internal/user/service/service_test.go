@@ -32,6 +32,65 @@ func rawClear() **json.RawMessage {
 	return ptr((*json.RawMessage)(nil))
 }
 
+func TestApplySidebarTaskColorAutomationReplacesRulesAndValidates(t *testing.T) {
+	current := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "old",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	replacement := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "new",
+			Enabled:   false,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionRepository, Value: nil},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "cyan"},
+		}},
+	}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: current}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &replacement,
+	}); err != nil {
+		t.Fatalf("apply automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, replacement)
+	}
+
+	invalid := models.SidebarTaskColorAutomation{
+		Enabled: replacement.Enabled,
+		Rules:   append([]models.SidebarTaskColorRule(nil), replacement.Rules...),
+	}
+	invalid.Rules[0].Enabled = true
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &invalid,
+	}); err == nil {
+		t.Fatal("expected incomplete enabled rule to be rejected")
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("rejected automatic colors changed settings to %#v", settings.SidebarTaskColorAutomation)
+	}
+}
+
+func TestApplySidebarTaskColorAutomationOmissionPreservesRules(t *testing.T) {
+	want := models.SidebarTaskColorAutomation{Enabled: true, Rules: []models.SidebarTaskColorRule{{
+		ID:        "keep",
+		Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+		Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "blue"},
+	}}}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: want}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{}); err != nil {
+		t.Fatalf("apply omitted automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, want) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, want)
+	}
+}
+
 // TestApplyBasicSettingsTasksListShowDetails verifies applyBasicSettings preserves TasksListShowDetails when omitted and applies explicit values.
 func TestApplyBasicSettingsTasksListShowDetails(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
