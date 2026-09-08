@@ -16,6 +16,7 @@ package scheduler_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -131,5 +132,112 @@ func TestQueueRun_UsesLegacyInlinePathWhenNoRunsServiceWired(t *testing.T) {
 	}
 	if got.PriorityClass != models.PriorityClassEvent {
 		t.Errorf("priority_class = %d, want %d (PriorityClassEvent, via the PriorityClass fix)", got.PriorityClass, models.PriorityClassEvent)
+	}
+}
+
+// TestQueueRunCtx_DelegatesRealActorFromRunContext covers
+// AC-OFFICE-RUN-CAUSATION-001.15: QueueRunCtx call sites (approval
+// resolution, reactivity) already know the human or agent that caused the
+// wake via RunContext.ActorType/ActorID, but that identity was previously
+// discarded before it ever reached causation resolution — every wake was
+// silently attributed to the system actor. This proves it now survives:
+// the persisted row's actor fields, and (since ClassifyPriority treats a
+// user actor specially) its priority class.
+func TestQueueRunCtx_DelegatesRealActorFromRunContext(t *testing.T) {
+	repo := newTestRepoSched(t)
+	ss := buildSchedulerForQueueRun(t, repo)
+	ctx := context.Background()
+
+	settingsAgent := &models.AgentInstance{
+		ID:                    testAgentID,
+		WorkspaceID:           testWorkspaceID,
+		Name:                  "actor-agent",
+		Role:                  models.AgentRoleWorker,
+		Status:                models.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
+	}
+	if err := repo.CreateAgentInstance(ctx, settingsAgent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
+	ss.SetRunsService(runsSvc)
+
+	err = ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+		Reason:    scheduler.RunReasonTaskComment,
+		TaskID:    "task-1",
+		ActorID:   "user-42",
+		ActorType: "user",
+	})
+	if err != nil {
+		t.Fatalf("queue run ctx: %v", err)
+	}
+
+	got := onlyQueuedRun(t, repo, testWorkspaceID)
+	if got.ActorKind != models.ActorKindUser {
+		t.Errorf("actor_kind = %q, want %q", got.ActorKind, models.ActorKindUser)
+	}
+	if got.ActorID != "user-42" {
+		t.Errorf("actor_id = %q, want %q", got.ActorID, "user-42")
+	}
+	if got.PriorityClass != models.PriorityClassHuman {
+		t.Errorf("priority_class = %d, want %d (PriorityClassHuman, since the actor is now a real user)", got.PriorityClass, models.PriorityClassHuman)
+	}
+}
+
+// TestQueueRunCtx_AgentSelfTriggerAllowanceEnforced proves the
+// AC-OFFICE-LAUNCH-SAFETY-004 self-trigger gate — dormant on this path
+// before actor threading, since the gate only evaluates for
+// actorKind == ActorKindAgent && actorID == the woken agent's own id —
+// is now reachable through QueueRunCtx: an agent re-triggering itself
+// beyond the default allowance (3, within the rolling window) is refused.
+func TestQueueRunCtx_AgentSelfTriggerAllowanceEnforced(t *testing.T) {
+	repo := newTestRepoSched(t)
+	ss := buildSchedulerForQueueRun(t, repo)
+	ctx := context.Background()
+
+	settingsAgent := &models.AgentInstance{
+		ID:                    testAgentID,
+		WorkspaceID:           testWorkspaceID,
+		Name:                  "self-trigger-agent",
+		Role:                  models.AgentRoleWorker,
+		Status:                models.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
+	}
+	if err := repo.CreateAgentInstance(ctx, settingsAgent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
+	ss.SetRunsService(runsSvc)
+
+	queueSelfTriggered := func(taskID string) error {
+		return ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+			Reason:    scheduler.RunReasonTaskComment,
+			TaskID:    taskID,
+			ActorID:   testAgentID,
+			ActorType: "agent",
+		})
+	}
+
+	// runsservice.DefaultSelfTriggerAllowance is 3 (this scheduler wires a
+	// runsSvc with no SetLaunchSafetyLimits override, so the default
+	// applies): the first 3 distinct-task self-triggers must succeed.
+	for i := 0; i < 3; i++ {
+		if err := queueSelfTriggered(fmt.Sprintf("task-%d", i)); err != nil {
+			t.Fatalf("self-trigger %d: unexpected refusal: %v", i, err)
+		}
+	}
+	// The 4th within the rolling window must be refused.
+	if err := queueSelfTriggered("task-3"); err == nil {
+		t.Fatal("expected the 4th self-trigger within the allowance window to be refused, got nil error")
 	}
 }

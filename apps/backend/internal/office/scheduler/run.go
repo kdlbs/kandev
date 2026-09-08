@@ -255,12 +255,29 @@ func (ss *SchedulerService) SetProjectSkillDirResolver(fn func(agentTypeID strin
 	ss.projectSkillDirResolver = fn
 }
 
-// QueueRun enqueues a run request for an agent instance.
+// QueueRun enqueues a run request for an agent instance, attributed to the
+// system actor. It exists for shared.RunQueuer callers that predate the
+// actor contract (AC-OFFICE-RUN-CAUSATION-001.15) and have no actor to
+// declare; QueueRunCtx callers thread their RunContext's real actor
+// through queueRunAsActor instead.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
 // Implements shared.RunQueuer.
 func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
+) error {
+	return ss.queueRunAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+}
+
+// queueRunAsActor is QueueRun's actor-aware core. actorKind/actorID flow
+// into the delegated runs/service causation resolution (workspace,
+// priority class, causation-depth and self-trigger refusal gates) and,
+// on the legacy inline fallback, into ClassifyPriority — so a real actor
+// gets the same priority treatment whether or not a runs service is wired.
+func (ss *SchedulerService) queueRunAsActor(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
 ) error {
 	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
 		return err
@@ -271,7 +288,8 @@ func (ss *SchedulerService) QueueRun(
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        service.PayloadWithAgent(payload, agentInstanceID),
-			ActorKind:      models.ActorKindSystem,
+			ActorKind:      actorKind,
+			ActorID:        actorID,
 		})
 		return err
 	}
@@ -318,12 +336,10 @@ func (ss *SchedulerService) QueueRun(
 		// as models.PriorityClass's Go zero value — which is
 		// PriorityClassHuman (0), not PriorityClassEvent (2) — falsely
 		// promoting every run enqueued through this path to the highest
-		// claim-order preference (AC-OFFICE-BACKPRESSURE-001.1/.3). This
-		// caller has no actor to classify against, so it always resolves to
-		// PriorityClassEvent's fallback, but going through ClassifyPriority
-		// keeps this in one place with the reason-registry mapping instead
-		// of hardcoding a value that could drift from it.
-		PriorityClass: shared.ClassifyPriority(models.ActorKindSystem, reason, false),
+		// claim-order preference (AC-OFFICE-BACKPRESSURE-001.1/.3).
+		// ClassifyPriority keeps this in one place with the reason-registry
+		// mapping instead of hardcoding a value that could drift from it.
+		PriorityClass: shared.ClassifyPriority(actorKind, reason, false),
 	}
 	if err := ss.repo.CreateRun(ctx, req); err != nil {
 		return fmt.Errorf("enqueue run: %w", err)
@@ -343,6 +359,12 @@ func (ss *SchedulerService) QueueRun(
 // otherwise it defaults to "{reason}:{taskID}:{agentID}" so the same
 // agent never gets two runs for the same task+reason within the
 // idempotency window.
+//
+// Unlike QueueRun, this threads c's real actor (ActorType/ActorID) through
+// to causation resolution instead of defaulting to system
+// (AC-OFFICE-RUN-CAUSATION-001.15) — every QueueRunCtx call site (approval
+// resolution, reactivity) already knows the human or agent that caused the
+// wake; it was only ever discarded at this boundary.
 func (ss *SchedulerService) QueueRunCtx(
 	ctx context.Context, agentInstanceID string, c RunContext,
 ) error {
@@ -354,7 +376,31 @@ func (ss *SchedulerService) QueueRunCtx(
 	if idempotencyKey == "" {
 		idempotencyKey = fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
 	}
-	return ss.QueueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey)
+	actorKind, actorID := actorFromRunContext(c)
+	return ss.queueRunAsActor(ctx, agentInstanceID, c.Reason, payload, idempotencyKey, actorKind, actorID)
+}
+
+// actorFromRunContext maps RunContext's loosely-typed ActorType string
+// ("user" | "agent" | "", set independently across many reactivity/
+// approval call sites) onto models.ActorKind. Anything other than an
+// exact "user"/"agent" match — including an empty ActorType, or a
+// non-empty ActorType with no ActorID — resolves to ActorKindSystem, the
+// same fail-restrictive default runs/service.normalizeActor applies for a
+// delegated request; keeping the same rule here means the legacy inline
+// fallback (no runs service wired) classifies priority identically to the
+// delegated path.
+func actorFromRunContext(c RunContext) (models.ActorKind, string) {
+	if c.ActorID == "" {
+		return models.ActorKindSystem, ""
+	}
+	switch c.ActorType {
+	case "user":
+		return models.ActorKindUser, c.ActorID
+	case "agent":
+		return models.ActorKindAgent, c.ActorID
+	default:
+		return models.ActorKindSystem, ""
+	}
 }
 
 func encodeRunContext(c RunContext) (string, error) {
