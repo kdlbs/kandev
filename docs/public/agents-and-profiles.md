@@ -258,7 +258,10 @@ stale browser action does not replace a newer route decision.
 
 The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
-model is missing from that host list.
+model is missing from that host list. Profile selectors do not show a model
+warning for this difference. Inspect the model list in profile settings for
+discovery details. Authentication, installation, and probe-failure indicators
+remain visible on profile selectors.
 
 At task launch, the selected executor's ACP catalog is authoritative. For
 profiles without automatic fallback, Kandev follows the four-step order above.

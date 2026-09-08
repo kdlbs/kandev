@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002
+  - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003
 created: 2026-08-23
 owners:
   - kandev
@@ -21,6 +22,7 @@ resolution from a bare requested model to one advertised bracketed variation.
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Unique model-variation resolution](#unique-model-variation-resolution) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003` | [Profile selection and warning placement](#8-profile-selection-and-warning-placement) |
 
 ## Migrated source detail
 
@@ -139,7 +141,7 @@ over `fallback_model`):
 | Session start, model selection unsupported | Continue on the agent default and persist a warning. | Same | Same |
 | Mid-session model/auth failure (office run, post-start) | Unchanged ADR behavior: office re-dispatches via the workspace routing chain (`routingerr.Decide(ContextOffice)`; availability codes → `DecisionFallback`). The profile's model policy does **not** gate office fallback — the workspace routing configuration is the office authorization owner. | Same as default-on-mismatch: `fallback_model` is a session-start policy, not an office routing input. | Legacy: re-dispatch to next candidate in the provider order (unchanged). |
 | Boot reconciliation | Never overwrite a gone start model (keep it; UI shows it red). Same for a gone `fallback_model`. | Same | Same (reconciler is mode-independent). |
-| New-task / new-agent profile picker | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. |
+| New-task / new-agent profile picker | Profile selectable without a host model advisory. | Same. | Same. |
 | Model picker (profile editor, session toolbar) | Gone models greyed out, unselectable, visible. | Same. | Same. |
 
 `SetModel` failures that mean "this agent does not support model selection"
@@ -227,17 +229,17 @@ table. This calculation is advisory because the host catalog can differ from
 the selected executor catalog.
 
 When the host advertises one variation, the task profile option remains
-selectable and identifies the possible target in its existing amber advisory.
-The profile editor keeps the saved bare ID visible and describes the unique
+selectable without a host model advisory. The profile editor keeps the saved
+bare ID visible and describes the unique
 host variation instead of reporting that the model is simply gone. Selecting
 the advertised variation remains an explicit way to update the profile.
 
-When the host advertises zero or multiple variations, the current missing-model
-presentation remains. The runtime can still reach a different decision from
+When the host advertises zero or multiple variations, the profile editor's
+missing-model presentation remains. The runtime can still reach a different decision from
 the selected executor catalog.
 
-The task-create advisory keeps its existing desktop tooltip and coarse-pointer
-drawer. The profile editor uses its existing responsive selector. The durable
+The task-create selector has no host model tooltip or help drawer.
+The profile editor uses its existing responsive selector. The durable
 chat warning uses the existing status-message layout on desktop and mobile.
 This change adds no nested scroll area or hover-only information.
 
@@ -496,27 +498,57 @@ All new copy is externalized via `t()` into the `settings` i18n namespace
   (`apps/web/src/locales/{en,pseudo,pt-pt,zh-cn}/settings.json`) — the i18n ratchet
 judges added lines even in unmigrated files.
 
-### 8. Profile picker warnings (new-task / new-agent)
+### 8. Profile selection and warning placement
 
 `apps/web/lib/state/slices/settings/types.ts` — `AgentProfileOption` gains
 `model`, `fallbackModel`, `autoFallback` (populated in
 `toAgentProfileOption`).
 
 `apps/web/components/task-create-dialog-options.tsx`
-(`useAgentProfileOptions`) can compute a host-catalog difference.
-This difference is advisory only.
+(`useAgentProfileOptions`) derives profile labels and eligibility without
+comparing the saved model with the host model catalog. Remove
+`advertisedModelIDs`, `ModelProbeWarning`, and `ModelProbeWarningIndicator` from
+this module, plus imports used only by those helpers. The hook no longer needs
+`useAvailableAgents` solely to produce model advisories.
 
-- Every profile remains selectable.
-- A missing host model shows one amber warning icon beside the profile name.
-- On fine pointers, hovering or focusing the warning icon reveals the full
-  localized advisory that the executor decides availability at launch. On
-  coarse pointers, tapping the icon opens the same advisory in a drawer. The
-  advisory is not shown as an always-visible secondary row in the option list.
-- The warning does not promise that an explicit fallback will be available.
-- The warning does not change the saved profile model.
+Both `renderLabel` and `renderTriggerLabel` use the same profile presentation.
+Keep the option interface compatible with its consumers. Preserve profile
+eligibility, recent-use ordering, names, logos, and CLI passthrough indicators.
+Keep `getCapabilityWarning` and its authentication, installation, and probe
+failure states. Those states describe agent health rather than a model mismatch.
+
+Consumers include task creation, new subtasks, new sessions, quick chat,
+automation configuration, and Office setup. All receive this behavior from the
+shared hook. Do not add consumer-specific warning suppression flags.
+
+Retain profile model/configuration fields and the editor's
+`findUniqueModelVariation`. After checking references, remove these unused
+selector keys from every locale:
+`profileStartModelNotAdvertisedOnHost` and
+`profileStartModelUniqueVariationOnHost`.
 
 `apps/web/app/office/setup/agent-profile-setup-controls.tsx`
-(`useSelectableProfileOptions`) uses the same advisory behavior.
+(`useSelectableProfileOptions`) retains its Office eligibility filtering around
+the shared profile options.
+
+#### Desktop and mobile composition
+
+Keep the touch-usable combobox and shared selection logic. A row tap completes
+the temporary profile choice without another help drawer or an empty hit area.
+Preserve keyboard selection, focus return, picker-owned scrolling, and safe-area
+constraints. Assert no document horizontal overflow.
+
+Use `e2e/tests/settings/mobile-no-silent-model-fallback.spec.ts` as the shipped
+flow and `components/task/mobile/mobile-picker-sheet.tsx` as the curated
+temporary-choice precedent. No picker-shell replacement is needed.
+
+#### Rationale and compatibility
+
+A host observation cannot establish the executor outcome. A neutral icon or
+better ID comparison would still report valid catalog differences during
+selection. Keep the existing executor-authority ADR and runtime behavior.
+This change needs no resolver, cache, schema, or new ADR. Explain warning
+placement in `docs/public/agents-and-profiles.md` when implementation ships.
 
 The persisted `model_selection_warning` chat message renders through
 `apps/web/components/task/chat/messages/status-message.tsx`.
@@ -566,8 +598,11 @@ Frontend (Vitest, `*.test.ts(x)`):
 
 - `model-config-selector`: disabled option not selectable; greyed class.
 - `session-models` WS handler: stale active model is kept (not cleared).
-- `useAgentProfileOptions`: every host-mismatch profile remains selectable and
-  shows an advisory warning.
+- `useAgentProfileOptions`: every otherwise eligible host-mismatch profile
+  remains selectable with no model advisory in either label. Cover canonical
+  IDs, legacy bracketed IDs, unique and multiple variations, and empty catalogs.
+- Capability health warnings, recent-use ordering, disabled-profile filtering,
+  and saved profile values remain unchanged by selector rendering.
 - Profile editor: gone start model renders red + disabled; auto-fallback keeps
   the explicit fallback choice visible but disables its controls.
 - Profile editors: fallback settings start collapsed; expanding exposes both
@@ -581,8 +616,11 @@ E2E (Playwright, `apps/web/e2e`):
 
 - Mock backend (`KANDEV_E2E_MOCK=true`): create a profile whose start model
   is not in the host catalog. Make sure that the task-create picker keeps the
-  profile selectable, shows one warning icon, and reveals the advisory warning
-  through the fine-pointer tooltip or coarse-pointer drawer.
+  profile selectable without a host model warning in the option or selected
+  label. Select the profile with keyboard on desktop and a row tap on mobile.
+- Launch a profile whose executor advertises its exact model while the host
+  omits it. Verify the selected model, no model-selection warning, and unchanged
+  profile values after reload.
 - Launch with an executor catalog that omits the profile model. Make sure that
   no model-selection call occurs, the task continues, and chat shows one warning.
 - Reload the task page. Make sure that the warning remains in chat.

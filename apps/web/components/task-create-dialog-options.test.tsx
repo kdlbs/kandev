@@ -58,19 +58,6 @@ const AGENT_WITH_GPT: AvailableAgent = {
   },
 } as unknown as AvailableAgent;
 
-const AGENT_WITH_OPUS_VARIATION: AvailableAgent = {
-  name: "omp-acp",
-  available: true,
-  model_config: {
-    default_model: "opus[1m]",
-    available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
-    current_model_id: "opus[1m]",
-    available_modes: [],
-    supports_dynamic_models: false,
-    status: "ok",
-  },
-} as unknown as AvailableAgent;
-
 const GONE_MODEL = "claude-gone";
 const DATA_DISABLED = "data-disabled";
 const MODEL_PROBE_WARNING_TEST_ID = "agent-profile-model-probe-warning";
@@ -116,14 +103,6 @@ function OptionsProbe({
 function renderOptions(profiles: AgentProfileOption[]) {
   render(<OptionsProbe profiles={profiles} />);
   return screen.getByTestId("option-0");
-}
-
-function getModelProbeWarning() {
-  return screen.getByTestId(MODEL_PROBE_WARNING_TEST_ID);
-}
-
-function getModelProbeWarningLabel() {
-  return getModelProbeWarning().getAttribute("aria-label");
 }
 
 beforeEach(() => {
@@ -226,80 +205,96 @@ describe("useAgentProfileOptions recent-use ordering", () => {
   });
 });
 
-describe("useAgentProfileOptions executor-authoritative model hint", () => {
-  it("keeps a profile whose start model is absent from the host probe selectable", () => {
-    const option = renderOptions([profileOption({ model: GONE_MODEL })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(getModelProbeWarningLabel()).toContain(GONE_MODEL);
-  });
-
-  it("keeps a profile with an available start model selectable", () => {
-    const option = renderOptions([profileOption({ model: "gpt-5" })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-  });
-
-  it("names a unique advertised variation without disabling the profile", () => {
-    setAvailableAgents([AGENT_WITH_OPUS_VARIATION]);
-    const option = renderOptions([profileOption({ model: "opus" })]);
-
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(getModelProbeWarningLabel()).toContain("opus[1m]");
-  });
-
-  it("keeps a profile with an empty (agent default) model selectable", () => {
-    const option = renderOptions([profileOption({ model: "" })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-  });
-
-  it("keeps a gone-model profile with a fallback selectable", () => {
-    const option = renderOptions([profileOption({ model: GONE_MODEL, fallback_model: "gpt-5" })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(option.getAttribute("data-reason")).toBeNull();
-
-    expect(getModelProbeWarningLabel()).toContain(GONE_MODEL);
-  });
-
-  it("keeps a profile selectable when both saved models are absent from the host probe", () => {
-    const option = renderOptions([
-      profileOption({ model: GONE_MODEL, fallback_model: "other-gone" }),
+describe("useAgentProfileOptions model-independent labels", () => {
+  // @covers AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.1
+  it.each([
+    ["exact", "gpt-5", ["gpt-5"]],
+    ["missing", GONE_MODEL, ["gpt-5"]],
+    ["unique variation", "opus", ["opus[1m]"]],
+    ["multiple variations", "opus", ["opus[1m]", "opus[270k]"]],
+    ["legacy effort IDs", "gpt-6-astra", ["gpt-6-astra[low]", "gpt-6-astra[high]"]],
+    ["bracketed request", "opus[1m]", ["opus[270k]"]],
+    ["empty catalog", GONE_MODEL, []],
+    ["provider default", "", ["gpt-5"]],
+  ])("does not show host model advisories in either label: %s", (_, model, models) => {
+    setAvailableAgents([
+      {
+        ...AGENT_WITH_GPT,
+        model_config: {
+          ...AGENT_WITH_GPT.model_config,
+          available_models: (models as string[]).map((id) => ({ id, name: id })),
+        },
+      },
     ]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(getModelProbeWarningLabel()).toContain(GONE_MODEL);
-  });
-
-  it("keeps auto-fallback profiles selectable and shows the host probe hint", () => {
-    const option = renderOptions([profileOption({ model: GONE_MODEL, auto_fallback: true })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(getModelProbeWarningLabel()).toContain(GONE_MODEL);
-  });
-
-  it("renders the host probe hint as one compact warning trigger", () => {
-    const option = renderOptions([profileOption({ model: GONE_MODEL })]);
-
-    expect(getModelProbeWarning()).toBeTruthy();
-    expect(option.textContent).not.toContain(
-      "The host probe did not advertise claude-gone. The selected executor will decide the model at launch.",
-    );
-  });
-
-  it("uses a non-interactive warning indicator in the selected trigger", () => {
-    const { result } = renderHook(() =>
-      useAgentProfileOptions([profileOption({ model: GONE_MODEL })]),
-    );
-
+    const profile = profileOption({ model: model as string });
+    const { result } = renderHook(() => useAgentProfileOptions([profile]));
+    const option = result.current[0]!;
+    expect(option.disabled).toBeUndefined();
+    expect(option.disabledReason).toBeUndefined();
     render(
       <TooltipProvider>
-        <div>{result.current[0]?.renderTriggerLabel?.()}</div>
+        <div data-testid="option-label">{option.renderLabel()}</div>
+        <div data-testid="selected-label">{option.renderTriggerLabel?.()}</div>
       </TooltipProvider>,
     );
-
-    expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
-    expect(screen.getByTitle(/claude-gone/)).toBeTruthy();
+    for (const label of ["option-label", "selected-label"]) {
+      const element = screen.getByTestId(label);
+      expect(element.textContent).toContain("hybrid");
+      expect(element.querySelector("button, .tabler-icon-alert-triangle")).toBeNull();
+      expect(element.querySelector('[title*="host probe"]')).toBeNull();
+    }
   });
 
-  it("does not gate when the agent model list is unknown (probe not landed)", () => {
+  // @covers AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.3
+  it.each(["auth_required", "not_installed", "failed"] as const)(
+    "preserves %s health indicators when the saved model is absent",
+    (capability_status) => {
+      const profile = profileOption({
+        model: GONE_MODEL,
+        capability_status,
+        capability_error: "Agent needs attention",
+      });
+      const { result } = renderHook(() => useAgentProfileOptions([profile]));
+      const option = result.current[0]!;
+      render(
+        <TooltipProvider>
+          <div>{option.renderLabel()}</div>
+          <div>{option.renderTriggerLabel?.()}</div>
+        </TooltipProvider>,
+      );
+      expect(screen.getAllByTitle("Agent needs attention")).toHaveLength(2);
+      expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
+    },
+  );
+
+  // @covers AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.6
+  it.each([false, true])(
+    "preserves saved profile settings with auto fallback %s",
+    (auto_fallback) => {
+      const profile = profileOption({
+        model: GONE_MODEL,
+        fallback_model: "other-gone",
+        auto_fallback,
+        cli_passthrough: true,
+      });
+      const saved = structuredClone(profile);
+      const option = renderOptions([profile]);
+      expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+      expect(option.getAttribute("data-reason")).toBeNull();
+      expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
+      expect(option.querySelector(".tabler-icon-terminal-2")).not.toBeNull();
+      expect(profile).toEqual(saved);
+    },
+  );
+
+  it("keeps labels stable when a pending host catalog changes", () => {
     setAvailableAgents([]);
-    const option = renderOptions([profileOption({ model: GONE_MODEL })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    const profile = profileOption({ model: GONE_MODEL });
+    const { rerender } = render(<OptionsProbe profiles={[profile]} />);
+    const initialLabel = screen.getByTestId("option-0").innerHTML;
+    setAvailableAgents([AGENT_WITH_GPT]);
+    rerender(<OptionsProbe profiles={[profile]} />);
+    expect(screen.getByTestId("option-0").innerHTML).toBe(initialLabel);
+    expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
   });
 });
