@@ -382,6 +382,118 @@ func TestListTasksFiltered_ClampsLimit(t *testing.T) {
 	}
 }
 
+// AC-002.8: board-read excludes archived, ephemeral, automation-origin, and
+// system-workflow tasks by default. The first three are provenance
+// exclusions with no toggle; only the system-workflow task reappears when
+// IncludeSystem is set.
+func TestListTasksFiltered_ExcludesArchivedEphemeralAutomationAndSystemByDefault(t *testing.T) {
+	repo := newTestRepo(t)
+	ensureTasksTable(t, repo)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflows (id, workspace_id, workflow_template_id, name)
+		VALUES ('wf-system', 'ws-1', 'routine', 'Routine')
+	`); err != nil {
+		t.Fatalf("seed system workflow: %v", err)
+	}
+
+	insertTaskRow(t, repo, "visible", "ws-1", "TODO", "medium", "2026-04-01T12:00:00Z")
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, state, priority, created_at, updated_at, archived_at)
+		VALUES ('archived-1', 'ws-1', 'archived-1-title', 'TODO', 'medium',
+		        '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z', '2026-04-02T13:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed archived task: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, state, priority, created_at, updated_at, is_ephemeral)
+		VALUES ('ephemeral-1', 'ws-1', 'ephemeral-1-title', 'TODO', 'medium',
+		        '2026-04-03T12:00:00Z', '2026-04-03T12:00:00Z', 1)
+	`); err != nil {
+		t.Fatalf("seed ephemeral task: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, state, priority, created_at, updated_at, origin)
+		VALUES ('automation-1', 'ws-1', 'automation-1-title', 'TODO', 'medium',
+		        '2026-04-04T12:00:00Z', '2026-04-04T12:00:00Z', 'automation_run')
+	`); err != nil {
+		t.Fatalf("seed automation task: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, workflow_id, title, state, priority, created_at, updated_at)
+		VALUES ('system-1', 'ws-1', 'wf-system', 'system-1-title', 'TODO', 'medium',
+		        '2026-04-05T12:00:00Z', '2026-04-05T12:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed system task: %v", err)
+	}
+
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{SortDesc: true})
+	if err != nil {
+		t.Fatalf("list default: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 1 || got[0] != "visible" {
+		t.Fatalf("default list = %v, want [visible]", got)
+	}
+
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{IncludeSystem: true, SortDesc: true})
+	if err != nil {
+		t.Fatalf("list IncludeSystem: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 2 || got[0] != "system-1" || got[1] != "visible" {
+		t.Fatalf("IncludeSystem list = %v, want [system-1 visible]", got)
+	}
+}
+
+// AC-002.1: when multiple rows tie on the sort column's value, the keyset
+// cursor must tie-break on id so pagination partitions the set instead of
+// skipping or repeating rows. Regression for a cursor predicate that
+// compared only the sort value.
+func TestListTasksFiltered_TiesBrokenByIDAcrossPages(t *testing.T) {
+	repo := newTestRepo(t)
+	ensureTasksTable(t, repo)
+	ctx := context.Background()
+
+	const sharedTS = "2026-04-01T12:00:00Z"
+	ids := []string{"tie-a", "tie-b", "tie-c"}
+	for _, id := range ids {
+		insertTaskRow(t, repo, id, "ws-1", "TODO", "medium", sharedTS)
+	}
+
+	seen := map[string]int{}
+	var order []string
+	cursorValue, cursorID := "", ""
+	for pages := 0; pages < 10; pages++ {
+		page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+			Limit: 2, SortDesc: true, CursorValue: cursorValue, CursorID: cursorID,
+		})
+		if err != nil {
+			t.Fatalf("page %d: %v", pages, err)
+		}
+		if len(page.Tasks) == 0 {
+			t.Fatalf("page %d returned no rows before exhausting %d ids (order so far=%v)", pages, len(ids), order)
+		}
+		for _, task := range page.Tasks {
+			seen[task.ID]++
+			order = append(order, task.ID)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursorValue, cursorID = page.NextCursor, page.NextID
+	}
+
+	if len(order) != len(ids) {
+		t.Fatalf("paged through %d rows total, want %d (got %v)", len(order), len(ids), order)
+	}
+	for _, id := range ids {
+		if seen[id] != 1 {
+			t.Errorf("id %s seen %d times across pages, want exactly 1 (order=%v)", id, seen[id], order)
+		}
+	}
+}
+
 func taskIDs(tasks []*sqlite.TaskRow) []string {
 	out := make([]string, len(tasks))
 	for i, t := range tasks {

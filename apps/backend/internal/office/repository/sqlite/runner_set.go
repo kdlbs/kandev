@@ -6,8 +6,10 @@ import "context"
 // agent is currently responsible for within one workspace — the "runner
 // set" a taskless run's task scope materializes from
 // (docs/specs/office/system-design/taskless-coordinator-authority-01.md#task-scope-derivation)
-// — plus the true total before capping, so a caller can detect truncation
-// without a second query. Ordered by (updated_at DESC, id DESC).
+// — plus the true total before capping, so a caller can detect truncation.
+// Ordered by (updated_at DESC, id DESC). The total is read from the same
+// query snapshot as the ids via a window function, not a second query, so a
+// concurrent board mutation between two separate reads cannot desync them.
 //
 // Shares CountActionableTasksForAgent's four clauses (runner projection
 // equals the agent, actionable state, not archived, not automation-origin)
@@ -17,34 +19,8 @@ import "context"
 func (r *Repository) ListRunnerSetTaskIDs(
 	ctx context.Context, agentID, workspaceID string, capAt int,
 ) ([]string, int, error) {
-	total, err := r.countRunnerSetTasks(ctx, agentID, workspaceID)
-	if err != nil {
-		return nil, 0, err
-	}
-	ids, err := r.queryRunnerSetTaskIDs(ctx, agentID, workspaceID, capAt)
-	if err != nil {
-		return nil, 0, err
-	}
-	return ids, total, nil
-}
-
-func (r *Repository) countRunnerSetTasks(ctx context.Context, agentID, workspaceID string) (int, error) {
-	var total int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT COUNT(*) FROM tasks t
-		WHERE `+RunnerProjection("t")+` = ?
-		  AND t.workspace_id = ?
-		  AND t.state IN ('TODO', 'IN_PROGRESS')
-		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
-	`), agentID, workspaceID).Scan(&total)
-	return total, err
-}
-
-func (r *Repository) queryRunnerSetTaskIDs(
-	ctx context.Context, agentID, workspaceID string, capAt int,
-) ([]string, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT t.id FROM tasks t
+		SELECT t.id, COUNT(*) OVER() AS total FROM tasks t
 		WHERE `+RunnerProjection("t")+` = ?
 		  AND t.workspace_id = ?
 		  AND t.state IN ('TODO', 'IN_PROGRESS')
@@ -53,20 +29,23 @@ func (r *Repository) queryRunnerSetTaskIDs(
 		LIMIT ?
 	`), agentID, workspaceID, capAt)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
 	ids := make([]string, 0)
+	total := 0
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+		var rowTotal int
+		if err := rows.Scan(&id, &rowTotal); err != nil {
+			return nil, 0, err
 		}
 		ids = append(ids, id)
+		total = rowTotal
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return ids, nil
+	return ids, total, nil
 }

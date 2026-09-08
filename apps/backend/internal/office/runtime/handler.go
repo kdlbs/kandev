@@ -181,7 +181,7 @@ func (h *Handler) postComment(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	taskID := firstNonEmpty(req.TaskID, runCtx.TaskID)
+	taskID := strings.TrimSpace(firstNonEmpty(req.TaskID, runCtx.TaskID))
 	if err := h.actions.PostComment(c.Request.Context(), runCtx, taskID, req.Body); err != nil {
 		h.respondRuntimeError(c, runCtx, "post_comment", "task", taskID, err)
 		return

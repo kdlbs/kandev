@@ -87,6 +87,10 @@ type snapshotCall struct {
 	Capabilities  string
 	InputSnapshot string
 	SessionID     string
+	// PrevCapabilities is recorded only on a CAS call — it is the value the
+	// compare-and-swap guarantee rests on, so an assertion on it can tell a
+	// correctly-fed CAS from one seeded with the wrong prior value.
+	PrevCapabilities string
 }
 
 func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshot(
@@ -254,16 +258,17 @@ func TestContextBuilderPersistsSeatActionAsAdvisoryMetadata(t *testing.T) {
 func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshotCAS(
 	_ context.Context,
 	id string,
-	_ string,
+	prevCapabilities string,
 	capabilities string,
 	inputSnapshot string,
 	sessionID string,
 ) (bool, error) {
 	s.casCalls = append(s.casCalls, snapshotCall{
-		RunID:         id,
-		Capabilities:  capabilities,
-		InputSnapshot: inputSnapshot,
-		SessionID:     sessionID,
+		RunID:            id,
+		Capabilities:     capabilities,
+		InputSnapshot:    inputSnapshot,
+		SessionID:        sessionID,
+		PrevCapabilities: prevCapabilities,
 	})
 	if s.casErr != nil {
 		return false, s.casErr

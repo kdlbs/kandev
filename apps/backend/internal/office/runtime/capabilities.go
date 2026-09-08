@@ -74,13 +74,16 @@ func (c Capabilities) Allows(key string) bool {
 }
 
 // WithTaskScope returns a copy of the capabilities with the given task
-// scope, discarding empty and whitespace-only identifiers so the scope
-// never contains an entry that can never match a real task id.
+// scope, discarding empty, whitespace-only, and reserved-sentinel
+// identifiers so the scope never contains an entry that can never match a
+// real task id, and never grants the wildcard scope from a task identifier
+// an untrusted source supplied.
 func (c Capabilities) WithTaskScope(taskIDs ...string) Capabilities {
 	next := c
 	filtered := make([]string, 0, len(taskIDs))
 	for _, id := range taskIDs {
-		if strings.TrimSpace(id) != "" {
+		trimmed := strings.TrimSpace(id)
+		if trimmed != "" && trimmed != WildcardTaskScope {
 			filtered = append(filtered, id)
 		}
 	}

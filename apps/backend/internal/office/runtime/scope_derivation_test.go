@@ -137,6 +137,34 @@ func TestBuild_RunnerSetQueryErrorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestBuild_WildcardPayloadTaskIDIsTreatedAsTaskless(t *testing.T) {
+	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
+	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"*"}`}
+
+	runCtx, err := builder.Build(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if runCtx.TaskID != "" {
+		t.Fatalf("TaskID = %q, want empty — the wildcard sentinel must never bind a run to a task", runCtx.TaskID)
+	}
+	if runCtx.Capabilities.TaskScopeSource == TaskScopeSourcePayload {
+		t.Fatalf("TaskScopeSource = %q, want a taskless derivation, not payload", runCtx.Capabilities.TaskScopeSource)
+	}
+	for _, id := range runCtx.Capabilities.AllowedTaskIDs {
+		if id == WildcardTaskScope {
+			t.Fatalf(
+				"a wildcard payload task_id must never grant workspace-wide mutation authority: %v",
+				runCtx.Capabilities.AllowedTaskIDs,
+			)
+		}
+	}
+	if runCtx.CanMutateTask("some-other-task") {
+		t.Fatal("a run injecting task_id=\"*\" must not gain authority over an arbitrary task")
+	}
+}
+
 func TestBuild_RunnerSetScopeExcludesWildcard(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
@@ -438,6 +466,29 @@ func TestBuildAndPersist_CASExhaustsAttemptsWithNoFinalMarker(t *testing.T) {
 	if len(store.casCalls) != maxScopeSwapAttempts {
 		t.Fatalf("expected %d CAS attempts, got %d", maxScopeSwapAttempts, len(store.casCalls))
 	}
+	// The first attempt must compare against the run's own capabilities as
+	// Build originally read them (empty here, since run.Capabilities is
+	// unset); every retry after a lost race must compare against the
+	// re-read run's capabilities, not the scope this attempt is about to
+	// write — otherwise the CAS predicate could never observe a real prior
+	// value and would lose every race forever.
+	if store.casCalls[0].PrevCapabilities != "" {
+		t.Fatalf("first CAS attempt PrevCapabilities = %q, want empty", store.casCalls[0].PrevCapabilities)
+	}
+	for i := 1; i < len(store.casCalls); i++ {
+		if store.casCalls[i].PrevCapabilities != store.runs["run-1"].Capabilities {
+			t.Fatalf(
+				"CAS attempt %d PrevCapabilities = %q, want the re-read run's capabilities %q",
+				i, store.casCalls[i].PrevCapabilities, store.runs["run-1"].Capabilities,
+			)
+		}
+		if store.casCalls[i].PrevCapabilities == store.casCalls[i].Capabilities {
+			t.Fatalf(
+				"CAS attempt %d compared the scope it is about to write against itself: %q",
+				i, store.casCalls[i].Capabilities,
+			)
+		}
+	}
 }
 
 func TestBuildAndPersist_CASErrorReturnsError(t *testing.T) {
@@ -490,6 +541,15 @@ func TestBuildAndPersist_PersistsSerializedRunnerSetScope(t *testing.T) {
 	if len(store.calls) != 1 {
 		t.Fatalf("expected 1 snapshot write, got %d", len(store.calls))
 	}
+	if len(store.casCalls) != 1 || store.casCalls[0].PrevCapabilities != "" {
+		t.Fatalf(
+			"a fresh run with no persisted capabilities must CAS against an empty prior value: %+v",
+			store.casCalls,
+		)
+	}
+	if run.Capabilities == "" {
+		t.Fatal("BuildAndPersist must mutate run.Capabilities in place — the JWT is minted from it")
+	}
 
 	var persistedCaps Capabilities
 	if err := json.Unmarshal([]byte(store.calls[0].Capabilities), &persistedCaps); err != nil {
@@ -508,5 +568,19 @@ func TestBuildAndPersist_PersistsSerializedRunnerSetScope(t *testing.T) {
 	}
 	if got := persistedRunCtx.Capabilities.AllowedTaskIDs; len(got) != 2 || got[0] != "t1" || got[1] != "t2" {
 		t.Fatalf("persisted input snapshot AllowedTaskIDs = %v, want [t1 t2]", got)
+	}
+
+	// run.Capabilities is the third carrier of the derived scope — the run
+	// token minted for this execution is marshalled from it, not from the
+	// DB row or the returned RunContext, so it must reflect the same scope.
+	var mutatedRunCaps Capabilities
+	if err := json.Unmarshal([]byte(run.Capabilities), &mutatedRunCaps); err != nil {
+		t.Fatalf("decode run.Capabilities: %v", err)
+	}
+	if got := mutatedRunCaps.AllowedTaskIDs; len(got) != 2 || got[0] != "t1" || got[1] != "t2" {
+		t.Fatalf("run.Capabilities AllowedTaskIDs = %v, want [t1 t2]", got)
+	}
+	if mutatedRunCaps.TaskScopeSource != TaskScopeSourceRunnerSet {
+		t.Fatalf("run.Capabilities TaskScopeSource = %q, want runner_set", mutatedRunCaps.TaskScopeSource)
 	}
 }

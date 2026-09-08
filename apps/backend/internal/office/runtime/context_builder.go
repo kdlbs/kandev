@@ -127,6 +127,11 @@ func (b *ContextBuilder) build(ctx context.Context, run *models.Run) (RunContext
 	}
 	payload := parsePayload(run.Payload)
 	taskID := strings.TrimSpace(payload["task_id"])
+	if taskID == WildcardTaskScope {
+		// The reserved wildcard sentinel can never bind a run to a task; an
+		// untrusted payload naming it is treated as if no task_id were given.
+		taskID = ""
+	}
 	sessionID := firstNonEmpty(run.SessionID, payload["session_id"])
 
 	caps, derivation := b.deriveScope(ctx, run, agent, taskID)

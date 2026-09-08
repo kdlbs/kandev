@@ -129,3 +129,14 @@ func TestWithTaskScope_AllWhitespaceArgumentsYieldEmptyScope(t *testing.T) {
 		t.Fatalf("AllowedTaskIDs = %v, want empty", caps.AllowedTaskIDs)
 	}
 }
+
+func TestWithTaskScope_RejectsWildcardSentinel(t *testing.T) {
+	caps := Capabilities{}.WithTaskScope(WildcardTaskScope, "task-1")
+	want := []string{"task-1"}
+	if len(caps.AllowedTaskIDs) != len(want) || caps.AllowedTaskIDs[0] != want[0] {
+		t.Fatalf(
+			"AllowedTaskIDs = %v, want %v — the reserved wildcard sentinel must never be assignable from external input",
+			caps.AllowedTaskIDs, want,
+		)
+	}
+}
