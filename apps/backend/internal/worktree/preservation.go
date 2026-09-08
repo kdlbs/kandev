@@ -8,13 +8,22 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 var ErrPreservedCheckoutUnproven = errors.New("preserved checkout identity is not proven")
+
+const (
+	maxPreservedCheckoutEntries  = 10_000
+	maxPreservedCheckoutFileSize = 4 * 1024 * 1024
+	maxPreservedCheckoutBytes    = 64 * 1024 * 1024
+	maxPreservedCheckoutHashTime = 30 * time.Second
+)
 
 type PreservationRequest struct {
 	RepositoryPath string
@@ -193,6 +202,8 @@ func statusCounts(status []byte) (int, int) {
 }
 
 func checkoutContentHash(ctx context.Context, worktreePath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, maxPreservedCheckoutHashTime)
+	defer cancel()
 	output, err := gitBytes(ctx, worktreePath, "ls-files", "-co", "-z")
 	if err != nil {
 		return "", err
@@ -200,52 +211,84 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 	paths := bytes.Split(output, []byte{0})
 	sort.Slice(paths, func(i, j int) bool { return bytes.Compare(paths[i], paths[j]) < 0 })
 	hash := sha256.New()
+	entryCount, byteCount := 0, int64(0)
 	_, _ = hash.Write([]byte("kandev-checkout-content-v1\x00"))
 	for _, rawPath := range paths {
 		if len(rawPath) == 0 {
 			continue
 		}
-		path := filepath.Join(worktreePath, filepath.FromSlash(string(rawPath)))
-		info, statErr := os.Lstat(path)
-		if statErr != nil && !os.IsNotExist(statErr) {
-			return "", fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
 		}
-		var contents []byte
-		var mode os.FileMode
-		switch {
-		case statErr != nil:
-			// A cached path can be absent from the working tree when the user
-			// has an unstaged deletion. Mode zero is the typed missing-entry
-			// marker; no existing filesystem entry has that mode.
-			mode = 0
-		case info.IsDir():
-			return "", fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
-		case info.Mode()&os.ModeSymlink != 0:
-			mode = info.Mode()
-			target, readErr := os.Readlink(path)
-			if readErr != nil {
-				return "", readErr
-			}
-			contents = []byte(target)
-		default:
-			if !info.Mode().IsRegular() {
-				return "", fmt.Errorf("%w: unsupported checkout entry", ErrPreservedCheckoutUnproven)
-			}
-			mode = info.Mode()
-			contents, err = os.ReadFile(path)
-			if err != nil {
-				return "", err
-			}
+		entryCount++
+		if entryCount > maxPreservedCheckoutEntries {
+			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
+		}
+		path := filepath.Join(worktreePath, filepath.FromSlash(string(rawPath)))
+		mode, contents, size, err := preservedCheckoutEntry(path)
+		if err != nil || size > maxPreservedCheckoutFileSize || byteCount+size > maxPreservedCheckoutBytes {
+			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
 		}
 		var frame [20]byte
 		binary.BigEndian.PutUint32(frame[0:4], uint32(mode))
 		binary.BigEndian.PutUint64(frame[4:12], uint64(len(rawPath)))
-		binary.BigEndian.PutUint64(frame[12:20], uint64(len(contents)))
+		binary.BigEndian.PutUint64(frame[12:20], uint64(size))
 		_, _ = hash.Write(frame[:])
 		_, _ = hash.Write(rawPath)
-		_, _ = hash.Write(contents)
+		if contents != nil {
+			_, _ = hash.Write(contents)
+			byteCount += size
+			continue
+		}
+		if size == 0 {
+			continue
+		}
+		if err := streamPreservedCheckoutFile(ctx, hash, path, size); err != nil {
+			return "", err
+		}
+		byteCount += size
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func preservedCheckoutEntry(path string) (os.FileMode, []byte, int64, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return 0, nil, 0, nil
+	}
+	if err != nil || info.IsDir() || !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+		return 0, nil, 0, ErrPreservedCheckoutUnproven
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		return info.Mode(), []byte(target), int64(len(target)), err
+	}
+	return info.Mode(), nil, info.Size(), nil
+}
+
+func streamPreservedCheckoutFile(ctx context.Context, hash io.Writer, path string, size int64) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
+	}
+	copied, err := io.Copy(hash, &contextReader{ctx: ctx, reader: file})
+	closeErr := file.Close()
+	if err != nil || closeErr != nil || copied != size {
+		return fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
+	}
+	return nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(buffer)
 }
 
 // stagedIndexHash proves the exact staged blob identity of every path in

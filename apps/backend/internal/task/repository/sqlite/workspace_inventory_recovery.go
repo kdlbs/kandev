@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -175,11 +176,12 @@ func (r *Repository) validateWorkspaceInventoryExistingRowTx(
 	var position int
 	var updatedAt time.Time
 	var deletedAt sql.NullTime
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+	query := `
 		SELECT task_environment_id, repository_id, worktree_id, worktree_path,
 		       worktree_branch, position, status, updated_at, deleted_at
 		FROM task_environment_repos WHERE id = ?
-	`), repair.EnvironmentRepoID).Scan(
+	` + r.workspaceInventorySourceLockSuffix()
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), repair.EnvironmentRepoID).Scan(
 		&environmentID, &repositoryID, &worktreeID, &worktreePath,
 		&worktreeBranch, &position, &status, &updatedAt, &deletedAt,
 	)
@@ -218,19 +220,19 @@ func (r *Repository) updateTaskEnvironmentRepoIdentityTx(
 
 func (r *Repository) validateWorkspaceInventoryOwnershipTx(ctx context.Context, tx *sqlx.Tx, repair *models.WorkspaceInventoryRepair) error {
 	var workspaceID string
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), repair.TaskID).Scan(&workspaceID); err != nil || workspaceID != repair.WorkspaceID {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`+r.workspaceInventorySourceLockSuffix()), repair.TaskID).Scan(&workspaceID); err != nil || workspaceID != repair.WorkspaceID {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
 	var envTaskID, envStatus string
 	var envUpdated time.Time
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status, updated_at FROM task_environments WHERE id = ?`), repair.TaskEnvironmentID).Scan(&envTaskID, &envStatus, &envUpdated); err != nil || envTaskID != repair.TaskID || envStatus == string(models.TaskEnvironmentStatusFailed) || !envUpdated.Equal(repair.ExpectedEnvironmentUpdatedAt) {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status, updated_at FROM task_environments WHERE id = ?`+r.workspaceInventorySourceLockSuffix()), repair.TaskEnvironmentID).Scan(&envTaskID, &envStatus, &envUpdated); err != nil || envTaskID != repair.TaskID || envStatus == string(models.TaskEnvironmentStatusFailed) || !envUpdated.Equal(repair.ExpectedEnvironmentUpdatedAt) {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
 	if err := r.validateWorkspaceInventoryRepositoryTx(ctx, tx, repair); err != nil {
 		return err
 	}
 	var sessionTaskID, sessionEnvironmentID string
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, task_environment_id FROM task_sessions WHERE id = ?`), repair.SessionID).Scan(&sessionTaskID, &sessionEnvironmentID); err != nil || sessionTaskID != repair.TaskID || sessionEnvironmentID != repair.TaskEnvironmentID {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, task_environment_id FROM task_sessions WHERE id = ?`+r.workspaceInventorySourceLockSuffix()), repair.SessionID).Scan(&sessionTaskID, &sessionEnvironmentID); err != nil || sessionTaskID != repair.TaskID || sessionEnvironmentID != repair.TaskEnvironmentID {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
 	return nil
@@ -240,15 +242,22 @@ func (r *Repository) validateWorkspaceInventoryRepositoryTx(ctx context.Context,
 	var taskRepoTaskID, repositoryID string
 	var position int
 	var taskRepoUpdated time.Time
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, repository_id, position, updated_at FROM task_repositories WHERE id = ?`), repair.TaskRepositoryID).Scan(&taskRepoTaskID, &repositoryID, &position, &taskRepoUpdated); err != nil || taskRepoTaskID != repair.TaskID || repositoryID != repair.RepositoryID || position != repair.Position || !taskRepoUpdated.Equal(repair.ExpectedTaskRepositoryUpdate) {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, repository_id, position, updated_at FROM task_repositories WHERE id = ?`+r.workspaceInventorySourceLockSuffix()), repair.TaskRepositoryID).Scan(&taskRepoTaskID, &repositoryID, &position, &taskRepoUpdated); err != nil || taskRepoTaskID != repair.TaskID || repositoryID != repair.RepositoryID || position != repair.Position || !taskRepoUpdated.Equal(repair.ExpectedTaskRepositoryUpdate) {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
 	var repositoryWorkspace string
 	var deletedAt sql.NullTime
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id, deleted_at FROM repositories WHERE id = ?`), repair.RepositoryID).Scan(&repositoryWorkspace, &deletedAt); err != nil || repositoryWorkspace != repair.WorkspaceID || deletedAt.Valid {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id, deleted_at FROM repositories WHERE id = ?`+r.workspaceInventorySourceLockSuffix()), repair.RepositoryID).Scan(&repositoryWorkspace, &deletedAt); err != nil || repositoryWorkspace != repair.WorkspaceID || deletedAt.Valid {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
 	return nil
+}
+
+func (r *Repository) workspaceInventorySourceLockSuffix() string {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return " FOR UPDATE"
+	}
+	return ""
 }
 
 func (r *Repository) insertWorkspaceInventoryReceiptTx(ctx context.Context, tx *sqlx.Tx, receipt *models.WorkspaceInventoryRecoveryReceipt) error {

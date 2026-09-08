@@ -1696,7 +1696,10 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 		metadata["executor_profile_id"] = session.ExecutorProfileID
 	}
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
-	reuseRequired := env != nil && env.MaterializationSessionID != session.ID
+	// This request is constructed only after finding an existing runtime row.
+	// That row may outlive a failed materialization by this same session, so it
+	// must never bypass preserved-workspace inventory admission.
+	reuseRequired := env != nil
 	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
 	return &LaunchAgentRequest{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,

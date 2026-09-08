@@ -68,6 +68,19 @@ func TestWorkspaceInventoryRepairSessionUsesOnlyMatchingServerRuntimeIdentity(t 
 	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
 		t.Fatalf("cross-task runtime error = %v", err)
 	}
+
+	mockRepo.executorsRunning["session"].TaskID = "task"
+	mockRepo.executorsRunning["session"].ExecutorID = "stale-executor"
+	_, _, err = executor.workspaceInventoryRepairSession(
+		context.Background(),
+		&LaunchAgentRequest{Repositories: []RepoSpec{{TaskRepositoryID: "task-repo", RepositoryID: "repo"}}},
+		&models.TaskEnvironment{ID: "environment", ExecutorID: "environment-executor"},
+		&models.TaskSession{ID: "session", TaskID: "task"},
+		[]*repoInfo{{TaskRepositoryID: "task-repo", RepositoryID: "repo", Position: 4}},
+	)
+	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("cross-executor runtime error = %v", err)
+	}
 }
 
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2

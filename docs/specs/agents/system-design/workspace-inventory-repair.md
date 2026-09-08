@@ -79,8 +79,10 @@ that supplies checkout identity is retained in the preservation receipt.
 
 ## Repair transaction and idempotency
 
-`workspace_inventory_recovery_receipts` is an append-only audit and
-idempotency table. The repair transaction locks and rechecks the source rows,
+`workspace_inventory_recovery_receipts` appends each receipt row as an audit and
+idempotency record. Its post-repair evidence, match result, and verification
+timestamp are monotonic attestation updates on that immutable receipt identity.
+The repair transaction locks and rechecks the source rows,
 uses their expected revisions, writes exactly one environment-repository row,
 and appends one receipt. A unique `(task_id, idempotency_key)` identity returns
 the receipt when its request hash matches and conflicts otherwise. The task is

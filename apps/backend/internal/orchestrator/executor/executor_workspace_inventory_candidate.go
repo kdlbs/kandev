@@ -30,7 +30,7 @@ func (e *Executor) workspaceInventoryRepairSession(
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return nil, nil, fmt.Errorf("%w: cannot load server-owned checkout identity", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
-	if running != nil && !workspaceInventoryRuntimeMatchesSession(running, session) {
+	if running != nil && !workspaceInventoryRuntimeMatchesEnvironment(running, session, env) {
 		return nil, nil, fmt.Errorf("%w: no server-owned checkout identity", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	if running == nil {
@@ -43,6 +43,11 @@ func (e *Executor) workspaceInventoryRepairSession(
 		return nil, nil, fmt.Errorf("%w: no server-owned checkout identity", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return workspaceInventorySessionWithRuntime(session, env.ID, spec.RepositoryID, position, running), running, nil
+}
+
+func workspaceInventoryRuntimeMatchesEnvironment(running *models.ExecutorRunning, session *models.TaskSession, env *models.TaskEnvironment) bool {
+	return workspaceInventoryRuntimeMatchesSession(running, session) &&
+		(env.ExecutorID == "" || running.ExecutorID == "" || running.ExecutorID == env.ExecutorID)
 }
 
 func (e *Executor) workspaceInventoryPriorRuntime(

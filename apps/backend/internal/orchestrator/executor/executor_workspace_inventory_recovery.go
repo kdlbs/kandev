@@ -84,6 +84,14 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	repositories []*repoInfo,
 	idempotencyKey string,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	// persistTaskEnvironment takes this task-scoped lock before it can create
+	// or attach a worktree writer. Retain it across proof, transaction, and
+	// post-repair attestation so a sibling launch cannot materialize the same
+	// checkout between either preservation observation and the durable receipt.
+	writerLock := e.taskEnvLock(task.ID)
+	writerLock.Lock()
+	defer writerLock.Unlock()
+
 	repairer, err := e.workspaceInventoryRepairer(task, session, req, env, idempotencyKey)
 	if err != nil {
 		return nil, err

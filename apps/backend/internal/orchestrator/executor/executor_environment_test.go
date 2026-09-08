@@ -1011,6 +1011,24 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 	}
 }
 
+// TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime
+// keeps the prepared-workspace fast path behind the same inventory admission
+// guard as every other persisted runtime. A runtime row can survive an
+// incomplete materialization by its owning session.
+func TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime(t *testing.T) {
+	repo := newMockRepository()
+	repo.executors["executor-1"] = &models.Executor{ID: "executor-1", Type: models.ExecutorTypeWorktree}
+	repo.taskRepositories["task-repository"] = &models.TaskRepository{ID: "task-repository", TaskID: "task", RepositoryID: "repository"}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session", TaskEnvironmentID: "environment"}
+	env := &models.TaskEnvironment{ID: "environment", Status: models.TaskEnvironmentStatusReady, MaterializationSessionID: session.ID}
+
+	req := executor.preparedWorkspaceInventoryRequest(context.Background(), &v1.Task{ID: "task", WorkspaceID: "workspace"}, session, "executor-1", nil, env)
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("prepared runtime disabled workspace inventory admission")
+	}
+}
+
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote

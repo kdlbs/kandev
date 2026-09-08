@@ -339,4 +339,36 @@ func TestInspectPreservedCheckoutRejectsWrongBranchAndSymlink(t *testing.T) {
 	if !errors.Is(err, ErrPreservedCheckoutUnproven) {
 		t.Fatalf("symlink error = %v", err)
 	}
+
+	otherRepositoryPath := initGitRepoForWorktreeTest(t)
+	_, err = InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: otherRepositoryPath, WorktreePath: worktreePath,
+		ExpectedBranch: "feature/pr-branch", WorktreeID: "synthetic-worktree",
+	})
+	if !errors.Is(err, ErrPreservedCheckoutUnproven) {
+		t.Fatalf("different common git directory error = %v", err)
+	}
+}
+
+func TestInspectPreservedCheckoutRejectsOversizedIgnoredFile(t *testing.T) {
+	repositoryPath := initGitRepoForWorktreeTest(t)
+	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored.bin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repositoryPath, "add", ".gitignore")
+	runGit(t, repositoryPath, "commit", "-m", "ignore fixture")
+	runGit(t, repositoryPath, "branch", "-f", "feature/pr-branch", "main")
+	worktreePath := filepath.Join(t.TempDir(), "preserved")
+	runGit(t, repositoryPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	if err := os.WriteFile(filepath.Join(worktreePath, "ignored.bin"), make([]byte, 4*1024*1024+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath, WorktreePath: worktreePath,
+		ExpectedBranch: "feature/pr-branch", WorktreeID: "synthetic-worktree",
+	})
+	if !errors.Is(err, ErrPreservedCheckoutUnproven) {
+		t.Fatalf("oversized ignored file error = %v", err)
+	}
 }
