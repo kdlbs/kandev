@@ -9,6 +9,7 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"go.uber.org/zap"
 )
 
 // backendErrorToolResult converts a BackendClient.RequestPayload failure into
@@ -100,14 +101,16 @@ coordination docs to the shared parent.`,
 
 func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID := req.GetString("task_id", "")
+		verbose := req.GetBool("verbose", false)
 		if s.taskID == "" || s.sessionID == "" {
+			s.logRelatedReadAttestationDenial(taskID, verbose)
 			return backendErrorToolResult(&BackendError{
 				Code:    ws.ErrorCodeForbidden,
 				Message: "related task access denied",
 				Details: map[string]interface{}{"reason": "related_task_scope_required"},
 			}), nil
 		}
-		taskID := req.GetString("task_id", "")
 		if taskID == "" || taskID == "self" {
 			taskID = s.taskID
 		}
@@ -119,7 +122,7 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 			"caller_task_id":     s.taskID,
 			"caller_session_id":  s.sessionID,
 			"mcp_surface":        string(s.Profile().Surface),
-			"verbose":            req.GetBool("verbose", false),
+			"verbose":            verbose,
 			"related_read_scope": s.relatedReadScope(),
 		}
 		var result map[string]interface{}
@@ -129,12 +132,26 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		// The backend authorizes and constructs the compact projection. Keep this
 		// defensive response shaping for older backends during rolling upgrades;
 		// it is not an authorization boundary.
-		if !req.GetBool("verbose", false) {
+		if !verbose {
 			stripRelatedTaskDescriptions(result)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) logRelatedReadAttestationDenial(targetTaskID string, verbose bool) {
+	s.logger.Info("mcp.related_task_read.authorization",
+		zap.String("caller_task_id", s.taskID),
+		zap.String("caller_session_id", s.sessionID),
+		zap.String("target_task_id", targetTaskID),
+		zap.String("mcp_surface", string(s.Profile().Surface)),
+		zap.String("related_read_scope", s.relatedReadScope()),
+		zap.Bool("verbose", verbose),
+		zap.String("outcome", "denied"),
+		zap.String("public_reason", "related_task_scope_required"),
+		zap.String("internal_reason", "caller task or session identity missing"),
+	)
 }
 
 func (s *Server) relatedReadScope() string {

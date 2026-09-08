@@ -5,11 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // relatedTasksResponse is a related-task graph shaped like the backend's, with
@@ -166,6 +169,47 @@ func TestListRelatedTasks_RejectsExplicitTargetWithoutAttestedSession(t *testing
 	assert.Contains(t, text.Text, `"reason": "related_task_scope_required"`)
 	assert.NotContains(t, text.Text, "known-target")
 	assert.NotContains(t, text.Text, "secret")
+}
+
+func TestListRelatedTasks_AuditsMissingAttestedIdentityDenials(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessionID string
+		taskID    string
+	}{
+		{name: "caller task", sessionID: "session-A"},
+		{name: "caller session", taskID: "task-A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			core, observed := observer.New(zap.InfoLevel)
+			log, err := logger.NewFromZap(zap.New(core))
+			require.NoError(t, err)
+			backend := &testBackend{response: relatedTasksResponse("secret")}
+			s := New(backend, tt.sessionID, tt.taskID, 10005, log, "", false, ModeTask)
+
+			result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{
+				"task_id": "known-target", "verbose": true,
+			})
+
+			require.True(t, result.IsError)
+			assert.Nil(t, backend.lastPayload)
+			entries := observed.FilterMessage("mcp.related_task_read.authorization").All()
+			require.Len(t, entries, 1)
+			assert.Equal(t, map[string]interface{}{
+				"component":          "mcp-server",
+				"caller_task_id":     tt.taskID,
+				"caller_session_id":  tt.sessionID,
+				"target_task_id":     "known-target",
+				"mcp_surface":        "kanban-task",
+				"related_read_scope": "relation",
+				"verbose":            true,
+				"outcome":            "denied",
+				"public_reason":      "related_task_scope_required",
+				"internal_reason":    "caller task or session identity missing",
+			}, entries[0].ContextMap())
+		})
+	}
 }
 
 func TestRelatedReadScopeRequiresOfficeSurface(t *testing.T) {
