@@ -96,28 +96,46 @@ func (r *Repository) migrateCoordinatorGrantSchema() error {
 
 func (r *Repository) coordinatorGrantSchemaCurrent() (bool, error) {
 	if dialect.IsPostgres(r.db.DriverName()) {
-		var current bool
-		err := r.db.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM pg_constraint c
-				JOIN pg_class table_ref ON table_ref.oid = c.conrelid
-				WHERE table_ref.relname = 'workspace_coordinator_grants'
-				  AND c.contype = 'f'
-				  AND LOWER(pg_get_constraintdef(c.oid)) LIKE 'foreign key (workspace_id, coordinator_task_id) references %tasks%(workspace_id, id) on delete cascade%'
-			) AND EXISTS (
-				SELECT 1 FROM pg_indexes
-				WHERE tablename = 'tasks' AND indexdef ILIKE '%(workspace_id, id)%'
-			) AND EXISTS (
-				SELECT 1 FROM pg_constraint
-				WHERE conrelid = 'workspace_coordinator_grants'::regclass
-				  AND conname = 'workspace_coordinator_grants_workspace_id_nonempty'
-			) AND EXISTS (
-				SELECT 1 FROM pg_constraint
-				WHERE conrelid = 'workspace_coordinator_grants'::regclass
-				  AND conname = 'workspace_coordinator_grants_task_id_nonempty'
-			)`).Scan(&current)
-		return current, err
+		return r.postgresCoordinatorGrantSchemaCurrent()
 	}
+	return r.sqliteCoordinatorGrantSchemaCurrent()
+}
+
+func (r *Repository) postgresCoordinatorGrantSchemaCurrent() (bool, error) {
+	var current bool
+	err := r.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM pg_constraint c
+			WHERE c.conrelid = 'workspace_coordinator_grants'::regclass
+			  AND c.contype = 'f'
+			  AND c.confrelid = 'tasks'::regclass
+			  AND c.confdeltype = 'c'
+			  AND c.conkey = ARRAY[
+				(SELECT attnum FROM pg_attribute WHERE attrelid = c.conrelid AND attname = 'workspace_id'),
+				(SELECT attnum FROM pg_attribute WHERE attrelid = c.conrelid AND attname = 'coordinator_task_id')
+			]::smallint[]
+			  AND c.confkey = ARRAY[
+				(SELECT attnum FROM pg_attribute WHERE attrelid = c.confrelid AND attname = 'workspace_id'),
+				(SELECT attnum FROM pg_attribute WHERE attrelid = c.confrelid AND attname = 'id')
+			]::smallint[]
+		) AND EXISTS (
+			SELECT 1 FROM pg_indexes
+			WHERE schemaname = current_schema()
+			  AND tablename = 'tasks'
+			  AND indexdef ILIKE '%(workspace_id, id)%'
+		) AND EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conrelid = 'workspace_coordinator_grants'::regclass
+			  AND conname = 'workspace_coordinator_grants_workspace_id_nonempty'
+		) AND EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conrelid = 'workspace_coordinator_grants'::regclass
+			  AND conname = 'workspace_coordinator_grants_task_id_nonempty'
+		)`).Scan(&current)
+	return current, err
+}
+
+func (r *Repository) sqliteCoordinatorGrantSchemaCurrent() (bool, error) {
 	var schema string
 	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_coordinator_grants'`).Scan(&schema)
 	if err == sql.ErrNoRows {

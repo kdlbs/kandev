@@ -90,6 +90,7 @@
     {"file": "internal/system/settings/store.go", "symbol": "migrateLegacySystemSettings", "rule": "sqlite-catalog", "reason": "This legacy settings migration is SQLite-only"},
     {"file": "internal/system/settings/store.go", "symbol": "migrateLegacySystemSettings", "rule": "conflict-syntax", "reason": "This legacy settings migration is SQLite-only"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "recreateTable", "rule": "sqlite-catalog", "reason": "SQLite cannot alter this legacy table in place"},
+    {"file": "internal/task/repository/sqlite/coordinator_grants.go", "symbol": "sqliteCoordinatorGrantSchemaCurrent", "rule": "sqlite-catalog", "reason": "The SQLite branch is the explicit dialect boundary for the coordinator grant migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_git_snapshot.go", "symbol": "prepareTaskWorktreeCutoverForeignKeys", "rule": "sqlite-catalog", "reason": "SQLite-only foreign-key cutover migration"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "recreateTable", "rule": "raw-placeholder", "reason": "SQLite-only table rebuild migration"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "backfillExecutorsRunningFromTaskSessions", "rule": "sqlite-catalog", "reason": "This backfill is a SQLite-only legacy migration"},
