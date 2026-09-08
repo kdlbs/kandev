@@ -1032,7 +1032,7 @@ func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir stri
 }
 
 func remoteAgentctlStopCommand(sessionDir string, pid int) string {
-	removeSessionDir := "rm -rf " + shellQuote(sessionDir)
+	removeSessionDir := removeRemoteDirCommand(sessionDir)
 	if pid <= 0 {
 		return removeSessionDir
 	}
@@ -1046,6 +1046,57 @@ if kill -0 %[1]d 2>/dev/null; then
   kill -9 %[1]d 2>/dev/null || true
 fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
+}
+
+// removeRemoteDirCommand builds the shell command that reclaims a remote
+// session directory on its own, independent of whether a process is stopped.
+func removeRemoteDirCommand(dir string) string {
+	return "rm -rf " + shellQuote(dir)
+}
+
+// verifyRemoteAgentctlIdentity confirms that a pid recovered from persisted
+// executors_running metadata still belongs to the agentctl this row
+// describes, before that pid is signalled. A persisted row can outlive a
+// remote host reboot, at which point the pid is guaranteed stale and PID
+// reuse by an unrelated process owned by the same SSH user is a real risk on
+// a shared runner — probeRemoteAgentctlLiveness alone only proves *some*
+// process holds the pid, not that it is ours. The remote launch command line
+// always includes "agentctl" and the persisted workdir (sessionDir or
+// taskDir), so a `ps` command-line match is sufficient identity evidence.
+//
+// Returns false (no error) when the pid is gone or belongs to something
+// else — both are "safe to skip the kill" outcomes for the caller. An error
+// return means the identity probe itself failed (e.g. an SSH-level fault,
+// not merely "no such process"), and the caller should treat this the same
+// as a failed stop: preserve the row rather than risk either signalling an
+// unverified pid or reporting an orphan as reaped.
+func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	stdout, stderr, err := runSSHCommand(ctx, client, remoteProcessCommandLineCommand(pid))
+	if err != nil {
+		var exitErr *ssh.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, remoteProcessProbeError(pid, err, stderr)
+		}
+		// A nonzero ps exit (e.g. no matching process) is evaluated below
+		// like any other result: empty output never matches.
+	}
+	return remoteAgentctlCommandLineMatches(stdout, sessionDir, taskDir), nil
+}
+
+func remoteProcessCommandLineCommand(pid int) string {
+	return fmt.Sprintf("ps -p %d -o command=", pid)
+}
+
+func remoteAgentctlCommandLineMatches(commandLine, sessionDir, taskDir string) bool {
+	line := strings.TrimSpace(commandLine)
+	if line == "" || !strings.Contains(line, "agentctl") {
+		return false
+	}
+	return (sessionDir != "" && strings.Contains(line, sessionDir)) ||
+		(taskDir != "" && strings.Contains(line, taskDir))
 }
 
 // probeRemoteAgentctlLiveness distinguishes a completed remote process probe

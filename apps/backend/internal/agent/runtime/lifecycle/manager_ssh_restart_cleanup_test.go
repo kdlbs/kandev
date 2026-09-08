@@ -24,7 +24,10 @@ func (s *restartSSHInventoryStore) ListExecutorsRunning(context.Context) ([]*mod
 }
 
 func TestStopAgentWithReasonReapsPersistedSSHAgentctlAfterRestart(t *testing.T) {
-	server := newFakeSSHServer(t, nil)
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "kill 4242", result: sshOK},
+	).handle)
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
 	registry.Register(NewSSHExecutor(nil, nil, nil, log))
@@ -102,4 +105,37 @@ func TestStopAgentWithReasonPersistedSSHBackendShutdownWithoutForcePreservesRemo
 
 	require.NoError(t, err)
 	require.Empty(t, server.commands(), "a non-forced graceful shutdown must not touch the remote host")
+}
+
+// TestStopAgentWithReasonPropagatesPersistedSSHStopFailure covers F1 at the
+// manager level: a failing remote stop command for a restart-recovered SSH
+// row must surface as an error from StopAgentWithReason, so the caller
+// (startup cleanup) preserves the executors_running row instead of pruning
+// it out from under a still-live orphan.
+func TestStopAgentWithReasonPropagatesPersistedSSHStopFailure(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/session")},
+		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
+	).handle)
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	row := &models.ExecutorRunning{
+		ID: "session-1", SessionID: "session-1", TaskID: "task-1",
+		ExecutorID: "executor-1", AgentExecutionID: "execution-1",
+		Runtime: agentruntime.RuntimeSSH, Metadata: metadata,
+	}
+	store := &restartSSHInventoryStore{rows: []*models.ExecutorRunning{row}}
+
+	mgr := NewManager(nil, &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(store)
+
+	err := mgr.StopAgentWithReason(context.Background(), "execution-1", "startup terminal session cleanup", true)
+
+	require.Error(t, err)
 }

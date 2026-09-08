@@ -61,14 +61,15 @@ type sshSessionState struct {
 // the client — at the cost of an extra TCP+handshake per session on the same
 // host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
-	agentctlResolver *AgentctlResolver
-	secretStore      secrets.SecretStore
-	agentList        RemoteAuthAgentLister
-	logger           *logger.Logger
-	brokerPreflight  func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
-	stopRemote       func(context.Context, *ssh.Client, string, int) error
-	closeClient      func(*ssh.Client) error
-	cleanupScript    func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
+	agentctlResolver     *AgentctlResolver
+	secretStore          secrets.SecretStore
+	agentList            RemoteAuthAgentLister
+	logger               *logger.Logger
+	brokerPreflight      func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
+	stopRemote           func(context.Context, *ssh.Client, string, int) error
+	verifyRemoteIdentity func(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error)
+	closeClient          func(*ssh.Client) error
+	cleanupScript        func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -91,6 +92,7 @@ func NewSSHExecutor(
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
 	executor.stopRemote = stopRemoteAgentctl
+	executor.verifyRemoteIdentity = verifyRemoteAgentctlIdentity
 	executor.closeClient = func(client *ssh.Client) error { return client.Close() }
 	executor.cleanupScript = executor.runCleanupScript
 	return executor
@@ -690,13 +692,33 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 	}
 	defer func() { _ = r.closeSSHClient(client) }()
 
+	verifyIdentity := r.verifyRemoteIdentity
+	if verifyIdentity == nil {
+		verifyIdentity = verifyRemoteAgentctlIdentity
+	}
+	taskDir := getMetadataString(instance.Metadata, MetadataKeySSHRemoteTaskDir)
+	isOurs, err := verifyIdentity(cleanupCtx, client, pid, sessionDir, taskDir)
+	if err != nil {
+		return fmt.Errorf("ssh: verify persisted agentctl identity for instance %q: %w", instance.InstanceID, err)
+	}
+	if !isOurs {
+		// The pid is gone or has been recycled by an unrelated process since
+		// this row was persisted (a stale row can outlive a remote reboot) —
+		// signalling it would risk killing something we don't own. The
+		// session directory is still ours to reclaim.
+		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
+			r.logger.Warn("failed to remove persisted SSH session dir for unmatched pid",
+				zap.String("instance_id", instance.InstanceID), zap.Error(err))
+		}
+		return nil
+	}
+
 	stopRemote := r.stopRemote
 	if stopRemote == nil {
 		stopRemote = stopRemoteAgentctl
 	}
 	if err := stopRemote(cleanupCtx, client, sessionDir, pid); err != nil {
-		r.logger.Warn("failed to stop persisted remote agentctl",
-			zap.String("instance_id", instance.InstanceID), zap.Error(err))
+		return fmt.Errorf("ssh: stop persisted remote agentctl for instance %q: %w", instance.InstanceID, err)
 	}
 	return nil
 }
