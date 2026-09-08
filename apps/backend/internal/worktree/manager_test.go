@@ -747,6 +747,39 @@ func TestCopySnapshotEntriesReplacesDestinationSymlinkWithDirectory(t *testing.T
 	}
 }
 
+func TestCopySnapshotEntriesReplacesDestinationSymlinkWithFile(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "file"), []byte("snapshot content\n"), 0600); err != nil {
+		t.Fatalf("write snapshot file: %v", err)
+	}
+	destination := t.TempDir()
+	external := filepath.Join(t.TempDir(), "external")
+	if err := os.WriteFile(external, []byte("external content\n"), 0640); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	if err := os.Symlink(external, filepath.Join(destination, "file")); err != nil {
+		t.Skipf("create destination symlink: %v", err)
+	}
+
+	if err := copySnapshotEntries(source, destination); err != nil {
+		t.Fatalf("copySnapshotEntries: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(destination, "file"))
+	if err != nil {
+		t.Fatalf("lstat restored file: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("restored entry mode = %s, want regular file", info.Mode())
+	}
+	content, err := os.ReadFile(external)
+	if err != nil {
+		t.Fatalf("read external file: %v", err)
+	}
+	if string(content) != "external content\n" {
+		t.Fatalf("external file content = %q, want unchanged content", content)
+	}
+}
+
 func TestIsAdminDirectoryMissing(t *testing.T) {
 	repoPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")

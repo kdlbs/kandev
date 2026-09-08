@@ -547,6 +547,13 @@ func copySnapshotFile(source, target string, entry os.DirEntry) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
+	if existing, err := os.Lstat(target); err == nil && existing.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(target); err != nil {
+			return err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
 		return err
 	}
