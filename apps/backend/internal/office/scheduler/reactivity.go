@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -116,6 +118,14 @@ func (ss *SchedulerService) ApplyTaskMutation(
 		}
 		seen[key] = struct{}{}
 		if err := ss.QueueRunCtx(ctx, agentID, c); err != nil {
+			if errors.Is(err, shared.ErrWorkspacePaused) {
+				// A confirmed operator pause is not a reactivity failure —
+				// the paused workspace already logged its own pause event.
+				ss.logger.Debug("reactivity run skipped (workspace paused)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
 			ss.logger.Error("reactivity run failed",
 				zap.String("agent", agentID),
 				zap.String("reason", c.Reason),
