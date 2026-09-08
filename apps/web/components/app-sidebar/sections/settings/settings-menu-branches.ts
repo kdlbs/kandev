@@ -128,6 +128,7 @@ export type BranchExecutor = {
 export type WorkspaceBranchOptions = {
   pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined;
   canvasesEnabled?: boolean;
+  coordinatorTaskAuthorityEnabled?: boolean;
 };
 
 /** The menu rows that grow a branch. */
@@ -218,11 +219,15 @@ export function buildWorkspacesBranch(
    */
   visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
-  { pluginIntegrationEnabled, canvasesEnabled = false }: WorkspaceBranchOptions = {},
+  {
+    pluginIntegrationEnabled,
+    canvasesEnabled = false,
+    coordinatorTaskAuthorityEnabled = false,
+  }: WorkspaceBranchOptions = {},
 ): SettingsMenuNode[] {
   return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
-    const workspaceTabs = getWorkspaceSettingsTabs(canvasesEnabled)
+    const workspaceTabs = getWorkspaceSettingsTabs(canvasesEnabled, coordinatorTaskAuthorityEnabled)
       .filter(({ tab }) => tab !== "overview")
       .map(({ tab, labelKey, icon }) => ({
         key: `workspace:${workspace.id}:${tab}`,

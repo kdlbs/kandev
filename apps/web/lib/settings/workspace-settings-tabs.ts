@@ -67,10 +67,13 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
  */
 export function getWorkspaceSettingsTabs(
   canvasesEnabled: boolean,
+  coordinatorTaskAuthorityEnabled = false,
 ): ReadonlyArray<WorkspaceTabSpec> {
-  return canvasesEnabled
-    ? WORKSPACE_SETTINGS_TABS
-    : WORKSPACE_SETTINGS_TABS.filter(({ tab }) => tab !== "canvases");
+  return WORKSPACE_SETTINGS_TABS.filter(({ tab }) => {
+    if (tab === "canvases") return canvasesEnabled;
+    if (tab === "coordinators") return coordinatorTaskAuthorityEnabled;
+    return true;
+  });
 }
 
 /** The name and mark for a tab, for the surfaces that render one tab at a time. */

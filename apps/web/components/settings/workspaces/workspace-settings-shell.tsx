@@ -132,8 +132,9 @@ export function WorkspaceSettingsShell({
   const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const canvasesEnabled = useFeature("canvases");
+  const coordinatorTaskAuthorityEnabled = useFeature("coordinatorTaskAuthority");
   const workspace = workspaces.find((item) => item.id === workspaceId);
-  const tabs = getWorkspaceSettingsTabs(canvasesEnabled);
+  const tabs = getWorkspaceSettingsTabs(canvasesEnabled, coordinatorTaskAuthorityEnabled);
   const tabsRef = useRef<HTMLElement | null>(null);
 
   // Each tab is its own route, so navigating remounts this shell and the

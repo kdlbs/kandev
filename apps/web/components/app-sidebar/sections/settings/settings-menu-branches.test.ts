@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { WORKSPACE_SETTINGS_TABS } from "@/lib/settings/workspace-settings-tabs";
+import { getWorkspaceSettingsTabs } from "@/lib/settings/workspace-settings-tabs";
 
 import {
   buildAgentsBranch,
@@ -18,9 +18,13 @@ const WORKSPACE_ID = "ws-1";
 
 // Derive expected tabs from the source of truth, not hardcoded literals,
 // so a new tab does not need a maintenance update here.
-const EXPECTED_WORKSPACE_TAB_HREFS = WORKSPACE_SETTINGS_TABS.filter(
-  ({ tab }) => tab !== "overview",
-).map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
+const EXPECTED_WORKSPACE_TAB_HREFS = getWorkspaceSettingsTabs(false, false)
+  .filter(({ tab }) => tab !== "overview")
+  .map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
+
+const EXPECTED_WORKSPACE_TAB_HREFS_WITH_COORDINATORS = getWorkspaceSettingsTabs(false, true)
+  .filter(({ tab }) => tab !== "overview")
+  .map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
 
 const WORKSPACES_HREF = "/settings/workspaces";
 const EXECUTORS_HREF = "/settings/executors";
@@ -91,6 +95,16 @@ describe("buildWorkspacesBranch", () => {
 
     expect(workspace.href).toBe(`/settings/workspaces/${WORKSPACE_ID}`);
     expect(hrefsOf(workspace.children ?? [])).toEqual(EXPECTED_WORKSPACE_TAB_HREFS);
+  });
+
+  it("includes the Coordinators tab only for enabled coordinator authority", () => {
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [], {
+      coordinatorTaskAuthorityEnabled: true,
+    });
+
+    expect(hrefsOf(workspace.children ?? [])).toEqual(
+      EXPECTED_WORKSPACE_TAB_HREFS_WITH_COORDINATORS,
+    );
   });
 
   it("goes one level deeper for integrations, the menu's deepest branch", () => {
