@@ -1,11 +1,19 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
+
+// noDelay is a zero-wait stand-in for retryAgentctlHandshake's delay
+// parameter, used by every test below that isn't specifically exercising the
+// backoff itself — it keeps the retry-classification tests fast regardless of
+// the production sshAgentctlHandshakeRetryDelay value.
+func noDelay(context.Context, time.Duration) error { return nil }
 
 // TestRetryAgentctlHandshakeRetriesRejectedHandshakes covers the launch-time
 // fix for the terminal "ssh: agentctl handshake returned 403" failure: a
@@ -27,7 +35,7 @@ func TestRetryAgentctlHandshakeRetriesRejectedHandshakes(t *testing.T) {
 		torndown = append(torndown, port)
 	}
 
-	port, pid, token, err := retryAgentctlHandshake(attempt, teardown)
+	port, pid, token, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 	if err != nil {
 		t.Fatalf("retryAgentctlHandshake: %v", err)
 	}
@@ -56,7 +64,7 @@ func TestRetryAgentctlHandshakeDoesNotRetryOtherFailures(t *testing.T) {
 		}
 		teardown := func(int, int) { teardownCalls++ }
 
-		_, _, _, err := retryAgentctlHandshake(attempt, teardown)
+		_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want %v", err, wantErr)
 		}
@@ -73,7 +81,7 @@ func TestRetryAgentctlHandshakeDoesNotRetryOtherFailures(t *testing.T) {
 		}
 		teardown := func(port, pid int) { torndownPort, torndownPID = port, pid }
 
-		_, _, _, err := retryAgentctlHandshake(attempt, teardown)
+		_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want %v", err, wantErr)
 		}
@@ -100,7 +108,7 @@ func TestRetryAgentctlHandshakeExhaustsAttemptsWithDiagnosis(t *testing.T) {
 	}
 	teardown := func(int, int) { torndown++ }
 
-	_, _, _, err := retryAgentctlHandshake(attempt, teardown)
+	_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 	if err == nil {
 		t.Fatal("expected an error after exhausting every attempt")
 	}
@@ -115,5 +123,70 @@ func TestRetryAgentctlHandshakeExhaustsAttemptsWithDiagnosis(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "log:") || !strings.Contains(got, "pid") {
 		t.Fatalf("error = %q, want the last attempt's diagnosis preserved", got)
+	}
+}
+
+// TestRetryAgentctlHandshakeWaitsBetweenRejectedAttempts is the regression
+// test for the corrected root cause: two SSH launches on the same runner
+// within ~15-30s race the picked port's bootstrap nonce, and a near-zero
+// retry loop burns every attempt in under a second — well inside that
+// window — so it cannot durably win the race. This proves the retry now
+// actually waits between attempts (not just that it retries at all, which
+// the tests above already cover with a zero delay).
+func TestRetryAgentctlHandshakeWaitsBetweenRejectedAttempts(t *testing.T) {
+	var delays []time.Duration
+	fakeDelay := func(_ context.Context, d time.Duration) error {
+		delays = append(delays, d)
+		return nil
+	}
+	var attempts int
+	attempt := func() (int, int, string, error) {
+		attempts++
+		if attempts < 3 {
+			return 5000 + attempts, 100 + attempts, "", fmt.Errorf("%w: status 403", errSSHAgentctlHandshakeRejected)
+		}
+		return 5003, 103, "token-3", nil
+	}
+	teardown := func(int, int) {}
+
+	_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, fakeDelay)
+	if err != nil {
+		t.Fatalf("retryAgentctlHandshake: %v", err)
+	}
+	if len(delays) != 2 {
+		t.Fatalf("delay calls = %d, want 2 (once between attempts 1->2 and 2->3, never after the final attempt)", len(delays))
+	}
+	for _, d := range delays {
+		if d != sshAgentctlHandshakeRetryDelay {
+			t.Fatalf("delay = %v, want %v (sized against the operator-observed 15-30s overlap window)", d, sshAgentctlHandshakeRetryDelay)
+		}
+	}
+}
+
+// TestRetryAgentctlHandshakeDelayCancellationAbortsRetry covers ctx
+// cancellation during the backoff wait: the retry must stop immediately
+// (not burn the remaining attempts) and still report the cancellation, while
+// the already-rejected attempt is still torn down.
+func TestRetryAgentctlHandshakeDelayCancellationAbortsRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var attempts int
+	attempt := func() (int, int, string, error) {
+		attempts++
+		return 5001, 101, "", fmt.Errorf("%w: status 403", errSSHAgentctlHandshakeRejected)
+	}
+	var teardownCalls int
+	teardown := func(int, int) { teardownCalls++ }
+	cancelledDelay := func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+	_, _, _, err := retryAgentctlHandshake(ctx, attempt, teardown, cancelledDelay)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (cancellation must stop the retry before a second attempt)", attempts)
+	}
+	if teardownCalls != 1 {
+		t.Fatalf("teardown calls = %d, want 1 (the first rejected attempt is still torn down)", teardownCalls)
 	}
 }

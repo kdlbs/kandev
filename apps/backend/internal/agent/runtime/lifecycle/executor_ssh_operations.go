@@ -542,7 +542,10 @@ func retryRemoteAgentctlPort(
 		}
 		lastErr = err
 		if !errors.Is(err, errSSHAgentctlPortInUse) {
-			return 0, 0, err
+			// Preserve whatever start() reported (e.g. a live pid on a
+			// ready-timeout) so the caller can still tear down a process that
+			// did start, instead of leaking it.
+			return port, pid, err
 		}
 	}
 	return 0, 0, fmt.Errorf(
@@ -597,9 +600,25 @@ echo "$AGENTCTL_PID"
 		return 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
 	}
 
-	// Poll the on-disk log for the "bound successfully" line; until then the
-	// process is starting up and a port-forward connect would race the bind.
-	deadline := time.Now().Add(sshAgentctlReadyTimeout)
+	return awaitRemoteAgentctlReady(
+		ctx, client, sessionDir, port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll, log,
+	)
+}
+
+// awaitRemoteAgentctlReady polls the on-disk log for the "bound successfully"
+// line; until then the process is starting up and a port-forward connect
+// would race the bind. timeout/poll are parameters (rather than reading the
+// package constants directly) so tests can exercise the timeout path without
+// waiting on the real 30s budget.
+func awaitRemoteAgentctlReady(
+	ctx context.Context,
+	client *ssh.Client,
+	sessionDir string,
+	port, pid int,
+	timeout, poll time.Duration,
+	log *logger.Logger,
+) (int, error) {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		logOut, _, _ := runSSHCommand(ctx, client,
 			"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
@@ -622,12 +641,17 @@ echo "$AGENTCTL_PID"
 				"ssh: agentctl exited before becoming ready; log tail:\n%s",
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
-		time.Sleep(sshAgentctlReadyPoll)
+		time.Sleep(poll)
 	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	return 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
-		sshAgentctlReadyTimeout, tail)
+	// The loop above only reaches the deadline by way of an isRemoteAgentctlAlive
+	// probe that returned true on its last iteration — otherwise the "exited
+	// before becoming ready" branch would already have returned. So the process
+	// is provably still running; return its pid (not 0) so the caller can tear
+	// it down instead of leaking it.
+	return pid, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
+		timeout, tail)
 }
 
 const sshAgentctlLogTailLines = 25
@@ -763,8 +787,17 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode == http.StatusForbidden {
+		// 403 is exactly ConsumeNonce rejecting the nonce (control_server.go) —
+		// the one case worth a fresh instance and a retry.
 		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusOK {
+		// Any other non-200 (400/404/500/...) is not the nonce rejection and
+		// must not trigger retryAgentctlHandshake's retry — that would cost
+		// up to sshAgentctlHandshakeAttempts full start-agentctl-and-tear-down
+		// cycles for a failure a fresh instance can't fix.
+		return "", fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
 	}
 	var result struct {
 		Token string `json:"token"`
@@ -786,6 +819,17 @@ func readRemoteAgentctlLogTail(ctx context.Context, client *ssh.Client, sessionD
 
 const sshAgentctlHandshakeAttempts = 3
 
+// sshAgentctlHandshakeRetryDelay is the pause between handshake retry
+// attempts. Sized against the operator-measured trigger on the SSH remote:
+// two independent launches within ~15-30s of each other race the picked
+// port's bootstrap nonce, and the loser gets rejected. The prior zero-delay
+// retry burned all sshAgentctlHandshakeAttempts in under a second — well
+// inside that window — so it could not durably escape the race it exists to
+// recover from. Waiting this long between attempts gives a concurrently
+// launching sibling time to finish (or fail) and vacate the port before the
+// next attempt.
+const sshAgentctlHandshakeRetryDelay = 15 * time.Second
+
 // retryAgentctlHandshake calls attempt up to sshAgentctlHandshakeAttempts
 // times, tearing down and retrying only when attempt fails with
 // errSSHAgentctlHandshakeRejected — the observed shape when a handshake
@@ -793,12 +837,17 @@ const sshAgentctlHandshakeAttempts = 3
 // stale process left on the picked port). Any other failure (bind
 // exhaustion, transport, a malformed response) is terminal and returned
 // immediately after tearing down anything attempt already started (pid > 0).
+// delay is called between attempts (not after the last one) and is injectable
+// so tests can run the retry loop without waiting on the real backoff; ctx
+// cancellation during the wait aborts the retry immediately.
 func retryAgentctlHandshake(
+	ctx context.Context,
 	attempt func() (port, pid int, token string, err error),
 	teardown func(port, pid int),
+	delay func(ctx context.Context, d time.Duration) error,
 ) (port, pid int, token string, err error) {
 	var lastErr error
-	for range sshAgentctlHandshakeAttempts {
+	for i := range sshAgentctlHandshakeAttempts {
 		port, pid, token, err = attempt()
 		if err == nil {
 			return port, pid, token, nil
@@ -810,11 +859,29 @@ func retryAgentctlHandshake(
 			return 0, 0, "", err
 		}
 		lastErr = err
+		if i < sshAgentctlHandshakeAttempts-1 {
+			if derr := delay(ctx, sshAgentctlHandshakeRetryDelay); derr != nil {
+				return 0, 0, "", fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
+			}
+		}
 	}
 	return 0, 0, "", fmt.Errorf(
 		"ssh: agentctl exhausted %d handshake attempts: %w",
 		sshAgentctlHandshakeAttempts, lastErr,
 	)
+}
+
+// sleepOrContextDone blocks for d or until ctx is cancelled, whichever comes
+// first. Shared delay primitive for retryAgentctlHandshake's production caller.
+func sleepOrContextDone(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func remoteControlHTTPClient(client *ssh.Client, controlPort int) *http.Client {

@@ -68,6 +68,23 @@ func TestRemoteControlHandshake(t *testing.T) {
 		}
 	})
 
+	t.Run("non-403 non-200 is not classified as the nonce-rejection retry sentinel", func(t *testing.T) {
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer httpServer.Close()
+		server := newFakeSSHServer(t, nil)
+		server.forwardTo(strings.TrimPrefix(httpServer.URL, "http://"))
+
+		_, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce")
+		if err == nil || !strings.Contains(err.Error(), "500") {
+			t.Fatalf("error = %v, want the status code", err)
+		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, only 403 is the nonce rejection — a 500 must not trigger a fresh-instance retry", err)
+		}
+	})
+
 	t.Run("empty token is an error", func(t *testing.T) {
 		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, `{"token":""}`)

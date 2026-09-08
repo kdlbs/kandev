@@ -143,13 +143,14 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 	// A session already in a terminal state carries its own outcome (e.g. a
 	// launch failure's error_message); a runtime that outlived it in the
 	// in-memory execution store must still be torn down, but the DB row is
-	// not touched. Mirrors the terminal-state guard in transitionSessionState.
-	if !isStopTerminalSessionState(session.State) {
-		if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-			e.logger.Error("failed to update agent session status",
-				zap.String("session_id", session.ID),
-				zap.Error(dbErr))
-		}
+	// not touched. transitionSessionState re-reads the session's current
+	// state itself rather than trusting the caller-supplied snapshot, so a
+	// session that turned terminal between the caller's read and this call
+	// (e.g. StopByTaskID iterating a list read once) can't be clobbered.
+	if _, _, err := e.transitionSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); err != nil {
+		e.logger.Error("failed to update agent session status",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
 	}
 	e.scheduleStop(ctx, session.ID, executionID, reason, force)
 	return nil

@@ -459,6 +459,7 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
 		}
+		nonceFingerprint := commonconfig.NonceFingerprint(nonce)
 		// Keep only the managed broker values in the long-lived remote
 		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
 		// required for the authenticated control handshake without
@@ -470,13 +471,23 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		)
 		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 		if err != nil {
-			return 0, 0, "", err
+			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"
+			// teardown fires even for a start-time failure (e.g. a
+			// ready-timeout) that left a live process behind.
+			return port, pid, "", err
 		}
+		r.logger.Debug("ssh: sending agentctl bootstrap handshake",
+			zap.Int("port", port), zap.Int("pid", pid),
+			zap.String("nonce_fingerprint", nonceFingerprint))
 		token, err := remoteControlHandshake(ctx, client, port, nonce)
 		if err != nil {
 			if errors.Is(err, errSSHAgentctlHandshakeRejected) {
-				err = fmt.Errorf("%w (port %d, pid %d); log:\n%s",
-					err, port, pid, readRemoteAgentctlLogTail(ctx, client, sessionDir))
+				// The fingerprint lets this rejection be correlated against
+				// agentctl's own handshake log line for the same nonce —
+				// distinguishing a mismatch/already-burned nonce from
+				// bootstrap mode never having been configured on the remote.
+				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
+					err, port, pid, nonceFingerprint, readRemoteAgentctlLogTail(ctx, client, sessionDir))
 			}
 			return port, pid, "", err
 		}
@@ -485,7 +496,7 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 	teardown := func(_, pid int) {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 	}
-	return retryAgentctlHandshake(attempt, teardown)
+	return retryAgentctlHandshake(ctx, attempt, teardown, sleepOrContextDone)
 }
 
 func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {
