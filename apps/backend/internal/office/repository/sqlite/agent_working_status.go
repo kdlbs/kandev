@@ -30,14 +30,9 @@ import (
 //
 // Takes the transition from either "idle", or from "working" when the
 // recorded owner (working_run_id) is a different run that is no longer
-// in-flight (not 'claimed'). The second branch closes the DR-14 successor
-// window: handleAgentCompleted leaves a run's own clearAgentWorking call
-// running after the run has already left 'claimed', so a same-agent
-// successor run can be claimed and launched before that clear executes. A
-// launching run taking ownership here means the abandoned owner's later
-// clear no-ops (its runID no longer matches), instead of clobbering the
-// successor's live "working" status. It never takes ownership from a
-// still-claimed owner, so a genuinely in-flight run is never stolen from.
+// in-flight (not 'claimed'). The launching run then owns the status, so the
+// predecessor's later run-scoped clear becomes a no-op. It never takes
+// ownership from a still-claimed owner, so an in-flight run is not stolen.
 //
 // Scoped to status IN ('idle', 'working') so it can never overwrite a
 // status a concurrent writer set between the scheduler's isAgentActive

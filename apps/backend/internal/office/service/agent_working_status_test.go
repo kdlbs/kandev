@@ -11,10 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/office/service"
 )
 
-// DR-14: "working" is a defined agent status that nothing ever assigned, so
-// every Office agent read "idle" permanently — including while a run was in
-// flight. These tests cover the write at the launch boundary and the reset
-// on all three terminal paths (success, failure, cancellation).
+// These tests cover the working-status write at the launch boundary and the
+// reset on all three terminal paths (success, failure, cancellation).
 
 // launchedWorkingAgent seeds an agent + task, ticks the scheduler so the run
 // is actually handed to the adapter, and returns the agent. On return the
@@ -64,10 +62,7 @@ func assertAgentStatus(
 	}
 }
 
-// TestAgentStatus_WorkingWhileRunInFlight is the core DR-14 regression pin:
-// before this change the assertion below read "idle" for an agent whose run
-// had just been handed to the adapter, making a busy workspace and a stalled
-// one indistinguishable.
+// TestAgentStatus_WorkingWhileRunInFlight covers the launch-boundary status.
 func TestAgentStatus_WorkingWhileRunInFlight(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -171,10 +166,9 @@ func TestAgentStatus_NotLeftWorkingWhenLaunchNeverHappened(t *testing.T) {
 		"after a run that never reached the adapter")
 }
 
-// TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves is the regression
-// test for DR-14 review round 1 Finding 3: resolveLifecycleRun only ever
-// looks up claimed runs, so a cancellation that already marked the run
-// terminal, or a late/duplicate delivery, makes it resolve to sql.ErrNoRows.
+// TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves covers the case where
+// resolveLifecycleRun only finds claimed runs. A terminal or duplicate event
+// can therefore return sql.ErrNoRows.
 // handleAgentCompleted (shared by AgentCompleted and AgentStopped) must
 // still clear "working" on that exit — it never reaches stampRunFinished.
 // The event carries the run's own id so the run-scoped clear (see
@@ -257,9 +251,8 @@ func TestAgentStatus_StaleEventDoesNotClobberSuccessorRun(t *testing.T) {
 		"after run A's stale event: run B's working status must survive")
 }
 
-// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate is the
-// regression test for DR-14 review round 2 Finding 1: a launched run that
-// gets requeued (e.g. a post-start provider fallback calling
+// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate covers a
+// launched run that gets requeued (for example, a post-start provider fallback calling
 // RequeueRunForNextCandidate) sets the run back to "queued" without ever
 // clearing the agent's "working" status, since that clear only happens on
 // the launch/complete cycle the requeue bypassed. The next scheduler pass
@@ -312,8 +305,8 @@ func TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate(t *testing.T)
 }
 
 // TestAgentStatus_TasklessCompletionClearsWorkingWhenNoRunResolves covers the
-// third DR-14 follow-up edit: handleTasklessAgentCompleted's sql.ErrNoRows
-// exit (no resolvable claimed run) must clear "working" like its two
+// handleTasklessAgentCompleted's sql.ErrNoRows exit (no resolvable claimed
+// run) must clear "working" like its two
 // siblings in handleAgentCompleted and handleAgentFailed, instead of
 // returning without a clear and stranding the agent's status.
 func TestAgentStatus_TasklessCompletionClearsWorkingWhenNoRunResolves(t *testing.T) {

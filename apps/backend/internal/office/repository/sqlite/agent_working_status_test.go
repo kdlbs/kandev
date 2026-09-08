@@ -45,8 +45,7 @@ func setWorkingRunID(t *testing.T, db *sqlx.DB, agentID, runID string) {
 	}
 }
 
-// TestMarkAgentWorking_FromIdle is the core DR-14 write: before this method
-// existed, no production code path could ever produce this status.
+// TestMarkAgentWorking_FromIdle covers the core working-status write.
 func TestMarkAgentWorking_FromIdle(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -84,10 +83,7 @@ func TestClearAgentWorking_ReturnsToIdle(t *testing.T) {
 
 // TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor is the
 // interleaving regression: a stale or duplicate terminal event for a run
-// that has already finished must not be able to reset an agent a SUCCESSOR
-// run has since marked working. Before working_run_id existed, this exact
-// sequence flipped a live run's agent back to "idle" — reintroducing DR-14's
-// invisibility bug in a narrower window.
+// that has already finished must not reset an agent a successor run owns.
 func TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -137,11 +133,9 @@ func TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor(t *testing.T)
 	}
 }
 
-// TestClearAgentWorking_DoesNotResurrectPausedAgent guards the highest-risk
-// interaction in DR-14. HandleAgentFailure clears "working" on the same code
-// path that auto-pauses an agent after consecutive failures. If the reset
-// were an unconditional UPDATE rather than a CAS, a paused agent would be
-// silently flipped back to idle and would resume picking up runs.
+// TestClearAgentWorking_DoesNotResurrectPausedAgent guards the interaction
+// between failure cleanup and automatic pausing. The clear must not turn a
+// paused agent back to idle.
 func TestClearAgentWorking_DoesNotResurrectPausedAgent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -206,7 +200,7 @@ func TestClearAgentWorking_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestMarkAgentWorking_SuccessorTakeover is the DR-14 follow-up regression.
+// TestMarkAgentWorking_SuccessorTakeover covers successor ownership.
 // Run A finishes (leaves 'claimed', making the agent claimable again) before
 // its own clearAgentWorking runs. In that window, run B is claimed and
 // launched for the same agent: B's MarkAgentWorking must take ownership from

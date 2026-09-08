@@ -28,22 +28,14 @@ const (
 )
 
 // markAgentWorking flips an agent to "working" as its run is handed to the
-// adapter, recording runID as the owning run. This also takes ownership from
-// a same-agent predecessor run that is still recorded "working" but is no
-// longer in-flight (repo.MarkAgentWorking's CAS) — the handoff between two
-// back-to-back runs on one agent, where the predecessor's own clear has not
-// executed yet. So changed = false no longer means "the agent was not
-// idle": it means the agent was neither idle nor holding an abandoned
-// "working" owner, i.e. it was genuinely busy or in a non-launchable status
-// (paused, stopped, pending approval).
+// adapter, recording runID as the owning run. It also takes ownership from
+// a predecessor that is still recorded "working" but is no longer in-flight.
+// A false result means the agent was neither idle nor holding an abandoned
+// owner, so it was genuinely busy or in a non-launchable status.
 //
-// Called BEFORE the launch rather than after it: the completion event for a
-// fast run can be processed as soon as the adapter is invoked, and a
-// mark-after-launch would race that reset and strand the agent showing
-// "working" forever — the exact failure this feature must not introduce,
-// since a stuck "working" reads as progress that is not happening.
-// The caller clears the status when the launch turns out not to have
-// happened.
+// Called BEFORE the launch so a completion event cannot clear a status that
+// the launch has not marked. The caller clears the status when launch does
+// not happen.
 //
 // runID must be non-empty: it is the only way a later clearAgentWorking call
 // can tell this run's own reset apart from a stale one belonging to a
