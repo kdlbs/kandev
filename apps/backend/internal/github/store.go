@@ -1797,6 +1797,9 @@ const legacyPRWatchesUniqueConstraint = "UNIQUE(session_id, repository_id, branc
 // the new partial unique indexes (applyIdempotentSchemaIndexes) without a
 // uniqueness violation.
 func (s *Store) migratePRWatchesToTaskOwnership() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
 	hasLegacy, err := s.tableSQLContains("github_pr_watches", legacyPRWatchesUniqueConstraint)
 	if err != nil {
 		return fmt.Errorf("inspect github_pr_watches schema: %w", err)
@@ -1984,7 +1987,7 @@ func mergePRWatchGroup(group []*PRWatch, toDelete map[string]bool, survivors map
 // the winning rows' merged watermarks.
 func applyPRWatchDedup(tx *sqlx.Tx, toDelete map[string]bool, survivors map[string]*PRWatch) error {
 	for id := range toDelete {
-		if _, err := tx.Exec(`DELETE FROM github_pr_watches WHERE id = ?`, id); err != nil {
+		if _, err := tx.Exec(tx.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
 			return fmt.Errorf("remove duplicate PR watch %s: %w", id, err)
 		}
 	}
@@ -1992,10 +1995,10 @@ func applyPRWatchDedup(tx *sqlx.Tx, toDelete map[string]bool, survivors map[stri
 		if toDelete[id] {
 			continue
 		}
-		if _, err := tx.Exec(`
+		if _, err := tx.Exec(tx.Rebind(`
 			UPDATE github_pr_watches
 			SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?
-			WHERE id = ?`,
+			WHERE id = ?`),
 			w.LastCheckedAt, w.LastCommentAt, w.LastCheckStatus, w.LastReviewState, id); err != nil {
 			return fmt.Errorf("merge PR watch watermark %s: %w", id, err)
 		}

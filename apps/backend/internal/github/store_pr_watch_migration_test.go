@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // seedLegacyPRWatch inserts a row directly into the legacy
@@ -115,6 +117,20 @@ func TestPRWatchMigration_DedupsFiftyResumedSessionWatches(t *testing.T) {
 	if len(all2) != 1 {
 		t.Fatalf("watches remaining after second pass = %d, want 1", len(all2))
 	}
+}
+
+func TestPRWatchMigration_SkipsSQLiteTableRebuildForPostgres(t *testing.T) {
+	db := openLegacyGitHubDB(t)
+	store := &Store{db: sqlx.NewDb(db.DB, "pgx"), ro: sqlx.NewDb(db.DB, "pgx")}
+
+	require.NoError(t, store.migratePRWatchesToTaskOwnership())
+	if store.PRWatchMigrationStats() != nil {
+		t.Fatal("PostgreSQL store recorded SQLite legacy-migration statistics")
+	}
+
+	var tableSQL string
+	require.NoError(t, db.Get(&tableSQL, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'github_pr_watches'"))
+	assert.Contains(t, tableSQL, legacyPRWatchesUniqueConstraint)
 }
 
 // TestPRWatchMigration_PrefersDiscoveredOverSearching is acceptance
