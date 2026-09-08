@@ -4,10 +4,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -243,9 +245,10 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	Action         string `json:"action"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -276,11 +279,16 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "repair_workspace_inventory" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', 'repair_workspace_inventory', or 'cancel_retry'", nil)
+	}
+	if req.Action == "repair_workspace_inventory" && strings.TrimSpace(req.IdempotencyKey) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "idempotency_key is required for workspace inventory repair", nil)
 	}
 
-	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
+	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
+		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+	})
 	if err != nil {
 		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
@@ -290,6 +298,13 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 			zap.String("session_id", req.SessionID),
 			zap.String("action", req.Action),
 			zap.Error(err))
+		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryInvalid) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Workspace inventory repair request is invalid", nil)
+		}
+		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) ||
+			errors.Is(err, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Workspace inventory repair could not prove an exclusive preserved checkout", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to recover session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

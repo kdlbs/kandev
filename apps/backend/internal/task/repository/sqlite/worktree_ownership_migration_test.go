@@ -98,10 +98,13 @@ func openLegacyDB(t *testing.T) *sqlx.DB {
 
 func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	// The final git snapshot table owns a foreign key to task_environments.
-	// Recreate it in its legacy session-owned shape before dropping the
-	// environment tables, otherwise PostgreSQL correctly rejects the rewind.
+	// Final-schema tables own foreign keys to task_environments. Recreate or
+	// remove them before dropping the environment tables, otherwise PostgreSQL
+	// correctly rejects this test-only rewind.
 	replaceGitSnapshotTableWithLegacy(t, &Repository{db: db, ro: db})
+	if _, err := db.Exec(`DROP TABLE workspace_inventory_recovery_receipts`); err != nil {
+		t.Fatalf("drop final workspace inventory receipts: %v", err)
+	}
 	if _, err := db.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		t.Fatalf("drop final env repos: %v", err)
 	}

@@ -174,8 +174,8 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
-		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
+	if !workspaceReuseAllowed(&models.TaskEnvironment{Status: models.TaskEnvironmentStatusReady}, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("empty Worktree inventory should remain attach-only until the guarded validator refuses or repairs it")
 	}
 	if !workspaceReuseAllowed(&models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
@@ -184,12 +184,22 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReuseAllowedDoesNotAttachFailedEmptyWorktreeEnvironment(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusFailed,
+	}
+
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("failed empty worktree environment authorized attach-only reuse")
+	}
+}
+
 func TestWorkspaceReuseAllowedRequiresInventoryForRepoBackedExecutors(t *testing.T) {
 	for _, executorType := range []string{
 		string(models.ExecutorTypeLocal),
 		string(models.ExecutorTypeLocalDocker),
 		string(models.ExecutorTypeSSH),
-		string(models.ExecutorTypeWorktree),
 	} {
 		t.Run(executorType, func(t *testing.T) {
 			env := &models.TaskEnvironment{ExecutorType: executorType}
@@ -998,6 +1008,24 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 	}
 	if req.Metadata != nil {
 		t.Fatalf("metadata = %#v, want no stale container handle during fresh recovery", req.Metadata)
+	}
+}
+
+// TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime
+// keeps the prepared-workspace fast path behind the same inventory admission
+// guard as every other persisted runtime. A runtime row can survive an
+// incomplete materialization by its owning session.
+func TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime(t *testing.T) {
+	repo := newMockRepository()
+	repo.executors["executor-1"] = &models.Executor{ID: "executor-1", Type: models.ExecutorTypeWorktree}
+	repo.taskRepositories["task-repository"] = &models.TaskRepository{ID: "task-repository", TaskID: "task", RepositoryID: "repository"}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session", TaskEnvironmentID: "environment"}
+	env := &models.TaskEnvironment{ID: "environment", Status: models.TaskEnvironmentStatusReady, MaterializationSessionID: session.ID}
+
+	req := executor.preparedWorkspaceInventoryRequest(context.Background(), &v1.Task{ID: "task", WorkspaceID: "workspace"}, session, "executor-1", nil, env)
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("prepared runtime disabled workspace inventory admission")
 	}
 }
 
