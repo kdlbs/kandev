@@ -211,6 +211,12 @@ func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
 	// see the same transitions the schedule fires against.
 	candidate := spec.Next(after.In(spec.Location))
 	for !candidate.IsZero() && isAmbiguousFallBack(candidate) {
+		transitionStart, _ := candidate.ZoneBounds()
+		if !after.Before(transitionStart) {
+			break
+		}
+		// The repeated window is bounded by the offset delta, so this advances
+		// at most one candidate per matching schedule slot in that window.
 		candidate = spec.Next(candidate)
 	}
 	return candidate, nil

@@ -203,6 +203,59 @@ func TestNextCronFire_DSTFallBackFiresOnce(t *testing.T) {
 	}
 }
 
+// TestNextCronFire_DSTFallBack_FirstEligiblePostTransition keeps the first
+// eligible run when a trigger is created during the repeated post-transition
+// hour. The 01:30 EST occurrence is not a duplicate when the anchor is already
+// after the 01:00 EST transition.
+func TestNextCronFire_DSTFallBack_FirstEligiblePostTransition(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+
+	// 01:15 EST, after the fall-back transition. Construct the instant in UTC
+	// so the anchor does not depend on time.Date's ambiguous-time choice.
+	after := time.Date(2026, time.November, 1, 6, 15, 0, 0, time.UTC).In(loc)
+	got, err := nextCronFire("30 1 * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("nextCronFire error: %v", err)
+	}
+
+	want := time.Date(2026, time.November, 1, 6, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("post-transition first fire: got %s, want %s", got, want)
+	}
+	if _, offset := got.In(loc).Zone(); offset != -5*3600 {
+		t.Fatalf("post-transition first fire should be EST (-05:00), got offset %d", offset)
+	}
+}
+
+// TestNextCronFire_DSTFallBack_MultipleAmbiguousOccurrences pins the loop
+// running more than once. An anchor after the pre-transition 01:00 hour must
+// skip every matching occurrence in the repeated hour before 02:00 EST.
+func TestNextCronFire_DSTFallBack_MultipleAmbiguousOccurrences(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+
+	// 01:59 EDT, the last pre-transition minute. Construct the instant in UTC
+	// so the anchor is not affected by ambiguous-time construction rules.
+	after := time.Date(2026, time.November, 1, 5, 59, 0, 0, time.UTC).In(loc)
+	got, err := nextCronFire("*/10 * * * *", "America/New_York", after)
+	if err != nil {
+		t.Fatalf("nextCronFire error: %v", err)
+	}
+
+	want := time.Date(2026, time.November, 1, 7, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("post-transition repeated-hour scan: got %s, want %s", got, want)
+	}
+	if _, offset := got.In(loc).Zone(); offset != -5*3600 {
+		t.Fatalf("next fire should be EST (-05:00), got offset %d", offset)
+	}
+}
+
 // TestNextCronFire_DSTFallBackFiresOnce_EuropeLondon covers a zone family
 // where Go's ambiguous-time-construction rules resolve differently than for
 // America/New_York (a naive time.Date reconstruction of the wall clock would
