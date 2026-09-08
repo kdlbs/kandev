@@ -20,7 +20,7 @@ import (
 // statements rather than a fake — this is a repository-column bug
 // (reading the wrong table's last_run_finished_at), and a fake would
 // hide exactly that class of defect.
-func newTestOfficeRepoForCron(t *testing.T) *officesqlite.Repository {
+func newTestOfficeRepoForCron(t *testing.T) (*officesqlite.Repository, *sqlx.DB) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "cron-cooldown.db"))
 	if err != nil {
@@ -46,7 +46,7 @@ func newTestOfficeRepoForCron(t *testing.T) *officesqlite.Repository {
 	); err != nil {
 		t.Fatalf("seed agents row: %v", err)
 	}
-	return repo
+	return repo, database
 }
 
 // TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown is the
@@ -60,7 +60,7 @@ func newTestOfficeRepoForCron(t *testing.T) *officesqlite.Repository {
 // never triggered and every case below returned true regardless of the
 // office_agent_runtime state.
 func TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown(t *testing.T) {
-	repo := newTestOfficeRepoForCron(t)
+	repo, _ := newTestOfficeRepoForCron(t)
 	ctx := context.Background()
 	gate := &heartbeatAgentRuntime{office: repo}
 
@@ -78,13 +78,14 @@ func TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown(t *testing.T
 
 	now := time.Now().UTC()
 
-	// Poison agent_profiles.last_run_finished_at with a stale value far
-	// outside any cooldown window. If AllowFire were still reading this
-	// column, every assertion below would pass for the wrong reason (or
-	// the "no runtime row" case would incorrectly gate). Assigning the
-	// zero-valued agent struct here also proves this column round-trips
+	// Poison agent_profiles.last_run_finished_at with a value inside the
+	// 60s cooldown window (now - 5s), not outside it. If AllowFire were
+	// still reading this column instead of office_agent_runtime, this
+	// poisoned value alone would gate Case 1 below (no office_agent_runtime
+	// row yet, wants true) since it never changes across cases — proving
+	// the column is not consulted. Also confirms this column round-trips
 	// harmlessly and is not itself relied on by the fixed gate.
-	staleAgentProfilesValue := now.Add(-10 * time.Minute)
+	staleAgentProfilesValue := now.Add(-5 * time.Second)
 	agent.LastRunFinishedAt = &staleAgentProfilesValue
 	if err := repo.UpdateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("poison agent_profiles.last_run_finished_at: %v", err)
@@ -126,9 +127,12 @@ func TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown(t *testing.T
 
 // TestHeartbeatAgentRuntime_AllowFire_ZeroCooldownSkipsRuntimeLookup
 // pins the existing short-circuit: cooldown_sec <= 0 always allows
-// firing without requiring a runtime row.
+// firing without querying office_agent_runtime at all. The runtime
+// table is dropped before the call, so an implementation that queries
+// it anyway (instead of skipping) would surface as an error here
+// rather than an unproven true.
 func TestHeartbeatAgentRuntime_AllowFire_ZeroCooldownSkipsRuntimeLookup(t *testing.T) {
-	repo := newTestOfficeRepoForCron(t)
+	repo, database := newTestOfficeRepoForCron(t)
 	ctx := context.Background()
 	gate := &heartbeatAgentRuntime{office: repo}
 
@@ -143,13 +147,13 @@ func TestHeartbeatAgentRuntime_AllowFire_ZeroCooldownSkipsRuntimeLookup(t *testi
 	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := repo.UpdateRuntimeLastRunFinished(ctx, agent.ID, time.Now().UTC()); err != nil {
-		t.Fatalf("stamp runtime: %v", err)
+	if _, err := database.ExecContext(ctx, `DROP TABLE office_agent_runtime`); err != nil {
+		t.Fatalf("drop office_agent_runtime: %v", err)
 	}
 
 	allowed, err := gate.AllowFire(ctx, agent.ID, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("AllowFire: %v", err)
+		t.Fatalf("AllowFire queried office_agent_runtime despite cooldown_sec=0: %v", err)
 	}
 	if !allowed {
 		t.Error("AllowFire (cooldown_sec=0) = false, want true")
