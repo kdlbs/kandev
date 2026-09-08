@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -63,10 +64,11 @@ type RoutineLookup interface {
 //   - coalesce_if_active: behave as step 2 (default).
 //   - always_enqueue: skip step 2, always create a fresh run.
 type Dispatcher struct {
-	repo     *officesqlite.Repository
-	agents   AgentReader
-	routines RoutineLookup
-	log      *logger.Logger
+	repo      *officesqlite.Repository
+	agents    AgentReader
+	routines  RoutineLookup
+	log       *logger.Logger
+	pauseGate shared.PauseGate
 }
 
 // NewDispatcher builds a Dispatcher. log MUST be non-nil; the agents
@@ -94,6 +96,13 @@ func NewDispatcher(
 // already holds — so the cycle is broken by setting this post-build).
 func (d *Dispatcher) SetRoutineLookup(routines RoutineLookup) {
 	d.routines = routines
+}
+
+// SetPauseGate wires the workspace-pause read used to block the
+// taskless-run creation path (createFreshRun). Optional — when nil the
+// gate is not enforced.
+func (d *Dispatcher) SetPauseGate(g shared.PauseGate) {
+	d.pauseGate = g
 }
 
 // Dispatch processes one wakeup-request by id. The flow is:
@@ -276,6 +285,10 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
+	if err := d.checkPauseGate(ctx, req); err != nil {
+		return err
+	}
+
 	reason := effectiveReason(req)
 	payload := req.Payload
 	if payload == "" {
@@ -311,4 +324,57 @@ func (d *Dispatcher) createFreshRun(
 		zap.String("source", req.Source),
 		zap.String("reason", reason))
 	return nil
+}
+
+// wakeupPauseSkipReason is the skip reason MarkWakeupRequestSkipped
+// writes when the pause gate blocks createFreshRun — matching the
+// literal the other gate sites use for cross-site debugging
+// consistency (routine skip_reason, halt-sweep cancel reason).
+const wakeupPauseSkipReason = "workspace_paused"
+
+// checkPauseGate is createFreshRun's sole gate insertion point (this is
+// the only source= that reaches CreateRun directly — skip_if_active and
+// coalesce_if_active resolve to either this path or a merge into an
+// existing run, never a bare write of their own). Resolves the
+// request's workspace via the agent it targets: GetAgentInstance's
+// ErrAgentNotFound is deliberately NOT treated as a gate error — F41
+// established this is the one wakeup-dispatch site that observes the
+// wrapped sentinel (it bypasses GetAgentFromConfig), and an agent that
+// no longer exists must not block on a workspace the dispatcher cannot
+// even resolve; launch behaviour for that case is unchanged (proceeds
+// ungated, exactly as before this gate existed). Any other lookup
+// error, or a PauseState error, fails closed. A confirmed pause marks
+// the request skipped so it does not stay perpetually "queued"; a
+// gate-read error deliberately does not — nothing has been written yet,
+// so the request is simply left queued for the next dispatch attempt.
+func (d *Dispatcher) checkPauseGate(ctx context.Context, req *officesqlite.WakeupRequest) error {
+	if d.pauseGate == nil {
+		return nil
+	}
+	agent, err := d.agents.GetAgentInstance(ctx, req.AgentProfileID)
+	if err != nil {
+		if errors.Is(err, officesqlite.ErrAgentNotFound) {
+			return nil
+		}
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate agent lookup failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	active, err := d.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate read failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active == nil {
+		return nil
+	}
+	pause.RecordBlocked("wakeup_dispatch")
+	if err := d.repo.MarkWakeupRequestSkipped(ctx, req.ID, wakeupPauseSkipReason); err != nil {
+		d.log.Warn("wakeup dispatch: mark skipped (paused) failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+	}
+	return shared.ErrWorkspacePaused
 }

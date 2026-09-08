@@ -2,8 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // DashboardApprovalAdapter implements dashboard.ApprovalReactivityQueuer
@@ -46,6 +48,12 @@ func (a *DashboardApprovalAdapter) QueueApprovalRuns(
 			IdempotencyKey:  w.IdempotencyKey,
 		}
 		if err := a.scheduler.QueueRunCtx(ctx, w.AgentID, c); err != nil {
+			if errors.Is(err, shared.ErrWorkspacePaused) {
+				// A confirmed operator pause is not a reactivity failure —
+				// the paused workspace already logged its own pause event.
+				a.scheduler.logger.Debug("approval run skipped (workspace paused): " + err.Error())
+				continue
+			}
 			a.scheduler.logger.Warn("approval run failed: " + err.Error())
 		}
 	}

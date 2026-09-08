@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -56,10 +57,11 @@ const (
 
 // Run outcome constants (docs/specs/task-delivery-ledger/spec.md, "Office run
 // outcome"). Written into runs.outcome alongside status='finished' at each of
-// the seven terminal call sites; NULL on the failed path and on every
-// pre-activation row. RunOutcomeProcessed is the only value
-// RunCountsByDayForAgent counts as succeeded. Every other value buckets into
-// skipped.
+// the eight terminal call sites (the original six, plus the pause gate's
+// early and final checks in scheduler_integration.go); NULL on the failed
+// path and on every pre-activation row. RunOutcomeProcessed is the only
+// value RunCountsByDayForAgent counts as succeeded. Every other value
+// buckets into skipped.
 const (
 	RunOutcomeProcessed          = "processed"
 	RunOutcomeBudgetBlocked      = "budget_blocked"
@@ -67,6 +69,7 @@ const (
 	RunOutcomeAgentInactive      = "agent_inactive"
 	RunOutcomeTaskTreeHeld       = "task_tree_held"
 	RunOutcomeBudgetUnmeasurable = "budget_unmeasurable"
+	RunOutcomeWorkspacePaused    = "workspace_paused"
 )
 
 // CoalesceWindowSeconds is the default coalescing window.
@@ -87,6 +90,9 @@ func (s *Service) QueueRun(
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
 	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
+		return err
+	}
+	if err := s.checkPauseGateForAgent(ctx, agentInstanceID, "queue_run"); err != nil {
 		return err
 	}
 
@@ -211,6 +217,51 @@ func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) 
 		return fmt.Errorf("agent %s is stopped", agentInstanceID)
 	case models.AgentStatusPendingApproval:
 		return fmt.Errorf("agent %s is pending approval", agentInstanceID)
+	}
+	return nil
+}
+
+// pauseGateState reads the workspace-pause gate directly (by workspace
+// id, not agent id — used by scheduler_integration.go's run-processing
+// gates, which already have the agent and its WorkspaceID in hand).
+// The returned bool is true only for a confirmed pause; err is non-nil
+// only on a gate-read failure. When s.pauseGate is nil (not wired) it
+// always reports (false, nil) so dispatch proceeds ungated.
+func (s *Service) pauseGateState(ctx context.Context, workspaceID string) (bool, error) {
+	if s.pauseGate == nil {
+		return false, nil
+	}
+	active, err := s.pauseGate.PauseState(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	return active != nil, nil
+}
+
+// checkPauseGateForAgent resolves agentInstanceID's workspace and blocks
+// queuing when that workspace is paused (the operator kill switch).
+// Fails closed on a gate-read error (shared.ErrPauseGateUnavailable) —
+// this write hasn't happened yet, so there is nothing to leave in a
+// retryable state beyond simply not writing it; the caller's own retry
+// (or the next event) tries again.
+func (s *Service) checkPauseGateForAgent(ctx context.Context, agentInstanceID, gateName string) error {
+	if s.pauseGate == nil {
+		return nil
+	}
+	agent, err := s.GetAgentFromConfig(ctx, agentInstanceID)
+	if err != nil {
+		return fmt.Errorf("get agent instance: %w", err)
+	}
+	active, err := s.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError(gateName)
+		s.logger.Warn("queue run: pause gate read failed",
+			zap.String("agent", agentInstanceID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active != nil {
+		pause.RecordBlocked(gateName)
+		return shared.ErrWorkspacePaused
 	}
 	return nil
 }

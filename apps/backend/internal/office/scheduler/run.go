@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
@@ -175,6 +176,7 @@ type SchedulerService struct {
 	kandevBasePathFn        func() string
 	agentTypeResolver       func(profileID string) string
 	projectSkillDirResolver func(agentTypeID string) string
+	pauseGate               shared.PauseGate
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -242,6 +244,13 @@ func (ss *SchedulerService) SetProjectSkillDirResolver(fn func(agentTypeID strin
 	ss.projectSkillDirResolver = fn
 }
 
+// SetPauseGate wires the workspace-pause read used by QueueRun to
+// enforce the operator kill switch. Optional — when nil the gate is
+// not enforced.
+func (ss *SchedulerService) SetPauseGate(g shared.PauseGate) {
+	ss.pauseGate = g
+}
+
 // QueueRun enqueues a run request for an agent instance.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
 // Implements shared.RunQueuer.
@@ -250,6 +259,9 @@ func (ss *SchedulerService) QueueRun(
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
 	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
+		return err
+	}
+	if err := ss.checkPauseGate(ctx, agentInstanceID); err != nil {
 		return err
 	}
 
@@ -343,6 +355,33 @@ func (ss *SchedulerService) guardAgentStatus(ctx context.Context, agentInstanceI
 		return fmt.Errorf("agent %s is stopped", agentInstanceID)
 	case models.AgentStatusPendingApproval:
 		return fmt.Errorf("agent %s is pending approval", agentInstanceID)
+	}
+	return nil
+}
+
+// checkPauseGate resolves agentInstanceID's workspace and blocks queuing
+// when that workspace is paused (the operator kill switch). Fails
+// closed on a gate-read error (shared.ErrPauseGateUnavailable) — this
+// write hasn't happened yet, so failing the call is the whole retry
+// story; the caller's own retry (or the next event) tries again.
+func (ss *SchedulerService) checkPauseGate(ctx context.Context, agentInstanceID string) error {
+	if ss.pauseGate == nil {
+		return nil
+	}
+	agent, err := ss.svc.GetAgentFromConfig(ctx, agentInstanceID)
+	if err != nil {
+		return fmt.Errorf("get agent instance: %w", err)
+	}
+	active, err := ss.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError("scheduler_queue_run")
+		ss.logger.Warn("queue run: pause gate read failed",
+			zap.String("agent", agentInstanceID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active != nil {
+		pause.RecordBlocked("scheduler_queue_run")
+		return shared.ErrWorkspacePaused
 	}
 	return nil
 }
