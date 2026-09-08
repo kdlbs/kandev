@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -472,6 +473,7 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 		t.Fatalf("claim: %v (run=%v)", err, run)
 	}
 	run.RetryCount = service.MaxRetryCount
+	run.SessionID = "sess-pathb"
 
 	if err := svc.HandleRunFailure(ctx, run, errForTest("boom")); err != nil {
 		t.Fatalf("handle run failure: %v", err)
@@ -493,5 +495,12 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 	}
 	if next.Reason != service.RunReasonAgentError {
 		t.Errorf("reason = %q, want agent_error", next.Reason)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(next.Payload), &payload); err != nil {
+		t.Fatalf("decode CEO payload: %v", err)
+	}
+	if payload["failed_session_id"] != run.SessionID {
+		t.Errorf("failed_session_id = %q, want %q", payload["failed_session_id"], run.SessionID)
 	}
 }

@@ -57,7 +57,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 |--------|---------|---------|
 | `routine` | A routine's cron / webhook / manual trigger fires | `{routine_id, variables, missed_ticks?}` |
 | `comment` | Comment posted on a task assigned to this agent (non-self). Also the channel pathway: inbound Telegram/Slack messages become comments on a channel task. | `{task_id, comment_id}` |
-| `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{agent_profile_id, run_id, error}` |
+| `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{failed_agent_id, failed_session_id?, run_id?, error}` |
 | `self` | Agent self-wake via tool call | `{reason, payload?}` |
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
 | `task_assigned` | An authoritative Office task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
@@ -67,6 +67,11 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `budget_alert` | Budget threshold crossed for a sub-agent (coordinator only) | `{agent_instance_id, budget_pct}` |
 
 The task-event sources are dispatched by office event subscribers when the corresponding task event fires. The legacy `heartbeat` source is **retired**: all periodic wakes flow through the `routine` source - each coordinator agent gets a pre-installed routine at onboarding (see *Routines*), and that routine's cron tick is what wakes the coordinator.
+
+An `agent_error` payload uses `failed_agent_id` to identify the failed agent.
+It includes `failed_session_id` when the failed session is known. Retry
+exhaustion also includes `run_id` for the failed run. The `error` field carries
+the failure details.
 
 ### Manual status changes (kanban drag-drop)
 

@@ -294,7 +294,7 @@ func (c QueueRunCallback) resolveCEO(ctx context.Context, in ActionInput, taskID
 		return nil, fmt.Errorf("queue_run: workspace has no CEO agent profile for task %s", taskID)
 	}
 	if in.Trigger == TriggerOnAgentError {
-		if payload, ok := in.Payload.(OnAgentErrorPayload); ok && payload.FailedAgentID == id {
+		if payload, ok := agentErrorPayload(in.Payload); ok && payload.FailedAgentID == id {
 			c.recordCEOSelfEscalationSkipped(taskID, id)
 			return nil, nil
 		}
@@ -400,6 +400,8 @@ func queueActionDigest(in ActionInput) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// queueRunPayload combines trigger metadata with workflow-authored fields.
+// Typed failure metadata provides defaults, while authored fields override it.
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
 	out := make(map[string]any, len(actionPayload))
 	comment, ok := commentPayload(in.Payload)
@@ -452,6 +454,7 @@ func commentPayload(payload any) (OnCommentPayload, bool) {
 	return OnCommentPayload{}, false
 }
 
+// agentErrorPayload normalizes value and pointer trigger payloads.
 func agentErrorPayload(payload any) (OnAgentErrorPayload, bool) {
 	switch p := payload.(type) {
 	case OnAgentErrorPayload:
