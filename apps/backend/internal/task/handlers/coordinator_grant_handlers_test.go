@@ -33,7 +33,7 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	if err := repo.CreateWorkspaceAgentPrincipal(ctx, &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "coordinator", BackingSessionID: "session-1",
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: coordinator.TaskPrincipalInstallationID, LogicalKey: coordinator.TaskPrincipalLogicalKey("coordinator"), BackingTaskID: "coordinator", BackingSessionID: "session-1",
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
 	}
@@ -116,6 +116,47 @@ func TestCreateCoordinatorGrantRegistersNormalTaskPrincipal(t *testing.T) {
 	}
 	if _, err := coordinator.EnsureTaskPrincipal(ctx, repo, "ws-1", "normal-task", "session-2"); err == nil {
 		t.Fatal("second session claim succeeded, want denial")
+	}
+}
+
+func TestCreateCoordinatorGrantRejectsCustomPrincipalBinding(t *testing.T) {
+	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "coordinator", WorkspaceID: "ws-1", Title: "Coordinator"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, &models.WorkspaceAgentPrincipal{
+		ID: "custom-principal", WorkspaceID: "ws-1", PluginInstallationID: "custom-plugin", LogicalKey: "custom", BackingTaskID: "coordinator",
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "admin", Role: authn.RoleAdmin})
+		c.Next()
+	})
+	RegisterCoordinatorGrantRoutes(router, repo, svc, log)
+	body, err := json.Marshal(createGrantRequest{CoordinatorTaskID: "coordinator", ScopeKind: "workspace", Capabilities: "inspect"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/coordinator-grants", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusConflict, response.Body.String())
+	}
+	grants, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", true)
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("grants = %#v, %v; want no grant", grants, err)
+	}
+	if taskID, err := repo.GetWorkspaceCoordinatorTaskID(ctx, "ws-1"); err != nil || taskID != "" {
+		t.Fatalf("designation = %q, %v; want absent", taskID, err)
 	}
 }
 

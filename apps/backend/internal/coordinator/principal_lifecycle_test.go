@@ -108,9 +108,18 @@ func TestEnsureTaskPrincipalPassesWorkspaceAndTaskToActiveLookup(t *testing.T) {
 	}
 }
 
+func TestEnsureTaskPrincipalRejectsCustomPrincipalBoundToTask(t *testing.T) {
+	store := &recordingPrincipalStore{custom: true}
+	principal, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-1")
+	if err == nil || principal != nil {
+		t.Fatalf("EnsureTaskPrincipal custom principal = %#v, %v; want rejection", principal, err)
+	}
+}
+
 func TestEnsureTaskPrincipalClaimsUnboundPrincipalOnce(t *testing.T) {
 	store := &claimingPrincipalStore{principal: &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: "workspace-1", BackingTaskID: "task-1",
+		ID: "principal-1", WorkspaceID: "workspace-1", PluginInstallationID: TaskPrincipalInstallationID,
+		LogicalKey: TaskPrincipalLogicalKey("task-1"), BackingTaskID: "task-1",
 	}}
 
 	principal, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-1")
@@ -163,11 +172,16 @@ func (s *claimingPrincipalStore) ClaimWorkspaceAgentPrincipal(_ context.Context,
 type recordingPrincipalStore struct {
 	workspaceID string
 	taskID      string
+	custom      bool
 }
 
 func (s *recordingPrincipalStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
 	s.workspaceID, s.taskID = workspaceID, taskID
-	return &models.WorkspaceAgentPrincipal{ID: "custom", BackingTaskID: taskID, BackingSessionID: "session-1"}, nil
+	installationID, logicalKey := TaskPrincipalInstallationID, TaskPrincipalLogicalKey(taskID)
+	if s.custom {
+		installationID, logicalKey = "custom-plugin", "custom-key"
+	}
+	return &models.WorkspaceAgentPrincipal{ID: "principal", WorkspaceID: workspaceID, PluginInstallationID: installationID, LogicalKey: logicalKey, BackingTaskID: taskID, BackingSessionID: "session-1"}, nil
 }
 
 func (s *recordingPrincipalStore) GetWorkspaceAgentPrincipalByContext(context.Context, string, string, string) (*models.WorkspaceAgentPrincipal, error) {

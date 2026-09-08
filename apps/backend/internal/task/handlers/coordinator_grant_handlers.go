@@ -329,6 +329,9 @@ func (h *CoordinatorGrantHandlers) httpCreateWorkspaceCoordinatorGrant(c *gin.Co
 			c.JSON(http.StatusConflict, gin.H{"error": "coordinator task principal is revoked"})
 			return
 		}
+	} else if !coordinator.IsTaskPrincipal(principal, workspaceID, req.CoordinatorTaskID) {
+		c.JSON(http.StatusConflict, gin.H{"error": "coordinator task has a non-server principal"})
+		return
 	}
 
 	now := time.Now()

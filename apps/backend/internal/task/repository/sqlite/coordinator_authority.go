@@ -275,7 +275,21 @@ func (r *Repository) RevokeCoordinatorGrant(ctx context.Context, id, revokedByUs
 	if revokedAt.IsZero() {
 		revokedAt = r.nowUTC()
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var workspaceID, coordinatorTaskID string
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT workspace_id, coordinator_task_id
+		FROM task_coordinator_grants
+		WHERE id = ? AND revoked_at IS NULL`), id).Scan(&workspaceID, &coordinatorTaskID); errors.Is(err, sql.ErrNoRows) {
+		return repoerrors.ErrCoordinatorGrantNotFound
+	} else if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_coordinator_grants
 		SET revoked_at = ?, revoked_by_user_id = ?
 		WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedByUserID, id)
@@ -288,7 +302,22 @@ func (r *Repository) RevokeCoordinatorGrant(ctx context.Context, id, revokedByUs
 		}
 		return repoerrors.ErrCoordinatorGrantNotFound
 	}
-	return nil
+	var remaining int
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*)
+		FROM task_coordinator_grants
+		WHERE workspace_id = ? AND coordinator_task_id = ?
+			AND principal_id <> '' AND revoked_at IS NULL`), workspaceID, coordinatorTaskID).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining == 0 {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM workspace_coordinator_grants
+			WHERE workspace_id = ? AND coordinator_task_id = ?`), workspaceID, coordinatorTaskID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) CreateCoordinatorAuditEvent(ctx context.Context, event *models.CoordinatorAuditEvent) error {

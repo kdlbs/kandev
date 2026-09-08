@@ -49,13 +49,7 @@ func EnsureTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, wor
 		return nil, err
 	}
 	if active != nil {
-		if active.BackingSessionID == "" && sessionID != "" {
-			return claimUnboundTaskPrincipal(ctx, store, active, taskID, sessionID)
-		}
-		if active.BackingSessionID != sessionID {
-			return nil, fmt.Errorf("ensure task principal: task is bound to another session")
-		}
-		return active, nil
+		return useExistingTaskPrincipal(ctx, store, active, workspaceID, taskID, sessionID)
 	}
 	logicalKey := TaskPrincipalLogicalKey(taskID)
 	principal, err := lookupOrCreateTaskPrincipal(ctx, store, workspaceID, taskID, logicalKey, sessionID)
@@ -74,6 +68,26 @@ func EnsureTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, wor
 	principal.BackingTaskID = taskID
 	principal.BackingSessionID = sessionID
 	return principal, nil
+}
+
+func useExistingTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, principal *models.WorkspaceAgentPrincipal, workspaceID, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {
+	if !IsTaskPrincipal(principal, workspaceID, taskID) {
+		return nil, fmt.Errorf("ensure task principal: task already has a non-server principal")
+	}
+	if principal.BackingSessionID == "" && sessionID != "" {
+		return claimUnboundTaskPrincipal(ctx, store, principal, taskID, sessionID)
+	}
+	if principal.BackingSessionID != sessionID {
+		return nil, fmt.Errorf("ensure task principal: task is bound to another session")
+	}
+	return principal, nil
+}
+
+// IsTaskPrincipal reports whether principal is the server-owned identity for
+// exactly one task. Operator grants must never bind arbitrary plugin subjects.
+func IsTaskPrincipal(principal *models.WorkspaceAgentPrincipal, workspaceID, taskID string) bool {
+	return principal != nil && principal.WorkspaceID == workspaceID && principal.BackingTaskID == taskID &&
+		principal.PluginInstallationID == TaskPrincipalInstallationID && principal.LogicalKey == TaskPrincipalLogicalKey(taskID)
 }
 
 func claimUnboundTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, principal *models.WorkspaceAgentPrincipal, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {

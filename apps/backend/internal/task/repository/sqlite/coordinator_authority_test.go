@@ -263,6 +263,39 @@ func TestIssueCoordinatorAuthorityGrantRejectsConflictingDesignationWithoutCapab
 	}
 }
 
+func TestRevokeCoordinatorGrantRemovesDesignationWithFinalPrincipalBoundGrant(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	createUsageEventsTestTask(t, repo, "coordinator")
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+	grant := &models.CoordinatorGrant{
+		ID: "grant-1", CoordinatorTaskID: "coordinator", PrincipalID: principal.ID, WorkspaceID: "ws-1",
+		ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "inspect", GrantedAt: now,
+	}
+	if err := repo.IssueCoordinatorAuthorityGrant(ctx,
+		&models.WorkspaceCoordinatorGrant{WorkspaceID: "ws-1", CoordinatorTaskID: "coordinator", CreatedByUserID: "operator", CreatedAt: now},
+		grant,
+	); err != nil {
+		t.Fatalf("IssueCoordinatorAuthorityGrant: %v", err)
+	}
+	if err := repo.RevokeCoordinatorGrant(ctx, grant.ID, "operator-2", now.Add(time.Minute)); err != nil {
+		t.Fatalf("RevokeCoordinatorGrant: %v", err)
+	}
+	if taskID, err := repo.GetWorkspaceCoordinatorTaskID(ctx, "ws-1"); err != nil || taskID != "" {
+		t.Fatalf("designation after final revocation = %q, %v; want absent", taskID, err)
+	}
+}
+
 func TestWorkspaceAgentPrincipalRepositoryRebindsAndRevokesImmediately(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
 	ctx := context.Background()
