@@ -17,6 +17,7 @@ afterEach(() => {
 function runnerEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env = {
     ...process.env,
+    npm_lifecycle_event: "e2e:run",
     KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
     ...extra,
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
@@ -25,6 +26,12 @@ function runnerEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.P
   delete env.KANDEV_E2E_DOCKER;
   delete env.CAPTURE_PR_ASSETS;
   return env;
+}
+
+function fakeExecutable(binDir: string, name: string, contents: string): void {
+  const executablePath = path.join(binDir, name);
+  fs.writeFileSync(executablePath, contents);
+  fs.chmodSync(executablePath, 0o755);
 }
 
 describe("run-e2e.sh", () => {
@@ -359,6 +366,23 @@ describe("run-e2e.sh", () => {
     expect(result.stdout).toBe("1");
   });
 
+  it("preserves a leading -- for direct script invocations", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    fakeExecutable(binDir, "docker", "#!/usr/bin/env sh\nexit 1\n");
+    fakeExecutable(binDir, "make", "#!/usr/bin/env sh\nexit 0\n");
+    fakeExecutable(binDir, "pnpm", "#!/usr/bin/env sh\nprintf '%s' \"$*\"\n");
+
+    const result = spawnSync("bash", [scriptPath, "--", "clean"], {
+      encoding: "utf8",
+      env: runnerEnv(binDir, { npm_lifecycle_event: "" }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("clean done");
+    expect(result.stdout).toContain("clean");
+  });
+
   it("forwards only the tail after a second -- when the first -- is a leading pnpm artifact", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
@@ -432,13 +456,37 @@ describe("run-e2e.sh", () => {
     expect(elapsedMs).toBeLessThan(15_000);
   });
 
+  it("selects Docker mode after a successful bounded probe", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    fakeExecutable(
+      binDir,
+      "docker",
+      '#!/usr/bin/env sh\nif [ "$1" = "info" ] || [ "$1" = "image" ] || [ "$1" = "run" ]; then exit 0; fi\nexit 1\n',
+    );
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--no-build", "--project", "chromium", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "1" }),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("mode=docker");
+    expect(result.stderr).not.toContain("did not respond within");
+  });
+
   it("bounds the docker info probe even when the hung process ignores SIGTERM", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     tempDirs.push(binDir);
+    const childPidFile = path.join(binDir, "child.pid");
     const dockerPath = path.join(binDir, "docker");
     fs.writeFileSync(
       dockerPath,
-      '#!/usr/bin/env sh\nif [ "$1" = "info" ]; then trap "" TERM; sleep 10; exit 0; fi\nexit 0\n',
+      '#!/usr/bin/env sh\nif [ "$1" = "info" ]; then trap "" TERM; sleep 10 & child=$!; printf \'%s\' "$child" > "$KANDEV_RUNNER_CHILD_PID_FILE"; wait "$child"; exit 0; fi\nexit 0\n',
     );
     fs.chmodSync(dockerPath, 0o755);
     const pnpmPath = path.join(binDir, "pnpm");
@@ -451,7 +499,10 @@ describe("run-e2e.sh", () => {
       [scriptPath, "--no-build", "--project", "chromium", "--", "--help"],
       {
         encoding: "utf8",
-        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "1" }),
+        env: runnerEnv(binDir, {
+          KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "1",
+          KANDEV_RUNNER_CHILD_PID_FILE: childPidFile,
+        }),
       },
     );
     const elapsedMs = Date.now() - start;
@@ -462,6 +513,8 @@ describe("run-e2e.sh", () => {
     );
     expect(result.stderr).toContain("mode=host");
     expect(elapsedMs).toBeLessThan(5_000);
+    const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
+    expect(() => process.kill(childPid, 0)).toThrow();
   }, 20_000);
 
   it.each([

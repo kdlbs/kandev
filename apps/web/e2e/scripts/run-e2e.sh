@@ -26,11 +26,12 @@
 #            run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
 #   Via pnpm: pnpm e2e:run [options] [-- <playwright args>]
 #   pnpm/npm forward a caller-supplied `--` verbatim, so `pnpm e2e:run -- --host`
-#   reaches this script as `-- --host`. A leading bare `--` is therefore dropped
-#   before option parsing and carries no meaning — write script options directly
-#   after `e2e:run` (`pnpm e2e:run --host --no-build -- --grep foo`), not before
-#   a leading `--`. A `--` anywhere else still ends option parsing and forwards
-#   everything after it straight to Playwright.
+#   reaches this script as `-- --host`. The package entry point drops that leading
+#   artifact before option parsing; direct script calls preserve `--` as the
+#   documented Playwright separator. For package calls, write script options
+#   directly after `e2e:run` (`pnpm e2e:run --host --no-build -- --grep foo`).
+#   A `--` anywhere else still ends option parsing and forwards everything after it
+#   straight to Playwright.
 #
 # Options:
 #   --docker | --host     Force runner (default: auto-detect)
@@ -79,14 +80,20 @@ docker_up() {
     log "docker info did not respond within 0s; treating Docker as unavailable (pass --host to skip this probe)"
     return 1
   fi
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
   docker info >/dev/null 2>&1 &
   local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
+  [[ "$had_monitor" -eq 1 ]] || set +m
   while kill -0 "$pid" 2>/dev/null; do
     if (( tick >= max_ticks )); then
       # SIGKILL, not SIGTERM: a wedged docker client can be blocked in a way
       # that doesn't honor SIGTERM, and `wait` below blocks until it exits.
-      kill -9 "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
+      kill -9 -- "-$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
       log "docker info did not respond within ${DOCKER_PROBE_TIMEOUT}s; treating Docker as unavailable (pass --host to skip this probe)"
       return 1
     fi
@@ -214,10 +221,11 @@ STRICT=1
 PROJECT=chromium
 PW_ARGS=()
 # pnpm/npm forward the caller's `--` verbatim, so `pnpm e2e:run -- --host`
-# reaches this script as `-- --host`. A leading `--` therefore carries no
-# information; dropping it keeps script options parseable. A later `--` still
-# ends option parsing (in the loop below).
-[[ "${1:-}" == -- ]] && shift
+# reaches this script as `-- --host`. Only the package entry point drops that
+# artifact. Direct calls keep the documented `-- <playwright args>` separator.
+if [[ "${npm_lifecycle_event:-}" == e2e:run && "${1:-}" == -- ]]; then
+  shift
+fi
 [[ "${1:-}" == clean ]] && { SUBCMD=clean; shift; }
 [[ "${1:-}" == run ]] && shift
 while [[ $# -gt 0 ]]; do
