@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -142,7 +146,16 @@ func (r *Repository) ListTaskRepositoryProviders(ctx context.Context, taskID str
 	return providers, err
 }
 
-// UpdateTaskRepository updates an existing task-repository link
+// UpdateTaskRepository updates an existing task-repository link in place.
+//
+// Takes the shared task-row lock (AC-TASKS-RUNNER-SWITCH-002.3a class-2
+// writer) on both the link's current and target task before writing: this
+// is the only writer that can change a task's repository count without
+// insert/delete, so a concurrent runner switch's repository-count read must
+// resolve fully before or fully after this update, on whichever task ID(s)
+// it touches. Locking both (sorted, to avoid a lock-order deadlock between
+// two concurrent re-parents) covers a re-parent moving the link away from
+// its current task as well as an in-place field update.
 func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	taskRepo.UpdatedAt = time.Now().UTC()
 
@@ -151,7 +164,24 @@ func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.
 		metadataJSON = []byte("{}")
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	currentTaskID, err := r.currentTaskRepositoryTaskIDTx(ctx, tx, taskRepo.ID)
+	if err != nil {
+		return err
+	}
+	for _, taskID := range lockOrderedTaskIDs(currentTaskID, taskRepo.TaskID) {
+		if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskID); lockErr != nil &&
+			!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+			return lockErr
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_repositories SET
 			task_id = ?, repository_id = ?, base_branch = ?, checkout_branch = ?, branch_policy_id = ?, branch_policy_name = ?,
 			branch_policy_base_branch = ?, branch_policy_branch_template = ?, branch_policy_pull_request_target = ?,
@@ -168,7 +198,39 @@ func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.
 	if rows == 0 {
 		return fmt.Errorf("task repository not found: %s", taskRepo.ID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// currentTaskRepositoryTaskIDTx returns the task_id a task_repositories row
+// currently holds, or "" if the row does not exist (UpdateTaskRepository's
+// own not-found check runs after the write and stays authoritative).
+func (r *Repository) currentTaskRepositoryTaskIDTx(ctx context.Context, tx *sqlx.Tx, id string) (string, error) {
+	var taskID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_repositories WHERE id = ?`), id).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return taskID, err
+}
+
+// lockOrderedTaskIDs returns the distinct, non-empty task IDs among a and b
+// in a stable sorted order, so two concurrent re-parents always attempt
+// their locks in the same relative order and cannot deadlock each other.
+func lockOrderedTaskIDs(a, b string) []string {
+	seen := make(map[string]struct{}, 2)
+	ids := make([]string, 0, 2)
+	for _, id := range []string{a, b} {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // DeleteTaskRepository deletes a task-repository link by ID

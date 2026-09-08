@@ -551,3 +551,68 @@ func TestSwitchTaskRunner_ConcurrentWorkspaceFolderAttachNeverBlendsWithSwitch(t
 		t.Fatalf("switch committed but stored profile = %q, want profile-new", stored)
 	}
 }
+
+// TestSwitchTaskRunner_ConcurrentTaskRepositoryReparentNeverBlendsWithSwitch
+// is the AC-TASKS-RUNNER-SWITCH-002.3a/3b acceptance evidence for the
+// UpdateTaskRepository retrofit: re-parenting the task's sole repository
+// link away to another task races a runner switch on the vacated task. The
+// two outcomes are the switch committing first (against the still-attached
+// repository) or the re-parent landing first and the switch being rejected
+// as no_repository — never a switch that commits after its task lost its
+// only repository.
+func TestSwitchTaskRunner_ConcurrentTaskRepositoryReparentNeverBlendsWithSwitch(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old"}`,
+	})
+	seedRunnerSwitchTask(t, repo, "task-2", "ws-1", seedRunnerSwitchTaskOpts{})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	taskRepo := seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	reparented := *taskRepo
+	reparented.TaskID = "task-2"
+
+	var wg sync.WaitGroup
+	var switchErr, reparentErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, switchErr = repo.SwitchTaskRunner(ctx, baseRunnerSwitchRequest("task-1", "profile-new", taskRepo))
+	}()
+	go func() {
+		defer wg.Done()
+		reparentErr = repo.UpdateTaskRepository(ctx, &reparented)
+	}()
+	wg.Wait()
+
+	if reparentErr != nil {
+		t.Fatalf("UpdateTaskRepository error = %v, want nil", reparentErr)
+	}
+
+	switchRejectedAsNoRepository := false
+	if switchErr != nil {
+		var conflict *repoerrors.ErrRunnerMutabilityConflict
+		if !errors.As(switchErr, &conflict) || conflict.Reason != models.RunnerReasonNoRepository {
+			t.Fatalf("switch error = %v, want nil or ErrRunnerMutabilityConflict{no_repository}", switchErr)
+		}
+		switchRejectedAsNoRepository = true
+	}
+
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	stored, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
+
+	if switchRejectedAsNoRepository {
+		if stored != "profile-old" {
+			t.Fatalf("switch was rejected but stored profile = %q, want unchanged profile-old", stored)
+		}
+		return
+	}
+	if stored != "profile-new" {
+		t.Fatalf("switch committed but stored profile = %q, want profile-new", stored)
+	}
+}
