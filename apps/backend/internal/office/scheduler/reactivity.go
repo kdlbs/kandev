@@ -377,6 +377,7 @@ func (ss *SchedulerService) cascadeReviewRequested(
 			zap.String("task_id", task.ID), zap.Error(err))
 		return
 	}
+	reported := map[string]struct{}{}
 	for _, p := range parts {
 		if p.AgentProfileID == "" {
 			continue
@@ -385,8 +386,13 @@ func (ss *SchedulerService) cascadeReviewRequested(
 			continue
 		}
 		// No durable occurrence row to key on: keyless by design, reported
-		// per recipient so the fan-out's full volume is countable.
-		runsservice.ReportKeylessEnqueue(RunReasonTaskReviewRequested, runsservice.KeylessCauseByDesign, "")
+		// once per distinct agent rather than per role — an agent seated as
+		// both reviewer and approver is one recipient, and queue()'s own
+		// seen-map dedup only attempts one enqueue for it.
+		if _, dup := reported[p.AgentProfileID]; !dup {
+			reported[p.AgentProfileID] = struct{}{}
+			runsservice.ReportKeylessEnqueue(RunReasonTaskReviewRequested, runsservice.KeylessCauseByDesign, "")
+		}
 		queue(p.AgentProfileID, RunContext{
 			Reason:      RunReasonTaskReviewRequested,
 			TaskID:      task.ID,

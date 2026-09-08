@@ -315,4 +315,58 @@ func TestReactivityProducerKeyAudit(t *testing.T) {
 			t.Fatalf("office_run_dedup_keyless_total{task_review_requested,by_design} = %d, want %d", got, want)
 		}
 	})
+
+	t.Run("task_review_requested_dual_role_recipient_counts_once", func(t *testing.T) {
+		// Regression test for Review round 3 Finding 4: an agent seated as
+		// both reviewer and approver on the same task is one recipient, not
+		// two. Driven through the real ApplyTaskMutation (not a bare
+		// closure) so the real queue closure's seen-map dedup — which
+		// silently absorbs the second queue() call for the same agent —
+		// is what proves the counter must match the number of enqueue
+		// attempts actually made, not the number of participant rows read.
+		ss, repo := newAuditScheduler(t)
+		ctx := context.Background()
+		createChildrenCompletedAgent(t, repo, "agent-dual-role")
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO tasks (id, workspace_id, workflow_step_id) VALUES ('task-audit-review-dual', 'ws-1', 'step-audit')
+		`); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+			VALUES ('p-audit-dual-reviewer', 'step-audit', 'task-audit-review-dual', 'reviewer', 'agent-dual-role', 1, 0)
+		`); err != nil {
+			t.Fatalf("insert reviewer participant: %v", err)
+		}
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+			VALUES ('p-audit-dual-approver', 'step-audit', 'task-audit-review-dual', 'approver', 'agent-dual-role', 1, 1)
+		`); err != nil {
+			t.Fatalf("insert approver participant: %v", err)
+		}
+
+		task := &TaskSnapshot{ID: "task-audit-review-dual", WorkspaceID: "ws-1", State: statusTodo}
+		before := auditKeylessCounterValue(t, RunReasonTaskReviewRequested, "by_design")
+		newStatus := statusInReview
+		change := TaskMutation{NewStatus: &newStatus, ActorID: "user-1", ActorType: "user"}
+		res, err := ss.ApplyTaskMutation(ctx, task, change)
+		if err != nil {
+			t.Fatalf("ApplyTaskMutation: %v", err)
+		}
+
+		queued := 0
+		for _, r := range res.Runs {
+			if r.Reason == RunReasonTaskReviewRequested && r.AgentID == "agent-dual-role" {
+				queued++
+			}
+		}
+		if queued != 1 {
+			t.Fatalf("expected exactly 1 queued task_review_requested run for the dual-role agent, got %d (%#v)", queued, res.Runs)
+		}
+		if got, want := auditKeylessCounterValue(t, RunReasonTaskReviewRequested, "by_design"), before+1; got != want {
+			t.Fatalf("office_run_dedup_keyless_total{task_review_requested,by_design} = %d, want %d (one recipient, not one row per role)", got, want)
+		}
+	})
 }
