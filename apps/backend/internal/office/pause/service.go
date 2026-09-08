@@ -7,9 +7,11 @@ package pause
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"go.uber.org/zap"
@@ -18,7 +20,14 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
+
+// haltSweepTimeout bounds the halt sweep once it is detached from the
+// caller's request context (see Pause), so a sweep stuck on a slow
+// dependency doesn't run unbounded after the HTTP response has already
+// been written.
+const haltSweepTimeout = 30 * time.Second
 
 // maxReasonCodePoints is the trimmed-reason length bound (Unicode code
 // points, not bytes — a CJK reason would otherwise cap near 166 characters
@@ -141,7 +150,13 @@ func (s *Service) Pause(ctx context.Context, workspaceID, reason, actorID, actor
 		return nil, err
 	}
 
-	sweep := s.runHaltSweep(ctx, workspaceID)
+	// The pause record is already durable at this point. Detach the sweep
+	// from the caller's request context (Gin cancels it on client
+	// disconnect) so an operator who has already gone away doesn't
+	// silently truncate the cancellations it's about to make.
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), haltSweepTimeout)
+	defer cancel()
+	sweep := s.runHaltSweep(sweepCtx, workspaceID)
 	return &PauseResult{Pause: active, Sweep: sweep}, nil
 }
 
@@ -195,18 +210,43 @@ func (s *Service) tryPauseOnce(ctx context.Context, workspaceID, reason, actorID
 		return nil, false, fmt.Errorf("re-read active pause: %w", readErr)
 	}
 	if active != nil {
-		s.logNoop(ctx, workspaceID, actorID, actorKind, "pause")
+		s.logNoop(ctx, workspaceID, actorID, actorKind, "pause", reason, noopCauseAlreadyPaused)
 		return active, true, nil
 	}
 	// No active record: a resume raced this insert. The caller retries once.
-	s.logNoop(ctx, workspaceID, actorID, actorKind, "pause")
+	s.logNoop(ctx, workspaceID, actorID, actorKind, "pause", reason, noopCauseLostRace)
 	return nil, false, nil
+}
+
+// Cause values for a workspace_pause_noop entry's structured Details,
+// naming why the request committed nothing (system-design-02.md's
+// Observability section).
+const (
+	noopCauseAlreadyPaused = "already_paused"
+	noopCauseLostRace      = "lost_race"
+	noopCauseNotPaused     = "not_paused"
+)
+
+// noopDetails is the JSON shape written to a workspace_pause_noop entry's
+// Details column: the requested operation, the caller's own (possibly
+// empty, for resume) reason, and why nothing committed.
+type noopDetails struct {
+	RequestedOp string `json:"requested_op"`
+	Reason      string `json:"reason"`
+	Cause       string `json:"cause"`
 }
 
 // logNoop writes a standalone (non-transactional, best-effort)
 // workspace_pause_noop activity entry for a request that changed nothing:
-// a repeat pause, or an insert that lost to a concurrent resume.
-func (s *Service) logNoop(ctx context.Context, workspaceID, actorID, actorKind, requestedOp string) {
+// a repeat pause, an insert that lost to a concurrent resume, or a resume
+// on an already-running workspace.
+func (s *Service) logNoop(ctx context.Context, workspaceID, actorID, actorKind, requestedOp, reason, cause string) {
+	details, err := json.Marshal(noopDetails{RequestedOp: requestedOp, Reason: reason, Cause: cause})
+	if err != nil {
+		s.logger.Error("failed to encode pause no-op activity details",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+		return
+	}
 	entry := &models.ActivityEntry{
 		WorkspaceID: workspaceID,
 		ActorType:   models.ActivityActorType(actorKind),
@@ -214,7 +254,7 @@ func (s *Service) logNoop(ctx context.Context, workspaceID, actorID, actorKind, 
 		Action:      models.ActivityActionWorkspacePauseNoop,
 		TargetType:  models.ActivityTargetWorkspace,
 		TargetID:    workspaceID,
-		Details:     requestedOp,
+		Details:     string(details),
 	}
 	if err := s.repo.CreateActivityEntry(ctx, entry); err != nil {
 		s.logger.Error("failed to log pause no-op activity",
@@ -247,7 +287,7 @@ func (s *Service) Resume(ctx context.Context, workspaceID, reason, actorID, acto
 		return nil, fmt.Errorf("read active pause: %w", err)
 	}
 	if active == nil {
-		s.logNoop(ctx, workspaceID, actorID, actorKind, "resume")
+		s.logNoop(ctx, workspaceID, actorID, actorKind, "resume", trimmedReason, noopCauseNotPaused)
 		return &ResumeResult{Released: false}, nil
 	}
 
@@ -265,10 +305,16 @@ func (s *Service) Resume(ctx context.Context, workspaceID, reason, actorID, acto
 
 // checkWorkspaceExists is the AC-006.9 guard every one of the three
 // endpoints performs, because the scope middleware short-circuits when
-// authentication is disabled (the default in every shipped profile).
+// authentication is disabled (the default in every shipped profile). Only
+// the task service's own not-found sentinel becomes ErrWorkspaceNotFound;
+// any other error (a failed read, a cancelled context) propagates so the
+// caller's default branch reports it as a 500, not a false 404.
 func (s *Service) checkWorkspaceExists(ctx context.Context, workspaceID string) error {
 	if _, err := s.workspaces.GetWorkspace(ctx, workspaceID); err != nil {
-		return ErrWorkspaceNotFound
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			return ErrWorkspaceNotFound
+		}
+		return fmt.Errorf("check workspace exists: %w", err)
 	}
 	return nil
 }

@@ -93,6 +93,9 @@ func TestDispatch_BlockedByPause_SkipsRunAndRecordsSkippedRow(t *testing.T) {
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
 	}
+	if len(gate.calls) != 1 || gate.calls[0] != "ws-1" {
+		t.Fatalf("gate.calls = %v, want [ws-1] — the gate must be asked about the routine's own workspace", gate.calls)
+	}
 
 	runs, err := repo.ListAllRuns(context.Background(), "ws-1", 10)
 	if err != nil {
@@ -139,6 +142,51 @@ func TestDispatch_SecondBlockedFireSamePause_WritesNoDuplicateRow(t *testing.T) 
 	}
 	if len(runs) != 1 {
 		t.Fatalf("len(runs) = %d, want exactly 1 skip record for repeated blocked fires", len(runs))
+	}
+}
+
+// TestDispatch_BlockedFiresDifferentPauses_EachWritesOwnSkipRow is the
+// other half of AC-002.13's dedup proof: the partial unique index is
+// keyed on (routine_id, pause_id), not routine_id alone, so two blocked
+// fires under two DIFFERENT pause records (a resume, then a new pause)
+// each write their own skip row rather than the second being silently
+// swallowed as if it were a repeat under the first pause.
+// TestDispatch_SecondBlockedFireSamePause_WritesNoDuplicateRow alone would
+// still pass even if the index were mistakenly keyed on routine_id only.
+func TestDispatch_BlockedFiresDifferentPauses_EachWritesOwnSkipRow(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+
+	gate := &fakePauseGate{active: []*models.WorkspacePause{
+		{ID: "pause-1", WorkspaceID: "ws-1"},
+		{ID: "pause-2", WorkspaceID: "ws-1"},
+	}}
+	svc.SetPauseGate(gate)
+
+	ctx := context.Background()
+	if _, err := svc.FireManual(ctx, routine.ID, nil); !errors.Is(err, shared.ErrWorkspacePaused) {
+		t.Fatalf("first fire err = %v, want shared.ErrWorkspacePaused", err)
+	}
+	if _, err := svc.FireManual(ctx, routine.ID, nil); !errors.Is(err, shared.ErrWorkspacePaused) {
+		t.Fatalf("second fire err = %v, want shared.ErrWorkspacePaused", err)
+	}
+
+	runs, err := repo.ListAllRuns(ctx, "ws-1", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("len(runs) = %d, want 2 skip records — one per distinct pause", len(runs))
+	}
+	pauseIDs := map[string]bool{}
+	for _, r := range runs {
+		if r.Status != models.RoutineRunStatusSkipped {
+			t.Errorf("status = %q, want skipped", r.Status)
+		}
+		pauseIDs[r.PauseID] = true
+	}
+	if !pauseIDs["pause-1"] || !pauseIDs["pause-2"] {
+		t.Fatalf("pause ids seen = %v, want both pause-1 and pause-2", pauseIDs)
 	}
 }
 
@@ -217,6 +265,22 @@ func TestProcessCronTrigger_BlockedByPause_SwallowsErrorForTickScheduledTriggers
 	}
 	if len(runs) != 1 || runs[0].Status != models.RoutineRunStatusSkipped {
 		t.Fatalf("runs = %+v, want exactly 1 skipped run", runs)
+	}
+
+	// AC-002.2: a blocked tick must still advance the trigger's cursor,
+	// exactly like processCronTrigger's ordinary (unblocked) path —
+	// otherwise NextRunAt stays stuck at the blocked fire time and every
+	// subsequent tick while paused re-fires (and, on resume, bursts every
+	// missed interval at once instead of resuming on schedule).
+	triggers, err := repo.ListTriggersByRoutineID(context.Background(), routine.ID)
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	if len(triggers) != 1 || triggers[0].NextRunAt == nil {
+		t.Fatalf("triggers = %+v, want exactly 1 trigger with NextRunAt set", triggers)
+	}
+	if !triggers[0].NextRunAt.After(due) {
+		t.Fatalf("NextRunAt = %v, want advanced past the blocked tick's due time %v", triggers[0].NextRunAt, due)
 	}
 }
 

@@ -61,9 +61,10 @@ func (h *Handler) getPause(c *gin.Context) {
 	// PauseState alone cannot distinguish "unknown workspace" from
 	// "running workspace" (both read (nil, nil)) — AC-006.9 requires the
 	// same existence check the two mutations perform, checked first as it
-	// is there.
+	// is there. Routed through writeMutationError so a failed read maps to
+	// 500 like the mutation endpoints, not a blanket 404.
 	if err := h.svc.checkWorkspaceExists(c.Request.Context(), workspaceID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{fieldError: err.Error()})
+		h.writeMutationError(c, workspaceID, err)
 		return
 	}
 	active, err := h.svc.PauseState(c.Request.Context(), workspaceID)

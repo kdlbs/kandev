@@ -5,22 +5,39 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
 )
 
+// erroringAgentReader is a wakeup.AgentReader double that always fails
+// with a non-ErrAgentNotFound error, letting a test drive
+// checkPauseGate's middle branch (a transient agent-lookup fault, not "no
+// such agent") independently of the sentinel-error and clean-read paths.
+type erroringAgentReader struct {
+	err error
+}
+
+func (e *erroringAgentReader) GetAgentInstance(context.Context, string) (*officemodels.AgentInstance, error) {
+	return nil, e.err
+}
+
 // fakeWakeupPauseGate is a scripted shared.PauseGate double with
 // pop-front semantics, mirroring the convention used by this
 // capability's other gate-site tests (office/service, office/scheduler,
-// office/routines).
+// office/routines). calls records every workspaceID the gate was asked
+// about, in order — AC-001.7 requires the gate be consulted with the
+// derivation site's actual workspace, not just called at all.
 type fakeWakeupPauseGate struct {
 	active []*officemodels.WorkspacePause
 	errs   []error
+	calls  []string
 }
 
-func (f *fakeWakeupPauseGate) PauseState(_ context.Context, _ string) (*officemodels.WorkspacePause, error) {
+func (f *fakeWakeupPauseGate) PauseState(_ context.Context, workspaceID string) (*officemodels.WorkspacePause, error) {
+	f.calls = append(f.calls, workspaceID)
 	var active *officemodels.WorkspacePause
 	if len(f.active) > 0 {
 		active, f.active = f.active[0], f.active[1:]
@@ -40,13 +57,17 @@ func (f *fakeWakeupPauseGate) PauseState(_ context.Context, _ string) (*officemo
 func TestDispatch_BlockedByPause_MarksSkippedWithWorkspacePausedReason(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.seedWakeup("w-1", wakeup.SourceSelf, `{"reason":"test"}`)
-	h.dispatcher.SetPauseGate(&fakeWakeupPauseGate{active: []*officemodels.WorkspacePause{
+	gate := &fakeWakeupPauseGate{active: []*officemodels.WorkspacePause{
 		{ID: "pause-1", WorkspaceID: "ws-1"},
-	}})
+	}}
+	h.dispatcher.SetPauseGate(gate)
 
 	err := h.dispatcher.Dispatch(context.Background(), "w-1")
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
+	}
+	if len(gate.calls) != 1 || gate.calls[0] != "ws-1" {
+		t.Fatalf("gate.calls = %v, want [ws-1] — the gate must be asked about the agent's own workspace", gate.calls)
 	}
 
 	got, gErr := h.repo.GetWakeupRequest(context.Background(), "w-1")
@@ -74,6 +95,34 @@ func TestDispatch_PauseGateError_LeavesRequestQueued(t *testing.T) {
 	h.dispatcher.SetPauseGate(&fakeWakeupPauseGate{errs: []error{errors.New("db unavailable")}})
 
 	err := h.dispatcher.Dispatch(context.Background(), "w-1")
+	if !errors.Is(err, shared.ErrPauseGateUnavailable) {
+		t.Fatalf("err = %v, want shared.ErrPauseGateUnavailable", err)
+	}
+
+	got, gErr := h.repo.GetWakeupRequest(context.Background(), "w-1")
+	if gErr != nil {
+		t.Fatalf("get wakeup request: %v", gErr)
+	}
+	if got.Status != officesqlite.WakeupStatusQueued {
+		t.Errorf("status = %q, want queued (untouched)", got.Status)
+	}
+}
+
+// TestDispatch_PauseGateAgentLookupError_FailsClosed proves checkPauseGate's
+// middle branch: a non-ErrAgentNotFound failure resolving the wakeup
+// request's agent (a transient DB fault, not "this agent doesn't exist")
+// fails closed exactly like a PauseState error, distinct from
+// ErrAgentNotFound's deliberate ungated-proceed exception one test below.
+// This is the specific inversion system-design-02.md's Surface decision
+// cites as the reason a governance-table implementation was rejected: a
+// gate that fails open on a transient DB fault.
+func TestDispatch_PauseGateAgentLookupError_FailsClosed(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedWakeup("w-1", wakeup.SourceSelf, `{"reason":"test"}`)
+	dispatcher := wakeup.NewDispatcher(h.repo, &erroringAgentReader{err: errors.New("db unavailable")}, logger.Default())
+	dispatcher.SetPauseGate(&fakeWakeupPauseGate{})
+
+	err := dispatcher.Dispatch(context.Background(), "w-1")
 	if !errors.Is(err, shared.ErrPauseGateUnavailable) {
 		t.Fatalf("err = %v, want shared.ErrPauseGateUnavailable", err)
 	}

@@ -28,6 +28,17 @@ import type { WorkspacePauseActionResult } from "@/hooks/domains/office/use-work
 const MAX_REASON_LENGTH = 500;
 
 /**
+ * Counts Unicode code points, not UTF-16 code units — matching the
+ * backend's utf8.RuneCountInString bound (pause/service.go's
+ * maxReasonCodePoints). Plain `string.length` counts UTF-16 code units,
+ * so a reason with astral-plane characters (many emoji, some CJK
+ * extensions) would be wrongly blocked well under the real backend limit.
+ */
+export function codePointLength(value: string): number {
+  return Array.from(value).length;
+}
+
+/**
  * AC-OFFICE-KILL-SWITCH-006.12: pause requires a reason and an explicit
  * confirmation before sending. A plain Dialog (not AlertDialog) so the
  * reason textarea participates in the base dialog's Enter-to-confirm.
@@ -46,7 +57,7 @@ export function PauseWorkspaceButton({
   const [submitting, setSubmitting] = useState(false);
 
   const trimmed = reason.trim();
-  const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_REASON_LENGTH;
+  const canSubmit = trimmed.length > 0 && codePointLength(trimmed) <= MAX_REASON_LENGTH;
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -74,7 +85,7 @@ export function PauseWorkspaceButton({
       <Button
         size="sm"
         variant="outline"
-        className="cursor-pointer gap-1.5"
+        className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
         disabled={disabled}
         data-testid="office-pause-workspace-button"
         onClick={() => setOpen(true)}
@@ -93,7 +104,6 @@ export function PauseWorkspaceButton({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={t("office:pauseReasonPlaceholder")}
-            maxLength={MAX_REASON_LENGTH}
             data-testid="office-pause-reason-input"
           />
           {error && (
@@ -168,7 +178,7 @@ export function ResumeWorkspaceButton({
     <>
       <Button
         size="sm"
-        className="cursor-pointer gap-1.5"
+        className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
         disabled={disabled}
         data-testid="office-resume-workspace-button"
         onClick={() => setOpen(true)}

@@ -258,10 +258,11 @@ func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
-	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
+	agent, err := ss.guardAgentStatus(ctx, agentInstanceID)
+	if err != nil {
 		return err
 	}
-	if err := ss.checkPauseGate(ctx, agentInstanceID); err != nil {
+	if err := ss.checkPauseGate(ctx, agent); err != nil {
 		return err
 	}
 
@@ -342,41 +343,42 @@ func encodeRunContext(c RunContext) (string, error) {
 	return string(b), nil
 }
 
-// guardAgentStatus returns an error if the agent is paused or stopped.
-func (ss *SchedulerService) guardAgentStatus(ctx context.Context, agentInstanceID string) error {
+// guardAgentStatus returns an error if the agent is paused or stopped,
+// and otherwise the resolved agent — checkPauseGate reuses this fetch
+// instead of looking the agent up a second time.
+func (ss *SchedulerService) guardAgentStatus(ctx context.Context, agentInstanceID string) (*models.AgentInstance, error) {
 	agent, err := ss.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
-		return fmt.Errorf("get agent instance: %w", err)
+		return nil, fmt.Errorf("get agent instance: %w", err)
 	}
 	switch agent.Status {
 	case models.AgentStatusPaused:
-		return fmt.Errorf("agent %s is paused", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is paused", agentInstanceID)
 	case models.AgentStatusStopped:
-		return fmt.Errorf("agent %s is stopped", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is stopped", agentInstanceID)
 	case models.AgentStatusPendingApproval:
-		return fmt.Errorf("agent %s is pending approval", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is pending approval", agentInstanceID)
 	}
-	return nil
+	return agent, nil
 }
 
-// checkPauseGate resolves agentInstanceID's workspace and blocks queuing
-// when that workspace is paused (the operator kill switch). Fails
-// closed on a gate-read error (shared.ErrPauseGateUnavailable) — this
-// write hasn't happened yet, so failing the call is the whole retry
-// story; the caller's own retry (or the next event) tries again.
-func (ss *SchedulerService) checkPauseGate(ctx context.Context, agentInstanceID string) error {
+// checkPauseGate blocks queuing when agent's workspace is paused (the
+// operator kill switch). Takes the already-resolved agent — usually
+// guardAgentStatus's return value — rather than re-resolving it, so the
+// two checks can never see two different snapshots of the agent's
+// workspace. Fails closed on a gate-read error
+// (shared.ErrPauseGateUnavailable) — this write hasn't happened yet, so
+// failing the call is the whole retry story; the caller's own retry (or
+// the next event) tries again.
+func (ss *SchedulerService) checkPauseGate(ctx context.Context, agent *models.AgentInstance) error {
 	if ss.pauseGate == nil {
 		return nil
-	}
-	agent, err := ss.svc.GetAgentFromConfig(ctx, agentInstanceID)
-	if err != nil {
-		return fmt.Errorf("get agent instance: %w", err)
 	}
 	active, err := ss.pauseGate.PauseState(ctx, agent.WorkspaceID)
 	if err != nil {
 		pause.RecordGateError("scheduler_queue_run")
 		ss.logger.Warn("queue run: pause gate read failed",
-			zap.String("agent", agentInstanceID), zap.Error(err))
+			zap.String("agent", agent.ID), zap.Error(err))
 		return shared.ErrPauseGateUnavailable
 	}
 	if active != nil {

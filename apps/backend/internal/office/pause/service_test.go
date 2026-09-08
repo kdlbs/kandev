@@ -2,6 +2,7 @@ package pause_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // fakeRepo is an in-memory, script-driven double for pause.Repository. It
@@ -88,6 +90,56 @@ func (f *fakeRepo) ReleaseCheckoutsForWorkspace(context.Context, []string) error
 	return f.releaseCkoutErr
 }
 
+// ctxAwareRepo wraps fakeRepo and surfaces the context's own error from
+// every halt-sweep method, letting a test distinguish "the sweep ran on an
+// already-cancelled context" from "the sweep ran on a live one" — Pause must
+// detach the sweep's context from the caller's request context, since a
+// client disconnect must not silently defeat the halt sweep.
+type ctxAwareRepo struct {
+	*fakeRepo
+}
+
+func (r *ctxAwareRepo) ListInflightRunsForWorkspace(ctx context.Context, workspaceID string) ([]models.InflightRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.fakeRepo.ListInflightRunsForWorkspace(ctx, workspaceID)
+}
+
+func (r *ctxAwareRepo) CancelRunsForWorkspace(ctx context.Context, runIDs []string, reason string) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.fakeRepo.CancelRunsForWorkspace(ctx, runIDs, reason)
+}
+
+func (r *ctxAwareRepo) ReleaseCheckoutsForWorkspace(ctx context.Context, runIDs []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.fakeRepo.ReleaseCheckoutsForWorkspace(ctx, runIDs)
+}
+
+func (r *ctxAwareRepo) ListLiveRoutineTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.fakeRepo.ListLiveRoutineTaskIDsForWorkspace(ctx, workspaceID)
+}
+
+// ctxAwareCanceller wraps fakeCanceller and surfaces the context's own
+// error, the same way ctxAwareRepo does for the repository methods.
+type ctxAwareCanceller struct {
+	*fakeCanceller
+}
+
+func (c *ctxAwareCanceller) CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.fakeCanceller.CancelTaskExecution(ctx, taskID, reason, force)
+}
+
 // fakeCanceller is a script-driven double for pause.TaskCanceller.
 type fakeCanceller struct {
 	results map[string]error
@@ -100,19 +152,45 @@ func (f *fakeCanceller) CancelTaskExecution(_ context.Context, taskID string, _ 
 }
 
 // fakeWorkspaces is a script-driven double for pause.WorkspaceChecker.
+// lookupErr, when set, is returned for every id regardless of known —
+// simulating a real backend fault (DB down, context cancelled) distinct
+// from the task service's own not-found sentinel.
 type fakeWorkspaces struct {
-	known map[string]bool
+	known     map[string]bool
+	lookupErr error
 }
 
 func (f *fakeWorkspaces) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
+	if f.lookupErr != nil {
+		return nil, f.lookupErr
+	}
 	if f.known[id] {
 		return &taskmodels.Workspace{ID: id}, nil
 	}
-	return nil, errors.New("not found")
+	return nil, repoerrors.ErrWorkspaceNotFound
 }
 
 func newTestService(repo pause.Repository, canceller pause.TaskCanceller, workspaces pause.WorkspaceChecker) *pause.Service {
 	return pause.NewService(repo, canceller, workspaces, logger.Default())
+}
+
+// noopDetails decodes a workspace_pause_noop entry's structured Details
+// field (docs/specs/office/system-design/workspace-kill-switch-02.md's
+// Observability section: "details carries the reason, and for the no-op
+// which operation was requested and why it committed nothing").
+type noopDetails struct {
+	RequestedOp string `json:"requested_op"`
+	Reason      string `json:"reason"`
+	Cause       string `json:"cause"`
+}
+
+func decodeNoopDetails(t *testing.T, raw string) noopDetails {
+	t.Helper()
+	var d noopDetails
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		t.Fatalf("decode noop details %q: %v", raw, err)
+	}
+	return d
 }
 
 // TestPauseState_NoActiveRecord proves the exported gate predicate reads
@@ -139,6 +217,23 @@ func TestPause_WorkspaceNotFound(t *testing.T) {
 	}
 	if repo.createCalls != 0 {
 		t.Fatalf("createCalls = %d, want 0 (existence check must run first)", repo.createCalls)
+	}
+}
+
+// TestPause_WorkspaceLookupFailureIsNotWorkspaceNotFound proves a genuine
+// backend fault on the existence check (not the task service's own
+// not-found sentinel) must not be rewritten to ErrWorkspaceNotFound —
+// otherwise a real 500-class fault is hidden behind "workspace not found".
+func TestPause_WorkspaceLookupFailureIsNotWorkspaceNotFound(t *testing.T) {
+	lookupErr := errors.New("db unavailable")
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{lookupErr: lookupErr})
+
+	_, err := svc.Pause(context.Background(), "ws-1", "incident", "user-1", "user")
+	if errors.Is(err, pause.ErrWorkspaceNotFound) {
+		t.Fatalf("err = %v, must not be ErrWorkspaceNotFound for a backend fault", err)
+	}
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("err = %v, want it to wrap the underlying lookup error", err)
 	}
 }
 
@@ -189,6 +284,46 @@ func TestPause_RepeatPauseReturnsExistingRecordAndLogsNoop(t *testing.T) {
 	if len(repo.activityEntries) != 1 || repo.activityEntries[0].Action != models.ActivityActionWorkspacePauseNoop {
 		t.Fatalf("activity entries = %+v, want one workspace_pause_noop entry", repo.activityEntries)
 	}
+	details := decodeNoopDetails(t, repo.activityEntries[0].Details)
+	if details.RequestedOp != "pause" || details.Reason != "second attempt" || details.Cause != "already_paused" {
+		t.Fatalf("noop details = %+v, want requested_op=pause reason=%q cause=already_paused", details, "second attempt")
+	}
+}
+
+// TestPause_RepeatPauseStillResweepsInFlightWork proves AC-003.6: a repeat
+// pause runs the halt sweep again, not just a no-op activity write.
+// TestPause_RepeatPauseReturnsExistingRecordAndLogsNoop's fixture seeds no
+// in-flight runs, so it would still pass even if a repeat pause skipped
+// the sweep entirely — this seeds an in-flight run and a live heavy
+// routine so the resweep's own work is actually exercised and asserted.
+func TestPause_RepeatPauseStillResweepsInFlightWork(t *testing.T) {
+	existing := &models.WorkspacePause{ID: "pause-1", WorkspaceID: "ws-1", Reason: "first"}
+	repo := &fakeRepo{
+		createErr:       []error{officesqlite.ErrWorkspaceAlreadyPaused},
+		activeReads:     []*models.WorkspacePause{existing},
+		inflightRuns:    []models.InflightRun{{RunID: "run-1", TaskID: "task-1"}},
+		liveRoutineIDs:  []string{"heavy-task-1"},
+		cancelRunsCount: 1,
+	}
+	canceller := &fakeCanceller{results: map[string]error{}}
+	svc := newTestService(repo, canceller, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+
+	result, err := svc.Pause(context.Background(), "ws-1", "second attempt", "user-2", "user")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if result.Pause != existing {
+		t.Fatalf("Pause returned %+v, want the existing record", result.Pause)
+	}
+	if result.Sweep.RunsCancelled != 1 {
+		t.Fatalf("Sweep.RunsCancelled = %d, want 1 — the resweep must still process in-flight work", result.Sweep.RunsCancelled)
+	}
+	if result.Sweep.ExecutionsCancelled != 2 {
+		t.Fatalf("Sweep.ExecutionsCancelled = %d, want 2 (task-1 and heavy-task-1)", result.Sweep.ExecutionsCancelled)
+	}
+	if len(canceller.calls) != 2 {
+		t.Fatalf("canceller calls = %v, want 2 — the resweep must not be skipped on a repeat pause", canceller.calls)
+	}
 }
 
 // TestPause_ContendedAfterLosingRaceToResumeTwice proves the insert-retry-
@@ -210,6 +345,12 @@ func TestPause_ContendedAfterLosingRaceToResumeTwice(t *testing.T) {
 	}
 	if len(repo.activityEntries) != 2 {
 		t.Fatalf("activity entries = %d, want 2 (one noop per losing attempt)", len(repo.activityEntries))
+	}
+	for _, entry := range repo.activityEntries {
+		details := decodeNoopDetails(t, entry.Details)
+		if details.RequestedOp != "pause" || details.Reason != "incident" || details.Cause != "lost_race" {
+			t.Fatalf("noop details = %+v, want requested_op=pause reason=incident cause=lost_race", details)
+		}
 	}
 }
 
@@ -250,6 +391,10 @@ func TestResume_NotPausedReleasesNothingButLogsNoop(t *testing.T) {
 	}
 	if len(repo.activityEntries) != 1 || repo.activityEntries[0].Action != models.ActivityActionWorkspacePauseNoop {
 		t.Fatalf("activity entries = %+v, want one workspace_pause_noop entry", repo.activityEntries)
+	}
+	details := decodeNoopDetails(t, repo.activityEntries[0].Details)
+	if details.RequestedOp != "resume" || details.Cause != "not_paused" {
+		t.Fatalf("noop details = %+v, want requested_op=resume cause=not_paused", details)
 	}
 }
 
@@ -332,6 +477,38 @@ func TestHaltSweep_HeavyPathCancelsTasklessLiveRoutine(t *testing.T) {
 	}
 	if len(canceller.calls) != 1 || canceller.calls[0] != "heavy-task-1" {
 		t.Fatalf("canceller calls = %v, want [heavy-task-1]", canceller.calls)
+	}
+}
+
+// TestPause_HaltSweepSurvivesCallerContextCancellation proves the halt
+// sweep's context is detached from the caller's request context: even
+// though the ctx passed to Pause is already cancelled (simulating a client
+// that disconnected right after the pause record committed), the sweep's
+// own repository/canceller calls must not observe that cancellation.
+func TestPause_HaltSweepSurvivesCallerContextCancellation(t *testing.T) {
+	repo := &ctxAwareRepo{fakeRepo: &fakeRepo{
+		inflightRuns:    []models.InflightRun{{RunID: "run-1", TaskID: "task-1"}},
+		liveRoutineIDs:  []string{"heavy-task-1"},
+		cancelRunsCount: 1,
+	}}
+	canceller := &ctxAwareCanceller{fakeCanceller: &fakeCanceller{results: map[string]error{}}}
+	svc := newTestService(repo, canceller, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate a client disconnect before the halt sweep runs
+
+	result, err := svc.Pause(ctx, "ws-1", "incident", "user-1", "user")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if result.Sweep.Failures != 0 {
+		t.Fatalf("Sweep.Failures = %d, want 0 — halt sweep must not inherit the caller's cancelled context", result.Sweep.Failures)
+	}
+	if result.Sweep.RunsCancelled != 1 {
+		t.Fatalf("Sweep.RunsCancelled = %d, want 1", result.Sweep.RunsCancelled)
+	}
+	if result.Sweep.ExecutionsCancelled != 2 {
+		t.Fatalf("Sweep.ExecutionsCancelled = %d, want 2", result.Sweep.ExecutionsCancelled)
 	}
 }
 

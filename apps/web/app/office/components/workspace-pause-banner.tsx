@@ -24,7 +24,7 @@ function RefreshPauseStateButton({
     <Button
       size="sm"
       variant="ghost"
-      className="cursor-pointer gap-1.5"
+      className="min-h-11 cursor-pointer gap-1.5 sm:min-h-0"
       data-testid={testId}
       onClick={() => void onRefresh()}
       title={t("office:refreshPauseState")}

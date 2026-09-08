@@ -32,6 +32,13 @@ test.describe("mobile: Office workspace kill switch", () => {
     });
     await assertNoDocumentHorizontalOverflow(testPage);
 
+    // Pause control meets the 44px coarse-pointer touch-target minimum
+    // (apps/web/AGENTS.md's mobile-parity convention).
+    const pauseButtonBox = await testPage
+      .getByTestId("office-pause-workspace-button")
+      .boundingBox();
+    expect(pauseButtonBox?.height).toBeGreaterThanOrEqual(44);
+
     // Pause control is reachable and operable on a phone viewport (AC-006.12, -006.8).
     await testPage.getByTestId("office-pause-workspace-button").tap();
     const pauseDialog = testPage.getByTestId("office-pause-workspace-dialog");
