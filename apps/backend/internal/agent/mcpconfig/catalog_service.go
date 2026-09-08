@@ -367,7 +367,7 @@ func validateSecretBindings(bindings []MCPSecretBinding) error {
 
 func validHTTPURL(value string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+	return err == nil && (parsed.Scheme == string(ServerTypeHTTP) || parsed.Scheme == "https") && parsed.Host != ""
 }
 
 func exactPackageVersion(value string) bool {
