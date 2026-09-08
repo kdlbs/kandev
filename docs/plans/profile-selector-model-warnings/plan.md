@@ -93,9 +93,10 @@ commit raw protocol frames or copy the live database into test fixtures.
 ## Technical approach
 
 In `apps/web/components/task-create-dialog-options.tsx`, remove the
-model-catalog comparison and the two model-warning renderers. Drop their
-exclusive imports and the host-catalog hook dependency. Keep the existing
-option interface and shared label rendering compatible with consumers.
+model-catalog comparison and the two model-warning renderers. Keep the
+capability hook active, and use its snapshot only to refresh health fields on
+profile options. Keep the existing option interface and shared label rendering
+compatible with consumers.
 
 The shared hook serves these existing callers:
 
@@ -177,7 +178,7 @@ Implementation checks on 2026-09-08:
 
 - Red: 11 component assertions and two selector cases per browser project failed
   on the former model-warning controls.
-- Green: 55 targeted unit tests, six desktop browser tests, and four mobile
+- Green: 56 targeted unit tests, six desktop browser tests, and four mobile
   browser tests passed.
 - Typecheck, targeted ESLint, localization checks, and the localization ratchet passed.
 - Public-documentation validator: 61 tests passed and 46 pages validated.
@@ -191,9 +192,8 @@ Task 01 records the commands, fixture correction, and mobile interaction detail.
 - Removing all warning icons would hide agent health errors; tests must distinguish
   those indicators from model advisories.
 - Removing only the dropdown button leaves the selected-label warning intact.
-- Removing the host hook can alter capability-loading timing in a caller.
-  Preserve capability status already carried on profiles; inspect consumers and
-  keep any required loading in their existing domain data layer.
+- Capability polling is shared with the selector hook. Keep it independent from
+  model-ID matching so health status remains current in selector-only surfaces.
 - Old mobile tests deliberately open the warning drawer. Replace those steps
   with completed row selection rather than deleting the tests.
 - The saved screenshot does not establish a stale-cache defect. Do not expand

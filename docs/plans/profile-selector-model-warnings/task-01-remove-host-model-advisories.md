@@ -162,9 +162,8 @@ Blanket icon removal can hide capability errors. Fixture setup must prove
 different host and executor catalogs, and cleanup must delete only the
 disposable profiles created by the tests.
 
-If removing the host-catalog subscription exposes a caller that relies on it
-for capability loading, retain that loading through the caller's existing
-domain hook. Do not introduce another model-warning calculation.
+Keep capability polling active through the shared selector hook. Apply its
+snapshot to health fields only. Do not reintroduce model-ID matching.
 
 ## Parallelism
 
@@ -189,13 +188,13 @@ domain hook. Do not introduce another model-warning calculation.
 Completed on 2026-09-08.
 
 - Removed host-catalog membership checks and both model-warning render paths
-  from the shared hook. Capability health, eligibility, and recent-use behavior
-  remain unchanged. Existing callers retain their domain-level capability loading.
+  from the shared hook. Kept capability polling active and applied its snapshot
+  to health fields only. Eligibility and recent-use behavior remain unchanged.
 - Removed the two selector-only keys from all six locale catalogs. Editor
   diagnostics and runtime-warning code remain unchanged.
 - The red component run failed 11 of 23 assertions. The old production build
   failed both selector cases in each browser project on the warning controls.
-- The four targeted unit suites passed all 55 tests.
+- The four targeted unit suites passed all 56 tests.
 - The managed desktop run passed six tests with `--host --project chromium`.
   The mobile run passed four tests with `--host --no-build --project mobile-chrome`.
   Both used the exact file lists in Verification. The mobile run reused the
@@ -210,6 +209,22 @@ Completed on 2026-09-08.
 - Public-documentation validation passed: 61 validator tests and 46 pages.
 - Fresh desktop/mobile screenshots show both the option list and selected label.
   The mobile screenshots show usable row spacing with no empty warning control.
+
+### PR fixup remediation
+
+- Greptile's P1 finding was valid: the shared selector hook also kept capability
+  revalidation alive for selector-only surfaces. The hook now calls
+  `useAvailableAgents` and applies `refreshProfileCapabilities` to the local
+  option input. The host catalog supplies health status only. It cannot remove,
+  disable, or rewrite a profile because of a model ID.
+- The remediation reran the focused desktop project (six passed) and mobile
+  project (four passed) after rebuilding the desktop production assets.
+- The E2E launch helper now derives the expected model display name from the
+  executor's settled ACP model state. It no longer couples the assertion to a
+  fixture display string.
+- Claude's trigger-label suggestion was already satisfied by the parameterized
+  test loop, which checks positive profile text and warning absence in both
+  render paths.
 
 No backend changes, schema changes, live-instance restarts, or profile rewrites
 were required. The screenshot-time browser catalog remains unknown.

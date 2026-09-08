@@ -85,8 +85,15 @@ async function assertRequestedModel(
     models: expect.arrayContaining([expect.objectContaining({ model_id: profile.model })]),
   });
   expect(await readModelSelectionWarnings(apiClient, sessionId)).toHaveLength(0);
+  const modelState = current.metadata?.acp_model_state as
+    | { models?: Array<{ model_id?: string; name?: string }> }
+    | undefined;
+  const requestedModelName = modelState?.models?.find(
+    (model) => model.model_id === profile.model,
+  )?.name;
+  expect(requestedModelName).toBeTruthy();
   const modelTrigger = page.getByRole("button", { name: "Session model settings" });
-  await expect(modelTrigger).toContainText("Opus (270k)");
+  await expect(modelTrigger).toContainText(requestedModelName!);
   await expect(modelTrigger).toContainText("High");
   const saved = await apiClient.getAgentProfile(profile.id);
   expect(saved.model).toBe(profile.model);

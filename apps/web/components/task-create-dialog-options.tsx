@@ -15,8 +15,12 @@ import type {
   ExecutorProfile,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
+import {
+  isSelectableAgentProfile,
+  refreshProfileCapabilities,
+} from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
@@ -133,6 +137,10 @@ export function useAgentProfileOptions(
   context?: AgentProfileRecentUseContext,
 ): OptionItem[] {
   const { t } = useTranslation();
+  // Keep capability discovery alive for every selector surface. The host
+  // catalog supplies health status only; it never participates in model-ID
+  // matching or selector eligibility.
+  const availableAgents = useAvailableAgents();
   const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const storeApi = useAppStoreApi();
   const recentUseLoaded = useAppStore((state) => !context || state.agentProfileRecentUse.loaded);
@@ -144,9 +152,13 @@ export function useAgentProfileOptions(
     void ensureAgentProfileRecentUseLoaded(storeApi);
   }, [context, recentUseLoaded, storeApi]);
   return useMemo(() => {
+    const profilesWithCapabilities = refreshProfileCapabilities(
+      agentProfiles,
+      availableAgents.items,
+    );
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
-    const selectable = agentProfiles.filter((profile) =>
+    const selectable = profilesWithCapabilities.filter((profile) =>
       isSelectableAgentProfile(profile, dynamicRoutingEnabled),
     );
     const orderedProfiles = context
@@ -193,7 +205,7 @@ export function useAgentProfileOptions(
         renderTriggerLabel: renderProfileLabel,
       };
     });
-  }, [agentProfiles, context, dynamicRoutingEnabled, recentProfileIds, t]);
+  }, [agentProfiles, availableAgents.items, context, dynamicRoutingEnabled, recentProfileIds, t]);
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {

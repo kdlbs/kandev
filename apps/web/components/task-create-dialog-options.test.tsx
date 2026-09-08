@@ -249,6 +249,7 @@ describe("useAgentProfileOptions model-independent labels", () => {
   it.each(["auth_required", "not_installed", "failed"] as const)(
     "preserves %s health indicators when the saved model is absent",
     (capability_status) => {
+      setAvailableAgents([]);
       const profile = profileOption({
         model: GONE_MODEL,
         capability_status,
@@ -297,4 +298,29 @@ describe("useAgentProfileOptions model-independent labels", () => {
     expect(screen.getByTestId("option-0").innerHTML).toBe(initialLabel);
     expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
   });
+});
+
+it("refreshes capability health from the host snapshot without inspecting model IDs", () => {
+  setAvailableAgents([
+    {
+      ...AGENT_WITH_GPT,
+      available: false,
+      model_config: {
+        ...AGENT_WITH_GPT.model_config,
+        error: "Agent unavailable",
+      },
+    },
+  ]);
+  const { result } = renderHook(() =>
+    useAgentProfileOptions([profileOption({ model: GONE_MODEL })]),
+  );
+  const option = result.current[0]!;
+  render(
+    <TooltipProvider>
+      <div>{option.renderLabel()}</div>
+      <div>{option.renderTriggerLabel?.()}</div>
+    </TooltipProvider>,
+  );
+  expect(screen.getAllByTitle("Agent unavailable")).toHaveLength(2);
+  expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
 });
