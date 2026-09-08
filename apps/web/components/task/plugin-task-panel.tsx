@@ -50,10 +50,11 @@ export function PluginTaskPanel({
 }: PluginTaskPanelContainerProps) {
   // Re-render when the registry changes (plugin disable/uninstall/reload) so
   // this panel picks up the fallback the instant its registration disappears.
-  usePluginRegistry();
+  const registry = usePluginRegistry();
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const registration = pluginRegistry.getTaskPanel(pluginId, panelKey);
+  const generation = registry.getPluginLifecycle(pluginId)?.generation ?? 0;
 
   if (!registration || !taskId) {
     return <PluginTaskPanelUnavailable />;
@@ -61,7 +62,11 @@ export function PluginTaskPanel({
 
   const { Component } = registration;
   return (
-    <PluginErrorBoundary context={`task panel "${panelId}"`} fallback={<PluginTaskPanelFailed />}>
+    <PluginErrorBoundary
+      key={`${pluginId}:${panelKey}:${generation}`}
+      context={`task panel "${panelId}"`}
+      fallback={<PluginTaskPanelFailed />}
+    >
       <Component
         panelId={panelId}
         taskId={taskId}
