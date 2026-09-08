@@ -31,6 +31,7 @@ Git state.
 ### Requirements
 
 - [Branch Policies](requirements/branch-policies.md)
+- [Configured Push Target](requirements/configured-push-target.md)
 - [Create a Local Repository During Task Creation](requirements/create-local-repository.md)
 - [Empty Remote Repositories](requirements/empty-remote-repositories.md)
 - [Kanban workspace creation](requirements/creation.md)
@@ -47,6 +48,7 @@ Git state.
 
 ### System design
 
+- [Configured Push Target](system-design/configured-push-target.md)
 - [Secret reference protection](system-design/repository-secrets.md)
 - [Empty Remote Repositories](system-design/empty-remote-repositories.md)
 - [Improve Kandev](system-design/improve-kandev.md)

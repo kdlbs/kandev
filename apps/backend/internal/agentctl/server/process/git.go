@@ -38,6 +38,18 @@ type GitOperationResult struct {
 	PreflightReason string   `json:"preflight_reason,omitempty"`
 	ConflictFiles   []string `json:"conflict_files,omitempty"`
 	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
+	// PushedRemote and PushedBranch name the destination a push or preflight
+	// validated. A push reports them only when the request carried an explicit
+	// push target, so a request that named none keeps its existing shape.
+	PushedRemote string `json:"pushed_remote,omitempty"`
+	PushedBranch string `json:"pushed_branch,omitempty"`
+	// ExpectedBranch and CurrentBranch accompany a branch-mismatch refusal.
+	// CurrentBranch is empty for a detached HEAD.
+	ExpectedBranch string `json:"expected_branch,omitempty"`
+	CurrentBranch  string `json:"current_branch,omitempty"`
+	// BaselinePublished marks a mismatch refused after empty-remote first
+	// publication already published the baseline in this request.
+	BaselinePublished bool `json:"baseline_published,omitempty"`
 }
 
 // GitOperator executes git operations in a workspace directory.
@@ -458,7 +470,8 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 }
 
 // Push performs a git push operation.
-func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*GitOperationResult, error) {
+func (g *GitOperator) Push(ctx context.Context, opts PushOptions) (*GitOperationResult, error) {
+	opts = opts.normalized()
 	if !g.tryLock("push") {
 		return nil, ErrOperationInProgress
 	}
@@ -467,36 +480,21 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	result := &GitOperationResult{
 		Operation: "push",
 	}
-	if g.remoteContributionErr != nil {
-		result.Error = g.remoteContributionErr.Error()
-		return result, nil
-	}
-	if g.contributionDestinationErr != nil {
-		result.Error = g.contributionDestinationErr.Error()
-		return result, nil
-	}
-	if g.contributionDestination != nil {
-		if err := g.validateContributionDestinationRemote(ctx); err != nil {
-			result.Error = err.Error()
-			return result, nil
-		}
-	}
-	if (g.remoteContribution != nil || g.contributionDestination != nil) && force {
-		result.Error = "force push is not allowed for a remote contribution"
-		return result, nil
-	}
-	if err := g.validateContributionRemote(ctx); err != nil {
-		result.Error = err.Error()
+	if refusal := g.validateContributionState(ctx, opts.Force); refusal != nil {
+		refusal.apply(result)
 		return result, nil
 	}
 
-	branch, err := g.getCurrentBranch(ctx)
-	if err != nil {
-		result.Error = err.Error()
+	// Every refusal below is raised before any remote is contacted, so a
+	// refused request is a no-op.
+	plan, refusal := g.resolvePushPlan(ctx, opts, false)
+	if refusal != nil {
+		refusal.apply(result)
 		return result, nil
 	}
+
 	basePublication := emptyRemotePublication{}
-	if g.remoteContribution == nil && g.contributionDestination == nil {
+	if plan.baselineEligible {
 		basePublication = g.prepareEmptyRemotePublication(ctx, "")
 		if basePublication.err != nil {
 			result.Error = basePublication.err.Error()
@@ -506,29 +504,24 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		}
 	}
 
-	args := []string{"push"}
-	shouldSetUpstream := setUpstream || g.getUpstreamRef(ctx) == ""
-	remote := "origin"
-	refspec := branch
-	if g.contributionDestination != nil {
-		remote = g.contributionDestination.ContributionRemoteName()
-		refspec = branch
-		shouldSetUpstream = setUpstream
-	} else if g.remoteContribution != nil {
-		remote = g.remoteContribution.ContributionRemoteName()
-		refspec = "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
-		shouldSetUpstream = setUpstream
+	// Every remaining read happens before the second verification, so that the
+	// branch read is the last git command before the push.
+	shouldSetUpstream := g.resolveSetUpstream(ctx, opts, plan)
+	if refusal := g.verifyExpectedBranch(ctx, opts.ExpectedBranch, basePublication.active); refusal != nil {
+		refusal.apply(result)
+		result.Output = basePublication.output
+		return result, nil
 	}
+
+	args := []string{"push"}
 	if shouldSetUpstream {
 		args = append(args, "--set-upstream")
 	}
-
-	if force {
+	if opts.Force {
 		// Use --force-with-lease for safer force push
 		args = append(args, "--force-with-lease")
 	}
-
-	args = append(args, remote, refspec)
+	args = append(args, plan.remote, plan.refspec)
 
 	output, err := g.runGitCommand(ctx, args...)
 	result.Output = output
@@ -544,107 +537,96 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	result.Output = combineGitOutputs(basePublication.output, output)
 
 	result.Success = true
+	plan.reportDestination(result)
 	g.logger.Info("push completed",
-		zap.String("branch", branch),
-		zap.String("remote", remote),
-		zap.Bool("force", force),
-		zap.Bool("set_upstream", shouldSetUpstream))
+		zap.String("branch", plan.branch),
+		zap.String("remote", plan.remote),
+		zap.Bool("force", opts.Force),
+		zap.Bool("set_upstream", shouldSetUpstream),
+		zap.Bool("expected_branch_supplied", opts.ExpectedBranch != ""),
+		zap.Bool("explicit_target", plan.explicit))
 	return result, nil
+}
+
+// validateContributionState runs the existing contribution binding checks,
+// which precede every refusal this capability adds.
+func (g *GitOperator) validateContributionState(ctx context.Context, force bool) *pushRefusal {
+	if g.remoteContributionErr != nil {
+		return &pushRefusal{message: g.remoteContributionErr.Error()}
+	}
+	if g.contributionDestinationErr != nil {
+		return &pushRefusal{message: g.contributionDestinationErr.Error()}
+	}
+	if g.contributionDestination != nil {
+		if err := g.validateContributionDestinationRemote(ctx); err != nil {
+			return &pushRefusal{message: err.Error()}
+		}
+	}
+	if g.contributionRouted() && force {
+		return &pushRefusal{message: "force push is not allowed for a remote contribution"}
+	}
+	if err := g.validateContributionRemote(ctx); err != nil {
+		return &pushRefusal{message: err.Error()}
+	}
+	return nil
+}
+
+// resolveSetUpstream reads the upstream tracking ref only on the path that can
+// use it. The explicit-target path never sets upstream and never reads it,
+// because that flag combination is refused before the push.
+func (g *GitOperator) resolveSetUpstream(ctx context.Context, opts PushOptions, plan *pushPlan) bool {
+	if plan.explicit {
+		return false
+	}
+	if plan.routed {
+		return opts.SetUpstream
+	}
+	return opts.SetUpstream || g.getUpstreamRef(ctx) == ""
 }
 
 // PushPreflight verifies that the configured contribution remote and final
 // head-branch refspec are writable without mutating the remote or local refs.
-func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, error) {
+func (g *GitOperator) PushPreflight(ctx context.Context, opts PushOptions) (*GitOperationResult, error) {
+	opts = opts.normalized()
 	if !g.tryLock("push-preflight") {
 		return nil, ErrOperationInProgress
 	}
 	defer g.unlock()
 	result := &GitOperationResult{Operation: "push_preflight"}
-	if g.remoteContributionErr != nil {
-		setPushPreflightError(result, g.remoteContributionErr)
+	if refusal := g.validateContributionState(ctx, false); refusal != nil {
+		refusal.apply(result)
 		return result, nil
 	}
-	if g.contributionDestinationErr != nil {
-		setPushPreflightError(result, g.contributionDestinationErr)
+	// Preflight verifies the expected branch once. It publishes no baseline, so
+	// there is no window for a second read to close.
+	plan, refusal := g.resolvePushPlan(ctx, opts, true)
+	if refusal != nil {
+		refusal.apply(result)
 		return result, nil
 	}
-	if g.contributionDestination != nil {
-		if err := g.validateContributionDestinationRemote(ctx); err != nil {
-			setPushPreflightError(result, err)
-			return result, nil
-		}
-		branch, err := g.getCurrentBranch(ctx)
-		if err != nil {
-			setPushPreflightError(result, err)
-			return result, nil
-		}
-		output, err := g.runGitCommand(ctx, "push", "--dry-run", g.contributionDestination.ContributionRemoteName(), branch)
-		result.Output = output
-		if err != nil {
-			setPushPreflightError(result, err)
-			return result, nil
-		}
-		result.Success = true
-		g.logger.Info("contribution destination push preflight completed", zap.String("branch", branch))
-		return result, nil
-	}
-	if g.remoteContribution == nil {
-		result.Success = true
-		return result, nil
-	}
-	if err := g.validateContributionRemote(ctx); err != nil {
-		setPushPreflightError(result, err)
-		return result, nil
-	}
-	branch, err := g.getCurrentBranch(ctx)
-	if err != nil {
-		setPushPreflightError(result, err)
-		return result, nil
-	}
-	environment := map[string]string{
-		"GIT_TERMINAL_PROMPT": "0",
-		"LANG":                "C",
-		"LC_ALL":              "C",
-	}
-	remote := g.remoteContribution.ContributionRemoteName()
-	destinationRef := "refs/heads/" + g.remoteContribution.HeadBranch
-	sourceOutput, sourceErr := g.runGitCommandWithEnvironment(
-		ctx,
-		environment,
-		"ls-remote",
-		"--refs",
-		remote,
-		destinationRef,
-	)
-	if sourceErr != nil {
-		setPushPreflightError(result, sourceErr)
-		return result, nil
-	}
-	if strings.TrimSpace(sourceOutput) == "" {
-		result.Error = "contribution source branch is missing"
-		result.ErrorCode = models.AgentErrorCauseCodeSourceBranchMissing
-		return result, nil
-	}
-	refspec := "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
-	output, err := g.runGitCommandWithEnvironment(
-		ctx,
-		environment,
-		"push",
-		"--dry-run",
-		"--porcelain",
-		remote,
-		refspec,
-	)
+
+	output, err := g.runGitCommand(ctx, "push", "--dry-run", plan.remote, plan.refspec)
 	result.Output = output
 	if err != nil {
-		if classifyPushPreflightHistoryUpdate(output, destinationRef) {
+		if destinationRef, ok := strings.CutPrefix(plan.refspec, "HEAD:"); ok &&
+			classifyPushPreflightHistoryUpdate(output, destinationRef) {
 			result.PreflightReason = preflightReasonHistoryUpdateRequired
 		}
 		setPushPreflightError(result, err)
 		return result, nil
 	}
 	result.Success = true
-	g.logger.Info("contribution push preflight completed", zap.String("branch", branch))
+	// A preflight under contribution routing keeps the result shape it has
+	// today; every other preflight reports what it validated.
+	if !plan.routed {
+		result.PushedRemote = plan.remote
+		result.PushedBranch = plan.branch
+	}
+	g.logger.Info("push preflight completed",
+		zap.String("branch", plan.branch),
+		zap.String("remote", plan.remote),
+		zap.Bool("contribution_routed", plan.routed),
+		zap.Bool("explicit_target", plan.explicit))
 	return result, nil
 }
 
