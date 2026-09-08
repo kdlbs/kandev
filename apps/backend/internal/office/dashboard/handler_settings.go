@@ -12,8 +12,29 @@ import (
 
 // -- Git --
 
+const errorKey = "error"
+
+// refuseIfConfigSyncActive writes a 409 and returns true when workspaceID
+// has an active Office config sync source. A guard read failure also
+// refuses: the guard exists to prevent a second writer, and an unknown
+// answer is not evidence that there is none.
+func (h *Handler) refuseIfConfigSyncActive(c *gin.Context, workspaceID string) bool {
+	if h.guard == nil {
+		return false
+	}
+	active, err := h.guard.HasActiveSource(c.Request.Context(), workspaceID)
+	if err != nil || active {
+		c.JSON(http.StatusConflict, gin.H{errorKey: "config sync is the active configuration source for this workspace"})
+		return true
+	}
+	return false
+}
+
 func (h *Handler) gitClone(c *gin.Context) {
 	wsID := c.Param("wsId")
+	if h.refuseIfConfigSyncActive(c, wsID) {
+		return
+	}
 	var req GitCloneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -43,6 +64,9 @@ func (h *Handler) gitClone(c *gin.Context) {
 
 func (h *Handler) gitPull(c *gin.Context) {
 	wsID := c.Param("wsId")
+	if h.refuseIfConfigSyncActive(c, wsID) {
+		return
+	}
 	if h.gitMgr == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "git manager not initialized"})
 		return

@@ -4,11 +4,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fetchSystemInfo: vi.fn(),
   requestRestart: vi.fn(),
+  registerBackendReloadOwner: vi.fn(),
+  releaseBackendReloadOwner: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/system-api", () => ({
   fetchSystemInfo: mocks.fetchSystemInfo,
   requestRestart: mocks.requestRestart,
+}));
+vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
+  registerBackendReloadOwner: () => {
+    mocks.registerBackendReloadOwner();
+    return mocks.releaseBackendReloadOwner;
+  },
 }));
 
 import { useKandevRestart } from "./use-kandev-restart";
@@ -16,6 +24,8 @@ import { useKandevRestart } from "./use-kandev-restart";
 beforeEach(() => {
   mocks.fetchSystemInfo.mockReset();
   mocks.requestRestart.mockReset();
+  mocks.registerBackendReloadOwner.mockReset();
+  mocks.releaseBackendReloadOwner.mockReset();
 });
 
 describe("useKandevRestart", () => {
@@ -33,6 +43,7 @@ describe("useKandevRestart", () => {
     });
 
     expect(mocks.requestRestart).toHaveBeenCalledTimes(1);
+    expect(mocks.registerBackendReloadOwner).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.phase).toBe("done"));
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
@@ -69,6 +80,7 @@ describe("useKandevRestart", () => {
     );
     expect(result.current.phase).toBe("error");
     expect(result.current.errorMessage).toBe("unsupported launch mode");
+    expect(mocks.releaseBackendReloadOwner).toHaveBeenCalledTimes(1);
   });
 
   it("ignores duplicate starts while a restart is already active", async () => {

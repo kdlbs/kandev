@@ -221,16 +221,20 @@ test.describe("task launch failure recovery", () => {
       expect(launchError.task_repository_id).toBe(taskRepository.id);
       expect(launchError.recovery_actions).toEqual(["retry_default", "pick_base_branch"]);
 
-      const pointerToast = testPage
-        .getByTestId("toast-message")
-        .filter({ hasText: "The task launch failed. Open the task details for recovery actions." });
-      await expect(pointerToast).toBeVisible({ timeout: 30_000 });
-      await expect(pointerToast).not.toContainText("branch-that-no-longer-exists");
+      await expect(
+        testPage.getByTestId("toast-message").filter({
+          hasText: "The task launch failed. Open the task details for recovery actions.",
+        }),
+      ).toHaveCount(0);
 
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1, { timeout: 30_000 });
       await expect(card).toContainText("The selected base branch is not available.");
       await expect(card).not.toContainText("branch-that-no-longer-exists");
+      await expect(testPage.getByTestId("last-agent-error-notice")).toHaveCount(0);
+      await expect(testPage.getByTestId("prepare-progress-panel")).toHaveCount(0);
+      await expect(testPage.getByTestId("missing-branch-recovery")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
 
       restoreSeedRepositoryOrigin(seedData);
       await testPage.reload();
@@ -282,7 +286,7 @@ test.describe("task launch failure recovery", () => {
     }
   });
 
-  test("persists a required refresh failure and retries after the origin recovers", async ({
+  test("starts from the local base when origin refresh fails", async ({
     testPage,
     apiClient,
     seedData,
@@ -293,11 +297,11 @@ test.describe("task launch failure recovery", () => {
     const { workflow, waiting, review } = await recoveryWorkflow(
       apiClient,
       seedData.workspaceId,
-      `Required refresh recovery ${Date.now()}`,
+      "Local base refresh",
     );
     const task = await apiClient.createTask(
       seedData.workspaceId,
-      "Required refresh failure recovery fixture",
+      "Local base refresh fallback fixture",
       {
         description: "/e2e:simple-message",
         workflow_id: workflow.id,
@@ -307,9 +311,6 @@ test.describe("task launch failure recovery", () => {
         repositories: [{ repository_id: seedData.repositoryId, base_branch: "main" }],
       },
     );
-    const storedTask = await apiClient.getTask(task.id);
-    const taskRepository = storedTask.repositories?.[0];
-    if (!taskRepository) throw new Error("refresh fixture did not create a task repository row");
 
     pointSeedRepositoryAtFailingOrigin(seedData, backend.tmpDir);
     try {
@@ -317,28 +318,6 @@ test.describe("task launch failure recovery", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-
-      const launchError = await waitForTaskLaunchError(apiClient, seedData.workspaceId, task.id);
-      expect(launchError.category).toBe("generic_launch_failure");
-      expect(launchError.task_repository_id).toBe(taskRepository.id);
-      expect(launchError.recovery_actions).toEqual(["retry_default", "pick_base_branch"]);
-
-      const card = testPage.getByTestId("task-launch-error-entry");
-      await expect(card).toHaveCount(1, { timeout: 30_000 });
-      await expect(card).toContainText("The task could not start.");
-
-      await testPage.reload();
-      await session.waitForLoad();
-      await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(1);
-
-      restoreSeedRepositoryOrigin(seedData);
-      await testPage.getByTestId("task-launch-pick_base_branch-button").click();
-      await expect(testPage.getByTestId("task-launch-branch-picker-option-main")).toBeVisible({
-        timeout: 30_000,
-      });
-      await testPage.getByTestId("task-launch-branch-picker-option-main").click();
-      await expect(testPage.getByTestId("task-launch-branch-picker-option-main")).toHaveCount(0);
-      await waitForLaunchErrorCleared(apiClient, seedData.workspaceId, task.id);
 
       await expect
         .poll(
@@ -348,13 +327,21 @@ test.describe("task launch failure recovery", () => {
               ["RUNNING", "WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(item.state),
             );
           },
-          { timeout: 60_000, message: "waiting for the recovered refresh session to launch" },
+          { timeout: 60_000, message: "waiting for the local-base session to launch" },
         )
         .toBe(true);
 
-      await assertNoDocumentHorizontalOverflow(testPage, "desktop required refresh recovery");
+      await expect
+        .poll(() => taskLaunchError(apiClient, seedData.workspaceId, task.id), {
+          timeout: 30_000,
+          message: "waiting for the local-base launch error to remain clear",
+        })
+        .toBeNull();
+      await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(0);
+
+      await assertNoDocumentHorizontalOverflow(testPage, "desktop local-base recovery");
       await testPage.screenshot({
-        path: testInfo.outputPath("required-refresh-recovery-desktop.png"),
+        path: testInfo.outputPath("local-base-refresh-desktop.png"),
         fullPage: true,
       });
     } finally {

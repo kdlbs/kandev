@@ -367,6 +367,84 @@ func TestClearStepReferencesClearsPullSource(t *testing.T) {
 	}
 }
 
+func TestClearStepReferencesClearsAllTransitionTriggers(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	target := &models.WorkflowStep{
+		ID:         "target-step",
+		WorkflowID: "wf-test",
+		Name:       "Target",
+		Position:   0,
+	}
+	if err := repo.CreateStep(ctx, target); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+
+	moveToTarget := func() models.GenericAction {
+		return models.GenericAction{
+			Type:   models.GenericActionMoveToStep,
+			Config: map[string]interface{}{"step_id": target.ID},
+		}
+	}
+	genericActions := []models.GenericAction{moveToTarget(), {Type: models.GenericActionAutoStartAgent}}
+	source := &models.WorkflowStep{
+		ID:         "source-step",
+		WorkflowID: "wf-test",
+		Name:       "Source",
+		Position:   1,
+		Events: models.StepEvents{
+			OnTurnStart: []models.OnTurnStartAction{
+				{Type: models.OnTurnStartMoveToStep, Config: map[string]interface{}{"step_id": target.ID}},
+				{Type: models.OnTurnStartMoveToNext},
+			},
+			OnTurnComplete: []models.OnTurnCompleteAction{
+				{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": target.ID}},
+				{Type: models.OnTurnCompleteMoveToNext},
+			},
+			OnComment:           genericActions,
+			OnBlockerResolved:   genericActions,
+			OnChildrenCompleted: genericActions,
+			OnApprovalResolved:  genericActions,
+			OnHeartbeat:         genericActions,
+			OnBudgetAlert:       genericActions,
+			OnAgentError:        genericActions,
+		},
+	}
+	if err := repo.CreateStep(ctx, source); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+
+	if err := repo.ClearStepReferences(ctx, "wf-test", target.ID); err != nil {
+		t.Fatalf("clear references: %v", err)
+	}
+
+	got, err := repo.GetStep(ctx, source.ID)
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if len(got.Events.OnTurnStart) != 1 || got.Events.OnTurnStart[0].Type != models.OnTurnStartMoveToNext {
+		t.Fatalf("OnTurnStart = %#v, want only move_to_next", got.Events.OnTurnStart)
+	}
+	if len(got.Events.OnTurnComplete) != 1 || got.Events.OnTurnComplete[0].Type != models.OnTurnCompleteMoveToNext {
+		t.Fatalf("OnTurnComplete = %#v, want only move_to_next", got.Events.OnTurnComplete)
+	}
+
+	for trigger, actions := range map[string][]models.GenericAction{
+		"on_comment":            got.Events.OnComment,
+		"on_blocker_resolved":   got.Events.OnBlockerResolved,
+		"on_children_completed": got.Events.OnChildrenCompleted,
+		"on_approval_resolved":  got.Events.OnApprovalResolved,
+		"on_heartbeat":          got.Events.OnHeartbeat,
+		"on_budget_alert":       got.Events.OnBudgetAlert,
+		"on_agent_error":        got.Events.OnAgentError,
+	} {
+		if len(actions) != 1 || actions[0].Type != models.GenericActionAutoStartAgent {
+			t.Errorf("%s = %#v, want only auto_start_agent", trigger, actions)
+		}
+	}
+}
+
 func TestStepAgentProfileID_Update(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

@@ -60,10 +60,12 @@ const (
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
-	Limit  int
-	Before string
-	After  string
-	Sort   string
+	Limit      int
+	Before     string
+	After      string
+	Sort       string
+	AuthorType string
+	Around     string
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.
@@ -118,8 +120,10 @@ const (
 	// records the source step so stale deliveries cannot run the wrong exit.
 	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
 	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
-	// lifecycle finished. It remains as an idempotency marker until the next
-	// step-changing move replaces it.
+	// lifecycle finished. It is cleared once its continuation has run and no
+	// MetaKeyManualMoveLifecyclePending token remains, so it does not
+	// accumulate as permanent startup-recovery work; a fresh manual move
+	// replaces it with a new pending token before it would be cleared.
 	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
 	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
 	// been applied, preventing a stale queue rollback from replaying one.
@@ -250,6 +254,10 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
+	// coordination record used to suppress the lifecycle event caused by a
+	// parked workflow profile switch.
+	SessionMetaKeyWorkflowProfileSwitchStopIntent = "workflow_profile_switch_stop_intent"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
 	SessionMetaKeyOrigin                 = "origin"
@@ -261,6 +269,18 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
+// one exact runtime execution. Stamp is compared before the metadata value is
+// marked consumed, so a delayed event cannot consume a newer switch intent.
+type WorkflowProfileSwitchStopIntent struct {
+	ExecutionID string `json:"execution_id"`
+	Stamp       string `json:"stamp"`
+	// Consumed is a durable tombstone for the matching terminal callback. It
+	// remains in session metadata so delayed callbacks after a restart cannot
+	// advance the workflow.
+	Consumed bool `json:"consumed,omitempty"`
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
@@ -888,10 +908,15 @@ type Task struct {
 	// this field are routed to SetTaskRunner / ClearTaskRunner inside
 	// the task repository.
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string `json:"origin,omitempty"`     // manual, agent_created, routine
-	ProjectID              string `json:"project_id,omitempty"` // FK to office project
-	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
-	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+	// AssigneeUserID is the HUMAN assignee, entirely independent of the agent
+	// assignee above: a task can carry both, and setting one never clears the
+	// other. It is advisory and gates nothing; taking a task over is a
+	// reassignment plus a prompt, not a lock.
+	AssigneeUserID string `json:"assignee_user_id,omitempty"`
+	Origin         string `json:"origin,omitempty"`     // manual, agent_created, routine
+	ProjectID      string `json:"project_id,omitempty"` // FK to office project
+	Labels         string `json:"labels,omitempty"`     // JSON array string, default "[]"
+	Identifier     string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
@@ -917,6 +942,27 @@ type Task struct {
 // runner from their workflow step, but retain normal per-session semantics.
 func (t *Task) IsOfficeOwnedAndAssigned() bool {
 	return t != nil && t.IsFromOffice && t.AssigneeAgentProfileID != ""
+}
+
+// OfficeDecisionWaitCandidate is the compact projection the Office
+// decision-waiting detector scans (REQ-OFFICE-STALL-VISIBILITY-002). It is a
+// candidate, not a finding: the repository query only establishes that the
+// task is Office-owned, sits at a step carrying a decision-required seat, and
+// has been quiet since UpdatedAt. Whether a decision was already recorded and
+// whether a run is still in flight are judged by the detector, so each
+// rejection has its own countable reason.
+type OfficeDecisionWaitCandidate struct {
+	TaskID    string    `db:"id"`
+	StepID    string    `db:"workflow_step_id"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
+
+// OfficeDecisionWaitCursor identifies the last candidate in one ordered page.
+// The task repository uses it to continue a bounded scan without repeatedly
+// returning the same oldest rows.
+type OfficeDecisionWaitCursor struct {
+	UpdatedAt time.Time
+	TaskID    string
 }
 
 // ChildCompletionRow is the compact active-child projection used to decide
@@ -996,6 +1042,44 @@ const (
 	WorkflowStyleCustom = "custom"
 )
 
+// WorkflowProfileSessionStartPolicy controls how a fixed-profile workflow step
+// obtains a session when it starts after a profile switch.
+type WorkflowProfileSessionStartPolicy string
+
+const (
+	WorkflowProfileSessionStartPolicyReuse WorkflowProfileSessionStartPolicy = "reuse"
+	WorkflowProfileSessionStartPolicyNew   WorkflowProfileSessionStartPolicy = "new"
+)
+
+// NormalizeWorkflowProfileSessionStartPolicy returns the safe default for empty
+// and unknown workflow step session-start policy values.
+func NormalizeWorkflowProfileSessionStartPolicy(value string) WorkflowProfileSessionStartPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionStartPolicy(value) == WorkflowProfileSessionStartPolicyNew {
+		return WorkflowProfileSessionStartPolicyNew
+	}
+	return WorkflowProfileSessionStartPolicyReuse
+}
+
+// WorkflowProfileSessionEndPolicy controls what happens to a fixed-profile
+// workflow step's session when the workflow leaves it for another profile.
+type WorkflowProfileSessionEndPolicy string
+
+const (
+	WorkflowProfileSessionEndPolicyComplete WorkflowProfileSessionEndPolicy = "complete"
+	WorkflowProfileSessionEndPolicyPark     WorkflowProfileSessionEndPolicy = "park"
+)
+
+// NormalizeWorkflowProfileSessionEndPolicy returns the safe default for empty
+// and unknown workflow step session-end policy values.
+func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
+		return WorkflowProfileSessionEndPolicyPark
+	}
+	return WorkflowProfileSessionEndPolicyComplete
+}
+
 // WorkflowSource values are persisted in workflows.source and record where a
 // workflow definition came from. Manual workflows are user-managed; GitHub
 // workflows are owned by the workflow-sync poller and may be overwritten or
@@ -1049,10 +1133,17 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 string    `json:"description"`
-	OwnerID                     string    `json:"owner_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	OwnerID     string `json:"owner_id"`
+	// OrgID is the owning tenant. Empty means organizations are off or the
+	// tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// UnitID places the workspace in the organization unit tree. Reach is
+	// resolved from this placement, so a workspace without one is reachable by
+	// nobody.
+	UnitID                      string    `json:"unit_id,omitempty"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -1543,6 +1634,25 @@ const (
 	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
+// AllTaskSessionStates is the canonical, exhaustive list of TaskSessionState
+// constants. Code that must cover every state (drift-guard tests, admin
+// tooling) should range over this slice instead of hand-writing its own
+// literal: Go does not enforce switch/slice exhaustiveness (the exhaustive
+// linter is not enabled in this repo), so a hand-written literal silently
+// stops covering new states the moment one is added here. Add a new
+// TaskSessionState constant to this slice in the same change that adds the
+// const.
+var AllTaskSessionStates = []TaskSessionState{
+	TaskSessionStateCreated,
+	TaskSessionStateStarting,
+	TaskSessionStateRunning,
+	TaskSessionStateIdle,
+	TaskSessionStateWaitingForInput,
+	TaskSessionStateCompleted,
+	TaskSessionStateFailed,
+	TaskSessionStateCancelled,
+}
+
 // SessionBranchInfo is a lightweight projection of a session with its worktree branch.
 // Used by the PR watch reconciler to find sessions that may need PR watches.
 type SessionBranchInfo struct {
@@ -1795,6 +1905,37 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// DesktopDiscoveryRootState describes whether an install-wide discovery root
+// can currently be read by the backend process.
+type DesktopDiscoveryRootState string
+
+const (
+	DesktopDiscoveryRootConnected         DesktopDiscoveryRootState = "connected"
+	DesktopDiscoveryRootReconnectRequired DesktopDiscoveryRootState = "reconnect_required"
+)
+
+// DesktopDiscoveryRoot is an install-wide root selected for automatic local
+// repository discovery. It is deliberately separate from a workspace-owned
+// repository grant.
+type DesktopDiscoveryRoot struct {
+	ID              string                    `json:"id"`
+	Path            string                    `json:"path"`
+	DisplayPath     string                    `json:"display_path"`
+	State           DesktopDiscoveryRootState `json:"state"`
+	LastScanAt      *time.Time                `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time                `json:"last_failure_at,omitempty"`
+	LastFailureCode string                    `json:"last_failure_code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// DesktopDiscoveryMigration records upgrade-only state without turning the
+// old implicit Home fallback into a new automatic scan.
+type DesktopDiscoveryMigration struct {
+	HomeConfirmationRequired bool      `json:"home_confirmation_required"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
 // RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
 // It is configuration, not task history: task repositories copy these fields
 // into their snapshot columns when a policy is selected.
@@ -1891,6 +2032,7 @@ const (
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
 	ExecutorTypeSSH          ExecutorType = "ssh"
+	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
 
@@ -1899,7 +2041,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false
@@ -1923,6 +2065,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSprites
 	case ExecutorTypeSSH:
 		return agentruntime.RuntimeSSH
+	case ExecutorTypeKubernetes:
+		return agentruntime.RuntimeKubernetes
 	default:
 		return agentruntime.RuntimeStandalone
 	}
@@ -1940,7 +2084,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeKubernetes
 }
 
 const (
@@ -2070,11 +2214,12 @@ const (
 // It owns the workspace (worktree/container/sandbox) and the agentctl control server.
 // Multiple sessions can share the same TaskEnvironment.
 type TaskEnvironment struct {
-	ID                string `json:"id"`
-	TaskID            string `json:"task_id"`
-	ExecutorType      string `json:"executor_type"`
-	ExecutorID        string `json:"executor_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	OwnershipGeneration int64  `json:"ownership_generation"`
+	ExecutorType        string `json:"executor_type"`
+	ExecutorID          string `json:"executor_id"`
+	ExecutorProfileID   string `json:"executor_profile_id"`
 	// AgentExecutionID was removed: executors_running owns the execution<->session
 	// mapping now. Read it via repo.GetExecutorRunningBySessionID(sessionID) when
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
@@ -2228,16 +2373,23 @@ type TaskPlan struct {
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
 // Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
 type TaskPlanRevision struct {
-	ID                 string    `json:"id"`
-	TaskID             string    `json:"task_id"`
-	RevisionNumber     int       `json:"revision_number"`
-	Title              string    `json:"title"`
-	Content            string    `json:"content"`
-	AuthorKind         string    `json:"author_kind"` // "agent" | "user"
-	AuthorName         string    `json:"author_name"` // display snapshot (agent profile name or user identifier)
-	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+	ID                 string  `json:"id"`
+	TaskID             string  `json:"task_id"`
+	RevisionNumber     int     `json:"revision_number"`
+	Title              string  `json:"title"`
+	Content            string  `json:"content"`
+	AuthorKind         string  `json:"author_kind"` // "agent" | "user"
+	AuthorName         string  `json:"author_name"` // display snapshot (agent profile name or user identifier)
+	RevertOfRevisionID *string `json:"revert_of_revision_id,omitempty"`
+	// WorkflowStepID/Name/Color snapshot the task's workflow step at write
+	// time, same display-snapshot pattern as AuthorName. Empty for revisions
+	// written before this stamping existed, and preserved as-is (not
+	// re-stamped) when a later write coalesces into this row.
+	WorkflowStepID    string    `json:"workflow_step_id,omitempty"`
+	WorkflowStepName  string    `json:"workflow_step_name,omitempty"`
+	WorkflowStepColor string    `json:"workflow_step_color,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
 // TaskWalkthrough is an agent-authored guided code tour attached to a task.

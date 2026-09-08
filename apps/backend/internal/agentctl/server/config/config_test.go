@@ -52,6 +52,17 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	}
 }
 
+// TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
+// AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
+func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		NamespacesMCPToolsByServer: true,
+	})
+	if !cfg.NamespacesMCPToolsByServer {
+		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
+	}
+}
+
 func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
 	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")

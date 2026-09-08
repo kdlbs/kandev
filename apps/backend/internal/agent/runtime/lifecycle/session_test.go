@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,17 @@ type mockAgentServer struct {
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	wsConnected          chan struct{} // closed when WS stream connects
+	materialized         []materializedUpload
+	failMaterialize      bool
+}
+
+// materializedUpload records one /api/v1/attachments/materialize request so a
+// test can assert that the bytes reached agentctl before the prompt dispatched.
+type materializedUpload struct {
+	sessionID    string
+	attachmentID string
+	name         string
+	body         string
 }
 
 func newMockAgentServer(t *testing.T) *mockAgentServer {
@@ -154,8 +166,61 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 	})
 
+	// Attachment materialization endpoint. The lifecycle manager streams claimed
+	// descriptors here before it dispatches a prompt, so recording each upload is
+	// what lets a steer test prove materialization happened first.
+	mux.HandleFunc("/api/v1/attachments/materialize", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, "bad multipart", http.StatusBadRequest)
+			return
+		}
+		m.mu.Lock()
+		fail := m.failMaterialize
+		m.mu.Unlock()
+		if fail {
+			http.Error(w, "materialization unavailable", http.StatusInternalServerError)
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "file is required", http.StatusBadRequest)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		body, err := io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "unreadable file", http.StatusBadRequest)
+			return
+		}
+		name := r.FormValue("name")
+		m.mu.Lock()
+		m.materialized = append(m.materialized, materializedUpload{
+			sessionID:    r.FormValue("session_id"),
+			attachmentID: r.FormValue("attachment_id"),
+			name:         name,
+			body:         string(body),
+		})
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"name":%q,"size_bytes":%d}`, name, len(body))
+	})
+
 	m.server = httptest.NewServer(mux)
 	return m
+}
+
+// materializedUploads returns a copy of the recorded materialization requests.
+func (m *mockAgentServer) materializedUploads() []materializedUpload {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]materializedUpload(nil), m.materialized...)
+}
+
+// setFailMaterialize makes the materialization endpoint reject every upload.
+func (m *mockAgentServer) setFailMaterialize(fail bool) {
+	m.mu.Lock()
+	m.failMaterialize = fail
+	m.mu.Unlock()
 }
 
 // buildResponse returns the handler or default response for a request message.

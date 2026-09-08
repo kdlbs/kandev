@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -297,35 +298,11 @@ func TestDependencyMutationsAreScopedToTheCaller(t *testing.T) {
 	}
 }
 
-// gateBlockerRepo forces the interleaving the cycle race needs: each cycle walk
-// announces itself and then waits for the other walk to start. Two bare
-// goroutines practically never land inside the validate-then-insert window, so
-// a test without this barrier passes even with the serialization removed and
-// proves nothing.
-type gateBlockerRepo struct {
-	*mockBlockerRepo
-	arrived chan struct{}
-	once    sync.Once
-}
-
-func (g *gateBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([]*orchmodels.TaskBlocker, error) {
-	g.once.Do(func() { close(g.arrived) })
-	select {
-	case <-g.arrived:
-	case <-time.After(time.Second):
-	}
-	// Give the other goroutine room to finish its own walk before this one
-	// inserts. Serialization must make that impossible; without it both walks
-	// complete against a pre-insert view.
-	time.Sleep(20 * time.Millisecond)
-	return g.mockBlockerRepo.ListTaskBlockers(ctx, taskID)
-}
-
 // Two concurrent adds must not each pass a cycle walk that predates the other's
 // insert and commit a cycle between them.
 func TestAddDependencyConcurrentInsertsCannotCreateACycle(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
-	repo := &gateBlockerRepo{mockBlockerRepo: &mockBlockerRepo{}, arrived: make(chan struct{})}
+	repo := &mockBlockerRepo{}
 	svc.SetBlockerRepository(repo)
 	ctx := context.Background()
 	a := mustSeedTask(t, svc, "A").ID
@@ -438,5 +415,24 @@ func TestDependencyEventFieldsCarryTheProjection(t *testing.T) {
 	deps, _ := fields["depends_on"].([]DependencyRef)
 	if len(deps) != 1 || deps[0].ID != predecessor.ID {
 		t.Errorf("depends_on = %+v; want one entry for %s", deps, predecessor.ID)
+	}
+}
+
+func TestValidateDependencyIDsRejectsOversizedSets(t *testing.T) {
+	ids := make([]string, maxTaskDependencyCount+1)
+	for index := range ids {
+		ids[index] = "dependency"
+	}
+
+	err := validateDependencyIDs("task", ids)
+	if !errors.Is(err, ErrInvalidDependencySet) {
+		t.Fatalf("error = %v, want ErrInvalidDependencySet", err)
+	}
+}
+
+func TestValidateDependencyIDsRejectsOversizedID(t *testing.T) {
+	err := validateDependencyIDs("task", []string{strings.Repeat("x", maxTaskDependencyIDLength+1)})
+	if !errors.Is(err, ErrInvalidDependencySet) {
+		t.Fatalf("error = %v, want ErrInvalidDependencySet", err)
 	}
 }

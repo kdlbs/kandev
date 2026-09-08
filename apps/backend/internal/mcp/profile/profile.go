@@ -3,7 +3,11 @@
 // agent can receive a profile, but it cannot request arbitrary tool names.
 package profile
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/kandev/kandev/internal/common/mcpmode"
+)
 
 type Surface string
 
@@ -24,6 +28,7 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityGuardedTTYExec Capability = "guarded-tty-exec"
+	CapabilityCanvas         Capability = "canvas-authoring"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent
@@ -78,15 +83,15 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	surface := SurfaceKanbanTask
 	capabilities := []Capability{}
 	switch mode {
-	case "office":
+	case mcpmode.Office:
 		surface = SurfaceOfficeTask
-	case "config":
+	case mcpmode.Config:
 		surface = SurfaceConfiguration
-	case "external":
+	case mcpmode.External:
 		surface = SurfaceExternal
-	case "automation":
+	case mcpmode.Automation:
 		surface = SurfaceAutomation
-	case "task-title-pending":
+	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
 	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation {

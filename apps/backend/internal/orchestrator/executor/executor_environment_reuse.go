@@ -6,12 +6,14 @@ import (
 	"sort"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
 const (
+	taskEnvironmentRepoStatusActive  = "active"
 	taskEnvironmentRepoStatusFailed  = "failed"
 	taskEnvironmentRepoStatusDeleted = "deleted"
 )
@@ -62,6 +64,49 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 		}
 	}
 	return nil
+}
+
+// claimSharedTaskEnvironmentTaskDirName records the first stable task-root
+// identity supplied by an inherited worktree launch. The claim must happen
+// before lifecycle materialization so the physical root and durable projection
+// cannot diverge. A losing concurrent claimant may continue only when it asked
+// for the same canonical identity.
+func (e *Executor) claimSharedTaskEnvironmentTaskDirName(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+) error {
+	if env == nil || req == nil || env.TaskID == "" || env.TaskID == req.TaskID || env.TaskDirName != "" || !req.UseWorktree || req.TaskDirName == "" {
+		return nil
+	}
+	stamper, ok := e.repo.(taskEnvironmentTaskDirNameStamper)
+	if !ok {
+		return nil
+	}
+	claimed, err := stamper.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, req.TaskDirName)
+	if err != nil {
+		return fmt.Errorf("claim shared task directory name: %w", err)
+	}
+	if claimed {
+		env.TaskDirName = req.TaskDirName
+		return nil
+	}
+	current, err := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		return fmt.Errorf("read shared task directory name after claim: %w", err)
+	}
+	if current == nil || current.TaskDirName == "" || current.TaskDirName != req.TaskDirName {
+		return fmt.Errorf("%w: shared task environment was claimed for task directory %q, requested %q", models.ErrWorkspaceReuseUnsafe, currentTaskDirName(current), req.TaskDirName)
+	}
+	env.TaskDirName = current.TaskDirName
+	return nil
+}
+
+func currentTaskDirName(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.TaskDirName
 }
 
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
@@ -175,6 +220,24 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			applyExecutorRunningMetadata(req, running)
 		}
 	}
+}
+
+// prepareExecutorTransition removes launch-local workspace authority inherited
+// from a session that belonged to a different executor type. The existing
+// environment remains available to persistTaskEnvironment as the durable row
+// to rebind after (and only after) the new executor launches successfully.
+//
+// In particular, a non-empty session.WorkspacePath is not a safe fallback: it
+// may name a deleted worktree or an ordinary directory left behind by an older
+// executor. Clearing it makes local execution fall back to RepositoryPath and
+// makes worktree execution materialize through its normal preparer.
+func prepareExecutorTransition(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
+	if req == nil || env == nil || env.ExecutorType == "" || env.ExecutorType == req.ExecutorType {
+		return false
+	}
+	req.WorkspacePath = ""
+	req.WorkspaceReuseRequired = false
+	return true
 }
 
 func extractContainerBootstrapNonceSecretID(metadata map[string]interface{}) string {
@@ -318,24 +381,26 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		return RepoSpec{}, false
 	}
 	return RepoSpec{
-		TaskRepositoryID:       req.TaskRepositoryID,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		RepositoryURL:          req.RepositoryURL,
-		RepoName:               req.RepoName,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		WorktreeID:             req.WorktreeID,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		RemoteSyncHandled:      req.RemoteSyncHandled,
-		RefreshRepository:      req.RefreshRepository,
-		CopyFiles:              req.CopyFiles,
-		BranchIdentitySlug:     topLevelBranchIdentitySlug(req),
+		TaskRepositoryID:           req.TaskRepositoryID,
+		RepositoryID:               req.RepositoryID,
+		RepositoryPath:             req.RepositoryPath,
+		RepositoryURL:              req.RepositoryURL,
+		RepoName:                   req.RepoName,
+		BaseBranch:                 req.BaseBranch,
+		DefaultBranch:              req.DefaultBranch,
+		CheckoutBranch:             req.CheckoutBranch,
+		PRNumber:                   req.PRNumber,
+		WorktreeID:                 req.WorktreeID,
+		WorktreeBranchPrefix:       req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:       req.WorktreeBranchTicket,
+		PullBeforeWorktree:         req.PullBeforeWorktree,
+		RemoteSyncHandled:          req.RemoteSyncHandled,
+		RefreshRepository:          req.RefreshRepository,
+		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
+		RemoteRefState:             req.RemoteRefState,
+		CopyFiles:                  req.CopyFiles,
+		BranchIdentitySlug:         topLevelBranchIdentitySlug(req),
 	}, true
 }
 
@@ -504,7 +569,14 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
-	if running.AgentExecutionID != "" && req.PreviousExecutionID == "" {
+	requestIsKubernetes := models.ExecutorType(req.ExecutorType) == models.ExecutorTypeKubernetes
+	runningIsKubernetes := running.Runtime == agentruntime.RuntimeKubernetes
+	mayReuseExecution := true
+	if requestIsKubernetes || runningIsKubernetes {
+		mayReuseExecution = requestIsKubernetes && runningIsKubernetes &&
+			req.SessionID != "" && running.SessionID == req.SessionID
+	}
+	if running.AgentExecutionID != "" && req.PreviousExecutionID == "" && mayReuseExecution {
 		req.PreviousExecutionID = running.AgentExecutionID
 	}
 	var metadata map[string]interface{}

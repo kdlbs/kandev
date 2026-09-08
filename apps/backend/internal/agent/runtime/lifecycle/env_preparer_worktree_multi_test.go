@@ -307,7 +307,9 @@ func TestWorktreePreparer_MultiRepo_RequiredRefreshIdentifiesFailingRepository(t
 		TaskDirName:  "refresh-fail_eee",
 		Repositories: []RepoPrepareSpec{
 			{TaskRepositoryID: "tr-good", RepositoryID: "repo-good", RepositoryPath: repoA, RepoName: "good", BaseBranch: "main"},
-			{TaskRepositoryID: "tr-bad", RepositoryID: "repo-bad", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "main", PullBeforeWorktree: true},
+			// The absent local and remote base keeps this repository strict so
+			// the test can identify which attachment caused preparation to fail.
+			{TaskRepositoryID: "tr-bad", RepositoryID: "repo-bad", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "remote-only", PullBeforeWorktree: true},
 		},
 	}
 
@@ -336,6 +338,49 @@ func TestWorktreePreparer_MultiRepo_RequiredRefreshIdentifiesFailingRepository(t
 				t.Fatalf("active worktree after required refresh failure = %s, want none", wt.ID)
 			}
 		}
+	}
+}
+
+func TestWorktreePreparer_MultiRepo_LocalRefreshFallbackKeepsTaskRunning(t *testing.T) {
+	repoA := initBareGitRepo(t, "local-fallback")
+	repoB := initBareGitRepo(t, "unchanged")
+
+	preparer, mgr := newPreparerForTest(t)
+	req := &EnvPrepareRequest{
+		TaskID:       "task-multi-local-fallback",
+		SessionID:    "sess-multi-local-fallback",
+		TaskTitle:    "Local refresh fallback",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  "local-fallback_fff",
+		Repositories: []RepoPrepareSpec{
+			{TaskRepositoryID: "tr-local", RepositoryID: "repo-local", RepositoryPath: repoA, RepoName: "local-fallback", BaseBranch: "main", PullBeforeWorktree: true},
+			{TaskRepositoryID: "tr-unchanged", RepositoryID: "repo-unchanged", RepositoryPath: repoB, RepoName: "unchanged", BaseBranch: "main"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected local fallback to keep preparation running: %s", res.ErrorMessage)
+	}
+	if len(res.Worktrees) != 2 {
+		t.Fatalf("worktrees = %d, want 2", len(res.Worktrees))
+	}
+	var syncWarnings []PrepareStep
+	for _, step := range res.Steps {
+		if step.Name == "Sync base branch" && step.Warning != "" {
+			syncWarnings = append(syncWarnings, step)
+		}
+	}
+	if len(syncWarnings) != 1 {
+		t.Fatalf("sync warning steps = %#v, want one local fallback warning", res.Steps)
+	}
+	if all, listErr := mgr.GetAllByTaskID(context.Background(), req.TaskID); listErr != nil {
+		t.Fatalf("list worktrees: %v", listErr)
+	} else if len(all) != 2 {
+		t.Fatalf("stored worktrees = %d, want 2", len(all))
 	}
 }
 

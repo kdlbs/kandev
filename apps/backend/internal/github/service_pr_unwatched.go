@@ -97,10 +97,32 @@ func (s *Service) syncUnwatchedTaskPRGroup(ctx context.Context, workspaceID stri
 		return
 	}
 	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group)
+	seen := make(map[string]struct{}, len(group))
 	for _, tp := range group {
+		if tp == nil || tp.TaskID == "" {
+			continue
+		}
 		status := live[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
 		if status == nil || status.PR == nil {
 			continue
+		}
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, "", tp.TaskID, tp.RepositoryID, tp.PRNumber)
+		seenKey := fmt.Sprintf("%s\x00%s\x00%d", effectiveTaskID, tp.RepositoryID, tp.PRNumber)
+		if _, duplicate := seen[seenKey]; duplicate {
+			continue
+		}
+		seen[seenKey] = struct{}{}
+		if effectiveTaskID != tp.TaskID {
+			ownerTP, loadErr := s.store.GetTaskPRByRepoAndNumber(ctx, effectiveTaskID, tp.RepositoryID, tp.PRNumber)
+			if loadErr != nil {
+				s.logger.Debug("load reconciled owner task PR failed",
+					zap.String("task_id", effectiveTaskID), zap.Int("pr_number", tp.PRNumber), zap.Error(loadErr))
+				continue
+			}
+			if ownerTP == nil {
+				continue
+			}
+			tp = ownerTP
 		}
 		if syncErr := s.reconcileTaskPRLifecycle(ctx, tp, status); syncErr != nil {
 			s.logger.Debug("unwatched task PR reconcile failed",
@@ -158,7 +180,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	// this call's own resolved value. persistAndPublishTaskPRSync already
 	// re-reads before publishing for exactly this reason (codex [P2] on the
 	// SyncTaskPR path); reuse it here instead of duplicating the write.
-	return s.persistAndPublishTaskPRSync(ctx, tp.TaskID, status.PR, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(ctx, tp.TaskID, status.PR, tp, changed, status.OutcomeFieldsPopulated, false)
 }
 
 // fetchUnwatchedTaskPRs prefers the batched GraphQL query — one call for the

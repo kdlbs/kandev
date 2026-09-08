@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconRobot, IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
-import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
@@ -28,74 +27,7 @@ import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
 import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
 import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
-
-// --- StepAgentProfileSelect ---
-
-function StepAgentProfileSelect({
-  step,
-  savedStep,
-  onUpdate,
-  readOnly,
-}: {
-  step: WorkflowStep;
-  savedStep?: WorkflowStep;
-  onUpdate: (updates: Partial<WorkflowStep>) => void;
-  readOnly: boolean;
-}) {
-  const { t } = useTranslation();
-  const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
-  const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
-
-  return (
-    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-      <Select
-        value={step.agent_profile_id || "none"}
-        onValueChange={(value) => {
-          if (readOnly || hasConditionalSessionConfig) return;
-          onUpdate({ agent_profile_id: value === "none" ? "" : value });
-        }}
-        disabled={readOnly || hasConditionalSessionConfig}
-      >
-        <SelectTrigger
-          className="h-8 w-full min-w-0 cursor-pointer sm:w-[220px]"
-          data-testid="step-agent-profile-select"
-          data-settings-dirty={isWorkflowStepValueDirty(
-            step,
-            savedStep,
-            (item) => item.agent_profile_id ?? "",
-          )}
-        >
-          <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <SelectValue placeholder={t("workflows:noProfileOverride")} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none" className="cursor-pointer">
-            {t("workflows:noProfileOverride")}
-          </SelectItem>
-          {healthyProfiles.map((p) => (
-            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-              {p.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <HelpTip
-        testId={`${step.id}-agent-profile-help`}
-        text={
-          hasConditionalSessionConfig
-            ? t("workflows:removeConditionalSessionConfigBeforeProfile")
-            : t("workflows:overrideAgentProfileHelp")
-        }
-      />
-      <SessionConfigToggle
-        step={step}
-        savedStep={savedStep}
-        onUpdate={onUpdate}
-        readOnly={readOnly}
-      />
-    </div>
-  );
-}
+import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
 
 // --- StepConfigHeader ---
 
@@ -162,7 +94,13 @@ function StepConfigHeader({
             ))}
           </SelectContent>
         </Select>
-        <StepAgentProfileSelect
+        <WorkflowStepAgentProfileSelector
+          step={step}
+          savedStep={savedStep}
+          onUpdate={onUpdate}
+          readOnly={readOnly}
+        />
+        <SessionConfigToggle
           step={step}
           savedStep={savedStep}
           onUpdate={onUpdate}

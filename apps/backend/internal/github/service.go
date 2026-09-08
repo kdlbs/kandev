@@ -94,26 +94,53 @@ type PromptResolver interface {
 	ResolvePromptContent(ctx context.Context, name, fallback string) string
 }
 
+// TaskRepositoryBaseBranchUpdater projects provider base changes into tasks.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(
+		ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+	) error
+}
+
+// WorkspaceGroupOwnerResolver resolves the workspace-group owner task for a
+// task that may be a non-owner member sharing another task's worktree
+// (inherit_parent / shared_group). It mirrors
+// internal/orchestrator.resolveEffectivePushTaskID's lookup so that a
+// watch-sourced association write is redirected to the same task an
+// orchestrator-side watch would have redirected to — see
+// resolveEffectiveAssociationTaskID for the full rationale.
+type WorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
+}
+
+// WorkspaceGroupOwnerSessionResolver resolves the owner for the exact group
+// bound to an observing session. It prevents a task with multiple active group
+// memberships from selecting an unrelated owner by task ID alone.
+type WorkspaceGroupOwnerSessionResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                       sync.Mutex
-	connectionMutationLocks  [64]sync.Mutex
-	client                   Client
-	authMethod               string
-	secrets                  SecretProvider
-	secretManager            SecretManager
-	connectionSecrets        ConnectionSecretStore
-	personalConnections      *StorePersonalConnectionRepository
-	resolver                 *CredentialResolver
-	appRegistrationRuntimes  map[string]*githubAppRuntime
-	appRegistrationLifecycle *AppRegistrationLifecycleService
-	credentialBroker         *CredentialBroker
-	store                    *Store
-	eventBus                 bus.EventBus
-	logger                   *logger.Logger
-	taskDeleter              TaskDeleter
-	comparisonTargetObserver ComparisonTargetObserver
-	taskIssueStore           TaskIssueStore
+	mu                          sync.Mutex
+	connectionMutationLocks     [64]sync.Mutex
+	client                      Client
+	authMethod                  string
+	secrets                     SecretProvider
+	secretManager               SecretManager
+	connectionSecrets           ConnectionSecretStore
+	personalConnections         *StorePersonalConnectionRepository
+	resolver                    *CredentialResolver
+	appRegistrationRuntimes     map[string]*githubAppRuntime
+	appRegistrationLifecycle    *AppRegistrationLifecycleService
+	credentialBroker            *CredentialBroker
+	store                       *Store
+	eventBus                    bus.EventBus
+	logger                      *logger.Logger
+	taskDeleter                 TaskDeleter
+	taskRepositoryUpdater       TaskRepositoryBaseBranchUpdater
+	comparisonTargetObserver    ComparisonTargetObserver
+	taskIssueStore              TaskIssueStore
+	workspaceGroupOwnerResolver WorkspaceGroupOwnerResolver
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
@@ -276,6 +303,20 @@ func (s *Service) newPATClient(token string) *PATClient {
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetTaskRepositoryBaseBranchUpdater wires best-effort task base projection.
+func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	s.taskRepositoryUpdater = updater
+}
+
+// SetWorkspaceGroupOwnerResolver wires the workspace-group owner lookup used
+// by resolveEffectiveAssociationTaskID to redirect watch-sourced association
+// writes away from a non-owner shared-worktree member. Optional — when unset,
+// the redirect is a no-op and association writes keep their pre-existing
+// (potentially member-attributed) behavior.
+func (s *Service) SetWorkspaceGroupOwnerResolver(r WorkspaceGroupOwnerResolver) {
+	s.workspaceGroupOwnerResolver = r
+}
 
 // SetCascadeTaskDeleter wires the cascade-delete dependency used by the
 // watch reset flow (ResetIssueWatch / ResetReviewWatch). Optional — when

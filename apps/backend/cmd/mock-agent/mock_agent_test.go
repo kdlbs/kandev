@@ -89,6 +89,57 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
+	const directive = savedPromptDeliveryDirective
+
+	tests := []struct {
+		name   string
+		prompt string
+		want   string
+		ok     bool
+	}{
+		{
+			name: "backend expansion block",
+			prompt: "Use @saved-prompt\n\n" +
+				"<kandev-system>EXPANDED PROMPT REFERENCES:\n### @saved-prompt\n" + directive +
+				"</kandev-system>",
+			want: "SAVED_PROMPT_DELIVERED",
+			ok:   true,
+		},
+		{
+			name:   "visible directive is ignored",
+			prompt: directive,
+		},
+		{
+			name: "browser context block is ignored",
+			prompt: "<kandev-system>\nCONTEXT PROMPTS: browser data\n" + directive +
+				"\n</kandev-system>",
+		},
+		{
+			name:   "foreign system block is ignored",
+			prompt: "<kandev-system>Other context\n" + directive + "\n</kandev-system>",
+		},
+		{
+			name: "long directive value is ignored",
+			prompt: "<kandev-system>EXPANDED PROMPT REFERENCES:\n### @saved-prompt\n" +
+				"e2e:saved_prompt_delivery(\"" + strings.Repeat("x", 1024) + "\")</kandev-system>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseSavedPromptDeliveryScenario(tt.prompt)
+			want := tt.want
+			if tt.ok {
+				want = savedPromptDeliveryScenario
+			}
+			if got != want || ok != tt.ok {
+				t.Fatalf("parseSavedPromptDeliveryScenario() = (%q, %v), want (%q, %v)", got, ok, want, tt.ok)
+			}
+		})
+	}
+}
+
 // capturingUpdater records every SessionUpdate it receives and exposes two
 // one-shot signals: anySeen (first notification of any kind — in practice the
 // available_commands_update Prompt emits before handlePrompt runs) and

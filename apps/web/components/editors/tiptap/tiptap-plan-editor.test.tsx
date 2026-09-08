@@ -78,6 +78,12 @@ async function renderReadyEditor(onChange: (value: string) => void): Promise<Edi
   return readyEditor!;
 }
 
+async function flushDeferredCommentCallbacks(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 function getFirstTableHeader(editor: Editor) {
   let headerPosition: number | null = null;
   editor.state.doc.descendants((node, position) => {
@@ -227,5 +233,95 @@ describe("TipTapPlanEditor mobile formatting clearance", () => {
     expect(planBubble.mobileContainerRef?.current).toBe(
       view.container.querySelector(".tiptap-plan-wrapper"),
     );
+  });
+});
+
+describe("TipTapPlanEditor comment projection", () => {
+  const comment = {
+    id: "primary-comment",
+    selectedText: "Primary",
+    from: 1,
+    to: 8,
+  };
+
+  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.2
+  it("does not report a projected comment as deleted when the projection changes", async () => {
+    const onCommentDeleted = vi.fn();
+    const view = render(
+      <TipTapPlanEditor
+        taskId="task-1"
+        value="Primary plan text"
+        onChange={() => undefined}
+        comments={[comment]}
+        onCommentDeleted={onCommentDeleted}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('.comment-badge[data-comment-id="primary-comment"]'),
+      ).not.toBeNull();
+    });
+
+    view.rerender(
+      <TipTapPlanEditor
+        taskId="task-1"
+        value="Primary plan text"
+        onChange={() => undefined}
+        comments={[]}
+        onCommentDeleted={onCommentDeleted}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('.comment-badge[data-comment-id="primary-comment"]'),
+      ).toBeNull();
+    });
+    await flushDeferredCommentCallbacks();
+
+    expect(onCommentDeleted).not.toHaveBeenCalled();
+  });
+
+  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.4
+  it("reports an untagged comment mark removal exactly once", async () => {
+    const onCommentDeleted = vi.fn();
+    const readyEditors: Editor[] = [];
+    const view = render(
+      <TipTapPlanEditor
+        taskId="task-1"
+        value="Primary plan text"
+        onChange={() => undefined}
+        comments={[comment]}
+        onCommentDeleted={onCommentDeleted}
+        onEditorReady={(readyEditor) => {
+          readyEditors.push(readyEditor);
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('.comment-badge[data-comment-id="primary-comment"]'),
+      ).not.toBeNull();
+    });
+    const readyEditor = readyEditors[0];
+    if (!readyEditor) throw new Error("editor did not become ready");
+    const markType = readyEditor.state.schema.marks.commentMark;
+
+    act(() => {
+      readyEditor.view.dispatch(
+        readyEditor.state.tr.removeMark(
+          0,
+          readyEditor.state.doc.content.size,
+          markType.create({ commentId: comment.id }),
+        ),
+      );
+    });
+
+    await waitFor(() => {
+      expect(onCommentDeleted).toHaveBeenCalledWith([comment.id]);
+    });
+    expect(onCommentDeleted).toHaveBeenCalledTimes(1);
   });
 });

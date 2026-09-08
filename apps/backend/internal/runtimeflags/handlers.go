@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 )
 
 type Handler struct {
@@ -20,7 +20,7 @@ func RegisterRoutes(router gin.IRouter, svc *Service) {
 	api.GET("", h.list)
 	// Flag overrides are install-wide; only admins may change them. With
 	// auth disabled the synthetic identity is an admin (no behavior change).
-	api.PATCH("/:key", authn.RequireAdmin(), h.patch)
+	api.PATCH("/:key", authz.RequireOrgScope(authz.ScopeOrgSettingsManage), h.patch)
 }
 
 func (h *Handler) list(c *gin.Context) {

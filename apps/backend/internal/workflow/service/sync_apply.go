@@ -361,6 +361,8 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.ShowInCommandPanel == desired.ShowInCommandPanel &&
 		existing.AutoArchiveAfterHours == desired.AutoArchiveAfterHours &&
 		existing.AgentProfileID == desired.AgentProfileID &&
+		existing.ProfileSessionStartPolicy == desired.ProfileSessionStartPolicy &&
+		existing.ProfileSessionEndPolicy == desired.ProfileSessionEndPolicy &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&

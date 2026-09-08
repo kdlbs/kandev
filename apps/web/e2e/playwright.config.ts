@@ -67,11 +67,13 @@ export default defineConfig({
       name: "chromium",
       testIgnore: [
         /mobile-.*\.spec\.ts/,
-        // Container-backed tests (Docker executor, SSH executor) live in the
+        // Container-backed tests (Docker, SSH, and Kubernetes executors) live in the
         // `containers` project and skip when Docker is not available locally.
         // See apps/web/e2e/README.md for what runs there.
         /docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+        /kubernetes-compat\/.*\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
@@ -88,20 +90,31 @@ export default defineConfig({
       // Spawns the backend with KANDEV_E2E_CONTAINERS=1 (KANDEV_E2E_DOCKER=1
       // is honored as a deprecated alias for one release). Builds the
       // kandev-agent:e2e and kandev-sshd:e2e images and skips entirely on
-      // hosts without a Docker daemon — Docker is used as the runtime for
-      // both the Docker executor's own containers AND the sshd target the
-      // SSH executor connects to. Container-bound tests are slow (~10-30s
-      // each) so they live in their own project to keep the default CI fast.
+      // hosts without a Docker daemon. Docker is used as the runtime for the
+      // Docker executor's own containers, the sshd target the SSH executor
+      // connects to, and the pinned Kind cluster used by Kubernetes specs.
+      // Container-bound tests are slow, so they live in their own project to
+      // keep the default CI fast.
       //
       // See apps/web/e2e/README.md for context and how to run locally.
       name: "containers",
-      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
+      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/, /kubernetes\/.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
       // Local `--shard=N/6` runs can still split this project at test level.
       // CI uses explicit files from the duration-aware containers manifests.
       // Each CI shard is its own process, and workers:1 still serializes tests
       // within a shard, so the worker-scoped backend remains safe.
+      fullyParallel: true,
+    },
+    {
+      // Small API-only Kubernetes compatibility smoke. CI runs this once for
+      // each supported server version; it intentionally does not multiply the
+      // full browser lifecycle matrix in the `containers` project.
+      name: "kubernetes-compat",
+      testMatch: /kubernetes-compat\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 300_000,
       fullyParallel: true,
     },
   ],

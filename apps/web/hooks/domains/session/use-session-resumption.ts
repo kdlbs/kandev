@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
 import {
   buildResumeRequest,
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
+import { useSessionRecoveryFeedback } from "./use-session-recovery-feedback";
+import {
+  buildGuardedSetters,
+  isCurrentRequest,
+  type SessionRequestIdentity,
+} from "./use-session-resumption-request-guard";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
@@ -58,6 +64,7 @@ type ResumeResponse = {
 export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
   setError: (e: string | null) => void;
+  setNotice?: (notice: string | null) => void;
   setWorktreePath: (p: string | null) => void;
   setWorktreeBranch: (p: string | null) => void;
   setTaskSession: (s: {
@@ -156,48 +163,69 @@ export async function resumeWithSilentFallback(
   setters: ResumeStateSetter,
 ): Promise<boolean> {
   setters.setResumptionState("resuming");
-  if (
-    await tryLaunch(
-      buildResumeRequest(taskId, sessionId).request,
-      taskId,
-      sessionId,
-      session,
-      setters,
-    )
-  ) {
+  const resumeAttempt = await tryLaunch(
+    buildResumeRequest(taskId, sessionId).request,
+    taskId,
+    sessionId,
+    session,
+    setters,
+  );
+  if (resumeAttempt.ok) {
+    setters.setNotice?.(null);
     return true;
   }
   // Resume failed (returned success=false OR threw). Fall back to read-only
   // workspace restore so the user keeps file/terminal/git access.
-  if (
-    await tryLaunch(
-      buildRestoreWorkspaceRequest(taskId, sessionId).request,
-      taskId,
-      sessionId,
-      session,
-      setters,
-    )
-  ) {
+  const restoreAttempt = await tryLaunch(
+    buildRestoreWorkspaceRequest(taskId, sessionId).request,
+    taskId,
+    sessionId,
+    session,
+    setters,
+  );
+  if (restoreAttempt.ok) {
+    setters.setError(null);
+    setters.setNotice?.(
+      t("task:resumeFailedWorkspaceReadOnly", { error: resumeAttempt.error.message }),
+    );
     return true;
   }
   setters.setResumptionState("error");
-  setters.setError(t("task:failedToResumeAndRestore"));
+  setters.setNotice?.(null);
+  setters.setError(
+    t("task:resumeAndRestoreFailed", {
+      resumeError: resumeAttempt.error.message,
+      restoreError: restoreAttempt.error.message,
+    }),
+  );
   return false;
 }
 
-/** Run a single launch attempt; returns true on success, false on any failure.
+type LaunchAttempt = { ok: true } | { ok: false; error: Error };
+
+/** Run a single launch attempt and retain its failure for the fallback notice.
  *  Logs caught errors to the console so silent fallback paths remain debuggable
- *  (errors otherwise vanish into the implicit `false` return). */
+ *  (errors otherwise vanish into the fallback state). */
 async function tryLaunch(
   request: import("@/lib/services/session-launch-service").LaunchSessionRequest,
   taskId: string,
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-): Promise<boolean> {
+): Promise<LaunchAttempt> {
   try {
     const resp = await launchSession(request);
-    if (!resp.success) return false;
+    if (!resp.success) {
+      return {
+        ok: false,
+        error: new Error(
+          resp.error ??
+            (request.intent === "restore_workspace"
+              ? t("task:failedToRestoreWorkspace")
+              : t("task:failedToResumeSession")),
+        ),
+      };
+    }
     applyResumeResponse(
       {
         success: true,
@@ -216,14 +244,17 @@ async function tryLaunch(
     if (request.intent === "restore_workspace" && setters.setAgentctlReady) {
       setters.setAgentctlReady(sessionId);
     }
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error("[tryLaunch] session launch failed", {
       intent: request.intent,
       sessionId,
       err,
     });
-    return false;
+    return {
+      ok: false,
+      error: err instanceof Error ? err : new Error(t("common:unknownError")),
+    };
   }
 }
 
@@ -370,6 +401,7 @@ async function checkAndResume({
   if (!client) return;
   setters.setResumptionState("checking");
   setters.setError(null);
+  setters.setNotice?.(null);
   try {
     const status = await client.request<SessionStatus>("task.session.status", {
       task_id: taskId,
@@ -425,6 +457,7 @@ async function checkAndResume({
   } catch (err) {
     setters.setResumptionState("error");
     setters.setError(err instanceof Error ? err.message : t("common:unknownError"));
+    setters.setNotice?.(null);
   }
 }
 
@@ -432,6 +465,7 @@ interface UseSessionResumptionReturn {
   resumptionState: ResumptionState;
   sessionStatus: SessionStatus | null;
   error: string | null;
+  notice: string | null;
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
@@ -456,6 +490,9 @@ type ResetAndCheckParams = {
   preventAutoStart: boolean;
 };
 
+const getSessionRequestKey = (taskId: string | null, sessionId: string | null) =>
+  JSON.stringify([taskId, sessionId]);
+
 /** Extracted effects: reset state on session/task change, auto-check/resume, and remote retry. */
 function useSessionResetAndCheck({
   taskId,
@@ -465,24 +502,36 @@ function useSessionResetAndCheck({
   setters,
   preventAutoStart,
 }: ResetAndCheckParams): SessionResetAndCheckResult {
+  const requestKey = getSessionRequestKey(taskId, sessionId);
   const [sessionStatusState, setSessionStatus] = useState<{
-    id: string | null;
+    requestKey: string;
     status: SessionStatus | null;
-  }>({ id: sessionId, status: null });
-  // Reset sessionStatus when sessionId changes (derived, not in effect)
-  const sessionStatus = sessionStatusState.id === sessionId ? sessionStatusState.status : null;
+  }>({ requestKey, status: null });
+  const sessionStatus =
+    sessionStatusState.requestKey === requestKey ? sessionStatusState.status : null;
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
-  const activeSessionRef = useRef(sessionId);
+  const requestGenerationRef = useRef(0);
+  const activeRequestRef = useRef<SessionRequestIdentity>({ key: requestKey, generation: 0 });
+
+  // Publish the new identity during commit so callbacks from the previous
+  // request are rejected before passive effects or queued promise handlers run.
+  useLayoutEffect(() => {
+    requestGenerationRef.current += 1;
+    activeRequestRef.current = {
+      key: requestKey,
+      generation: requestGenerationRef.current,
+    };
+  }, [requestKey]);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
   useEffect(() => {
-    activeSessionRef.current = sessionId;
     hasAttemptedResume.current = false;
     remoteStatusRetryCount.current = 0;
     setters.setResumptionState("idle");
     setters.setError(null);
+    setters.setNotice?.(null);
     setters.setWorktreePath(null);
     setters.setWorktreeBranch(null);
   }, [sessionId, taskId]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional reset on dep change
@@ -492,14 +541,17 @@ function useSessionResetAndCheck({
     if (!taskId || !sessionId || connectionStatus !== "connected" || hasAttemptedResume.current)
       return;
     hasAttemptedResume.current = true;
-    const guardedSetters = buildGuardedSetters(activeSessionRef, sessionId, setters);
+    const capturedRequest = activeRequestRef.current;
+    const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
     checkAndResume({
       taskId,
       sessionId,
       session,
       preventAutoStart,
       setSessionStatus: (s) => {
-        if (activeSessionRef.current === sessionId) setSessionStatus({ id: sessionId, status: s });
+        if (isCurrentRequest(activeRequestRef.current, capturedRequest)) {
+          setSessionStatus({ requestKey: capturedRequest.key, status: s });
+        }
       },
       setters: guardedSetters,
     });
@@ -512,6 +564,7 @@ function useSessionResetAndCheck({
     if (!sessionStatus?.is_remote_executor) return;
     if (sessionStatus.remote_checked_at || sessionStatus.remote_status_error) return;
     if (remoteStatusRetryCount.current >= 3) return;
+    const capturedRequest = activeRequestRef.current;
 
     const timer = window.setTimeout(async () => {
       const client = getWebSocketClient();
@@ -522,7 +575,9 @@ function useSessionResetAndCheck({
           task_id: taskId,
           session_id: sessionId,
         });
-        setSessionStatus({ id: sessionId, status: nextStatus });
+        if (isCurrentRequest(activeRequestRef.current, capturedRequest)) {
+          setSessionStatus({ requestKey: capturedRequest.key, status: nextStatus });
+        }
       } catch {
         // Best-effort refresh only.
       }
@@ -534,49 +589,13 @@ function useSessionResetAndCheck({
   return { sessionStatus };
 }
 
-/** Wrap state setters with a guard that prevents stale async callbacks from updating state. */
-function buildGuardedSetters(
-  activeSessionRef: React.RefObject<string | null>,
-  capturedSessionId: string,
-  setters: ResumeStateSetter,
-): ResumeStateSetter {
-  const guard = () => activeSessionRef.current === capturedSessionId;
-  return {
-    ...setters,
-    setResumptionState: (s) => {
-      if (guard()) setters.setResumptionState(s);
-    },
-    setError: (e) => {
-      if (guard()) setters.setError(e);
-    },
-    setWorktreePath: (p) => {
-      if (guard()) setters.setWorktreePath(p);
-    },
-    setWorktreeBranch: (b) => {
-      if (guard()) setters.setWorktreeBranch(b);
-    },
-    // The remaining setters write store state keyed by session id, but a
-    // stale async callback completing after navigation can still touch the
-    // previous session's row (e.g. re-mark it resume-skipped or overwrite its
-    // status). Guard them all so a switched-away session is never mutated.
-    setTaskSession: (s) => {
-      if (guard()) setters.setTaskSession(s);
-    },
-    setAgentctlReady: (sid) => {
-      if (guard()) setters.setAgentctlReady?.(sid);
-    },
-    setResumeSkipped: (sid, skipped) => {
-      if (guard()) setters.setResumeSkipped?.(sid, skipped);
-    },
-  };
-}
-
 export function useSessionResumption(
   taskId: string | null,
   sessionId: string | null,
 ): UseSessionResumptionReturn {
   const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -594,6 +613,7 @@ export function useSessionResumption(
   const setters: ResumeStateSetter = {
     setResumptionState,
     setError,
+    setNotice,
     setWorktreePath,
     setWorktreeBranch,
     setTaskSession,
@@ -601,6 +621,8 @@ export function useSessionResumption(
     setResumeSkipped,
     getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,
   };
+
+  useSessionRecoveryFeedback(sessionId, session?.state, error, notice, setters);
 
   const { sessionStatus } = useSessionResetAndCheck({
     taskId,
@@ -616,11 +638,13 @@ export function useSessionResumption(
     if (!taskId || !sessionId) return false;
     setResumptionState("resuming");
     setError(null);
+    setNotice(null);
     try {
       const { request } = buildResumeRequest(taskId, sessionId);
       const response = await launchSession(request);
       if (response.success) {
         setResumptionState("resumed");
+        setNotice(null);
         if (response.state) {
           setTaskSession({
             id: toSessionId(sessionId),
@@ -643,7 +667,7 @@ export function useSessionResumption(
         return true;
       }
       setResumptionState("error");
-      setError(t("task:failedToResumeSession"));
+      setError(response.error ?? t("task:failedToResumeSession"));
       return false;
     } catch (err) {
       setResumptionState("error");
@@ -655,6 +679,7 @@ export function useSessionResumption(
     sessionId,
     session,
     setTaskSession,
+    setNotice,
     setWorktreePath,
     setWorktreeBranch,
     setResumeSkipped,
@@ -664,6 +689,7 @@ export function useSessionResumption(
     resumptionState,
     sessionStatus,
     error,
+    notice,
     taskSessionState: session?.state ?? null,
     worktreePath,
     worktreeBranch,

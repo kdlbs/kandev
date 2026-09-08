@@ -69,9 +69,9 @@ running agents unattended.
   start the dependent manually). Kandev never auto-retries a failed
   predecessor and never silently drops the edge.
 - Users declare dependencies in the **task-create dialog** ("Depends on") and
-  manage them afterwards over MCP. The task detail view deliberately has no edge
-  editor: dependencies describe how work was planned, and the surfaces that read
-  them (card badge, chip, graph) stay read-only.
+  manage them afterwards from the **Edit task dialog** or over MCP. The edit
+  dialog behavior is defined in
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - An open task SHALL show a **dependency chip** in the status row directly above
   its chat composer, alongside the PR status chip. The chip reports both
   directions — the tasks this task is blocked by, and the tasks it blocks — and
@@ -571,9 +571,6 @@ MCP:
   A chain is a set of edges between concrete tasks in v1.
 - Gantt or timeline rendering, and estimated-duration modelling.
 - Editing dependencies from the multi-select toolbar or via bulk operations.
-- An edge editor on the task detail view. Declaring dependencies is a planning
-  act that belongs to task creation (or to MCP for an agent decomposing work);
-  the task view only reports them.
 
 ## Implementation plan
 

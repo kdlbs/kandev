@@ -14,6 +14,7 @@ type AgentEventPayload struct {
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
 	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
@@ -28,6 +29,22 @@ type AgentEventPayload struct {
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// Prompt replay evidence is populated on terminal failure events. It is
+	// captured by lifecycle before the terminal event is published so consumers
+	// do not have to infer output or effects from independently subscribed
+	// stream events.
+	EvidenceKnown  bool `json:"evidence_known,omitempty"`
+	OutputObserved bool `json:"output_observed,omitempty"`
+	EffectObserved bool `json:"effect_observed,omitempty"`
+}
+
+// PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
+// terminal failure event. Lifecycle conservatively treats any genuine turn
+// content as both output and effect evidence, which fails replay closed.
+type PromptAttemptEvidence struct {
+	EvidenceKnown  bool
+	OutputObserved bool
+	EffectObserved bool
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
@@ -247,13 +264,14 @@ type AgentStreamEventData struct {
 // for execution-scoped logic (e.g., resume-token CAS that must reject writes from
 // a defunct execution).
 type AgentStreamEventPayload struct {
-	Type        string                `json:"type"` // Always "agent/event"
-	Timestamp   string                `json:"timestamp"`
-	AgentID     string                `json:"agent_id"`     // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID string                `json:"execution_id"` // Lifecycle execution ID; stable across the payload's lifetime.
-	TaskID      string                `json:"task_id"`
-	SessionID   string                `json:"session_id"` // Task session ID
-	Data        *AgentStreamEventData `json:"data"`
+	Type           string                `json:"type"` // Always "agent/event"
+	Timestamp      string                `json:"timestamp"`
+	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
+	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	TaskID         string                `json:"task_id"`
+	SessionID      string                `json:"session_id"` // Task session ID
+	Data           *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event
@@ -270,11 +288,12 @@ const (
 // GitEventPayload is a unified payload for all git-related WebSocket events.
 // Uses discriminated union pattern with Type field.
 type GitEventPayload struct {
-	Type      GitEventType `json:"type"`
-	TaskID    string       `json:"task_id,omitempty"`
-	SessionID string       `json:"session_id"`
-	AgentID   string       `json:"agent_id,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Type              GitEventType `json:"type"`
+	TaskID            string       `json:"task_id,omitempty"`
+	SessionID         string       `json:"session_id"`
+	TaskEnvironmentID string       `json:"task_environment_id,omitempty"`
+	AgentID           string       `json:"agent_id,omitempty"`
+	Timestamp         string       `json:"timestamp"`
 
 	// For status_update
 	Status *GitStatusData `json:"status,omitempty"`

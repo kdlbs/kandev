@@ -866,7 +866,7 @@ func TestSessionIPRefreshedThroughMiddleware(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		authhttpapi.RegisterRoutes(router, svc, log)
+		authhttpapi.RegisterRoutes(router, svc, nil, log)
 		rec = doRequest(router, http.MethodGet, "/api/v1/auth/sessions", withCookie(svc, token), func(r *http.Request) {
 			r.RemoteAddr = "2.2.2.2:1234"
 		})

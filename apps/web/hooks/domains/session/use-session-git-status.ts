@@ -81,3 +81,29 @@ export function useSessionGitStatusByRepo(
       .sort((a, b) => a.repository_name.localeCompare(b.repository_name));
   }, [map]);
 }
+
+/** Identifies the active pending-operation scope across session/environment replacement. */
+export function useSessionGitPendingScope(sessionId: string | null): string {
+  return useAppStore((state) => {
+    if (!sessionId) return "";
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return `${sessionId}\u0000${envKey}`;
+  });
+}
+
+/**
+ * Checkout/reset generations are repository-scoped. Commit refetches and
+ * comparison-base refreshes intentionally do not participate here because
+ * they do not replace the checked-out worktree.
+ */
+export function useSessionGitPendingCheckoutGenerations(
+  sessionId: string | null,
+): Record<string, number> {
+  return useAppStore(
+    useShallow((state) => {
+      if (!sessionId) return {};
+      const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+      return state.gitCheckoutGeneration.byEnvironmentId[envKey] ?? {};
+    }),
+  );
+}

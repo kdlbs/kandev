@@ -49,12 +49,14 @@ func (m *Manager) ExecuteGuardedTTY(
 	execution.guardedTTYMu.Lock()
 	defer execution.guardedTTYMu.Unlock()
 
-	if !m.isExactGuardedTTYExecution(execution, request.Execution) {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if !m.isExactGuardedTTYExecution(execution, request.Execution, client) {
 		return nil, ErrGuardedTTYExecutionUnavailable
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, guardedTTYAgentctlTimeout)
 	defer cancel()
-	receipt, err := execution.agentctl.GuardedTTYExec(requestCtx, streams.GuardedTTYAgentRequest{
+	receipt, err := client.GuardedTTYExec(requestCtx, streams.GuardedTTYAgentRequest{
 		AttestationID: request.AttestationID,
 		ExecutionID:   request.Execution.ExecutionID,
 		TaskID:        request.Execution.TaskID,
@@ -73,12 +75,12 @@ func (m *Manager) ExecuteGuardedTTY(
 	return receipt, nil
 }
 
-func (m *Manager) isExactGuardedTTYExecution(execution *AgentExecution, expected streams.MCPExecutionContext) bool {
+func (m *Manager) isExactGuardedTTYExecution(execution *AgentExecution, expected streams.MCPExecutionContext, client interface{ HasAgentStream() bool }) bool {
 	if execution == nil || execution.ID != expected.ExecutionID || execution.TaskID != expected.TaskID ||
 		execution.SessionID != expected.SessionID || execution.AgentID != streams.GuardedTTYAgentID ||
-		execution.Status != v1.AgentStatusReady || execution.agentctl == nil ||
+		execution.Status != v1.AgentStatusReady || client == nil ||
 		!execution.IsAgentctlReady() || !execution.isSessionInitialized() || execution.ACPSessionID == "" ||
-		!execution.agentctl.HasAgentStream() {
+		!client.HasAgentStream() {
 		return false
 	}
 	current, exists := m.executionStore.GetBySessionID(expected.SessionID)

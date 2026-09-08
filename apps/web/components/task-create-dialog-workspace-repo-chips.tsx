@@ -9,7 +9,7 @@ import type { LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { type PillOption } from "@/components/task-create-dialog-pill";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import {
   computeBranchIntent,
   type BranchIntent,
@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-repo-chip-parts";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
 
 type WorkspaceRepoChipsProps = {
   rows: TaskRepoRow[];
@@ -36,6 +37,7 @@ type WorkspaceRepoChipsProps = {
   freshBranchEnabled?: boolean;
   branchPolicyDisabledReason?: string;
   showBranchPolicies?: boolean;
+  showDiscoveryControls?: boolean;
   canAddMore: boolean;
   addHint?: string;
   addLabel?: string;
@@ -71,6 +73,7 @@ export function WorkspaceRepoChips({
   freshBranchEnabled,
   branchPolicyDisabledReason,
   showBranchPolicies = false,
+  showDiscoveryControls = false,
   canAddMore,
   addHint,
   addLabel,
@@ -127,6 +130,7 @@ export function WorkspaceRepoChips({
           }
           onPolicySelected={onPolicySelected}
           showBranchPolicies={showBranchPolicies}
+          showDiscoveryControls={showDiscoveryControls}
           onCreateRepository={
             rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
           }
@@ -263,6 +267,7 @@ type RepoChipProps = {
   onPolicySelected?: () => void;
   branchPolicyDisabledReason?: string;
   showBranchPolicies?: boolean;
+  showDiscoveryControls?: boolean;
   onRemove: () => void;
   onCreateRepository?: () => void;
   onRefreshRepositories?: () => void;
@@ -479,6 +484,8 @@ function RepoChipContent({
   onCreateRepository,
   onRefreshRepositories,
   repositoriesRefreshing,
+  showDiscoveryControls,
+  workspaceId,
 }: RepoChipProps & { data: RepoChipData; branchPolicies: RepositoryBranchPolicy[] }) {
   const { repoOptions, branchOptions, branches, branchesLoading, refreshBranches } = data;
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
@@ -514,6 +521,11 @@ function RepoChipContent({
         onCreateRepository={onCreateRepository}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
+        popoverHeader={
+          showDiscoveryControls ? (
+            <RepositoryDiscoveryControls workspaceId={workspaceId} presentation="picker" />
+          ) : undefined
+        }
       />
       <RepoChipBranchPill
         branchPicker={branchPicker}

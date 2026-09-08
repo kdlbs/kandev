@@ -1,21 +1,47 @@
 import { useCallback } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
 import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTranslation } from "react-i18next";
 
 type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
 
+export type TaskActionOptions = {
+  cascade?: boolean;
+  discardWorktreeChanges?: boolean;
+};
+
 export function useTaskActions() {
+  const { toast } = useToast();
+  const { t } = useTranslation();
+
   const moveTaskById = useCallback(async (taskId: string, payload: MovePayload) => {
     return moveTask(taskId, payload);
   }, []);
 
-  const deleteTaskById = useCallback(async (taskId: string, opts?: { cascade?: boolean }) => {
-    return deleteTask(taskId, opts);
-  }, []);
+  const deleteTaskById = useCallback(
+    async (taskId: string, opts?: DeleteTaskParams) => {
+      try {
+        return await deleteTask(taskId, opts);
+      } catch (error) {
+        if (isTaskDeleteDirtyWorktreeError(error)) {
+          toast({
+            title: t("task:deleteDirtyWorktreeTitle"),
+            description: t("task:deleteDirtyWorktreeDescription"),
+            variant: "error",
+          });
+        }
+        throw error;
+      }
+    },
+    [t, toast],
+  );
 
-  const archiveTaskById = useCallback(async (taskId: string, opts?: { cascade?: boolean }) => {
+  const archiveTaskById = useCallback(async (taskId: string, opts?: TaskActionOptions) => {
     return archiveTask(taskId, opts);
   }, []);
 
@@ -39,7 +65,7 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
   });
 
   return useCallback(
-    async (taskId: string, opts?: { cascade?: boolean }) => {
+    async (taskId: string, opts?: TaskActionOptions) => {
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
       const removalOptions = opts?.cascade ? { excludeTaskTree: true } : {};

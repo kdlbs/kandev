@@ -51,6 +51,43 @@ const (
 	toolResult       = `{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"ok"}]}}`
 )
 
+func TestMCPClientUsesPinnedLegacyProtocolVersion(t *testing.T) {
+	c := NewMCPClient("token-a", "cloud", "ws", "https://x.atlassian.net")
+	var requestProtocol string
+	setMCPTestTransport(c, mcpRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body struct {
+			Method string `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("decode MCP request: %v", err)
+		}
+		switch body.Method {
+		case "initialize":
+			requestProtocol = body.Params.ProtocolVersion
+			resp := mcpHTTPResponse(http.StatusOK, "application/json", initializeResult)
+			resp.Header.Set("Mcp-Session-Id", "session-1")
+			return resp, nil
+		case "notifications/initialized":
+			return mcpHTTPResponse(http.StatusAccepted, "application/json", ""), nil
+		default:
+			return mcpHTTPResponse(http.StatusOK, "application/json", toolResult), nil
+		}
+	}))
+
+	if _, err := c.call(context.Background(), "tools/call", map[string]interface{}{"name": "test", "arguments": map[string]interface{}{}}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if requestProtocol != mcpProtocol {
+		t.Fatalf("initialize protocol = %q, want %q", requestProtocol, mcpProtocol)
+	}
+	if mcpProtocol != mcp.ProtocolVersion20250618 {
+		t.Fatalf("configured Jira protocol = %q, want %q", mcpProtocol, mcp.ProtocolVersion20250618)
+	}
+}
+
 func TestMCPClientSendsInitializedNotification(t *testing.T) {
 	c := NewMCPClient("token-a", "cloud", "ws", "https://x.atlassian.net")
 	initialized := false

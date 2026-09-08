@@ -84,6 +84,15 @@ func assertPlanRevisionEqual(t *testing.T, got, want *models.TaskPlanRevision) {
 	if got.AuthorName != want.AuthorName {
 		t.Errorf("AuthorName = %q, want %q", got.AuthorName, want.AuthorName)
 	}
+	if got.WorkflowStepID != want.WorkflowStepID {
+		t.Errorf("WorkflowStepID = %q, want %q", got.WorkflowStepID, want.WorkflowStepID)
+	}
+	if got.WorkflowStepName != want.WorkflowStepName {
+		t.Errorf("WorkflowStepName = %q, want %q", got.WorkflowStepName, want.WorkflowStepName)
+	}
+	if got.WorkflowStepColor != want.WorkflowStepColor {
+		t.Errorf("WorkflowStepColor = %q, want %q", got.WorkflowStepColor, want.WorkflowStepColor)
+	}
 	assertOptionalString(t, "RevertOfRevisionID", got.RevertOfRevisionID, want.RevertOfRevisionID)
 	assertTimeEqual(t, "CreatedAt", got.CreatedAt, want.CreatedAt)
 	assertTimeEqual(t, "UpdatedAt", got.UpdatedAt, want.UpdatedAt)
@@ -317,6 +326,9 @@ func TestInsertTaskPlanRevisionRoundTripsEveryField(t *testing.T) {
 		ID: "planrev-full", TaskID: "task-planrev-full", RevisionNumber: 4,
 		Title: "Plan v4", Content: "four", AuthorKind: "user", AuthorName: "jcfs",
 		RevertOfRevisionID: &revertOf,
+		WorkflowStepID:     "step-build",
+		WorkflowStepName:   "Build",
+		WorkflowStepColor:  "bg-blue-500",
 		CreatedAt:          time.Date(2026, 6, 6, 6, 6, 6, 789000000, time.UTC),
 	}
 	if err := repo.InsertTaskPlanRevision(ctx, want); err != nil {
@@ -556,7 +568,7 @@ func TestWritePlanRevisionCreatesHeadAndFirstRevision(t *testing.T) {
 	rev := &models.TaskPlanRevision{
 		TaskID: "task-writeplan", Title: "Plan", Content: "first", AuthorKind: "agent", AuthorName: "claude",
 	}
-	if err := repo.WritePlanRevision(ctx, head, rev, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, rev, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision: %v", err)
 	}
 	if head.ID == "" {
@@ -582,6 +594,95 @@ func TestWritePlanRevisionCreatesHeadAndFirstRevision(t *testing.T) {
 	assertPlanRevisionEqual(t, gotRev, rev)
 }
 
+func seedPlanWorkflowStep(t *testing.T, repo *Repository, taskID, workflowID, stepID, name, color string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, Name: workflowID}); err != nil {
+		t.Fatalf("CreateWorkflow(%s): %v", workflowID, err)
+	}
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_steps (id, workflow_id, name, position, color, created_at, updated_at)
+		VALUES (?, ?, ?, 0, ?, ?, ?)
+	`), stepID, workflowID, name, color, now, now); err != nil {
+		t.Fatalf("insert workflow step %s: %v", stepID, err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		UPDATE tasks SET workflow_id = ?, workflow_step_id = ? WHERE id = ?
+	`), workflowID, stepID, taskID); err != nil {
+		t.Fatalf("set task workflow step %s: %v", stepID, err)
+	}
+}
+
+func TestWritePlanRevisionStampsCurrentWorkflowStep(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-writeplan-step")
+	seedPlanWorkflowStep(t, repo, "task-writeplan-step", "workflow-writeplan-step", "step-build", "Build", "bg-blue-500")
+
+	head := &models.TaskPlan{TaskID: "task-writeplan-step", Content: "first"}
+	rev := &models.TaskPlanRevision{
+		TaskID: "task-writeplan-step", Title: "Plan", Content: "first", AuthorKind: "agent",
+	}
+	if err := repo.WritePlanRevision(ctx, head, rev, nil, false, false); err != nil {
+		t.Fatalf("WritePlanRevision: %v", err)
+	}
+
+	if rev.WorkflowStepID != "step-build" || rev.WorkflowStepName != "Build" || rev.WorkflowStepColor != "bg-blue-500" {
+		t.Fatalf("workflow step stamp = %q/%q/%q, want step-build/Build/bg-blue-500", rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor)
+	}
+}
+
+func TestPlanRevisionWorkflowColumnsReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-plan-replay")
+
+	for _, column := range []string{"workflow_step_id", "workflow_step_name", "workflow_step_color"} {
+		if _, err := repo.db.Exec("ALTER TABLE task_plan_revisions DROP COLUMN " + column); err != nil {
+			t.Fatalf("drop legacy column %s: %v", column, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_plan_revisions
+			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?, ?, ?, NULL, ?, ?)
+	`), "legacy-plan-revision", "task-plan-replay", "Plan", "legacy", "agent", "Agent", now, now); err != nil {
+		t.Fatalf("insert legacy plan revision: %v", err)
+	}
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("run legacy plan migrations: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay legacy plan migrations: %v", err)
+	}
+
+	var stepID, stepName, stepColor string
+	if err := repo.db.QueryRow(repo.db.Rebind(`
+		SELECT workflow_step_id, workflow_step_name, workflow_step_color
+		FROM task_plan_revisions WHERE id = ?
+	`), "legacy-plan-revision").Scan(&stepID, &stepName, &stepColor); err != nil {
+		t.Fatalf("read migrated legacy revision: %v", err)
+	}
+	if stepID != "" || stepName != "" || stepColor != "" {
+		t.Fatalf("legacy workflow fields = %q/%q/%q, want empty defaults", stepID, stepName, stepColor)
+	}
+
+	seedPlanWorkflowStep(t, repo, "task-plan-replay", "workflow-plan-replay", "step-review", "Review", "bg-purple-500")
+	head := &models.TaskPlan{TaskID: "task-plan-replay", Content: "new"}
+	rev := &models.TaskPlanRevision{
+		TaskID: "task-plan-replay", Title: "Plan", Content: "new", AuthorKind: "user", AuthorName: "You",
+	}
+	if err := repo.WritePlanRevision(ctx, head, rev, nil, false, false); err != nil {
+		t.Fatalf("write stamped revision after migration: %v", err)
+	}
+	if rev.WorkflowStepID != "step-review" || rev.WorkflowStepName != "Review" || rev.WorkflowStepColor != "bg-purple-500" {
+		t.Fatalf("post-migration workflow stamp = %q/%q/%q, want step-review/Review/bg-purple-500", rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor)
+	}
+}
+
 func TestWritePlanRevisionMissingTask(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -590,7 +691,7 @@ func TestWritePlanRevisionMissingTask(t *testing.T) {
 	err := repo.WritePlanRevision(ctx,
 		&models.TaskPlan{ID: "plan-missing", TaskID: taskID, Title: "Plan", Content: "body"},
 		&models.TaskPlanRevision{TaskID: taskID, Title: "Plan", Content: "body", AuthorKind: "agent"},
-		nil)
+		nil, false, false)
 	if !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("WritePlanRevision error = %v, want ErrTaskNotFound", err)
 	}
@@ -612,7 +713,7 @@ func TestWritePlanRevisionUpsertsHeadAndAppendsRevisions(t *testing.T) {
 	}
 	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
 		TaskID: "task-writeplan-append", Title: "v1", Content: "one", AuthorKind: "agent",
-	}, nil); err != nil {
+	}, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
 	}
 	createdAt := head.CreatedAt
@@ -623,7 +724,7 @@ func TestWritePlanRevisionUpsertsHeadAndAppendsRevisions(t *testing.T) {
 	second := &models.TaskPlanRevision{
 		TaskID: "task-writeplan-append", Title: "v2", Content: "two", AuthorKind: "user", AuthorName: "jcfs",
 	}
-	if err := repo.WritePlanRevision(ctx, head, second, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, second, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(second): %v", err)
 	}
 	if second.RevisionNumber != 2 {
@@ -671,7 +772,7 @@ func TestWritePlanRevisionPreservesImplementationMarkerAcrossUpsert(t *testing.T
 	head := &models.TaskPlan{ID: "plan-marker", TaskID: "task-writeplan-marker", Title: "v1", Content: "one"}
 	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
 		TaskID: "task-writeplan-marker", Title: "v1", Content: "one", AuthorKind: "agent",
-	}, nil); err != nil {
+	}, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
 	}
 	if _, err := repo.MarkTaskPlanImplementationStarted(ctx, "task-writeplan-marker", "session-x", "jcfs"); err != nil {
@@ -682,7 +783,7 @@ func TestWritePlanRevisionPreservesImplementationMarkerAcrossUpsert(t *testing.T
 	head.Content = "two"
 	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
 		TaskID: "task-writeplan-marker", Title: "v2", Content: "two", AuthorKind: "agent",
-	}, nil); err != nil {
+	}, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(second): %v", err)
 	}
 
@@ -701,14 +802,17 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedTaskForDocs(t, repo, "task-writeplan-merge")
+	seedPlanWorkflowStep(t, repo, "task-writeplan-merge", "workflow-writeplan-merge", "step-build", "Build", "bg-blue-500")
 
 	head := &models.TaskPlan{ID: "plan-merge", TaskID: "task-writeplan-merge", Title: "v1", Content: "one"}
 	first := &models.TaskPlanRevision{
 		ID: "planrev-merge", TaskID: "task-writeplan-merge", Title: "v1", Content: "one",
 		AuthorKind: "agent", AuthorName: "claude",
-		CreatedAt: time.Date(2026, 2, 2, 2, 2, 2, 0, time.UTC),
+		WorkflowStepID:   "step-build",
+		WorkflowStepName: "Build",
+		CreatedAt:        time.Date(2026, 2, 2, 2, 2, 2, 0, time.UTC),
 	}
-	if err := repo.WritePlanRevision(ctx, head, first, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, first, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
 	}
 
@@ -717,9 +821,13 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	merged := &models.TaskPlanRevision{
 		TaskID: "task-writeplan-merge", Title: "v1 edited", Content: "one edited",
 		AuthorKind: "ignored", AuthorName: "ignored",
+		// Different step than `first` — proves the merge UPDATE (title/content/
+		// updated_at only) doesn't re-stamp the persisted step columns.
+		WorkflowStepID:   "step-review",
+		WorkflowStepName: "Review",
 	}
 	coalesceID := "planrev-merge"
-	if err := repo.WritePlanRevision(ctx, head, merged, &coalesceID); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, merged, &coalesceID, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(merge): %v", err)
 	}
 	if merged.ID != "planrev-merge" {
@@ -743,6 +851,9 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	if got.AuthorKind != "agent" || got.AuthorName != "claude" {
 		t.Errorf("author = %q/%q, want the original agent/claude preserved", got.AuthorKind, got.AuthorName)
 	}
+	if got.WorkflowStepID != "step-build" || got.WorkflowStepName != "Build" {
+		t.Errorf("workflow step = %q/%q, want the original step-build/Build preserved (merge must not re-stamp)", got.WorkflowStepID, got.WorkflowStepName)
+	}
 	if !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v preserved", got.CreatedAt, first.CreatedAt)
 	}
@@ -760,7 +871,7 @@ func TestWritePlanRevisionRollsBackWhenCoalesceTargetMissing(t *testing.T) {
 	err := repo.WritePlanRevision(ctx,
 		&models.TaskPlan{ID: "plan-rollback", TaskID: "task-writeplan-rollback", Title: "nope", Content: "nope"},
 		&models.TaskPlanRevision{TaskID: "task-writeplan-rollback", Title: "x", Content: "y"},
-		&missingID)
+		&missingID, false, false)
 	if err == nil {
 		t.Fatal("WritePlanRevision with an unknown coalesce id returned nil")
 	}
@@ -785,7 +896,7 @@ func TestTaskPlanAndRevisionsCascadeOnTaskDelete(t *testing.T) {
 	if err := repo.WritePlanRevision(ctx,
 		&models.TaskPlan{ID: "plan-cascade", TaskID: "task-plan-cascade", Title: "Plan", Content: "body"},
 		&models.TaskPlanRevision{TaskID: "task-plan-cascade", Title: "Plan", Content: "body", AuthorKind: "agent"},
-		nil); err != nil {
+		nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision: %v", err)
 	}
 
@@ -847,7 +958,85 @@ func TestTaskPlanMethodsPropagateBackendErrors(t *testing.T) {
 	if err := repo.WritePlanRevision(ctx,
 		&models.TaskPlan{TaskID: "task-plan-broken"},
 		&models.TaskPlanRevision{TaskID: "task-plan-broken"},
-		nil); err == nil {
+		nil, false, false); err == nil {
 		t.Error("WritePlanRevision on a closed database returned nil")
+	}
+}
+
+func TestWritePlanRevisionPreserveFlagsGateOnlyTheUpdateBranch(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-writeplan-preserve")
+
+	head := &models.TaskPlan{
+		ID: "plan-preserve", TaskID: "task-writeplan-preserve", Title: "v1", Content: "one", CreatedBy: "agent",
+	}
+	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
+		TaskID: "task-writeplan-preserve", Title: "v1", Content: "one", AuthorKind: "agent",
+	}, nil, false, false); err != nil {
+		t.Fatalf("WritePlanRevision(first): %v", err)
+	}
+
+	// An existing row with preserveTitle/preserveCreatedBy set keeps its stored title and
+	// created_by even though head carries different values; content still updates.
+	head.Title = "v2"
+	head.Content = "two"
+	head.CreatedBy = "user"
+	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
+		TaskID: "task-writeplan-preserve", Title: "v2", Content: "two", AuthorKind: "agent",
+	}, nil, true, true); err != nil {
+		t.Fatalf("WritePlanRevision(preserve): %v", err)
+	}
+
+	gotHead, err := repo.GetTaskPlan(ctx, "task-writeplan-preserve")
+	if err != nil {
+		t.Fatalf("GetTaskPlan: %v", err)
+	}
+	if gotHead.Title != "v1" {
+		t.Errorf("HEAD title = %q, want v1 preserved", gotHead.Title)
+	}
+	if gotHead.CreatedBy != "agent" {
+		t.Errorf("HEAD created_by = %q, want agent preserved", gotHead.CreatedBy)
+	}
+	if gotHead.Content != "two" {
+		t.Errorf("HEAD content = %q, want two (content is never preserved)", gotHead.Content)
+	}
+	if head.Title != "v1" || head.CreatedBy != "agent" {
+		t.Errorf("returned HEAD metadata = %q/%q, want authoritative preserved values v1/agent", head.Title, head.CreatedBy)
+	}
+
+	revisions, err := repo.ListTaskPlanRevisions(ctx, "task-writeplan-preserve", 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions: %v", err)
+	}
+	latest, err := repo.GetTaskPlanRevision(ctx, revisions[0].ID)
+	if err != nil {
+		t.Fatalf("GetTaskPlanRevision: %v", err)
+	}
+	if latest.Title != "v1" {
+		t.Errorf("revision title = %q, want authoritative preserved title v1", latest.Title)
+	}
+}
+
+func TestWritePlanRevisionPreserveFlagsIgnoredOnFreshInsert(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-writeplan-preserve-insert")
+
+	head := &models.TaskPlan{
+		TaskID: "task-writeplan-preserve-insert", Title: "fresh", Content: "body", CreatedBy: "agent",
+	}
+	if err := repo.WritePlanRevision(ctx, head, &models.TaskPlanRevision{
+		TaskID: "task-writeplan-preserve-insert", Title: "fresh", Content: "body", AuthorKind: "agent",
+	}, nil, true, true); err != nil {
+		t.Fatalf("WritePlanRevision: %v", err)
+	}
+
+	gotHead, err := repo.GetTaskPlan(ctx, "task-writeplan-preserve-insert")
+	if err != nil {
+		t.Fatalf("GetTaskPlan: %v", err)
+	}
+	if gotHead.Title != "fresh" || gotHead.CreatedBy != "agent" {
+		t.Errorf("HEAD = %+v, want head's own values used on a fresh insert regardless of preserve flags", gotHead)
 	}
 }

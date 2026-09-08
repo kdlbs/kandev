@@ -185,6 +185,63 @@ func (r *Repository) MarkWakeupRequestCoalesced(
 	return r.mergeWakeupPayloadIntoRunSnapshot(ctx, id, intoRunID)
 }
 
+// PromoteRunAndCoalesceWakeupIfQueued atomically promotes a queued run,
+// attaches the wakeup request, increments the coalesced count, and merges the
+// request payload. The first run update holds the writer lock until commit, so
+// the scheduler cannot claim the run with only part of the coalesced state.
+// It returns false when the scheduler claimed the run before this transaction.
+func (r *Repository) PromoteRunAndCoalesceWakeupIfQueued(
+	ctx context.Context, requestID, runID, reason string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs SET reason = ? WHERE id = ? AND status = 'queued'
+	`), reason, runID)
+	if err != nil {
+		return false, err
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE agent_wakeup_requests
+		SET status = ?, run_id = ?, claimed_at = ?, finished_at = ?
+		WHERE id = ?
+	`), WakeupStatusCoalesced, runID, now, now, requestID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs SET coalesced_count = coalesced_count + 1 WHERE id = ?
+	`), runID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE runs
+		SET context_snapshot = json_patch(
+			COALESCE(NULLIF(context_snapshot, ''), '{}'),
+			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
+		)
+		WHERE id = ?
+	`), requestID, runID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // bumpRunCoalescedCount increments coalesced_count on the runs row by 1.
 // Used by MarkWakeupRequestCoalesced when a wakeup-request lands on top
 // of an in-flight run for the same agent.

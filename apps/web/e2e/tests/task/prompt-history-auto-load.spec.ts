@@ -92,14 +92,23 @@ kandevTest.describe("Prompt history auto-load", () => {
       });
       for (let attempt = 0; attempt < 10 && (await firstRow.count()) === 0; attempt++) {
         const rowsBefore = await panel.locator('[data-testid^="prompt-history-row-"]').count();
-        await panel.evaluate((el) => {
+        await scroller.evaluate((el) => {
+          // Force a fresh exit and re-entry. A repeated write of the current
+          // bottom value does not emit a native scroll transition, so an
+          // observer that is still armed can otherwise miss the next page.
+          el.scrollTop = 0;
+          el.dispatchEvent(new Event("scroll", { bubbles: true }));
           el.scrollTop = el.scrollHeight;
+          el.dispatchEvent(new Event("scroll", { bubbles: true }));
         });
         await expect
-          .poll(async () => await panel.locator('[data-testid^="prompt-history-row-"]').count(), {
-            timeout: 5_000,
-          })
-          .toBeGreaterThan(rowsBefore);
+          .poll(
+            async () =>
+              (await firstRow.count()) > 0 ||
+              (await panel.locator('[data-testid^="prompt-history-row-"]').count()) > rowsBefore,
+            { timeout: 5_000 },
+          )
+          .toBe(true);
       }
       await expect(firstRow).toBeAttached({ timeout: 10_000 });
       await expect(firstRow.locator('[data-testid^="prompt-history-number-"]')).toHaveText("#1");

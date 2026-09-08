@@ -14,6 +14,7 @@ import {
 
 const WORKSPACE_ID = "ws-1";
 const WORKSPACES_HREF = "/settings/workspaces";
+const EXECUTORS_HREF = "/settings/executors";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
 const ORDERED_WORKSPACES = [
   { id: "ws-first", name: "First" },
@@ -55,6 +56,16 @@ function integrationSlugsOf(tabs: readonly SettingsMenuNode[]): Array<string | u
 }
 
 describe("buildWorkspacesBranch", () => {
+  it("includes the Canvases tab only for an enabled canvas feature", () => {
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [], {
+      canvasesEnabled: true,
+    });
+
+    expect(hrefsOf(workspace.children ?? [])).toContain(
+      `/settings/workspaces/${WORKSPACE_ID}/canvases`,
+    );
+  });
+
   it("places the active workspace first without disturbing the remaining order", () => {
     const branch = buildWorkspacesBranch(ORDERED_WORKSPACES, "ws-active");
 
@@ -127,7 +138,9 @@ describe("buildWorkspacesBranch", () => {
           icon: IntegrationIcon,
         },
       ],
-      (_integrationId, workspaceId) => enabledByWorkspace[workspaceId],
+      {
+        pluginIntegrationEnabled: (_integrationId, workspaceId) => enabledByWorkspace[workspaceId],
+      },
     );
 
     expect(integrationSlugsOf(disabled.children ?? [])).not.toContain("bitbucket");
@@ -326,6 +339,34 @@ describe("buildExecutorsBranch", () => {
       "/settings/executor/exec-1/profile/exec-profile-1",
     ]);
   });
+
+  it("makes a configured Kubernetes executor disclosure-only and links its profile root", () => {
+    const [executor] = buildExecutorsBranch([
+      {
+        id: "cluster/primary",
+        name: "Kubernetes",
+        type: "k8s",
+        profiles: [{ id: "profile/primary", name: "Primary" }],
+      },
+    ]);
+
+    expect(executor.href).toBeNull();
+    expect(hrefsOf(executor.children ?? [])).toEqual(["/settings/executors/profile%2Fprimary"]);
+  });
+
+  it("keeps the Kubernetes connection route reachable for an executor without profiles", () => {
+    const [executor] = buildExecutorsBranch([
+      {
+        id: "cluster/primary",
+        name: "Kubernetes",
+        type: "k8s",
+        profiles: [],
+      },
+    ]);
+
+    expect(executor.href).toBe("/settings/executors/k8s/cluster%2Fprimary");
+    expect(executor.children).toEqual([]);
+  });
 });
 
 describe("findActiveNodePath", () => {
@@ -378,6 +419,32 @@ describe("findActiveNodePath", () => {
     ]);
   });
 
+  it("reaches a Kubernetes profile through its disclosure-only executor", () => {
+    const kubernetesForest = [
+      buildBranchRoot(
+        {
+          href: EXECUTORS_HREF,
+          labelKey: "common:executors",
+          activePrefixes: ["/settings/executors/", "/settings/executor/"],
+        },
+        buildExecutorsBranch([
+          {
+            id: "cluster-primary",
+            name: "Kubernetes",
+            type: "k8s",
+            profiles: [{ id: "profile-primary", name: "Primary" }],
+          },
+        ]),
+      ),
+    ];
+
+    expect(findActiveNodePath(kubernetesForest, `${EXECUTORS_HREF}/profile-primary`)).toEqual([
+      settingsMenuRowKey(EXECUTORS_HREF),
+      "executor:cluster-primary",
+      "executor:cluster-primary:profile:profile-primary",
+    ]);
+  });
+
   it("stops at the row when the route has no node — the row stays active", () => {
     // The install catalogue is not an agent, and the flat profile spelling has
     // no executor to nest under. Both are the row's own pages.
@@ -385,7 +452,7 @@ describe("findActiveNodePath", () => {
       settingsMenuRowKey("/settings/agents"),
     ]);
     expect(findActiveNodePath(forest, "/settings/executors/exec-profile-1")).toEqual([
-      settingsMenuRowKey("/settings/executors"),
+      settingsMenuRowKey(EXECUTORS_HREF),
     ]);
   });
 
@@ -393,7 +460,7 @@ describe("findActiveNodePath", () => {
     // `/settings/executor/<id>` is not under `/settings/executors`, but the
     // Executors row owns it — and so must its branch.
     expect(findActiveNodePath(forest, "/settings/executor/exec-1")).toEqual([
-      settingsMenuRowKey("/settings/executors"),
+      settingsMenuRowKey(EXECUTORS_HREF),
       "executor:exec-1",
     ]);
   });

@@ -47,6 +47,7 @@
   "pasteLink": "Paste link...",
   "planFormattingToolbar": "Plan formatting toolbar",
   "pleaseTryAgain": "Please try again.",
+  "previewHtml": "Preview HTML",
   "previewMarkdown": "Preview markdown",
   "queuedForTheAgent": "Queued for the agent.",
   "reload": "Reload",
@@ -87,5 +88,6 @@
   "toggleCode": "Toggle code",
   "toggleWordWrap": "Toggle word wrap",
   "underlineCmdU": "Underline (Cmd+U)",
-  "failedToOpenEditor": "Failed to open editor"
+  "failedToOpenEditor": "Failed to open editor",
+  "downloadFile": "Download file"
 }

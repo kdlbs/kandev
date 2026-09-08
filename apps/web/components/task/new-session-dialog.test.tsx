@@ -37,6 +37,10 @@ const mockState = {
   agentProfiles: {
     items: [BASE_PROFILE],
   },
+  agentProfileRecentUse: {
+    loaded: true,
+    records: {},
+  },
   tasks: {
     activeSessionId: "session-1",
   },
@@ -249,6 +253,7 @@ describe("NewSessionDialog", () => {
   afterEach(() => {
     cleanup();
     mockState.agentProfiles.items = [BASE_PROFILE];
+    mockState.agentProfileRecentUse = { loaded: true, records: {} };
     mockExecutorProfile = null;
     mockAgentSelectorValue = undefined;
     mockAgentSelectorOnChange = undefined;
@@ -320,6 +325,72 @@ describe("NewSessionDialog", () => {
     );
   });
 
+  it("uses the recent task-session profile as an explicit default", async () => {
+    const recentProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
+    mockState.agentProfiles.items = [BASE_PROFILE, recentProfile];
+    mockState.agentProfileRecentUse = {
+      loaded: true,
+      records: {
+        task_session: {
+          profileIds: [recentProfile.id],
+          revision: 1,
+          updatedAt: "2026-08-30T12:00:00Z",
+        },
+      },
+    };
+
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(recentProfile.id));
+    fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
+
+    await waitFor(() =>
+      expect(mockBuildStartRequest).toHaveBeenCalledWith(
+        "task-1",
+        recentProfile.id,
+        expect.objectContaining({ profileExplicit: true }),
+      ),
+    );
+  });
+
+  it("does not replace a manual profile choice when recent use changes", async () => {
+    const recentProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
+    const laterRecentProfile = { ...BASE_PROFILE, id: "profile-3", label: "Profile 3" };
+    mockState.agentProfiles.items = [BASE_PROFILE, recentProfile, laterRecentProfile];
+    mockState.agentProfileRecentUse = {
+      loaded: true,
+      records: {
+        task_session: {
+          profileIds: [recentProfile.id],
+          revision: 1,
+          updatedAt: "2026-08-30T12:00:00Z",
+        },
+      },
+    };
+    const { rerender } = render(
+      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+    );
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(recentProfile.id));
+    await act(async () => {
+      mockAgentSelectorOnChange?.(BASE_PROFILE.id);
+    });
+
+    mockState.agentProfileRecentUse = {
+      loaded: true,
+      records: {
+        task_session: {
+          profileIds: [laterRecentProfile.id],
+          revision: 2,
+          updatedAt: "2026-08-30T12:01:00Z",
+        },
+      },
+    };
+    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(BASE_PROFILE.id));
+  });
+
   it("marks a changed picker profile explicit", async () => {
     mockState.agentProfiles.items = [
       BASE_PROFILE,
@@ -369,7 +440,30 @@ describe("NewSessionDialog", () => {
     await waitFor(() => expect(mockAgentSelectorValue).toBe("profile-2"));
   });
 
-  it("does not keep an unhealthy profile selected during a local handoff", async () => {
+  it("resets a manual profile choice when it becomes incompatible", async () => {
+    const manualProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
+    const fallbackProfile = { ...BASE_PROFILE, id: "profile-3", label: "Profile 3" };
+    mockState.agentProfiles.items = [BASE_PROFILE, manualProfile, fallbackProfile];
+    const { rerender } = render(
+      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+    );
+
+    await act(async () => {
+      mockAgentSelectorOnChange?.(manualProfile.id);
+    });
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(manualProfile.id));
+
+    mockState.agentProfiles.items = [
+      BASE_PROFILE,
+      { ...manualProfile, enabled: false },
+      fallbackProfile,
+    ];
+    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(BASE_PROFILE.id));
+  });
+
+  it("uses an implicit fallback when a local handoff target is incompatible", async () => {
     mockExecutorProfile = {
       id: "executor-profile-1",
       name: "Local",
@@ -400,7 +494,7 @@ describe("NewSessionDialog", () => {
       expect(mockBuildStartRequest).toHaveBeenCalledWith(
         "task-1",
         "profile-1",
-        expect.objectContaining({ profileExplicit: true }),
+        expect.objectContaining({ profileExplicit: false }),
       ),
     );
   });

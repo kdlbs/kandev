@@ -56,9 +56,10 @@ place for dependency selection and future less-common options.
   advanced controls can be appended inside that region without adding another
   top-level row to the dialog. Do not add placeholder future controls in this
   change.
-- Show the disclosure only for an unstarted task in create mode, matching the
-  dependency selector's existing availability. Session mode, edit mode, and
-  started-task forms do not gain a new advanced-settings row.
+- Show the disclosure only for an unstarted task in create mode. Session mode,
+  edit mode, and started-task forms do not gain this advanced-settings row.
+  Edit-mode dependency behavior is owned by
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - Keep all new trigger copy localized through the task translation namespace.
 
 ## Interaction contract
@@ -85,7 +86,9 @@ place for dependency selection and future less-common options.
 - The row exposes `aria-expanded="true"`, and the expanded content is connected
   to it through the normal collapsible relationship.
 - Closing the section preserves every selected predecessor. Reopening it
-  reveals the existing selected title or localized count.
+  reveals the existing selected task's trigger label (its title, or
+  `#N · Title` when the task has a linked change-request number) or the
+  localized dependency count for multiple predecessors.
 - The selector's search-row info control continues to explain dependency wait
   behavior without changing the disclosure state or selection.
 
@@ -124,14 +127,16 @@ place for dependency selection and future less-common options.
 - **GIVEN** the expanded selector with no predecessors, **THEN** its trigger
   shows the existing `No dependency` label and dependency icon.
 - **GIVEN** a selected predecessor, **WHEN** the user collapses and reopens the
-  advanced section, **THEN** the selected task title or localized dependency
-  count remains visible in the selector and the form state is unchanged.
+  advanced section, **THEN** the selected task's trigger label (its title, its
+  `#N · Title` change-request form, or a localized dependency count for
+  multiple predecessors) remains visible in the selector and the form state is
+  unchanged.
 - **GIVEN** a workflow selector that is visible, hidden for a single workflow,
   or locked by a caller, **WHEN** the create dialog renders, **THEN** the
   workflow's existing behavior is preserved and the advanced dependency
   control remains available under the same create-mode rules.
 - **GIVEN** session mode, edit mode, or a started task, **WHEN** the form
-  renders, **THEN** no advanced-settings disclosure is added.
+  renders, **THEN** this create-only advanced-settings disclosure is absent.
 - **GIVEN** a mobile create dialog, **WHEN** the user taps the disclosure and
   opens the dependency picker, **THEN** the controls remain reachable, the
   picker is contained in the viewport, and the document has no horizontal
@@ -146,7 +151,7 @@ place for dependency selection and future less-common options.
   archived-task filtering, or automatic task-start behavior.
 - Changing the dependency selector's search, task icons, info help, or picker
   interaction except where needed to mount it inside the disclosure.
-- Adding dependency editing to task detail, Kanban card menus, or MCP.
+- Adding dependency editing as part of this advanced-settings refinement.
 - Adding or designing future advanced controls beyond the extensible content
   region.
 - Changing workflow, agent, executor, repository, or branch selector behavior.

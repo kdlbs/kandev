@@ -112,7 +112,7 @@ type PortConfig struct {
 // InstanceDefaults provides default values for new instances.
 // These can be overridden when creating an instance.
 type InstanceDefaults struct {
-	// Protocol for agent communication (acp, codex, mcp)
+	// Protocol for agent communication (acp)
 	Protocol agent.Protocol
 
 	// AgentCommand is the command to run the agent (e.g., "auggie --acp")
@@ -244,7 +244,8 @@ type InstanceConfig struct {
 	AssumeMcpHttp bool
 
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default), "config", and "office" select distinct tool surfaces.
+	// "task" (default), "task-title-pending", "config", "office", and
+	// "automation" select distinct tool surfaces.
 	McpMode string
 
 	// McpProviders limits task-mode review automation tools to attached providers.
@@ -252,6 +253,10 @@ type InstanceConfig struct {
 
 	// McpProfile is the backend-owned typed MCP tool profile.
 	McpProfile *mcpprofile.Context
+
+	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
+	// clients that append the injected server name to every tool.
+	NamespacesMCPToolsByServer bool
 
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
@@ -453,10 +458,10 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 
 	applyOverrides(cfg, overrides)
 
-	// Inject local kandev MCP server for MCP tunneling through the agent stream
-	// This ensures the kandev MCP server is available for protocols that read MCP config
-	// at startup time (e.g., Codex via -c flags). The MCP server uses the agent stream
-	// WebSocket connection (bidirectional) to forward tool calls to the backend.
+	// Inject local kandev MCP server for MCP tunneling through the agent stream.
+	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
+	// The MCP server uses the agent stream WebSocket connection (bidirectional)
+	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
 	}
@@ -524,6 +529,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		profileContext := *overrides.McpProfile
 		cfg.McpProfile = &profileContext
 	}
+	if overrides.NamespacesMCPToolsByServer {
+		cfg.NamespacesMCPToolsByServer = true
+	}
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
@@ -566,31 +574,32 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID               string
-	Protocol                 agent.Protocol
-	AgentCommand             string
-	WorkDir                  string
-	AutoStart                *bool
-	Env                      []string
-	AutoApprovePermissions   *bool
-	ApprovalPolicy           string
-	AgentType                string
-	McpServers               []McpServerConfig
-	SessionID                string
-	TaskID                   string
-	DisableAskQuestion       bool
-	AssumeMcpSse             bool
-	AssumeMcpHttp            bool
-	McpMode                  string
-	McpProviders             []string
-	McpProfile               *mcpprofile.Context
-	RequiresProcessKill      bool
-	StripEnv                 []string
-	BaseBranches             map[string]string
-	ComparisonTargets        map[string]models.ComparisonTarget
-	RemoteContributions      map[string]models.RemoteContribution
-	ContributionDestinations map[string]models.ContributionDestination
-	WorkspaceSourceRoots     []string
+	InstanceID                 string
+	Protocol                   agent.Protocol
+	AgentCommand               string
+	WorkDir                    string
+	AutoStart                  *bool
+	Env                        []string
+	AutoApprovePermissions     *bool
+	ApprovalPolicy             string
+	AgentType                  string
+	McpServers                 []McpServerConfig
+	SessionID                  string
+	TaskID                     string
+	DisableAskQuestion         bool
+	AssumeMcpSse               bool
+	AssumeMcpHttp              bool
+	McpMode                    string
+	McpProviders               []string
+	McpProfile                 *mcpprofile.Context
+	NamespacesMCPToolsByServer bool
+	RequiresProcessKill        bool
+	StripEnv                   []string
+	BaseBranches               map[string]string
+	ComparisonTargets          map[string]models.ComparisonTarget
+	RemoteContributions        map[string]models.RemoteContribution
+	ContributionDestinations   map[string]models.ContributionDestination
+	WorkspaceSourceRoots       []string
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

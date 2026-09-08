@@ -293,7 +293,7 @@ Survives a kandev process restart: all `agent_wakeup_requests` rows including `q
 
 Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The unstarted-task recovery sweep suppresses duplicates with its `NOT EXISTS` check on `runs`: any queued, claimed, or finished run of any age blocks redispatch, while failed and cancelled runs do not.
 
-Retention: idempotency-key dedup window 24 hours; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) drops missed routine ticks beyond it (not recorded individually).
+Retention: the idempotency lookup window is 24 hours, while persisted idempotency keys remain unique; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) drops missed routine ticks beyond it (not recorded individually).
 
 The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and resumes processing them.
 

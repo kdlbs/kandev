@@ -4,6 +4,7 @@ import {
   computeCanConnect,
   computeTerminalPaneState,
   isEnvironmentEnded,
+  resolveTouchScrollEnabled,
   shouldGuardPassthroughEscape,
 } from "./passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
@@ -57,6 +58,26 @@ describe("shouldGuardPassthroughEscape", () => {
 describe("computeCanConnect", () => {
   it("lets the backend wait for an agent passthrough session that is not cached as ready", () => {
     expect(computeCanConnect("agent", "session-1", "session-1")).toBe(true);
+  });
+});
+
+describe("resolveTouchScrollEnabled", () => {
+  it("enables shell terminals by default for a coarse pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", false)).toBe(true);
+  });
+
+  it("keeps the custom handler disabled for a fine pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", true, true)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", true, true)).toBe(false);
+  });
+
+  it("keeps an explicit coarse-pointer opt-out", () => {
+    expect(resolveTouchScrollEnabled("shell", false, false)).toBe(false);
+  });
+
+  it("does not opt agent terminals in unless their caller requests it", () => {
+    expect(resolveTouchScrollEnabled("agent", false)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", false, true)).toBe(true);
   });
 });
 

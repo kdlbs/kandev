@@ -33,6 +33,9 @@ func wsDeleteWithActiveSessionCheck(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := deleteFn(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		log.Error("failed to delete "+resourceName, zap.Error(err))
 		if errors.Is(err, service.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, resourceName+" is used by an active agent session", nil)

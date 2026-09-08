@@ -445,6 +445,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 	assert.Contains(t, tools, "get_task_pr_automation_kandev")
 	assert.Contains(t, tools, "update_task_pr_automation_kandev")
+	assert.Contains(t, tools, "report_pr_auto_fix_outcome_kandev")
 	assert.Contains(t, tools, "get_diagnostic_bundle_kandev")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.Contains(t, tools, "update_task_mr_automation_kandev")
@@ -496,6 +497,30 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_task_state_kandev")
 	assert.NotContains(t, tools, "delete_workflow_step_kandev")
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
+}
+
+// TestPlanWriteTools_DescribeContentCeiling pins
+// AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-002.5: both plan write tools state the
+// byte ceiling in their registered description, so a caller can size its
+// document before its first write.
+func TestPlanWriteTools_DescribeContentCeiling(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, s)
+
+	tools := s.mcpServer.ListTools()
+	for _, name := range []string{"create_task_plan_kandev", "update_task_plan_kandev"} {
+		tool, ok := tools[name]
+		require.Truef(t, ok, "%s not registered", name)
+		contentSchema, ok := tool.Tool.InputSchema.Properties["content"].(map[string]any)
+		require.Truef(t, ok, "%s content property is not a JSON schema object", name)
+		description, ok := contentSchema["description"].(string)
+		require.Truef(t, ok, "%s content property has no description", name)
+		assert.Containsf(t, description, "262,144", "%s content property does not state the byte ceiling", name)
+	}
 }
 
 func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
@@ -658,6 +683,7 @@ func TestServerModeTask_ProviderMembership(t *testing.T) {
 			tools := getRegisteredToolNames(s)
 			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantPR, containsTool(tools, "report_pr_auto_fix_outcome_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
 			assert.Contains(t, tools, "stop_task_kandev")
@@ -894,11 +920,11 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
 	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
-	// list_task_sessions + PR automation + MR automation) + 1 add_branch_to_task +
+	// list_task_sessions + PR automation + MR automation + PR auto-fix outcome) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
-	// + 2 task-dependency (add/remove) + 1 rich-output = 38.
+	// + 2 task-dependency (add/remove) + 1 rich-output = 39.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -909,7 +935,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 38, len(tools))
+	assert.Equal(t, 39, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

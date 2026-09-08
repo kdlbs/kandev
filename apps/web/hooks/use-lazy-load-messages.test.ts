@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Message } from "@/lib/types/http";
 const listTaskSessionMessages = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", () => ({ listTaskSessionMessages }));
 
@@ -11,7 +12,12 @@ const storeMock = vi.hoisted(() => ({
     isLoadingMore: false,
   },
   prepended: [] as Array<{ id: string }>,
-  bySession: [] as Array<{ id: string; author_type?: string; prompt_index?: number }>,
+  bySession: [] as Array<{
+    id: string;
+    author_type?: string;
+    prompt_index?: number;
+    type?: Message["type"];
+  }>,
   setMessagesMetadata: vi.fn(),
 }));
 
@@ -60,7 +66,12 @@ function wireResponse(ids: string[], hasMore: boolean) {
 }
 
 function wireTypedResponse(
-  entries: Array<{ id: string; author_type?: string; prompt_index?: number }>,
+  entries: Array<{
+    id: string;
+    author_type?: string;
+    prompt_index?: number;
+    type?: Message["type"];
+  }>,
   hasMore: boolean,
 ) {
   return {
@@ -68,6 +79,7 @@ function wireTypedResponse(
       id: entry.id,
       author_type: entry.author_type ?? "agent",
       prompt_index: entry.prompt_index,
+      type: entry.type,
       created_at: "2026-01-01T00:00:00.000000Z",
     })),
     has_more: hasMore,
@@ -284,5 +296,171 @@ describe("useLazyLoadMessages minUserPromptsPerLoad", () => {
     });
 
     expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useLazyLoadMessages minTextPartsPerLoad", () => {
+  // @covers AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13
+  it("continues past a raw page whose tool activity leaves the text target unmet", async () => {
+    const toolParts = Array.from({ length: 19 }, (_, index) => ({
+      id: `tool-${index}`,
+      type: "tool_call" as const,
+    }));
+    listTaskSessionMessages
+      .mockResolvedValueOnce(
+        wireTypedResponse([...toolParts, { id: "text-1", type: "message" }], true),
+      )
+      .mockResolvedValueOnce(
+        wireTypedResponse(
+          Array.from({ length: 19 }, (_, index) => ({
+            id: `text-${index + 2}`,
+            type: "content" as const,
+          })),
+          false,
+        ),
+      );
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not count live appended text toward the older-text target", async () => {
+    const firstPage = Promise.withResolvers<unknown>();
+    listTaskSessionMessages
+      .mockReturnValueOnce(firstPage.promise)
+      .mockResolvedValueOnce(
+        wireTypedResponse([{ id: "twentieth-older-text", type: "message" }], false),
+      );
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    const loadPromise = result.current.loadMore();
+    storeMock.bySession = [{ id: "live-text", type: "message" }];
+    await act(async () => {
+      firstPage.resolve(
+        wireTypedResponse(
+          Array.from({ length: 19 }, (_, index) => ({
+            id: `older-text-${index}`,
+            type: "message" as const,
+          })),
+          true,
+        ),
+      );
+      await loadPromise;
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts message, content, and legacy rows but excludes other activity", async () => {
+    listTaskSessionMessages
+      .mockResolvedValueOnce(
+        wireTypedResponse(
+          [
+            { id: "message", type: "message" },
+            { id: "content", type: "content" },
+            { id: "legacy" },
+            { id: "thinking", type: "thinking" },
+          ],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(wireTypedResponse([{ id: "fourth-text", type: "message" }], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 4 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps loading true across every page in an accumulated batch", async () => {
+    const firstPage = Promise.withResolvers<unknown>();
+    const secondPage = Promise.withResolvers<unknown>();
+    listTaskSessionMessages
+      .mockReturnValueOnce(firstPage.promise)
+      .mockReturnValueOnce(secondPage.promise);
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 2 }));
+
+    let loadPromise!: Promise<number>;
+    act(() => {
+      loadPromise = result.current.loadMore();
+    });
+    expect(result.current.isLoadingMore).toBe(true);
+
+    await act(async () => {
+      firstPage.resolve(wireTypedResponse([{ id: "first", type: "message" }], true));
+      await vi.waitFor(() => expect(listTaskSessionMessages).toHaveBeenCalledTimes(2));
+    });
+    expect(result.current.isLoadingMore).toBe(true);
+
+    await act(async () => {
+      secondPage.resolve(wireTypedResponse([{ id: "second", type: "message" }], false));
+      await loadPromise;
+    });
+    expect(result.current.isLoadingMore).toBe(false);
+  });
+});
+
+describe("useLazyLoadMessages minTextPartsPerLoad stops", () => {
+  it("stops at the first prompt when the text target remains unmet", async () => {
+    listTaskSessionMessages
+      .mockResolvedValueOnce(
+        wireTypedResponse(
+          [{ id: "first-prompt", author_type: "user", prompt_index: 1, type: "message" }],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(wireTypedResponse([{ id: "hidden", type: "message" }], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops when raw history is exhausted before the text target", async () => {
+    listTaskSessionMessages.mockResolvedValueOnce(
+      wireTypedResponse([{ id: "only-text", type: "message" }], false),
+    );
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after a zero-result page before the text target", async () => {
+    listTaskSessionMessages.mockResolvedValueOnce(wireTypedResponse([], true));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at the page safety bound when activity never advances the target", async () => {
+    for (let index = 0; index < 11; index += 1) {
+      listTaskSessionMessages.mockResolvedValueOnce(
+        wireTypedResponse([{ id: `tool-${index}`, type: "tool_call" }], true),
+      );
+    }
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(10);
   });
 });

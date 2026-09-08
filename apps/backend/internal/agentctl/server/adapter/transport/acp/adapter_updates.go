@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const acpUserRole = "user"
+
 // notifWork is the item type carried on notifQueue. notif is populated for a
 // real SDK notification (the common case); sync identifies a barrier and may
 // carry afterBarrier state finalization. The worker closes sync after the
@@ -170,14 +172,16 @@ func (a *Adapter) handleACPUpdate(
 	sessionID := string(n.SessionId)
 
 	suppressed := a.dialect.suppresses(n)
+	handled := suppressed
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
-		if event != nil && a.observeCodexProviderEvidence(promptGeneration, event) {
-			// Once the explicit Codex system-error marker has been observed,
-			// suppress the provider's explanatory assistant chunk. The adapter
-			// emits one normalized error after the prompt barrier instead.
+		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
+			a.observeCursorRetriableEvidence(promptGeneration, event)) {
+			// Suppress provider control/evidence chunks. The adapter emits one
+			// normalized error after the prompt barrier instead.
 			event = nil
+			handled = true
 		}
 		if n.Update.UsageUpdate != nil {
 			lifecycleEvent := usageLifecycleEvent(
@@ -220,7 +224,7 @@ func (a *Adapter) handleACPUpdate(
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
 		a.maybeScheduleAsyncTurnComplete(*event)
-	} else if !suppressed {
+	} else if !handled {
 		if updateJSON, err := json.Marshal(n.Update); err == nil {
 			a.logger.Warn("unhandled ACP session notification",
 				zap.String("session_id", sessionID),
@@ -232,6 +236,38 @@ func (a *Adapter) handleACPUpdate(
 		if supplemental := a.emitDialectContextWindow(sessionID, n.Meta); supplemental != nil {
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
+	}
+}
+
+func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event *AgentEvent) bool {
+	if a.agentID != acpcompat.CursorAgentID || event == nil || promptGeneration == 0 {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole &&
+		isCursorRetriableStreamReset(event.Text) {
+		turn.setCursorRetriable()
+		return true
+	}
+	if cursorProviderProgress(event) {
+		turn.clearCursorRetriable()
+	}
+	return false
+}
+
+func cursorProviderProgress(event *AgentEvent) bool {
+	switch event.Type {
+	case streams.EventTypeMessageChunk:
+		return event.Role != acpUserRole && strings.TrimSpace(event.Text) != ""
+	case streams.EventTypeReasoning:
+		return strings.TrimSpace(event.ReasoningText) != ""
+	case streams.EventTypeToolCall:
+		return event.ToolCallID != ""
+	default:
+		return false
 	}
 }
 
@@ -307,7 +343,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertMessageChunkWithProtocolID(
 			sessionID,
 			u.UserMessageChunk.Content,
-			"user",
+			acpUserRole,
 			derefStr(u.UserMessageChunk.MessageId),
 		)
 
@@ -572,7 +608,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 	}
 
 	// Only set Role for user messages (assistant is the default)
-	if role == "user" {
+	if role == acpUserRole {
 		event.Role = role
 	}
 

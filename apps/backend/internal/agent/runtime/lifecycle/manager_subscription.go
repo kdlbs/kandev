@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // WorkspacePollMode mirrors process.PollMode for the lifecycle layer. Defined
@@ -76,12 +74,16 @@ type workspacePollAggregator struct {
 	// Last-write-wins queue: pendingPush + pushInFlight serialize per-workspace HTTP pushes so order matches enqueue.
 	pendingPush  map[string]workspacePushTarget
 	pushInFlight map[string]bool
+	// dirtyPush records a desired mode whose last RPC failed. The next
+	// contribution event retries it even when the effective mode is unchanged.
+	dirtyPush map[string]bool
 }
 
-// workspacePushTarget bundles the queued mode and the agentctl client captured at enqueue time.
+// workspacePushTarget bundles the queued mode and execution resolved at enqueue time.
+// The worker pins that execution's current client only while issuing the RPC.
 type workspacePushTarget struct {
-	mode   WorkspacePollMode
-	client *agentctl.Client
+	mode      WorkspacePollMode
+	execution *AgentExecution
 }
 
 // newWorkspacePollAggregator wires an aggregator to the lifecycle manager.
@@ -96,6 +98,7 @@ func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 		runtimeWorkspaceBySession: make(map[string]string),
 		pendingPush:               make(map[string]workspacePushTarget),
 		pushInFlight:              make(map[string]bool),
+		dirtyPush:                 make(map[string]bool),
 	}
 }
 
@@ -241,16 +244,18 @@ func (a *workspacePollAggregator) effectiveModeLocked(workspacePath string) Work
 // to retry a mode that may have been sent before agentctl accepted requests.
 func (a *workspacePollAggregator) applyEffectiveModeLocked(workspacePath string, effective WorkspacePollMode, force bool) bool {
 	prev, hadPrev := a.lastPushed[workspacePath]
-	shouldPush := force || !hadPrev || prev != effective
-	if !force && !hadPrev && effective == WorkspacePollModePaused {
+	shouldPush := force || a.dirtyPush[workspacePath] || !hadPrev || prev != effective
+	if !force && !hadPrev && effective == WorkspacePollModePaused && !a.dirtyPush[workspacePath] {
 		return false
 	}
 	if effective == WorkspacePollModePaused {
 		delete(a.lastPushed, workspacePath)
-	} else {
-		a.lastPushed[workspacePath] = effective
+		// Keep the mode map bounded, but still report a transition from an
+		// already-managed mode so pushAsync delivers the paused state.
+		return shouldPush
 	}
-	return shouldPush && effective != WorkspacePollModePaused
+	a.lastPushed[workspacePath] = effective
+	return shouldPush
 }
 
 // recordAndCompute updates the per-session mode for the given workspace and
@@ -288,12 +293,13 @@ func (a *workspacePollAggregator) recordRuntimeAndCompute(sessionID string, acti
 
 // pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
 func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspacePath string, mode WorkspacePollMode) {
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return
 	}
+	releaseClient()
 	a.mu.Lock()
-	a.pendingPush[workspacePath] = workspacePushTarget{mode: mode, client: client}
+	a.pendingPush[workspacePath] = workspacePushTarget{mode: mode, execution: execution}
 	if a.pushInFlight[workspacePath] {
 		a.mu.Unlock()
 		return
@@ -316,15 +322,27 @@ func (a *workspacePollAggregator) pushLoop(workspacePath string) {
 		delete(a.pendingPush, workspacePath)
 		a.mu.Unlock()
 
+		client, releaseClient := target.execution.AcquireAgentCtlClient()
+		if client == nil {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), pushPollModeTimeout)
-		err := target.client.SetWorkspacePollMode(ctx, string(target.mode))
+		err := client.SetWorkspacePollMode(ctx, string(target.mode))
 		cancel()
+		releaseClient()
 		if err != nil {
+			a.mu.Lock()
+			a.dirtyPush[workspacePath] = true
+			a.mu.Unlock()
 			a.mgr.logger.Warn("failed to push workspace poll mode",
 				zap.String("workspace", workspacePath),
 				zap.String("mode", string(target.mode)),
 				zap.Error(err))
+			continue
 		}
+		a.mu.Lock()
+		delete(a.dirtyPush, workspacePath)
+		a.mu.Unlock()
 	}
 }
 

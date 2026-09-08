@@ -35,6 +35,10 @@ export type ActionConfirmPopoverProps = {
   onConfirm: () => void | Promise<void>;
 };
 
+export function isActionConfirmationTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-confirmation-boundary]") !== null;
+}
+
 /**
  * A non-modal confirmation surface for one anchored action.
  *
@@ -216,7 +220,12 @@ function ActionConfirmPopoverContent({
       <PopoverHeader>
         <PopoverTitle id={titleId}>{title}</PopoverTitle>
         {description ? (
-          <PopoverDescription id={descriptionId}>{description}</PopoverDescription>
+          <PopoverDescription
+            id={descriptionId}
+            className={size === "wide" ? "text-pretty" : undefined}
+          >
+            {description}
+          </PopoverDescription>
         ) : null}
       </PopoverHeader>
       <div className="flex justify-end gap-2">

@@ -3,6 +3,8 @@ import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { dispatchToPluginWsHandlers } from "@/lib/ws/plugin-bridge";
+import { toWebSocketRequestError } from "./request-error";
+export { WebSocketRequestError, type WebSocketRequestErrorDetails } from "./request-error";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -494,11 +496,7 @@ export class WebSocketClient {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingRequests.delete(msgId);
-    const errorMessage =
-      typeof payload === "object" && payload && "message" in payload
-        ? String((payload as { message?: string }).message)
-        : "WebSocket request failed";
-    pending.reject(new Error(errorMessage));
+    pending.reject(toWebSocketRequestError(payload));
   }
 
   private handleDisconnect(event: CloseEvent) {

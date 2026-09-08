@@ -163,6 +163,14 @@ describe("reviewFileKey", () => {
     const b = reviewFileKey({ path: "README.md", repository_name: "backend" });
     expect(a).not.toBe(b);
   });
+
+  it("keeps mixed layers distinct without colliding with repository keys", () => {
+    const staged = reviewFileKey({ path: "mixed.ts", change_layer: "staged" });
+    const repositoryFile = reviewFileKey({ path: "staged", repository_name: "mixed.ts" });
+
+    expect(staged).toBe(`mixed.ts${SEP}${SEP}staged`);
+    expect(staged).not.toBe(repositoryFile);
+  });
 });
 
 describe("resolvePRReviewRepositoryName", () => {
@@ -237,6 +245,20 @@ describe("splitReviewFileKey", () => {
     expect(splitReviewFileKey(`${SEP}${APP_PATH}`)).toEqual({
       repositoryName: "",
       path: APP_PATH,
+    });
+  });
+
+  it("round-trips a layer-qualified repository key", () => {
+    const key = reviewFileKey({
+      path: APP_PATH,
+      repository_name: "frontend",
+      change_layer: "unstaged",
+    });
+
+    expect(splitReviewFileKey(key)).toEqual({
+      repositoryName: "frontend",
+      path: APP_PATH,
+      changeLayer: "unstaged",
     });
   });
 

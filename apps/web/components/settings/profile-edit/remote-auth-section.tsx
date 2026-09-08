@@ -28,8 +28,8 @@ type AuthSectionProps = {
   selectedIds: Set<string>;
   baselineSelectedIds: Set<string>;
   onCredentialsChange: (ids: string[]) => void;
-  envSecretId: string | null;
-  baselineEnvSecretId: string | null;
+  agentEnvVars: Record<string, string | null>;
+  baselineAgentEnvVars: Record<string, string | null>;
   onMethodSecretChange: (methodId: string, secretId: string | null) => void;
   secrets: SecretListItem[];
   configBundles: AgentConfigBundle[];
@@ -44,8 +44,8 @@ export function AuthSection({
   selectedIds,
   baselineSelectedIds,
   onCredentialsChange,
-  envSecretId,
-  baselineEnvSecretId,
+  agentEnvVars,
+  baselineAgentEnvVars,
   onMethodSecretChange,
   secrets,
   configBundles,
@@ -55,18 +55,25 @@ export function AuthSection({
   isSSH,
 }: AuthSectionProps) {
   const methods = getSpecMethods(spec);
-  const envMethod = methods.find((m) => m.type === "env");
+  const envMethods = methods.filter((m) => m.type === "env");
+  const envMethodIds = new Set(envMethods.map((m) => m.method_id));
   const fileMethod = methods.find((m) => m.type === "files");
   const fileSelected = fileMethod ? selectedIds.has(fileMethod.method_id) : false;
-  const envSelected = Boolean(envMethod && (selectedIds.has(envMethod.method_id) || envSecretId));
   const baselineFileSelected = fileMethod ? baselineSelectedIds.has(fileMethod.method_id) : false;
-  const baselineEnvSelected = Boolean(
-    envMethod && (baselineSelectedIds.has(envMethod.method_id) || baselineEnvSecretId),
+  const isEnvSelected = (
+    m: RemoteAuthMethod,
+    ids: Set<string>,
+    envVars: Record<string, string | null>,
+  ) => ids.has(m.method_id) || Boolean(envVars[m.method_id]);
+  const anyEnvSelected = envMethods.some((m) => isEnvSelected(m, selectedIds, agentEnvVars));
+  const anyEnvHasSecret = envMethods.some((m) => Boolean(agentEnvVars[m.method_id]));
+  const envDirty = envMethods.some(
+    (m) =>
+      isEnvSelected(m, selectedIds, agentEnvVars) !==
+        isEnvSelected(m, baselineSelectedIds, baselineAgentEnvVars) ||
+      (agentEnvVars[m.method_id] ?? null) !== (baselineAgentEnvVars[m.method_id] ?? null),
   );
-  const isDirty =
-    fileSelected !== baselineFileSelected ||
-    envSelected !== baselineEnvSelected ||
-    envSecretId !== baselineEnvSecretId;
+  const isDirty = fileSelected !== baselineFileSelected || envDirty;
   const configIsDirty = configBundles.some(
     (bundle) => configBundleIds.includes(bundle.id) !== baselineConfigBundleIds.includes(bundle.id),
   );
@@ -74,7 +81,7 @@ export function AuthSection({
   const handleMethodToggle = (methodId: string, checked: boolean) => {
     const nextSelectedIds = new Set(selectedIds);
     setMethodSelected(nextSelectedIds, methodId, checked);
-    if (envMethod?.method_id === methodId && !checked) {
+    if (envMethodIds.has(methodId) && !checked) {
       onMethodSecretChange(methodId, null);
     }
     onCredentialsChange([...nextSelectedIds]);
@@ -88,8 +95,8 @@ export function AuthSection({
           <span className="font-medium text-sm">{spec.display_name}</span>
           <AuthStatusBadge
             fileSelected={fileSelected}
-            envSelected={envSelected}
-            hasSecret={!!envSecretId}
+            envSelected={anyEnvSelected}
+            hasSecret={anyEnvHasSecret}
           />
         </div>
       </AccordionTrigger>
@@ -97,17 +104,15 @@ export function AuthSection({
         <div className="space-y-3 text-sm">
           <AuthOptions
             fileMethod={fileMethod}
-            envMethod={envMethod}
+            envMethods={envMethods}
             fileSelected={fileSelected}
-            envSelected={envSelected}
             baselineFileSelected={baselineFileSelected}
-            baselineEnvSelected={baselineEnvSelected}
-            secretId={envSecretId}
-            baselineSecretId={baselineEnvSecretId}
+            agentEnvVars={agentEnvVars}
+            baselineAgentEnvVars={baselineAgentEnvVars}
+            selectedIds={selectedIds}
+            baselineSelectedIds={baselineSelectedIds}
             onMethodToggle={handleMethodToggle}
-            onSecretIdChange={(sid) => {
-              if (envMethod) onMethodSecretChange(envMethod.method_id, sid);
-            }}
+            onSecretIdChange={(methodId, sid) => onMethodSecretChange(methodId, sid)}
             secrets={secrets}
           />
           {configBundles.length > 0 && (
@@ -128,30 +133,31 @@ export function AuthSection({
 
 function AuthOptions({
   fileMethod,
-  envMethod,
+  envMethods,
   fileSelected,
-  envSelected,
   baselineFileSelected,
-  baselineEnvSelected,
-  secretId,
-  baselineSecretId,
+  agentEnvVars,
+  baselineAgentEnvVars,
+  selectedIds,
+  baselineSelectedIds,
   onMethodToggle,
   onSecretIdChange,
   secrets,
 }: {
   fileMethod?: RemoteAuthMethod;
-  envMethod?: RemoteAuthMethod;
+  envMethods: RemoteAuthMethod[];
   fileSelected: boolean;
-  envSelected: boolean;
   baselineFileSelected: boolean;
-  baselineEnvSelected: boolean;
-  secretId: string | null;
-  baselineSecretId: string | null;
+  agentEnvVars: Record<string, string | null>;
+  baselineAgentEnvVars: Record<string, string | null>;
+  selectedIds: Set<string>;
+  baselineSelectedIds: Set<string>;
   onMethodToggle: (methodId: string, checked: boolean) => void;
-  onSecretIdChange: (id: string | null) => void;
+  onSecretIdChange: (methodId: string, id: string | null) => void;
   secrets: SecretListItem[];
 }) {
   const { t } = useTranslation();
+  const showEnvVarInLabel = envMethods.length > 1;
   return (
     <div role="group" aria-label={t("executors:remoteAuthMethod")} className="grid gap-2">
       {fileMethod && (
@@ -163,18 +169,29 @@ function AuthOptions({
           onCheckedChange={(checked) => onMethodToggle(fileMethod.method_id, checked)}
         />
       )}
-      {envMethod?.env_var && (
-        <EnvOption
-          method={envMethod}
-          isSelected={envSelected}
-          isDirty={envSelected !== baselineEnvSelected || secretId !== baselineSecretId}
-          secretId={secretId}
-          baselineSecretId={baselineSecretId}
-          onSecretIdChange={onSecretIdChange}
-          secrets={secrets}
-          onCheckedChange={(checked) => onMethodToggle(envMethod.method_id, checked)}
-        />
-      )}
+      {envMethods
+        .filter((method) => method.env_var)
+        .map((method) => {
+          const secretId = agentEnvVars[method.method_id] ?? null;
+          const baselineSecretId = baselineAgentEnvVars[method.method_id] ?? null;
+          const isSelected = selectedIds.has(method.method_id) || Boolean(secretId);
+          const baselineSelected =
+            baselineSelectedIds.has(method.method_id) || Boolean(baselineSecretId);
+          return (
+            <EnvOption
+              key={method.method_id}
+              method={method}
+              isSelected={isSelected}
+              isDirty={isSelected !== baselineSelected || secretId !== baselineSecretId}
+              secretId={secretId}
+              baselineSecretId={baselineSecretId}
+              showEnvVarInLabel={showEnvVarInLabel}
+              onSecretIdChange={(sid) => onSecretIdChange(method.method_id, sid)}
+              secrets={secrets}
+              onCheckedChange={(checked) => onMethodToggle(method.method_id, checked)}
+            />
+          );
+        })}
     </div>
   );
 }
@@ -219,6 +236,7 @@ function EnvOption({
   isDirty,
   secretId,
   baselineSecretId,
+  showEnvVarInLabel,
   onSecretIdChange,
   secrets,
   onCheckedChange,
@@ -228,21 +246,25 @@ function EnvOption({
   isDirty: boolean;
   secretId: string | null;
   baselineSecretId: string | null;
+  showEnvVarInLabel: boolean;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
   onCheckedChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const label = showEnvVarInLabel
+    ? t("executors:provideSecretForEnvVar", { envVar: method.env_var })
+    : t("executors:provideSecret");
   return (
     <div>
       <AuthOption
         selected={isSelected}
         isDirty={isDirty}
         onCheckedChange={onCheckedChange}
-        label={t("executors:provideSecret")}
+        label={label}
       >
         <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{t("executors:provideSecret")}</span>
+          <span className="text-sm font-medium">{label}</span>
           <span className="text-xs text-muted-foreground">
             <Trans i18nKey="executors:setEnvVarViaStoredSecret" values={{ envVar: method.env_var }}>
               Set <code className="text-[11px] bg-muted px-1 rounded">{method.env_var}</code> via a

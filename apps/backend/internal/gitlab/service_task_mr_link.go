@@ -158,6 +158,11 @@ func bracketedHostname(hostname string) string {
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,
 // fetches the configured-host MR, and idempotently persists its association.
+// `repositoryID` is repositories.ID (or empty to auto-resolve the task's
+// single repository) — the same id space AssociatePRWithTask uses on the
+// GitHub side. A row id from task_repositories instead fails closed here
+// (ValidateTaskMRRepositoryIdentity / ResolveTaskMRRepository reject it)
+// rather than silently duplicating the association.
 func (s *Service) AssociateExistingMRByURL(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, mrURL string,

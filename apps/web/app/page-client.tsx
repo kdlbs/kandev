@@ -9,10 +9,10 @@ import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
-import { linkToTask, linkToTasks } from "@/lib/links";
+import { linkToTask, linkToTasks, linkToThreads } from "@/lib/links";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { isExplicitHomeDestination, resolveStartupTaskId } from "@/lib/startup-page";
-import { shouldRestoreHomeTaskListingView } from "@/lib/task-listing/view-preference";
+import { resolveHomeTaskListingRedirect } from "@/lib/task-listing/view-preference";
 import { useTranslation } from "react-i18next";
 
 type PageClientProps = {
@@ -66,9 +66,13 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
       return;
     }
     if (hasWorkflowFilter) return;
-    if (shouldRestoreHomeTaskListingView(preferredView, initialTaskId, initialSessionId)) {
-      router.replace(linkToTasks(workspaceId));
-    }
+    const routedView = resolveHomeTaskListingRedirect(
+      preferredView,
+      initialTaskId,
+      initialSessionId,
+    );
+    if (routedView === "list") router.replace(linkToTasks(workspaceId));
+    if (routedView === "threads") router.replace(linkToThreads(workspaceId));
   }, [
     hasWorkflowFilter,
     initialSessionId,

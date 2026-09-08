@@ -17,6 +17,10 @@ import (
 // reaches for a symbol defined only in the tagged one.
 
 func newMultiRepoStatusServer(t *testing.T) (*Server, []string) {
+	return newMultiRepoStatusServerWithAgentEnv(t, nil)
+}
+
+func newMultiRepoStatusServerWithAgentEnv(t *testing.T, agentEnv []string) (*Server, []string) {
 	t.Helper()
 	taskRoot := t.TempDir()
 	repoNames := []string{"alpha", "beta"}
@@ -24,7 +28,10 @@ func newMultiRepoStatusServer(t *testing.T) (*Server, []string) {
 		newStatusTestRepo(t, taskRoot, repo)
 	}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
-	cfg := &config.InstanceConfig{WorkDir: taskRoot}
+	cfg := &config.InstanceConfig{
+		WorkDir:  taskRoot,
+		AgentEnv: append([]string(nil), agentEnv...),
+	}
 	return NewServer(cfg, process.NewManager(cfg, log), nil, nil, log), repoNames
 }
 

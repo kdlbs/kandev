@@ -104,6 +104,8 @@ Each entry under `steps:`:
     agent_name: Claude Code
     model: claude-opus-4-7
     mode: default
+  profile_session_start_policy: reuse
+  profile_session_end_policy: complete
   events:
     # triggers — see "Triggers" below
 ```
@@ -120,11 +122,13 @@ Each entry under `steps:`:
 | `allow_manual_move` | bool | — | always emitted | Whether users can drag the task into this step manually. |
 | `auto_archive_after_hours` | int | no | omitted when `0` | Auto-archive a task this many hours after it lands in the step. `0` / omitted = never. |
 | `agent_profile` | object | no | omitted when none | Step-level agent profile, overriding the workflow default. See [Agent profiles](#agent-profiles). |
+| `profile_session_start_policy` | enum | no | `reuse` | When this destination step changes the effective agent profile, reuse the newest eligible nonterminal session for that profile, or use `new` to always start a fresh conversation. |
+| `profile_session_end_policy` | enum | no | `complete` | When this source step is left for a different profile, complete its session, or use `park` to stop the agent while keeping the conversation available. |
 
 > **Note:** `position`, `color`, `events`, and the three booleans carry no
 > `omitempty`, so they always appear in exported files (even when `false` or
 > empty). The `prompt`, `auto_archive_after_hours`, and `agent_profile` fields
-> are omitted when unset.
+> are omitted when unset. Session policies use their defaults when omitted.
 
 > **Not in the portable format:** office/Phase-2 step metadata — `stage_type`,
 > step participants (reviewers/approvers), and recorded decisions — is **not**
@@ -169,7 +173,7 @@ import/export:
 
 | Trigger | Allowed action `type`s | `config` |
 |---------|------------------------|----------|
-| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | the first three take no config; `set_session_mode` takes `mode` (the agent permission mode to apply, e.g. `acceptEdits`); `queue_run` / `queue_run_for_each_participant` use the same config keys as the office triggers (see [Office triggers](#office--phase-2-triggers-intended-format--see-caveat)) |
+| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | the first three take no config; `set_session_mode` takes `mode` (the agent permission mode to apply, e.g. `acceptEdits`); `queue_run` / `queue_run_for_each_participant` use the same config keys as the office triggers (see [Office / Phase-2 triggers](#office--phase-2-triggers)) |
 | `on_turn_start` | `move_to_next`, `move_to_previous`, `move_to_step` | `move_to_step` needs `step_position` |
 | `on_turn_complete` | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` | `move_to_step` needs `step_position` |
 | `on_exit` | `disable_plan_mode` | — |
@@ -215,7 +219,7 @@ through the conversion.
 > from this portable export format. Do not copy their `step_id:` form into a
 > portable import file — use `step_position:`.
 
-### Office / Phase-2 triggers (intended format — see caveat)
+### Office / Phase-2 triggers
 
 The seven event-driven "office" triggers use the generic action shape
 (`GenericAction`):
@@ -230,12 +234,17 @@ The seven event-driven "office" triggers use the generic action shape
 | `on_budget_alert` | A budget threshold is crossed. |
 | `on_agent_error` | The agent errors out. |
 
-Each holds a list of generic actions whose `type` is one of `queue_run`,
-`clear_decisions`, or `queue_run_for_each_participant`, with a free-form
-`config` map interpreted by the engine. Common keys: `target` (e.g. `primary`,
-`workspace.ceo_agent`), `task_id` (e.g. `this`), `reason`, and `role`.
+Each holds a list of generic actions whose `type` is one of `move_to_next`,
+`move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`,
+`clear_decisions`, or `queue_run_for_each_participant`. `queue_run` /
+`queue_run_for_each_participant` take a free-form `config` map interpreted by
+the engine; common keys are `target` (e.g. `primary`, `workspace.ceo_agent`),
+`task_id` (e.g. `this`), `reason`, and `role`. `move_to_step` takes
+`config.step_position` and is validated and remapped exactly like the four
+Kanban-era triggers above (see [`move_to_step` uses `step_position`, not
+`step_id`](#move_to_step-uses-step_position-not-step_id)).
 
-Intended shape:
+Example:
 
 ```yaml
 events:
@@ -246,23 +255,19 @@ events:
         task_id: this
         reason: task_comment
   on_children_completed:
-    - type: queue_run
+    - type: move_to_step
       config:
-        target: primary
-        task_id: this
-        reason: task_children_completed
+        step_position: 3
 ```
 
-> [!WARNING]
-> **These seven triggers do not round-trip today** (tracked by
-> [#1109](https://github.com/kdlbs/kandev/issues/1109)). The portable
-> conversion (`remapStepEvents` in `export.go`) only copies `on_enter`,
-> `on_turn_start`, `on_turn_complete`, and `on_exit`. As a result the office
-> triggers are **dropped on export** (they never appear in an exported file) and
-> **dropped on import** (if you hand-author them, they are parsed but discarded
-> before the step is persisted). The format above documents the *intended*
-> shape; until #1109 lands, office-style workflows will not survive a
-> round-trip. Coordinate with that fix before relying on it.
+These seven triggers round-trip through export and import (fixed by
+[#1109](https://github.com/kdlbs/kandev/issues/1109); the portable conversion
+in `export.go` now carries all eleven `StepEvents` fields, not just
+`on_enter`/`on_turn_start`/`on_turn_complete`/`on_exit`). What still does not
+round-trip is Office step *metadata* with no portable representation:
+`stage_type`, step participants (reviewers/approvers), recorded decisions,
+task data, and step history
+(see the note under [`StepPortable`](#stepportable)).
 
 ---
 

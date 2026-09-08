@@ -25,8 +25,9 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.4:** File and directory context items are visually distinguishable before send. Directory items do not attempt to open a file preview when selected.
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.5:** File-tree context items are ephemeral: they survive a reload and a failed send, and they are removed after the next successful send unless the user pins them through an existing context control.
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.6:** Sending the message, directly or after a busy-session send is queued, includes each selected path in the existing hidden context block and `context_files` message metadata so the agent is instructed to inspect the path and the sent user message records it. Metadata retains optional directory identity while remaining compatible with older `{ path, name }` entries.
-- **AC-UI-FILE-TREE-CHAT-CONTEXT-001.7:** On phone and coarse-pointer layouts, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
+- **AC-UI-FILE-TREE-CHAT-CONTEXT-001.7:** On phone, tablet, and coarse-pointer desktop-workbench compositions, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
 - **AC-UI-FILE-TREE-CHAT-CONTEXT-001.8:** All new visible labels and feedback use the existing localization catalogs.
+- **AC-UI-FILE-TREE-CHAT-CONTEXT-001.9:** File-tree rows shall retain compact single-line spacing in every responsive composition. A visible coarse-pointer action, including in the desktop workbench, shall not cause wrapping; long names shall truncate instead.
 
 ## Migrated source detail
 
@@ -42,7 +43,8 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - File and directory context items are visually distinguishable before send. Directory items do not attempt to open a file preview when selected.
 - File-tree context items are ephemeral: they survive a reload and a failed send, and they are removed after the next successful send unless the user pins them through an existing context control.
 - Sending the message, directly or after a busy-session send is queued, includes each selected path in the existing hidden context block and `context_files` message metadata so the agent is instructed to inspect the path and the sent user message records it. Metadata retains optional directory identity while remaining compatible with older `{ path, name }` entries.
-- On phone and coarse-pointer layouts, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
+- On phone, tablet, and coarse-pointer desktop-workbench compositions, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
+- File-tree rows retain compact single-line spacing in every responsive composition; visible coarse-pointer actions do not cause wrapping, and long names truncate instead.
 - All new visible labels and feedback use the existing localization catalogs.
 - Existing file opening, folder expansion, multi-selection, drag/drop, editor, rename, download, and delete behavior remains unchanged.
 

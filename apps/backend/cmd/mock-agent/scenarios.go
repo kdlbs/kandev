@@ -14,6 +14,12 @@ import (
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
 
+const (
+	savedPromptDeliveryScenario  = "saved-prompt-delivery"
+	savedPromptDeliveryResponse  = "SAVED_PROMPT_DELIVERED"
+	savedPromptDeliveryDirective = `e2e:saved_prompt_delivery("SAVED_PROMPT_DELIVERED")`
+)
+
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
 	"simple-message":          scenarioSimpleMessage,
@@ -47,6 +53,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"push-current-branch":     scenarioPushCurrentBranch,
 	"steer-fold-setup":        scenarioSteerFoldSetup,
 	"steer-defer-setup":       scenarioSteerDeferSetup,
+	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -96,6 +103,13 @@ func scenarioEmptyTurn(e *emitter) {
 	// must outlast the client's initial WS subscribe (especially on mobile,
 	// where a fast auto-start turn can finish before the chat subscribes).
 	fixedDelay(3000)
+}
+
+// scenarioSavedPromptDelivery emits the fixed response used by the Quick Chat
+// saved-prompt E2E test. The handler routes here only after it finds the exact
+// directive inside a backend-generated expansion block.
+func scenarioSavedPromptDelivery(e *emitter) {
+	e.text(savedPromptDeliveryResponse)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.

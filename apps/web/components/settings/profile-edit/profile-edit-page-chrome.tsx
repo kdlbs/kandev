@@ -98,7 +98,13 @@ export function ProfileHeader({
   );
 }
 
-export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
+export function ProfileFormActions({
+  onDelete,
+  disabled = false,
+}: {
+  onDelete: () => void;
+  disabled?: boolean;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   return (
@@ -107,6 +113,7 @@ export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
         variant="destructive"
         size="sm"
         onClick={onDelete}
+        disabled={disabled}
         className="min-h-11 cursor-pointer text-sm md:min-h-7 md:text-xs"
       >
         <IconTrash className="mr-1 h-4 w-4" />
@@ -173,7 +180,11 @@ export function DeleteProfileDialog({
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="min-h-11 cursor-pointer md:min-h-9"
+          >
             {t("common:cancel")}
           </Button>
           <Button
@@ -182,7 +193,7 @@ export function DeleteProfileDialog({
               onDelete({ removeRelatedDockerContainers: shouldRemoveRelatedContainers })
             }
             disabled={deleting}
-            className="cursor-pointer"
+            className="min-h-11 cursor-pointer md:min-h-9"
           >
             {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>

@@ -188,17 +188,46 @@ func RepositoryProvider(
 	}
 }
 
-// AgentctlProvider returns kandev agentctl-related placeholders.
+// AgentctlProviderOptions configures executor-specific agentctl placeholders.
+type AgentctlProviderOptions struct {
+	BinaryPath string
+	Start      bool
+}
+
+// AgentctlProvider returns the legacy agentctl placeholders used by existing
+// callers.
 func AgentctlProvider(agentctlPort int, workspacePath string) PlaceholderProvider {
+	return agentctlProvider(agentctlPort, workspacePath, "/usr/local/bin/agentctl", "agentctl")
+}
+
+// AgentctlProviderWithOptions returns agentctl placeholders for an
+// executor-visible binary path.
+func AgentctlProviderWithOptions(
+	agentctlPort int,
+	workspacePath string,
+	options AgentctlProviderOptions,
+) PlaceholderProvider {
+	startCommand := ""
+	if options.Start {
+		startCommand = options.BinaryPath
+	}
+	return agentctlProvider(agentctlPort, workspacePath, options.BinaryPath, startCommand)
+}
+
+func agentctlProvider(agentctlPort int, workspacePath, binaryPath, startCommand string) PlaceholderProvider {
 	return func() map[string]string {
 		portStr := fmt.Sprintf("%d", agentctlPort)
+		startScript := ""
+		if startCommand != "" {
+			startScript = fmt.Sprintf(
+				"nohup %s --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
+				shellQuote(startCommand), portStr, shellQuote(workspacePath),
+			)
+		}
 		return map[string]string{
 			"kandev.agentctl.port":    portStr,
-			"kandev.agentctl.install": "chmod +x /usr/local/bin/agentctl",
-			"kandev.agentctl.start": fmt.Sprintf(
-				"nohup agentctl --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
-				portStr, workspacePath,
-			),
+			"kandev.agentctl.install": "chmod +x " + shellQuote(binaryPath),
+			"kandev.agentctl.start":   startScript,
 		}
 	}
 }

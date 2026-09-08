@@ -169,7 +169,8 @@ func addAttachmentToClaim(selection *attachmentClaimSelection, attachment *model
 		selection.claimIDs = append(selection.claimIDs, id)
 		return nil
 	case models.AttachmentStateClaimed:
-		if attachment.TaskID != taskID || attachment.SessionID != sessionID {
+		if attachment.TaskID != taskID ||
+			(attachment.SessionID != "" && attachment.SessionID != sessionID) {
 			return models.ErrAttachmentClaimConflict
 		}
 		return nil

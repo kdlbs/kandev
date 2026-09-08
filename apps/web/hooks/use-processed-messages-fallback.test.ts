@@ -8,6 +8,8 @@ import {
 } from "@/lib/types/http";
 import { useProcessedMessages } from "./use-processed-messages";
 
+const TASK_DESCRIPTION = "task description";
+
 function makeMessage(id: string, authorType: "agent" | "user", content: string): Message {
   return {
     id,
@@ -24,7 +26,10 @@ describe("useProcessedMessages task description fallback", () => {
   it("keeps the task description before visible agent history", () => {
     const agentMessage = makeMessage("agent-1", "agent", "boot");
     const { result } = renderHook(() =>
-      useProcessedMessages([agentMessage], "t1", "s1", "task description"),
+      useProcessedMessages([agentMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: true,
+        hasOlderMessages: false,
+      }),
     );
 
     expect(result.current.allMessages.map((message) => message.id)).toEqual([
@@ -33,10 +38,37 @@ describe("useProcessedMessages task description fallback", () => {
     ]);
   });
 
+  it("does not synthesize a fallback while older history remains", () => {
+    const agentMessage = makeMessage("agent-1", "agent", "boot");
+    const { result } = renderHook(() =>
+      useProcessedMessages([agentMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: true,
+        hasOlderMessages: true,
+      }),
+    );
+
+    expect(result.current.allMessages.map((message) => message.id)).toEqual(["agent-1"]);
+  });
+
+  it("does not synthesize a fallback before history initializes", () => {
+    const agentMessage = makeMessage("agent-1", "agent", "boot");
+    const { result } = renderHook(() =>
+      useProcessedMessages([agentMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: false,
+        hasOlderMessages: false,
+      }),
+    );
+
+    expect(result.current.allMessages.map((message) => message.id)).toEqual(["agent-1"]);
+  });
+
   it("does not duplicate a visible stored user prompt", () => {
     const userMessage = makeMessage("user-1", "user", "stored prompt");
     const { result } = renderHook(() =>
-      useProcessedMessages([userMessage], "t1", "s1", "task description"),
+      useProcessedMessages([userMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: true,
+        hasOlderMessages: false,
+      }),
     );
 
     expect(result.current.allMessages.map((message) => message.id)).toEqual(["user-1"]);

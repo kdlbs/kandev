@@ -147,6 +147,9 @@ type TaskRepository interface {
 // exists. Implementations must return only server-authored identity data.
 type RemoteContributionService interface {
 	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	// Associate's repositoryID is repositories.ID — the repository_id COLUMN
+	// on the task's task_repositories row, not that row's own id. Callers
+	// must pass task.Repositories[i].RepositoryID, never .ID.
 	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
 }
 
@@ -302,12 +305,14 @@ type Handlers struct {
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
-	reviewService *service.ReviewService
-	reviewRunner  ReviewRunner
-	pluginSvc     *plugins.Service
+	reviewService      *service.ReviewService
+	reviewRunner       ReviewRunner
+	pluginSvc          *plugins.Service
+	canvasAuthoringSvc CanvasAuthoringService
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	taskPRAutoFixOutcome   TaskPRAutoFixOutcomeService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
@@ -324,6 +329,16 @@ type Handlers struct {
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
 	guardedTTYService  GuardedTTYExecutionService
+}
+
+func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
+	if h.handoffSvc == nil || taskID == "" {
+		return
+	}
+	if err := h.handoffSvc.ReleaseWorkspacePolicy(context.WithoutCancel(ctx), taskID, "create_rollback"); err != nil {
+		h.logger.Warn("rollback workspace membership cleanup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 // NewHandlers creates new MCP handlers.
@@ -431,6 +446,13 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
 }
 
+// SetCanvasAuthoringService wires the feature-gated, task-scoped canvas
+// authoring boundary. Leave it unset when canvas support is disabled so raw WS
+// canvas actions are not registered either.
+func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
+	h.canvasAuthoringSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -448,6 +470,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskPlanHandlers(d)
 	h.registerTaskQuestionHandlers(d)
 	h.registerReviewHandlers(d)
+	h.registerCanvasHandlers(d)
 }
 
 func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
@@ -462,6 +485,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPReportPRAutoFixOutcome, h.handleReportTaskPRAutoFixOutcome)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
@@ -903,6 +927,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		DeferredLaunch:         deferredLaunch,
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
+		WorkspacePolicy:        &workspacePolicy,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -941,28 +966,18 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("rollback delete failed after missing task repository",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
 		}
-		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
 			h.logger.Error("associate remote contribution; rolling back task creation",
 				zap.String("task_id", task.ID), zap.Error(err))
 			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
 				h.logger.Error("rollback delete failed after contribution association error",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
-		}
-	}
-
-	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach workspace policy: "+attachErr.Error(), nil)
 		}
 	}
 
@@ -1035,6 +1050,12 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		// A reference the caller supplied that does not resolve is a
+		// validation failure, not an internal one. Classifying it as
+		// INTERNAL_ERROR discarded err.Error() and left the caller with a
+		// bare "Failed to create task" naming neither the field nor the
+		// offending value — the cause reached the backend log and nowhere else.
+		errors.Is(err, service.ErrTaskReferenceNotFound),
 		isMCPWorkflowNotFoundError(err):
 		return ws.ErrorCodeValidation
 	default:
@@ -3787,7 +3808,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("task_id", taskID))
 
 	// Block until user responds or context is cancelled (agent MCP timeout).
-	// With MCP_TIMEOUT set to 2h for Claude Code, this will wait long enough.
+	// With MCP_TOOL_TIMEOUT set to 2h for Claude Code, this will wait long enough.
 	// If the agent times out, the entry is cleaned up and the event-based
 	// fallback in the orchestrator handles resuming with a new turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
@@ -4046,19 +4067,22 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -4081,18 +4105,29 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
+//
+// Mode validity is checked before anything else, ahead of PlanService's own
+// task-reach authorization: the tool's schema
+// already publishes the two accepted values, so rejecting an unrecognized
+// one discloses nothing about the target task. Both modes' content checks —
+// replace's "empty content" rejection and append's fragment validation — run
+// inside PlanService.UpdatePlan, after authorization, so a caller the
+// authorizer denies never learns anything about content validity for a task
+// it cannot reach.
 func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID    string `json:"task_id"`
 		Title     string `json:"title"`
 		Content   string `json:"content"`
 		CreatedBy string `json:"created_by"`
+		Mode      string `json:"mode"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.Content == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	mode, err := service.ParsePlanWriteMode(req.Mode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
 	createdBy := req.CreatedBy
@@ -4100,19 +4135,23 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: mode == service.PlanWriteModeReplace,
+		Mode:               mode,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

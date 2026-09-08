@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-MCP-SESSION-OBSERVABILITY-001
 created: 2026-07-30
-updated: 2026-08-18
+updated: 2026-08-30
 owners:
   - Kandev
 ---
@@ -56,7 +56,7 @@ turning absence into failure:
 | Configured   | The server exists in the selected profile or is Kandev's built-in task server.                                                                   |
 | Filtered     | Kandev deliberately omitted the server because the agent, executor policy, transport, or passthrough strategy could not expose it.               |
 | Delivered    | The server was included in ACP `session/new`, `session/load`, or `session/reset`, or was materialized into a passthrough CLI's effective config. |
-| Connected    | Kandev's in-session MCP endpoint observed that client connection initialize successfully.                                                        |
+| Connected    | Kandev's in-session MCP endpoint accepted the client's protocol. For a legacy client, initialize supplies this evidence.                         |
 | Tools loaded | Kandev's in-session endpoint served `tools/list` successfully to that connection.                                                                |
 | Used         | Kandev's in-session endpoint observed at least one tool call on that connection.                                                                 |
 | Failed       | Kandev received an explicit server-specific attachment error.                                                                                    |
@@ -81,9 +81,12 @@ from profile configuration, agent capability flags, a successful ACP
 - The report carries the backend-owned `task_id`, `session_id`, `execution_id`,
   `attachment_attempt_id`, `agent_id`, and `agent_profile_id`. It also records
   the provider's `acp_session_id` when available.
-- Each observed MCP transport client receives a connection ID. Connection
-  evidence is attributed to the agentctl instance's backend-owned task and
-  session identity, never to IDs supplied by the agent.
+- Each observed legacy MCP transport client receives a connection ID.
+  Connection evidence is attributed to the agentctl instance's backend-owned
+  task and session identity, never to IDs supplied by the agent.
+- Modern MCP requests are stateless. Their protocol, tool-list, and tool-call
+  evidence belongs to the current attachment attempt. Kandev does not invent a
+  connection ID and does not treat the end of an HTTP request as a disconnect.
 - Multiple agents inside one task remain distinct because they have distinct
   Kandev session IDs. Restarting one session creates a new execution report;
   evidence from the superseded execution cannot keep the current execution
@@ -104,7 +107,7 @@ Each attempt timeline is bounded and can contain these events:
 - server filtered, with a stable reason code;
 - server delivered;
 - agent session accepted;
-- MCP initialize observed;
+- MCP protocol accepted, including legacy initialize where applicable;
 - tools list observed, including tool count;
 - tool call observed, without tool arguments or result;
 - explicit attachment error;

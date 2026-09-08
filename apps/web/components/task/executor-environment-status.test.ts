@@ -4,6 +4,7 @@ import {
   resolveExecutorEnvironmentStatus,
 } from "./executor-environment-status";
 import type { ContainerLiveStatus, TaskEnvironment } from "@/lib/api/domains/task-environment-api";
+import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 
 const baseEnv: TaskEnvironment = {
   id: "env-1",
@@ -29,6 +30,27 @@ function container(overrides: Partial<ContainerLiveStatus>): ContainerLiveStatus
   };
 }
 
+function resolveKubernetesStatus(
+  session: KubernetesSession | null,
+  options: { loaded?: boolean; error?: string | null } = {},
+) {
+  return (
+    resolveExecutorEnvironmentStatus as unknown as (
+      env: TaskEnvironment,
+      container: ContainerLiveStatus | null,
+      kubernetes: {
+        session: KubernetesSession | null;
+        loaded: boolean;
+        error: string | null;
+      },
+    ) => ReturnType<typeof resolveExecutorEnvironmentStatus>
+  )({ ...baseEnv, executor_type: "k8s", status: "ready" }, null, {
+    session,
+    loaded: options.loaded ?? true,
+    error: options.error ?? null,
+  });
+}
+
 describe("resolveExecutorEnvironmentStatus", () => {
   it("uses live container state ahead of recorded environment status", () => {
     expect(
@@ -51,6 +73,45 @@ describe("resolveExecutorEnvironmentStatus", () => {
       label: "starting",
       tone: "warn",
     });
+  });
+
+  it("uses exact Kubernetes state instead of the recorded ready status", () => {
+    expect(
+      resolveKubernetesStatus({
+        session_id: "session-1",
+        task_id: "task-1",
+        pod_phase: "Running",
+        container_state: "running",
+        restarts: 0,
+      }),
+    ).toEqual({ label: "Running", tone: "running" });
+    expect(resolveKubernetesStatus(null)).toEqual({ label: "Unavailable", tone: "warn" });
+    expect(resolveKubernetesStatus(null, { error: "status request failed" })).toEqual({
+      label: "Error",
+      tone: "error",
+    });
+  });
+
+  it("prioritizes Kubernetes failure reason and pending state", () => {
+    expect(
+      resolveKubernetesStatus({
+        session_id: "session-1",
+        task_id: "task-1",
+        pod_phase: "Pending",
+        container_state: "waiting",
+        restarts: 0,
+      }),
+    ).toEqual({ label: "Waiting", tone: "warn" });
+    expect(
+      resolveKubernetesStatus({
+        session_id: "session-1",
+        task_id: "task-1",
+        pod_phase: "Failed",
+        container_state: "terminated",
+        restarts: 1,
+        failure_reason: "ImagePullBackOff",
+      }),
+    ).toEqual({ label: "ImagePullBackOff", tone: "error" });
   });
 });
 

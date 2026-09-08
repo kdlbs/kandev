@@ -27,20 +27,14 @@ Reviewers can inspect a diff in GitHub, but a large pull request still takes tim
 - **AC-UI-PR-WALKTHROUGH-001.6:** The configured workflow agent generates and renders the walkthrough for a non-draft same-repository pull request when it is opened, reopened, marked ready for review, or updated. OpenCode is the initial runner, but the skill and artifact contract do not depend on it. A maintainer can explicitly retrigger generation by adding the `generate-pr-walkthrough` label.
 - **AC-UI-PR-WALKTHROUGH-001.7:** The workflow gives each runner the same fixed prompt, prepared context, draft JSON path, renderer command, and final output paths. A provider change does not change this contract.
 - **AC-UI-PR-WALKTHROUGH-001.8:** Kandev CI uses `.pr-walkthrough/draft.json` as the provider-neutral draft path. Its renderer command invokes the script bundled under `.agents/skills/pr-walkthrough/scripts/`.
+- **AC-UI-PR-WALKTHROUGH-001.9:** After a walkthrough is publicly validated, its pull request callout shall use the exact validated URL for the object keyed by the first 12 lowercase hexadecimal characters of the published head SHA. A full-SHA URL shall not be emitted by current walkthrough automation.
+- **AC-UI-PR-WALKTHROUGH-001.10:** When Kandev automation changes a pull request description, it shall merge only its marker-owned section with the latest description, preserve other content and marker-owned sections, and report success only after its owned result is readable from GitHub.
+- **AC-UI-PR-WALKTHROUGH-001.11:** When a covered pull request description edit leaves an existing walkthrough callout with a stale or legacy URL and the current canonical walkthrough object is publicly available, reconciliation shall replace only that callout with the canonical URL. If the object is unavailable or the markers are malformed, reconciliation shall make no destructive description write and shall report the reason.
 
 ## Migrated source detail
 
-## Why
-
-Reviewers can inspect a diff in GitHub, but a large pull request still takes
-time to understand. Kandev should generate a visual explanation that gives a
-reviewer the change context, architecture, important code paths, risk, and
-review focus before they read the full diff.
-
-This increment generates the walkthrough HTML in CI and publishes the HTML to
-the dedicated Cloudflare R2 walkthrough bucket. The hosted file remains
-available after the pull request merges and expires through the bucket
-lifecycle policy.
+This generates the walkthrough HTML in CI and publishes the HTML to
+the dedicated Cloudflare R2 walkthrough bucket. Lifecycle controls retention.
 
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
@@ -48,11 +42,11 @@ lifecycle policy.
 [ADR-2026-08-22-pr-walkthrough-description-link](../../../decisions/2026-08-22-pr-walkthrough-description-link.md),
 [ADR-2026-08-23-pr-walkthrough-short-urls](../../../decisions/2026-08-23-pr-walkthrough-short-urls.md),
 [ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md),
+[ADR-2026-09-05-pr-walkthrough-description-integrity](../../../decisions/2026-09-05-pr-walkthrough-description-integrity.md),
 [ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md)
 
 **Implementation plans:**
-[Portable PR walkthrough runner fix](../../../plans/pr-walkthrough-portable-runner-fix/plan.md),
-[PR walkthrough runner reliability fix](../../../plans/pr-walkthrough-runner-reliability-fix/plan.md)
+[PR walkthrough description integrity fix](../../../plans/pr-walkthrough-description-integrity-fix/plan.md)
 
 ## What
 
@@ -95,7 +89,9 @@ lifecycle policy.
   `.agents/skills/pr-walkthrough/scripts/`.
 - Walkthrough automation lives in `.github/workflows/pr-walkthrough.yml` and
   is enabled independently with the `PR_WALKTHROUGH_ENABLED` repository
-  variable. It does not share the `OPENCODE_REVIEW_ENABLED` code-review gate.
+  variable. The trusted, non-generating repair path for edited descriptions is
+  in `.github/workflows/pr-walkthrough-reconcile.yml`. It does not share the
+  `OPENCODE_REVIEW_ENABLED` code-review gate.
 - The initial runner uses `opencode-go/muse-spark-1.2-contributor` and its
   built-in `high` reasoning variant. The workflow passes these values with the
   OpenCode 1.17.7 `--model` and `--variant` options.

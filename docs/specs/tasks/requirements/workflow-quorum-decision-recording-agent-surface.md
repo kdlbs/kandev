@@ -47,10 +47,24 @@ An Office participant can submit a validated verdict with a reason, and the resu
 - **AC-TASKS-QUORUM-RECORDING-001.3:** WHEN the caller is not a participant on the task with
   `decision_required = 1` for `reviewer` or `approver`, THE SYSTEM SHALL reject
   the call with a permission error and write no row.
-- **AC-TASKS-QUORUM-RECORDING-001.4:** WHEN the caller holds both `reviewer` and `approver`, THE SYSTEM
-  SHALL record the decision under `approver`, matching the existing
-  approver-wins precedence in `resolveDeciderRole`
-  (`office/dashboard/decisions.go`).
+- **AC-TASKS-QUORUM-RECORDING-001.4:** WHEN the caller holds both `reviewer` and `approver` seats at
+  the task's current `workflow_step_id`, THE SYSTEM SHALL record the decision
+  under `approver`. WHEN exactly one of those seats sits at the task's current
+  `workflow_step_id`, THE SYSTEM SHALL record the decision under that seat's
+  role and SHALL NOT apply approver-wins across steps. WHEN neither seat sits
+  at the task's current `workflow_step_id`, whether both seats share one
+  earlier step or the seats occupy different earlier steps, THE SYSTEM SHALL
+  record the decision under the role named by the current step's own
+  eligible automatic `on_turn_complete` `wait_for_quorum` guard, when that
+  step names exactly one role; only WHEN the current step names both roles,
+  names neither, or cannot be resolved SHALL approver-wins apply as the final
+  tiebreak.
+- **AC-TASKS-QUORUM-RECORDING-001.4a:** THE SYSTEM SHALL apply
+  AC-TASKS-QUORUM-RECORDING-001.4 to the agent decision surface only. The human decision path
+  resolves the role step-blind and retains unconditional approver-wins, so the
+  two surfaces MAY record a caller holding both roles under different roles for
+  the same task and step. This divergence is deliberate and is recorded here
+  rather than left implicit.
 - **AC-TASKS-QUORUM-RECORDING-001.5:** THE SYSTEM SHALL resolve the caller's role over the same
   participant population that AC-TASKS-QUORUM-SLATE-001.9 builds, not over rows scoped to the
   task's current step alone. `ListAllTaskParticipants` is step-scoped today, so

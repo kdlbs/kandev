@@ -184,7 +184,7 @@ export function AgentProfileDeleteConflictDialog({
         <AlertDialogDescription
           asChild
           data-testid="agent-profile-delete-conflict-body"
-          className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
+          className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
         >
           <div>
             <p>{t("agents:profileInUseIntro")}</p>
@@ -210,9 +210,9 @@ export function AgentProfileDeleteConflictDialog({
             />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
             {hasHardBlockers ? (
-              <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
+              <p>{t("agents:changeTierMappingsFirst")}</p>
             ) : (
-              <p className="mt-2">{t("agents:deleteAnywayConsequences")}</p>
+              <p>{t("agents:deleteAnywayConsequences")}</p>
             )}
           </div>
         </AlertDialogDescription>
@@ -242,9 +242,9 @@ function UtilityAgentConflictSection({
   const { t } = useTranslation();
   if (utilityAgents.length === 0) return null;
   return (
-    <div className="mt-2" data-testid="profile-conflict-utility-agents">
+    <div className="space-y-1" data-testid="profile-conflict-utility-agents">
       <p className="font-medium text-sm">{t("agents:conflictUtilityAgentsTitle")}</p>
-      <ul className="list-disc list-inside mt-1 space-y-0.5">
+      <ul className="list-disc list-inside space-y-0.5">
         {utilityAgents.map((agent) => (
           <li key={agent.id} className="text-sm">
             {agent.name || agent.id}
@@ -266,9 +266,9 @@ function SessionConflictSection({
 }) {
   if (sessions.length === 0) return null;
   return (
-    <div className="mt-2">
+    <div className="space-y-1">
       <p className="font-medium text-sm">{title}</p>
-      <ul className="list-disc list-inside mt-1 space-y-0.5">
+      <ul className="list-disc list-inside space-y-0.5">
         {sessions.map((t) => (
           <li key={t.task_id} className="text-sm">
             {t.task_title || fallback}
@@ -288,9 +288,9 @@ function WatcherConflictSection({
   const entries = Object.entries(watchersByKind);
   if (entries.length === 0) return null;
   return (
-    <div className="mt-2">
+    <div className="space-y-1">
       <p className="font-medium text-sm">{t("agents:conflictWatchersTitle")}</p>
-      <ul className="list-disc list-inside mt-1 space-y-0.5">
+      <ul className="list-disc list-inside space-y-0.5">
         {entries.map(([kind, items]) => (
           <li key={kind} className="text-sm">
             <span className="font-medium">
@@ -317,9 +317,9 @@ function AutomationConflictSection({
   const { t } = useTranslation();
   if (automations.length === 0) return null;
   return (
-    <div className="mt-2" data-testid="delete-conflict-automations">
+    <div className="space-y-1" data-testid="delete-conflict-automations">
       <p className="font-medium text-sm">{t("agents:conflictAutomationsTitle")}</p>
-      <ul className="list-disc list-inside mt-1 space-y-0.5">
+      <ul className="list-disc list-inside space-y-0.5">
         {automations.map((ref) => (
           <li key={ref.id} className="text-sm">
             <Trans
@@ -350,9 +350,9 @@ function RoutingTierConflictSection({
   const { t } = useTranslation();
   if (routingTiers.length === 0) return null;
   return (
-    <div className="mt-2">
+    <div className="space-y-1">
       <p className="font-medium text-sm">{t("agents:conflictTierMappingsTitle")}</p>
-      <ul className="list-disc list-inside mt-1 space-y-0.5">
+      <ul className="list-disc list-inside space-y-0.5">
         {routingTiers.map((ref) => (
           <li key={`${ref.workspace_id}-${ref.provider_id}-${ref.tier}`} className="text-sm">
             <Trans

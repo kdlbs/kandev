@@ -79,7 +79,9 @@ describe("PRMergedBanner", () => {
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
     expect(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM)).toBeTruthy();
-    expect(screen.getByText(/Are you sure you want to archive "Task One"\?/)).toBeTruthy();
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Archive [“"]?Task One[”"]?\./i,
+    );
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
   });
 
@@ -168,7 +170,9 @@ describe("PRMergedBanner", () => {
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
     expect(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM)).toBeTruthy();
-    expect(screen.getByText(/Are you sure you want to archive "this task"\?/)).toBeTruthy();
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Archive [“"]?this task[”"]?\./i,
+    );
   });
 });
 

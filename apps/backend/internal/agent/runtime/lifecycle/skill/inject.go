@@ -6,6 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // cleanKandevSkills removes every kandev-* directory from the agent's
@@ -34,21 +38,40 @@ func cleanKandevSkills(worktreePath, projectSkillDir string) error {
 // injectSkills performs a clean-slate injection of skills into a
 // worktree:
 //  1. Removes every kandev-* directory in the project skill dir.
-//  2. Writes each skill's SKILL.md under kandev-<slug>/.
+//  2. Writes each skill's SKILL.md under DirName(slug)/.
 //  3. Best-effort appends the kandev-* pattern to .git/info/exclude.
 //
 // Skills with invalid slugs are skipped silently — caller upstream
 // already validates user-facing input.
-func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
+//
+// DirName is not injective: an already-prefixed slug ("kandev-protocol")
+// and its unprefixed counterpart ("protocol") resolve to the same
+// directory. When two skills in this manifest collide that way, the
+// first one (in manifest order) claims the directory; every later
+// colliding skill is skipped and logged rather than silently
+// overwriting or mixing support files into the first skill's directory.
+func injectSkills(worktreePath, projectSkillDir string, skills []Skill, log *logger.Logger) error {
 	if err := cleanKandevSkills(worktreePath, projectSkillDir); err != nil {
 		return fmt.Errorf("clean kandev skills: %w", err)
 	}
 	skillsDir := filepath.Join(worktreePath, projectSkillDir)
+	claimed := make(map[string]string, len(skills))
 	for _, sk := range skills {
 		if !isValidSlug(sk.Slug) {
 			continue
 		}
-		dir := filepath.Join(skillsDir, "kandev-"+sk.Slug)
+		dirName := DirName(sk.Slug)
+		if owner, ok := claimed[dirName]; ok {
+			if log != nil {
+				log.Warn("skipping skill: directory name collides with an already-injected skill",
+					zap.String("slug", sk.Slug),
+					zap.String("collides_with_slug", owner),
+					zap.String("dir", dirName))
+			}
+			continue
+		}
+		claimed[dirName] = sk.Slug
+		dir := filepath.Join(skillsDir, dirName)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir skill %s: %w", sk.Slug, err)
 		}
@@ -150,12 +173,14 @@ func parentChainAllowsSkillWrite(absSkillDir, parent string) bool {
 	return true
 }
 
-// ensureGitExclude appends "<projectSkillDir>/kandev-*" to the
-// worktree's .git/info/exclude file so injected skill directories
-// never appear as dirty files in git status. Idempotent.
+// ensureGitExclude appends a "kandev-*" glob for the project skill
+// directory to the repository's info/exclude file so injected skill
+// directories never appear as dirty files in git status. Idempotent.
 //
-// Linked worktrees use a .git file pointing at the real gitdir; this
-// helper resolves both the directory and file forms.
+// The pattern is derived from the path git actually sees post-symlink
+// resolution (see gitExcludePattern), and the file it's written to is
+// resolved to the shared common gitdir (see resolveGitDir) so linked
+// worktrees don't write to a location git never reads.
 func ensureGitExclude(worktreePath, projectSkillDir string) error {
 	gitDir, err := resolveGitDir(worktreePath)
 	if err != nil {
@@ -166,7 +191,11 @@ func ensureGitExclude(worktreePath, projectSkillDir string) error {
 		return fmt.Errorf("mkdir info dir: %w", err)
 	}
 
-	pattern := projectSkillDir + "/kandev-*"
+	pattern, ok := gitExcludePattern(worktreePath, projectSkillDir)
+	if !ok {
+		return nil
+	}
+
 	if data, err := os.ReadFile(excludeFile); err == nil {
 		scanner := bufio.NewScanner(strings.NewReader(string(data)))
 		for scanner.Scan() {
@@ -185,10 +214,50 @@ func ensureGitExclude(worktreePath, projectSkillDir string) error {
 	return err
 }
 
-// resolveGitDir returns the actual git directory for a worktree path.
-// For a normal repository the .git directory is returned as-is. For a
-// linked worktree, .git is a file of the form "gitdir: /path/to/gitdir"
-// and the target path is returned.
+// gitExcludePattern derives the info/exclude glob for the project skill
+// directory as git actually sees it: relative to the worktree root,
+// after resolving symlinks (a symlinked projectSkillDir, e.g. this
+// repo's own ".claude/skills" -> "../.agents/skills", would otherwise
+// make the literal pattern never match, since writes through it land on
+// the resolved path).
+//
+// Falls back to the literal "<projectSkillDir>/kandev-*" when resolution
+// fails — e.g. the skill dir doesn't exist yet, which happens whenever
+// injectSkills is called with an empty skill list — so non-symlink
+// behaviour stays byte-identical to before this path existed. Returns
+// ok=false when the resolved target falls outside the worktree: nothing
+// there for git to exclude.
+func gitExcludePattern(worktreePath, projectSkillDir string) (string, bool) {
+	fallback := projectSkillDir + "/kandev-*"
+
+	resolvedWorktree, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		return fallback, true
+	}
+	resolvedSkillDir, err := filepath.EvalSymlinks(filepath.Join(worktreePath, projectSkillDir))
+	if err != nil {
+		return fallback, true
+	}
+
+	rel, err := filepath.Rel(resolvedWorktree, resolvedSkillDir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return filepath.ToSlash(rel) + "/kandev-*", true
+}
+
+// resolveGitDir returns the git directory whose info/exclude git will
+// actually read for a worktree path.
+//
+// For a normal repository, .git is a directory and is returned as-is.
+// For a linked worktree, .git is a file of the form
+// "gitdir: /path/to/repo/.git/worktrees/<name>". That per-worktree
+// gitdir has its own info/ subdirectory, but git does not read
+// info/exclude from it — it reads $GIT_COMMON_DIR/info/exclude, found
+// via the gitdir's "commondir" file. Resolve through that file so the
+// exclude pattern lands where git looks; without a commondir file (e.g.
+// a non-standard layout), fall back to the gitdir itself.
 func resolveGitDir(worktreePath string) (string, error) {
 	gitPath := filepath.Join(worktreePath, ".git")
 	info, err := os.Lstat(gitPath)
@@ -207,15 +276,48 @@ func resolveGitDir(worktreePath string) (string, error) {
 	if !strings.HasPrefix(line, prefix) {
 		return "", fmt.Errorf("unexpected .git file content: %q", line)
 	}
-	return strings.TrimPrefix(line, prefix), nil
+	return resolveCommonDir(strings.TrimPrefix(line, prefix)), nil
+}
+
+// resolveCommonDir returns the shared git common directory for a linked
+// worktree's per-worktree gitdir, read from its "commondir" file (its
+// contents are typically a relative path like "../.."). Returns gitDir
+// unchanged when no commondir file exists.
+func resolveCommonDir(gitDir string) string {
+	data, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return gitDir
+	}
+	commonDir := strings.TrimSpace(string(data))
+	if commonDir == "" {
+		return gitDir
+	}
+	if filepath.IsAbs(commonDir) {
+		return commonDir
+	}
+	return filepath.Join(gitDir, commonDir)
 }
 
 // SpritesProjectSkillPath returns the on-sprite path where a single
 // skill's SKILL.md must be uploaded for the given agent's project
 // skill dir. The sprite's CWD is always /workspace, so this is just
-// /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
+// /workspace/<projectSkillDir>/<DirName(slug)>/SKILL.md.
 func SpritesProjectSkillPath(projectSkillDir, slug string) string {
-	return "/workspace/" + projectSkillDir + "/kandev-" + slug + "/SKILL.md"
+	return "/workspace/" + projectSkillDir + "/" + DirName(slug) + "/SKILL.md"
+}
+
+// DirName returns the on-disk directory name for a skill slug within a
+// project skill directory. The "kandev-" prefix marks Kandev-owned
+// directories so cleanup can safely remove them without touching a
+// user's own skills (see cleanKandevSkills). Applying it is idempotent:
+// a slug that already carries the prefix (bundled system skills are
+// slugged "kandev-*" at source) is not prefixed a second time, which
+// would otherwise leave the skill unloadable under its declared name.
+func DirName(slug string) string {
+	if strings.HasPrefix(slug, "kandev-") {
+		return slug
+	}
+	return "kandev-" + slug
 }
 
 func renderSkillMarkdown(sk Skill) string {

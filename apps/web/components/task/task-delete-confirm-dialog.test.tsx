@@ -41,6 +41,7 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
 }
 
 const WARNING_TESTID = "still-working-warning";
+const DISCARD_CHECKBOX_TESTID = "delete-discard-worktree-checkbox";
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
@@ -49,6 +50,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskDeleteConfirmDialog", () => {
+  it("contains long confirmation content in a scrolling body with touch-safe actions", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="A task with a title that needs to wrap inside a phone confirmation surface"
+        taskId="task-1"
+        executorType="sprites"
+        isInFlight
+        confirmTestId="confirm"
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.className).toContain("max-h-[calc(100dvh-2rem)]");
+    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(dialog.className).toContain("overflow-hidden");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("min-h-0");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("space-y-3");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("overflow-y-auto");
+    expect(screen.getByTestId("confirm").className).toContain("min-h-11");
+    expect(screen.getByTestId("confirm").className).toContain("w-full");
+    expect(screen.getByTestId("confirm").getAttribute("data-variant")).toBe("destructive");
+  });
+
   it("hides the cascade checkbox when the task has no subtasks", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     const onConfirm = vi.fn();
@@ -65,8 +93,9 @@ describe("TaskDeleteConfirmDialog", () => {
     await waitFor(() => expect(mockGetSubtaskCount).toHaveBeenCalledWith("task-1"));
     expect(screen.queryByTestId("delete-cascade-checkbox")).toBeNull();
 
+    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: false });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
   });
 
   it("shows the cascade checkbox when the task has subtasks; defaults to unchecked", async () => {
@@ -85,8 +114,9 @@ describe("TaskDeleteConfirmDialog", () => {
     await screen.findByTestId("delete-cascade-checkbox");
     expect(screen.getByText(/Also delete 3 subtasks/i)).toBeTruthy();
 
+    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: false });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
   });
 
   it("propagates cascade=true when the user ticks the checkbox", async () => {
@@ -103,9 +133,10 @@ describe("TaskDeleteConfirmDialog", () => {
       />,
     );
     const checkbox = await screen.findByTestId("delete-cascade-checkbox");
+    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(checkbox);
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: true });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: true, discardWorktreeChanges: true });
   });
 
   it("sums subtask counts across taskIds for bulk delete", async () => {
@@ -126,7 +157,74 @@ describe("TaskDeleteConfirmDialog", () => {
   });
 });
 
+describe("TaskDeleteConfirmDialog discard consent", () => {
+  it("requires explicit discard consent for worktree cleanup", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    const onConfirm = vi.fn();
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={onConfirm}
+        confirmTestId="confirm"
+      />,
+    );
+
+    const discard = await screen.findByTestId(DISCARD_CHECKBOX_TESTID);
+    const confirm = screen.getByTestId("confirm") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fireEvent.click(discard);
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
+  });
+
+  it("shows discard consent when a cascade can include child worktrees", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 1 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Parent task"
+        taskId="task-1"
+        executorType="local"
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(await screen.findByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
+  });
+});
+
 describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
+  it("states the named delete outcome directly and separates cleanup effects", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Delete [“"]?My task[”"]?\. This action cannot be undone\./i,
+    );
+    expect(screen.getByTestId("task-cleanup-effects").tagName).toBe("UL");
+    expect(screen.getByTestId("task-cleanup-effects").querySelectorAll("li")).toHaveLength(2);
+    expect(screen.getByTestId("task-cleanup-notes").tagName).toBe("DIV");
+    expect(screen.queryByText(/Are you sure/i)).toBeNull();
+  });
+
   it("local reassures repo is untouched", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     renderDialog(
@@ -187,6 +285,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
       />,
     );
     expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
+    expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
   });
 });
 

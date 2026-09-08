@@ -254,54 +254,54 @@ task rejected at Approval and reworked, same seat, new review round.
 
 Given workspace, task, step and role:
 
-1. List the workspace's Office agents whose role is `ceo` and whose status is
-   neither `stopped` nor `pending_approval`, ordered by `created_at` then
-   identifier.
+1. List the workspace's Office agents whose agent role is in that role's pool
+   (`ceo` + `specialist` for reviewer, `ceo` alone otherwise, per the D-B
+   ruling, 2026-09-01) and whose status is neither `stopped` nor
+   `pending_approval`, ordered by `created_at` then identifier
+   (`AC-OFFICE-REVIEW-SEATS-002.1`). Both filters apply over the shared
+   listing's result, not a change to it, so other callers are unaffected
+   (`AC-OFFICE-REVIEW-SEATS-002.2`).
 2. If the list is empty, seat the task's runner, record the fallback
    provenance, and record self-review if the runner is the seated agent
    (`AC-OFFICE-REVIEW-SEATS-002.5`). If the runner does not resolve, write no
    seat and emit the unfillable signal (`AC-OFFICE-REVIEW-SEATS-002.6`).
 3. If the list holds one agent and it is the task's runner, seat it and record
-   self-review (`AC-OFFICE-REVIEW-SEATS-002.4`).
-4. If the list holds more than one agent and the first is the task's runner,
-   seat the second (`AC-OFFICE-REVIEW-SEATS-002.3`).
-5. Otherwise seat the first, recording the provenance as *eligible pool* rather
-   than *fallback* (`AC-OFFICE-REVIEW-SEATS-002.9`). This is the ordinary case,
-   and naming it is what makes the provenance counter's values exhaustive
-   rather than exceptional.
+   self-review (`AC-OFFICE-REVIEW-SEATS-002.4`) — including a one-`ceo`
+   workspace seating the same agent for both reviewer and approver, accepted
+   under the D-B ruling.
+4. If the list holds more than one agent, seat the first member that is
+   neither the runner nor already seated in another role on the task,
+   workflow-wide (`AC-OFFICE-REVIEW-SEATS-002.3`). Best-effort: a failed read
+   is non-fatal, and if every member is excluded, casting falls back to the
+   first member (second, if the first is the runner) as before. Self-review
+   is recorded either way.
+5. Otherwise (exactly one candidate, not the runner) seat it, recording the
+   provenance as *eligible pool* rather than *fallback*, and recording
+   self-review if it is already seated in another role on the task
+   (`AC-OFFICE-REVIEW-SEATS-002.9`). Disjoint from step 4's domain.
 
 **The runner resolver does not work on Postgres, and is repaired here.** Step 2
-is the only path that seats anyone in a CEO-less workspace, and in this card's
-scenario it is the path that runs: the task stands at `review`, its `runner`
-seat was written at `work`, and `review` declares no primary agent profile, so
-the resolver's first two tiers miss and the third decides. That third tier
-orders by `rowid`, which does not exist on Postgres, in a file that branches on
-the dialect elsewhere - so the call errors instead of returning an agent,
-routing to `AC-OFFICE-REVIEW-SEATS-002.6`: no seat, unfillable signal, task
-parked. The defect this capability exists to remove would survive on Postgres
-while every SQLite test passed.
+is the path that seats the task's runner when the eligible pool is empty. In
+this card's no-eligible-candidate scenario it runs: the task stands at
+`review`, its `runner` seat was written at `work`, and `review` declares no
+primary agent profile, so the resolver's
+first two tiers miss and the third decides. That tier orders by `rowid`,
+absent on Postgres, so the call errors instead of returning an agent, routing
+to `AC-OFFICE-REVIEW-SEATS-002.6`: no seat, unfillable signal, task parked -
+the defect this capability removes would survive on Postgres while every
+SQLite test passed.
 
-Swapping `rowid` for the table's `id` does not fix it: that column is a text
-identifier with no ordering meaning, so ordering by it is a random pick wearing
-a determinism costume, which `AC-OFFICE-REVIEW-SEATS-002.10` forbids. The table
-carries no timestamp, so **no existing column can answer "most recently
-written"**.
+Swapping `rowid` for `id` does not fix it: `id` is a text identifier with no
+ordering meaning, so ordering by it is a random pick, which
+`AC-OFFICE-REVIEW-SEATS-002.10` forbids, and the table carries no timestamp to
+order by instead.
 
-**Design position: the repair is in scope, and it is a column.** The migration
-*Persistence* already requires also adds a creation timestamp, and the third
-tier orders by it descending with `agent_profile_id` ascending as tiebreak - a
-named column and a named tiebreak, identical on both engines. Pre-existing rows
-backfill to one constant, so they are mutually tied and resolved by the
-tiebreak: still deterministic. Scoping the repair out was considered and
-rejected; it leaves this capability's only CEO-less path broken on one of two
-supported engines.
-
-**Where the status exclusion is applied.** `AC-OFFICE-REVIEW-SEATS-002.2`
-requires excluding `stopped` and `pending_approval` without changing any other
-caller of the agent listing. The exclusion is therefore applied in the caster,
-over the listing's result, not by adding a filter to the shared listing method
-or by changing its default. A shared listing whose behavior changes for
-everyone is how an unrelated Office surface silently loses agents.
+**Design position: the repair is in scope, and it is a column.** The
+migration *Persistence* already requires also adds a creation timestamp; the
+third tier orders by it descending, `agent_profile_id` ascending as tiebreak -
+identical on both engines. Pre-existing rows backfill to one constant, tied
+and resolved by the tiebreak. Scoping the repair out was rejected: it leaves
+this capability's only CEO-less path broken on one supported engine.
 
 ## Failure and recovery
 

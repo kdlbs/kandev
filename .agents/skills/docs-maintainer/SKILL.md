@@ -58,6 +58,37 @@ Skip public docs when the change is:
 8. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
 9. Note docs impact and the page's primary content type in the PR body.
 
+## Diagrams for Public Docs
+
+When a page explains architecture, lifecycle, data flow, state, trust
+boundaries, ownership, or a multi-step workflow, decide whether a visual
+teaches more than prose, a table, or bullets. If it does, use
+`/diagram-design` and load its
+`references/kandev-public-docs.md` integration guide.
+
+- Choose a semantic pattern first when behavior, state, ownership, trust, or
+  risk carries the meaning. Then choose and load the nearest visual-type
+  reference.
+- Use `doc-inline`, `balanced`, and `mixed` for normal docs-column figures
+  unless the page or source requires another output dial.
+- Author a self-contained HTML source, run the diagram self-check, geometry
+  check, and skin check, then export a reviewed local SVG. Use PNG only when a
+  raster fallback is required. Store the published image under
+  `docs/screenshots/` and reference it relatively.
+- If labels are dense at docs-column width, tighten the SVG viewBox and raise
+  the readable type ramp before publishing. Use a plain Markdown image so the
+  landing publisher copies it to `/docs/screenshots`; do not nest it inside a
+  Markdown link. Add a separate reference-style Markdown link targeting
+  `../../docs/screenshots/<file>.svg` so readers can open the full-size vector.
+- Give every image precise alt text and explain the diagram's essential result
+  in nearby prose. Use real Kandev names from authoritative source material.
+- For an existing Mermaid diagram, use the skill's Mermaid import workflow
+  before revising it. Redraw for quality instead of reproducing Mermaid's
+  automatic layout, and keep Mermaid only when the publication constraints
+  make it the better source.
+- Keep the diagram within its complexity budget. Split an overview from detail
+  when the reader needs more than one focused figure.
+
 ## Validation
 
 Run the checks relevant to your change:

@@ -4,7 +4,9 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
@@ -57,23 +59,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   }
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the picker → tab transition; the input is briefly
-  // disabled while the FE store catches up to the RUNNING session state.
-  //
-  // Race fix: `contenteditable="true"` was observed as a momentary flicker
-  // before the session settled into STARTING/RUNNING and flipped the input
-  // back to false. Callers then hit `editor.fill()` against a non-editable
-  // node and the test failed. Wait for the agent-status indicator to clear
-  // (STARTING/RUNNING both render a "Agent is …" status; IDLE renders none),
-  // then assert editability — by that point the input has reached its
-  // stable, ready state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("status", { name: /Agent is (starting|running)/ })).not.toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return dialog;
 }
 
@@ -752,5 +738,140 @@ test.describe("Queue affordance", () => {
     // Panel and chip both disappear once the queue is empty.
     await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 5_000 });
+  });
+});
+
+async function readQueuePreviewMetricsWithoutDisclosure(
+  preview: Locator,
+): Promise<{ clientHeight: number; scrollHeight: number }> {
+  return preview.evaluate((element) => {
+    const disclosure = element
+      .closest('[data-testid="queue-entry"]')
+      ?.querySelector<HTMLElement>('[data-testid="queue-entry-expand"]');
+    const previousDisplay = disclosure?.style.display;
+    try {
+      if (disclosure) disclosure.style.display = "none";
+      return {
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      };
+    } finally {
+      if (disclosure) disclosure.style.display = previousDisplay ?? "";
+    }
+  });
+}
+
+test.describe("Queued row controls", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10
+  test("adapts queued row controls to rendered overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const fixture = "adaptive-width-probe ".repeat(12).trim();
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Adaptive queued row controls",
+      { sleepSeconds: 60 },
+    );
+    await testPage.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(testPage.getByTestId("app-sidebar")).toHaveAttribute("data-collapsed", "true");
+    const chatMaximize = testPage
+      .locator(
+        '.dv-groupview:has([data-testid^="session-tab-"]) .dv-tabs-and-actions-container [data-testid="dockview-maximize-btn"]',
+      )
+      .first();
+    await expect(chatMaximize).toBeVisible();
+    await chatMaximize.click();
+    const autoRunResponse = await apiClient.setQueueAutoRun(sessionId, false);
+    expect(autoRunResponse).toMatchObject({ session_id: sessionId, auto_run: false });
+    await waitForComposerQueueMode(testPage);
+    await apiClient.queueMessage(taskId, sessionId, fixture);
+    await expect
+      .poll(() => apiClient.getQueueStatus(sessionId))
+      .toMatchObject({ count: 1, auto_run: false });
+
+    const chat = session.activeChat();
+    await chat.getByTestId("queue-chip").click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const row = panel.getByTestId("queue-entry").filter({ hasText: fixture });
+    const preview = row.getByTestId("queue-entry-text");
+    const actions = row.getByTestId("queue-entry-actions");
+    const remove = row.getByTestId("queue-entry-remove");
+    await expect(row).toBeVisible();
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await testPage.setViewportSize({ width: 800, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight > metrics.clientHeight;
+      })
+      .toBe(true);
+    const expand = row.getByTestId("queue-entry-expand");
+    await expect(expand).toBeVisible();
+
+    await testPage.mouse.move(0, 0);
+    await expect(actions).toHaveCSS("opacity", "0");
+    await row.hover();
+    await expect(actions).toHaveCSS("opacity", "1");
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    await expect(remove).toHaveAttribute("title", "Remove queued message");
+    await expect(
+      row.getByRole("button", { name: "Remove queued message", exact: true }),
+    ).toHaveCount(1);
+    await expect(remove.locator("svg")).toHaveClass(/tabler-icon-trash/);
+    const order = await actions.evaluate((container) => {
+      const direct = [...container.children] as HTMLElement[];
+      const disclosure = direct.find((element) => element.dataset.testid === "queue-entry-expand");
+      const terminal = direct.at(-1);
+      return {
+        adjacent: disclosure?.nextElementSibling === terminal,
+        terminalTestId: (terminal as HTMLElement | undefined)?.dataset.testid,
+      };
+    });
+    expect(order).toEqual({ adjacent: true, terminalTestId: "queue-entry-remove" });
+
+    const colors = await remove.evaluate((button) => {
+      const muted = document.createElement("span");
+      muted.className = "text-muted-foreground";
+      const destructive = document.createElement("span");
+      destructive.className = "text-destructive";
+      button.parentElement?.append(muted, destructive);
+      const values = {
+        muted: getComputedStyle(muted).color,
+        destructive: getComputedStyle(destructive).color,
+      };
+      muted.remove();
+      destructive.remove();
+      return values;
+    });
+    await expect(remove).toHaveCSS("color", colors.muted);
+    await remove.hover();
+    await expect(remove).toHaveCSS("color", colors.destructive);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await remove.click();
+    await expect(row).toHaveCount(0);
   });
 });

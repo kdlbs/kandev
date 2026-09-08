@@ -76,6 +76,7 @@ type Repository interface {
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
+	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
 	UpdateTaskParentID(ctx context.Context, taskID, parentID string) error
 	GetProjectWorkspaceID(ctx context.Context, projectID string) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
@@ -92,9 +93,13 @@ type Repository interface {
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
-	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) error
+	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (sqlite.ParticipantWriteResult, error)
 	RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
+	// CancelDisplacedParticipantRun cancels the run(s) the step-entry
+	// fan-out queued for agentProfileID at (taskID, stepID). Used after a
+	// claim displaces an agent from a role.
+	CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -145,6 +150,15 @@ type RetryCanceller interface {
 	CancelPendingRetriesForTask(ctx context.Context, taskID string) error
 }
 
+// ProjectBudgetEvaluator evaluates project-scoped budget policies for a
+// destination project. Wired to costs.CostService.EvaluateProjectBudget so
+// reassigning a task into a project re-checks that project's policies —
+// otherwise a notify_only threshold crossed purely by moving historical
+// spend (not a new cost event or agent launch) would never fire an alert.
+type ProjectBudgetEvaluator interface {
+	EvaluateProjectBudget(ctx context.Context, workspaceID, projectID string) error
+}
+
 // RunResolver resolves the originating office run id for a task, used
 // to attribute the task_status_changed activity row back to the run
 // that produced the transition. Optional dependency — when nil, the
@@ -157,6 +171,18 @@ type RunResolver interface {
 // reactivity pipeline when a task is moved to "cancelled" status.
 type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
+}
+
+// HumanAssigneeWriter applies a human assignee on behalf of the calling user.
+//
+// Both the authorization (the caller needs task.write on the workspace) and
+// the validation (the assignee must be able to reach it) are owned by the task
+// service. Office delegates the whole write rather than reimplementing either,
+// which also covers a gap specific to this route: PATCH /office/tasks/:id
+// carries no `:wsId`, so the office workspace-scope middleware does not gate
+// it.
+type HumanAssigneeWriter interface {
+	SetHumanAssignee(ctx context.Context, taskID, userID string) error
 }
 
 // TaskDetacher applies the canonical task hierarchy/workspace detachment and
@@ -271,7 +297,11 @@ type ApprovalRun struct {
 	ActorID         string
 	ActorType       string
 	Role            string // reviewer|approver, when relevant
-	DecisionComment string // for changes_requested
+	DecisionComment string // for changes_requested/rejected
+	// IdempotencyKey identifies the decision event that caused this wake.
+	// Decision reactivity can recur for the same task, so the scheduler
+	// must not fall back to its once-per-task reason key.
+	IdempotencyKey string
 }
 
 // ApprovalReactivityQueuer queues approval-flow runs (review
@@ -361,6 +391,20 @@ type DashboardService struct {
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
+	assigneeWriter   HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
+	projectBudget    ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
+	// own session id. Defaults false (zero value); set via
+	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
+	officeSessionIdentity bool
+}
+
+// SetOfficeSessionIdentity wires the features.officeSessionIdentity flag.
+// When true, RecordAgentDecision forwards the decider's own calling session
+// id so RecordDecision re-evaluates against it instead of the task's
+// most-recently-started ("active") session. Defaults false.
+func (s *DashboardService) SetOfficeSessionIdentity(enabled bool) {
+	s.officeSessionIdentity = enabled
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -468,6 +512,13 @@ func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
 }
 
+// SetProjectBudgetEvaluator wires the seam used to re-evaluate a
+// destination project's budget policies on task reassignment. Optional;
+// when unset, UpdateTaskProjectID does not check budgets.
+func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
+	s.projectBudget = e
+}
+
 // LogTaskStateChange records a task state transition for Office tasks before
 // the task service publishes its state-change notification. This keeps the
 // activity-backed timeline durable before clients refetch the task detail.
@@ -502,6 +553,14 @@ func (s *DashboardService) LogTaskStateChange(
 // a task is moved to "cancelled".
 func (s *DashboardService) SetTaskCanceller(c TaskCanceller) {
 	s.taskCanceller = c
+}
+
+// SetHumanAssigneeWriter wires the human-assignee write seam. It is optional
+// only in the sense that office can be constructed without it; when it is
+// absent the mutation is refused rather than applied unauthorized, because
+// this route is not otherwise workspace-gated.
+func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
+	s.assigneeWriter = w
 }
 
 // SetTaskDetacher wires the canonical task detachment operation used when the

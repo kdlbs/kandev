@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-27
+updated: 2026-08-31
 owners:
   - Kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
 
 ## Migrated source detail
 
@@ -72,6 +72,60 @@ workspace modes.
 - Classification is deterministic in this version. Calling a model to classify
   an error or extract timing data is deferred.
 
+#### Cursor normal-completion failure projection
+
+`cursor-agent` can report an upstream HTTP/2 stream reset as an ordinary
+`agent_message_chunk`. It can later return a successful `session/prompt`
+response. The ACP transport therefore owns a Cursor-specific evidence
+projection that mirrors the existing Codex capacity projection. It does not add
+generic content scanning to orchestration.
+
+The observer runs in the ordered ACP notification worker and applies these
+checks in order:
+
+1. The adapter identity is `cursor-acp`.
+2. The normalized event is a non-empty assistant message chunk for a non-zero
+   prompt generation that matches the active turn.
+3. After trimming leading and trailing whitespace, the chunk begins with
+   `Error: RetriableError:`.
+4. A case-insensitive bounded match finds `RetriableError` and either
+   `http/2 stream closed` or `CANCEL (0x8)`.
+
+The identity, event-type, and prefix checks precede the full fingerprint. The
+prefix check uses `strings.HasPrefix(strings.TrimSpace(text), ...)`, so ordinary
+per-token traffic does not allocate a normalized copy. Prose that mentions the
+error after other text, a partial `RetriableError`, a stale generation, and the
+same text from another adapter do not match.
+
+A match sets pending evidence on the active `promptTurnState` under its existing
+evidence mutex. The observer suppresses the control chunk. A later non-empty
+assistant or thought chunk clears the marker for the same generation. A new
+tool call also clears it. This activity proves that Cursor resumed its own
+attempt. A later matching control chunk sets the marker again. Updates for an
+in-flight tool do not clear it. Such updates can arrive during error settlement
+without proving renewed provider generation.
+
+After `session/prompt` returns, `sendPrompt` drains the notification queue. Then
+it examines the turn. If the Cursor marker is pending, the adapter cancels the
+async completion owner. It emits exactly one `EventTypeError` instead of the
+ordinary complete event. The error carries this bounded constant diagnostic:
+`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`.
+The valid `ProviderError` uses source `cursor_acp`, provider ID `cursor-acp`, and
+a UTC occurrence time. The adapter does not copy raw assistant text into the
+structured diagnostic.
+
+The deterministic catalogue adds the dedicated rule
+`cursor.retriable_stream_reset.v1` before the generic transport-loss rule. The
+rule requires the complete normalized Cursor diagnostic
+`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`
+(with the existing bracketed `canceled` decoration allowed). It maps to
+`agent_transport_lost` with high confidence and class `transient`.
+It retains the existing `AutoRetryable` invariant. The rule applies the shared
+context-cancellation veto. Cursor's `[canceled]` token does not satisfy that
+veto. It lacks `context canceled`, `context deadline exceeded`, or
+`cancel escalated`. The deliberately narrow `transportLostRe` remains
+unchanged.
+
 ### Error classes
 
 The policy layer has two configurable classes:
@@ -110,6 +164,52 @@ Classification does not by itself authorize retry or switching.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
+
+#### Cursor retry-safety semantics
+
+The Cursor label `RetriableError` is evidence about the upstream transport. It
+is not permission for Kandev to repeat a turn. The following rules define the
+Cursor recovery choices. They preserve the provider-neutral safety boundary in
+[ADR-2026-08-08-provider-neutral-agent-error-recovery](../../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md):
+
+1. **Safe point.** A terminal marker is automatically replayable only when its
+   prompt-generation-correlated evidence is known and records neither assistant
+   output nor tool activity. Thoughts, message output, a pending or completed
+   tool call, and missing evidence all fail closed. The observed incident had
+   thoughts and a `Read File` call in flight, so it enters manual recovery even
+   though its classification is transient.
+2. **Continuation mode.** An eligible concrete-profile retry retains the
+   selected execution profile. It uses the existing provider-native resume
+   identity before it sends the cached original prompt again. It does not create
+   a fresh provider route or switch providers. This replay is allowed only at
+   the safe point above. An unsafe turn exposes the existing manual Resume and
+   Start fresh choices. The user, not the classifier, chooses continuation.
+3. **Cursor-owned retry.** Kandev does not schedule while the original
+   `session/prompt` RPC remains open. Provider progress after a marker clears
+   the pending marker. Only a later terminal marker can re-arm it. The prompt
+   barrier then proves that Cursor's internal retry has either resumed or
+   finished before Kandev chooses recovery. This prevents overlapping Cursor
+   and Kandev retry loops.
+4. **Budget and delay.** Eligible concrete-profile recovery reuses the single
+   orchestrator-owned retry entry, `transientMaxAttempts`, and
+   `transientRetryDelayFor`. There is no Cursor-specific nested counter, timer,
+   or backoff. Exhaustion uses the existing manual recovery path.
+
+The orchestrator records replay evidence for every interactive prompt, not only
+dynamic route attempts. The evidence remains scoped by session, execution, and
+prompt generation. Lifecycle snapshots the current prompt's evidence before it
+marks a terminal completion as activity and carries that immutable snapshot on
+`agent.failed`. This prevents separate NATS subscriptions for `agent.stream.*`
+and `agent.failed` from changing the replay decision based on delivery order.
+The concrete-profile `handleTransientFailure` path requires the same known,
+no-output, no-tool condition before scheduling. A missing record is unsafe.
+Dynamic profiles retain `dynamicPreResultSafe` and their configured policy
+owner. A model-switch restart reserves the cached prompt and replay identity
+before `StartAgentProcess` can dispatch the replacement prompt, then binds the
+identity to the replacement execution. `agent_transport_lost` remains
+same-provider recovery evidence and does not gain permission to switch
+candidates merely because Cursor supplied the new fingerprint. No orchestration
+branch inspects `cursor-acp`, `cursor_acp`, or the raw diagnostic.
 
 ### Per-class policy
 

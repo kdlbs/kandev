@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-10
-updated: 2026-08-23
+updated: 2026-08-30
 owners:
   - kandev
 ---
@@ -22,6 +22,20 @@ The E2E workflow currently uses Playwright's ordinal test-level sharding. It kee
 
 - **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1:** **Normal:** the existing fourteen-shard Chromium and mobile-Chrome matrix.
 - **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.2:** **Containers:** the existing six-shard Docker and SSH matrix.
+
+### REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002: Efficient setup and actionable flake feedback
+
+**Intent:** Once test work is balanced, repeated setup and false-positive
+assertions become the next avoidable sources of CI time and lost diagnosis.
+Setup acceleration must preserve the existing fallback, and a green result
+must not hide a test that only passed after a retry.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.1:** Container-backed E2E jobs shall resolve the runtime image to an immutable digest, reuse browser binaries from a matching digest-scoped cache when available, and use a per-run save key with a stable digest-scoped restore prefix. A miss, stale entry, cache-service failure, or incompatible entry shall use the digest-pinned image extraction path and shall not change test selection or make the cache a correctness dependency. If the image digest cannot be resolved, the job shall fail before using an unpinned image reference.
+- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.2:** E2E reporting shall separate test execution time from material setup costs, including dependency installation, runtime-image startup, and browser provisioning, and shall expose whether the timing plan used a profile or a fallback.
+- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.3:** E2E reporting shall identify each passed-after-retry result by stable test key, attempt status, error category, and available diagnostic artifacts. The explicit diagnostic lane shall be able to fail when a test passes only after retry.
+- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.4:** When an E2E test selects one lazy-loaded item, readiness assertions shall be scoped to that selected item. Unrelated loading placeholders shall not determine the selected item's result.
 
 ## Migrated source detail
 
@@ -240,4 +254,7 @@ manifests, rolling profile, retry diagnostics, and fail-closed runner have
 unit, type, and targeted E2E coverage. The prebuilt desktop image amendment is
 implemented and was proven by the branch image publish and pull-request smoke
 run recorded in `docs/plans/desktop-e2e-prebuilt-image/plan.md`. The balance
-target remains an operational check after merge.
+target remains an operational check after merge. The setup-reuse and
+selection-scoped readiness follow-up is implemented on the current branch.
+Remote cache hit/miss measurements and post-merge rollout evidence remain
+pending.

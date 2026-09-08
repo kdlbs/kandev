@@ -13,9 +13,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Pill } from "@/components/task-create-dialog-pill";
 import {
   branchToOption,
-  computeBranchPlaceholder,
   sortBranches,
-} from "@/components/task-create-dialog-branch-options";
+  computeBranchPlaceholder,
+} from "@/components/branch-picker-options";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import type {
   RemoteRepository,

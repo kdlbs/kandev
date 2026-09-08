@@ -603,7 +603,7 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T
 		t.Fatalf("CreateTask: %v", err)
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-join", TaskID: "task-join", ExecutorID: exec.ID,
+		ID: "sess-join", TaskID: "task-join", ExecutorID: exec.ID, ExecutorProfileID: "profile-join",
 		State: models.TaskSessionStateRunning,
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
@@ -628,6 +628,9 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T
 	}
 	if v, _ := got.ExecutorSnapshot["executor_name"].(string); v != "my-docker" {
 		t.Errorf("expected executor_name 'my-docker' from JOIN, got %q (JOIN to executors removed?)", v)
+	}
+	if got.ExecutorProfileID != "profile-join" {
+		t.Errorf("expected executor_profile_id 'profile-join', got %q", got.ExecutorProfileID)
 	}
 }
 

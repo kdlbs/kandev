@@ -23,10 +23,9 @@ func (r *Repository) migrateRunOutcome() {
 }
 
 // activateRunOutcome writes telemetry.run_outcome.activated_at only after a
-// positive probe confirms runs.outcome exists. The migration runner
-// (MigrateLogger.Apply) swallows failures at WARN, so this probe is the
-// only thing standing between a failed migration and a consumer wrongly
-// believing the mechanism is live. WriteMetaKeyIfAbsent makes the write
+// positive probe confirms runs.outcome exists. The required office migration
+// runner fails startup for unexpected migration errors, so this probe runs
+// only after the schema contract is complete. WriteMetaKeyIfAbsent makes the write
 // replay-safe: the instant is never overwritten once set. Any failure here
 // is logged and swallowed — activation is a best-effort published fact,
 // never a boot-blocking requirement, and the sweep-equivalent writer path

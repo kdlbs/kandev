@@ -75,6 +75,7 @@ function makeParams(): EnvSwitchParams {
 describe("performEnvSwitch — pinned column resize after fast-path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getEnvLayout).mockReturnValue(null);
     vi.mocked(getManualRightWidth).mockReturnValue(null);
   });
 
@@ -199,5 +200,32 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
 
     expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420);
+  });
+});
+
+describe("performEnvSwitch — custom default fast-path widths", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEnvLayout).mockReturnValue(null);
+    vi.mocked(getManualRightWidth).mockReturnValue(null);
+  });
+
+  it("uses custom default proportions for an unsaved environment", () => {
+    const resizeView = vi.fn();
+    vi.mocked(getRootSplitview).mockImplementation(
+      () =>
+        ({
+          length: 3,
+          getViewSize: () => 800,
+          resizeView,
+        }) as unknown as NonNullable<ReturnType<typeof getRootSplitview>>,
+    );
+
+    const params = makeParams();
+    params.getDefaultPinnedWidths = vi.fn(() => new Map([["right", 240]]));
+
+    performEnvSwitch(params);
+
+    expect(resizeView).toHaveBeenCalledWith(2, 240);
   });
 });
