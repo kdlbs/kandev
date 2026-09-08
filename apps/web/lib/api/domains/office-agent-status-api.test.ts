@@ -76,8 +76,6 @@ describe("updateAgentStatus", () => {
       }),
     );
 
-    await expect(updateAgentStatus(AGENT_ID, "idle")).rejects.toThrow(
-      "invalid status transition",
-    );
+    await expect(updateAgentStatus(AGENT_ID, "idle")).rejects.toThrow("invalid status transition");
   });
 });
