@@ -166,11 +166,11 @@ func (t *sshRuntimeAPITunnel) proxy(remote net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(local, remote)
-		close(done)
+		done <- struct{}{}
 	}()
 	go func() {
 		_, _ = io.Copy(remote, local)
-		close(done)
+		done <- struct{}{}
 	}()
 	<-done
 	_ = local.Close()

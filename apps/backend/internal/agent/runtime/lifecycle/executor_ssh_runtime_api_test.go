@@ -1,7 +1,10 @@
 package lifecycle
 
 import (
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"sync"
@@ -123,5 +126,35 @@ func TestOpenSSHRuntimeAPITunnel_ResumeRebindsPersistedRemotePort(t *testing.T) 
 	}
 	if resumedReq.Env[envKeyKandevAPIURL] != secondURL {
 		t.Fatalf("resume API URL = %q, want %q", resumedReq.Env[envKeyKandevAPIURL], secondURL)
+	}
+}
+
+func TestOpenSSHRuntimeAPITunnel_ProxiesRoundTripAndTearsDown(t *testing.T) {
+	localServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		_, _ = io.WriteString(w, "runtime-api-round-trip")
+	}))
+	t.Cleanup(localServer.Close)
+
+	server := newFakeSSHServer(t, nil)
+	client := server.dial(t)
+	tunnel, rewrittenURL, err := openSSHRuntimeAPITunnel(client, localServer.URL)
+	if err != nil {
+		t.Fatalf("open tunnel: %v", err)
+	}
+	t.Cleanup(func() { _ = tunnel.Close() })
+
+	requestClient := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	response, err := requestClient.Get(rewrittenURL)
+	if err != nil {
+		t.Fatalf("GET through SSH runtime API tunnel: %v", err)
+	}
+	t.Cleanup(func() { _ = response.Body.Close() })
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read tunneled response: %v", err)
+	}
+	if string(body) != "runtime-api-round-trip" {
+		t.Fatalf("tunneled response = %q", body)
 	}
 }

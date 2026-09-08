@@ -255,7 +255,7 @@ func (s *fakeSSHServer) handleTCPIPForward(conn *ssh.ServerConn, req *ssh.Reques
 		_ = req.Reply(true, nil)
 	}
 	s.wg.Add(1)
-	go s.serveReverseForward(key, listener)
+	go s.serveReverseForward(conn, key, listener)
 }
 
 func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
@@ -280,7 +280,7 @@ func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
 	_ = req.Reply(true, nil)
 }
 
-func (s *fakeSSHServer) serveReverseForward(key string, listener net.Listener) {
+func (s *fakeSSHServer) serveReverseForward(conn *ssh.ServerConn, key string, listener net.Listener) {
 	defer s.wg.Done()
 	defer func() {
 		s.reverseMu.Lock()
@@ -292,11 +292,53 @@ func (s *fakeSSHServer) serveReverseForward(key string, listener net.Listener) {
 		if err != nil {
 			return
 		}
-		_ = incoming.Close()
-		// No current test needs to deliver a connection through the fake
-		// reverse forward. Closing accepted sockets still models the remote
-		// listener's lifetime and keeps the test server bounded.
+		s.serveReverseForwardConnection(conn, incoming)
 	}
+}
+
+func (s *fakeSSHServer) serveReverseForwardConnection(conn *ssh.ServerConn, incoming net.Conn) {
+	defer func() { _ = incoming.Close() }()
+	originAddr, originPort := tcpOrigin(incoming.RemoteAddr())
+	channel, requests, err := conn.OpenChannel("forwarded-tcpip", ssh.Marshal(struct {
+		Addr       string
+		Port       uint32
+		OriginAddr string
+		OriginPort uint32
+	}{
+		Addr:       "127.0.0.1",
+		Port:       uint32(incoming.LocalAddr().(*net.TCPAddr).Port),
+		OriginAddr: originAddr,
+		OriginPort: originPort,
+	}))
+	if err != nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ssh.DiscardRequests(requests)
+	}()
+
+	var copies sync.WaitGroup
+	copies.Add(2)
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(channel, incoming)
+	}()
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(incoming, channel)
+	}()
+	copies.Wait()
+	_ = channel.Close()
+}
+
+func tcpOrigin(addr net.Addr) (string, uint32) {
+	tcpAddr, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return "", 0
+	}
+	return tcpAddr.IP.String(), uint32(tcpAddr.Port)
 }
 
 func (s *fakeSSHServer) serveSession(newChan ssh.NewChannel) {

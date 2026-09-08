@@ -74,3 +74,36 @@ func TestUploadSSHSkillManifest_NoSeatRemovesStaleDecisionSkill(t *testing.T) {
 		t.Fatalf("no-seat upload left stale decision skill at %s", decisionPath)
 	}
 }
+
+func TestUploadSSHSkillManifest_NoSeatDoesNotFollowDecisionSkillSymlink(t *testing.T) {
+	remoteWorkspace := t.TempDir()
+	outsideWorkspace := t.TempDir()
+	marker := filepath.Join(outsideWorkspace, "keep.txt")
+	if err := os.WriteFile(marker, []byte("must survive"), 0o600); err != nil {
+		t.Fatalf("seed outside marker: %v", err)
+	}
+	decisionRoot := filepath.Join(remoteWorkspace, ".claude", "skills", skill.ReservedDecisionSkillSlug)
+	if err := os.MkdirAll(filepath.Dir(decisionRoot), 0o755); err != nil {
+		t.Fatalf("create decision skill parent: %v", err)
+	}
+	if err := os.Symlink(outsideWorkspace, decisionRoot); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	server := newFakeSSHServer(t, nil)
+	server.enableSFTP()
+	manifest, err := json.Marshal(skill.Manifest{ProjectSkillDir: ".claude/skills"})
+	if err != nil {
+		t.Fatalf("marshal no-seat manifest: %v", err)
+	}
+	if err := uploadSSHSkillManifest(context.Background(), server.dial(t), remoteWorkspace,
+		map[string]interface{}{MetadataKeySkillManifestJSON: string(manifest)}); err != nil {
+		t.Fatalf("uploadSSHSkillManifest: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("outside marker was removed: %v", err)
+	}
+	if _, err := os.Lstat(decisionRoot); !os.IsNotExist(err) {
+		t.Fatalf("decision symlink still exists or returned unexpected error: %v", err)
+	}
+}
