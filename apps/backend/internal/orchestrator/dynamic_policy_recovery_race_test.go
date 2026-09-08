@@ -42,35 +42,9 @@ func TestConcurrentDynamicPolicyRecoveryLaunchesExactlyOnce(t *testing.T) {
 	)
 
 	repo := setupTestRepo(t)
-	seedSession(t, repo, taskID, sessionID, "step-race")
-
 	resolver := newDynamicPolicyRaceResolver(t, repo, dynamicProfileID, concreteProfileID)
-
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.AgentProfileID = dynamicProfileID
-	session.ExecutionProfileID = concreteProfileID
-	session.RouteGeneration = 4
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("update session: %v", err)
-	}
-	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
-
-	elapsedDeadline := time.Now().UTC().Add(-time.Minute)
-	if err := repo.SaveRouteState(ctx, dynamicruntime.RouteState{
-		SessionID: sessionID, LogicalProfileID: dynamicProfileID,
-		ExecutionProfileID: concreteProfileID, Generation: 4, ProfileVersion: 1,
-		Status:          "retry_wait",
-		PolicyStateJSON: `{"deadline":"` + elapsedDeadline.Format(time.RFC3339Nano) + `"}`,
-		UpdatedAt:       time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("SaveRouteState: %v", err)
-	}
-	if _, _, err := resolver.EngineForTest().LoadState(ctx, sessionID); err != nil {
-		t.Fatalf("warm engine cache: %v", err)
-	}
+	seedDynamicPolicyRecoveryState(t, repo, taskID, sessionID, executionID, dynamicProfileID, concreteProfileID)
+	warmDynamicPolicyRecoveryState(t, resolver, sessionID, "warm engine cache")
 
 	var launches int32
 	agentManager := &mockAgentManager{
@@ -181,6 +155,47 @@ func newDynamicPolicyRaceResolverWithPersistence(
 	}
 }
 
+// seedDynamicPolicyRecoveryState creates one due route state and its session projection.
+func seedDynamicPolicyRecoveryState(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	taskID, sessionID, executionID, dynamicProfileID, concreteProfileID string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	seedSession(t, repo, taskID, sessionID, "step-race")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = dynamicProfileID
+	session.ExecutionProfileID = concreteProfileID
+	session.RouteGeneration = 4
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	elapsedDeadline := time.Now().UTC().Add(-time.Minute)
+	if err := repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+		SessionID: sessionID, LogicalProfileID: dynamicProfileID,
+		ExecutionProfileID: concreteProfileID, Generation: 4, ProfileVersion: 1,
+		Status:          "retry_wait",
+		PolicyStateJSON: `{"deadline":"` + elapsedDeadline.Format(time.RFC3339Nano) + `"}`,
+		UpdatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveRouteState: %v", err)
+	}
+}
+
+// warmDynamicPolicyRecoveryState loads the route into one engine's local cache.
+func warmDynamicPolicyRecoveryState(t *testing.T, resolver *dynamicPolicyRaceResolver, sessionID, label string) {
+	t.Helper()
+	if _, _, err := resolver.EngineForTest().LoadState(context.Background(), sessionID); err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
 // claimRendezvousBarrier wraps the real repository's durable claim so the
 // first two concurrent callers are guaranteed to both arrive at
 // ClaimRouteStateFrom before either one executes it, rather than leaving
@@ -223,10 +238,12 @@ func (b *claimRendezvousBarrier) rendezvous() bool {
 	if seen != 1 {
 		return true
 	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-release:
 		return true
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		b.t.Errorf("claim rendezvous timed out waiting for a second caller")
 		return false
 	}
@@ -266,40 +283,12 @@ func TestConcurrentDynamicPolicyRecoveryClaimContendsOnSQLCAS(t *testing.T) {
 	)
 
 	repo := setupTestRepo(t)
-	seedSession(t, repo, taskID, sessionID, "step-race")
-
 	barrier := newClaimRendezvousBarrier(t, repo)
 	resolverA := newDynamicPolicyRaceResolverWithPersistence(t, repo, dynamicProfileID, concreteProfileID, barrier)
 	resolverB := newDynamicPolicyRaceResolverWithPersistence(t, repo, dynamicProfileID, concreteProfileID, barrier)
-
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.AgentProfileID = dynamicProfileID
-	session.ExecutionProfileID = concreteProfileID
-	session.RouteGeneration = 4
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("update session: %v", err)
-	}
-	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
-
-	elapsedDeadline := time.Now().UTC().Add(-time.Minute)
-	if err := repo.SaveRouteState(ctx, dynamicruntime.RouteState{
-		SessionID: sessionID, LogicalProfileID: dynamicProfileID,
-		ExecutionProfileID: concreteProfileID, Generation: 4, ProfileVersion: 1,
-		Status:          "retry_wait",
-		PolicyStateJSON: `{"deadline":"` + elapsedDeadline.Format(time.RFC3339Nano) + `"}`,
-		UpdatedAt:       time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("SaveRouteState: %v", err)
-	}
-	if _, _, err := resolverA.EngineForTest().LoadState(ctx, sessionID); err != nil {
-		t.Fatalf("warm engine A cache: %v", err)
-	}
-	if _, _, err := resolverB.EngineForTest().LoadState(ctx, sessionID); err != nil {
-		t.Fatalf("warm engine B cache: %v", err)
-	}
+	seedDynamicPolicyRecoveryState(t, repo, taskID, sessionID, executionID, dynamicProfileID, concreteProfileID)
+	warmDynamicPolicyRecoveryState(t, resolverA, sessionID, "warm engine A cache")
+	warmDynamicPolicyRecoveryState(t, resolverB, sessionID, "warm engine B cache")
 
 	var launches int32
 	agentManager := &mockAgentManager{
