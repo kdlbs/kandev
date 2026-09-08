@@ -89,10 +89,11 @@ func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
-	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
+	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
+	if err != nil {
 		return err
 	}
-	if err := s.checkPauseGateForAgent(ctx, agentInstanceID, "queue_run"); err != nil {
+	if err := s.checkPauseGateForAgent(ctx, agent, "queue_run"); err != nil {
 		return err
 	}
 
@@ -204,21 +205,24 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 	}
 }
 
-// guardAgentStatus returns an error if the agent is paused or stopped.
-func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) error {
+// guardAgentStatus returns an error if the agent is paused or stopped,
+// and otherwise the resolved agent — callers that also need the pause
+// gate's workspace scope (checkPauseGateForAgent) reuse this fetch instead
+// of looking the agent up a second time.
+func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) (*models.AgentInstance, error) {
 	agent, err := s.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
-		return fmt.Errorf("get agent instance: %w", err)
+		return nil, fmt.Errorf("get agent instance: %w", err)
 	}
 	switch agent.Status {
 	case models.AgentStatusPaused:
-		return fmt.Errorf("agent %s is paused", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is paused", agentInstanceID)
 	case models.AgentStatusStopped:
-		return fmt.Errorf("agent %s is stopped", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is stopped", agentInstanceID)
 	case models.AgentStatusPendingApproval:
-		return fmt.Errorf("agent %s is pending approval", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is pending approval", agentInstanceID)
 	}
-	return nil
+	return agent, nil
 }
 
 // pauseGateState reads the workspace-pause gate directly (by workspace
@@ -238,25 +242,23 @@ func (s *Service) pauseGateState(ctx context.Context, workspaceID string) (bool,
 	return active != nil, nil
 }
 
-// checkPauseGateForAgent resolves agentInstanceID's workspace and blocks
-// queuing when that workspace is paused (the operator kill switch).
-// Fails closed on a gate-read error (shared.ErrPauseGateUnavailable) —
-// this write hasn't happened yet, so there is nothing to leave in a
-// retryable state beyond simply not writing it; the caller's own retry
-// (or the next event) tries again.
-func (s *Service) checkPauseGateForAgent(ctx context.Context, agentInstanceID, gateName string) error {
+// checkPauseGateForAgent blocks queuing when agent's workspace is paused
+// (the operator kill switch). Takes the already-resolved agent — usually
+// guardAgentStatus's return value — rather than re-resolving it, so the
+// two checks can never see two different snapshots of the agent's
+// workspace. Fails closed on a gate-read error
+// (shared.ErrPauseGateUnavailable) — this write hasn't happened yet, so
+// there is nothing to leave in a retryable state beyond simply not writing
+// it; the caller's own retry (or the next event) tries again.
+func (s *Service) checkPauseGateForAgent(ctx context.Context, agent *models.AgentInstance, gateName string) error {
 	if s.pauseGate == nil {
 		return nil
-	}
-	agent, err := s.GetAgentFromConfig(ctx, agentInstanceID)
-	if err != nil {
-		return fmt.Errorf("get agent instance: %w", err)
 	}
 	active, err := s.pauseGate.PauseState(ctx, agent.WorkspaceID)
 	if err != nil {
 		pause.RecordGateError(gateName)
 		s.logger.Warn("queue run: pause gate read failed",
-			zap.String("agent", agentInstanceID), zap.Error(err))
+			zap.String("agent", agent.ID), zap.Error(err))
 		return shared.ErrPauseGateUnavailable
 	}
 	if active != nil {

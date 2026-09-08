@@ -44,11 +44,15 @@ func TestQueueRun_BlockedByPause_ReturnsErrWorkspacePaused(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	svc.SetPauseGate(&fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}})
+	gate := &fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
+	svc.SetPauseGate(gate)
 
 	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
+	}
+	if len(gate.calls) != 1 || gate.calls[0] != "ws-1" {
+		t.Fatalf("gate.calls = %v, want [ws-1] — the gate must be asked about the agent's own workspace", gate.calls)
 	}
 
 	runs, _ := svc.ListRuns(ctx, "ws-1")

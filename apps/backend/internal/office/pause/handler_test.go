@@ -3,6 +3,7 @@ package pause_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -77,6 +78,43 @@ func TestGetPause_RunningWorkspaceReportsNotPaused(t *testing.T) {
 	}
 	if body["pause"] != nil {
 		t.Fatalf("pause = %v, want nil", body["pause"])
+	}
+}
+
+// TestGetPause_WorkspaceLookupFailureReturns500 proves a genuine backend
+// fault on the existence check surfaces as 500, not the 404 a real
+// not-found workspace gets — a failed read must not be conflated with an
+// absent workspace on any of the three endpoints.
+func TestGetPause_WorkspaceLookupFailureReturns500(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{lookupErr: errors.New("db unavailable")})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodGet, "/api/v1/office/workspaces/ws-1/pause", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPostPause_WorkspaceLookupFailureReturns500 is the postPause twin of
+// TestGetPause_WorkspaceLookupFailureReturns500.
+func TestPostPause_WorkspaceLookupFailureReturns500(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{lookupErr: errors.New("db unavailable")})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/pause", `{"reason":"incident"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPostResume_WorkspaceLookupFailureReturns500 is the postResume twin.
+func TestPostResume_WorkspaceLookupFailureReturns500(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{lookupErr: errors.New("db unavailable")})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/resume", `{}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
 	}
 }
 

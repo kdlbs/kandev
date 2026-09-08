@@ -11,13 +11,17 @@ import (
 
 // fakeSchedulerPauseGate is a scripted shared.PauseGate double with
 // pop-front semantics, mirroring office/service's and office/routines'
-// own gate-test fakes.
+// own gate-test fakes. calls records every workspaceID the gate was asked
+// about, in order — AC-001.7 requires the gate be consulted with the
+// derivation site's actual workspace, not just called at all.
 type fakeSchedulerPauseGate struct {
 	active []*models.WorkspacePause
 	errs   []error
+	calls  []string
 }
 
-func (f *fakeSchedulerPauseGate) PauseState(_ context.Context, _ string) (*models.WorkspacePause, error) {
+func (f *fakeSchedulerPauseGate) PauseState(_ context.Context, workspaceID string) (*models.WorkspacePause, error) {
+	f.calls = append(f.calls, workspaceID)
 	var active *models.WorkspacePause
 	if len(f.active) > 0 {
 		active, f.active = f.active[0], f.active[1:]
@@ -37,11 +41,15 @@ func TestSchedulerQueueRun_BlockedByPause_ReturnsErrWorkspacePaused(t *testing.T
 	repo := newReactivityTestRepo(t)
 	ss := newChildrenCompletedTestScheduler(t, repo)
 	createChildrenCompletedAgent(t, repo, "agent-paused-ws")
-	ss.SetPauseGate(&fakeSchedulerPauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}})
+	gate := &fakeSchedulerPauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
+	ss.SetPauseGate(gate)
 
 	err := ss.QueueRun(context.Background(), "agent-paused-ws", RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
+	}
+	if len(gate.calls) != 1 || gate.calls[0] != "ws-1" {
+		t.Fatalf("gate.calls = %v, want [ws-1] — the gate must be asked about the agent's own workspace", gate.calls)
 	}
 
 	runs, err := repo.ListRuns(context.Background(), "ws-1")
