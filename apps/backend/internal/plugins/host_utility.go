@@ -94,11 +94,10 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 			return h.invokeConfiguredAgentProfile(ctx, profileID, profiles, runner, prompt)
 		}
 	}
-	// A direct-profile schema may belong to a plugin upgraded from the legacy
-	// utility-agent schema. Keep reading the persisted legacy key even though
-	// the new settings form no longer renders it; plugin config replacement does
-	// not migrate or delete unknown keys.
-	if hasUtilityAgentConfig(h.configSchema) || hasAgentProfileConfig(h.configSchema) {
+	// A verified manifest upgrade can retain its legacy selector even though the
+	// replacement schema no longer renders it. Do not treat arbitrary
+	// undeclared config as an agent selector.
+	if hasUtilityAgentConfig(h.configSchema) || h.legacyUtilityAgentFallback {
 		agentID, _ := config[utilityAgentConfigKey].(string)
 		if agentID != "" {
 			return h.invokeConfiguredUtilityAgent(ctx, agentID, agents, runner, prompt)

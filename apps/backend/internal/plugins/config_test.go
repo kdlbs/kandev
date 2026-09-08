@@ -161,9 +161,21 @@ func TestUpdateConfigPreservesLegacyUtilityAgentForDirectProfileSchema(t *testin
 	}
 	merged = preserveLegacyUtilityAgentConfig(merged, map[string]any{
 		utilityAgentConfigKey: "utility-agent-1",
-	}, schema)
+	}, schema, true)
 	if merged[utilityAgentConfigKey] != "utility-agent-1" {
 		t.Fatalf("legacy selector = %v, want utility-agent-1", merged[utilityAgentConfigKey])
+	}
+}
+
+func TestPreserveLegacyUtilityAgentConfigRequiresUpgradeMarker(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{
+		agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+	}}
+	merged := preserveLegacyUtilityAgentConfig(map[string]any{}, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema, false)
+	if _, found := merged[utilityAgentConfigKey]; found {
+		t.Fatalf("preserveLegacyUtilityAgentConfig() retained undeclared selector: %v", merged)
 	}
 }
 

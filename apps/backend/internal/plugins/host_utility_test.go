@@ -109,13 +109,14 @@ func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAg
 	}
 }
 
-func TestPluginHost_InvokeUtilityAgent_FallsBackToUndeclaredLegacyUtilityAgentConfig(t *testing.T) {
+func TestPluginHost_InvokeUtilityAgent_FallsBackToRetainedLegacyUtilityAgentConfig(t *testing.T) {
 	d := configuredUtilityHost(t)
 	d.host.configSchema = map[string]any{
 		"properties": map[string]any{
 			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
 		},
 	}
+	d.host.legacyUtilityAgentFallback = true
 
 	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
 	if err != nil || got != "the summary" {
@@ -126,6 +127,23 @@ func TestPluginHost_InvokeUtilityAgent_FallsBackToUndeclaredLegacyUtilityAgentCo
 	}
 	if d.utilRun.gotProfileID != "profile-42" {
 		t.Fatalf("runner got profile %q", d.utilRun.gotProfileID)
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_RejectsUndeclaredLegacyUtilityAgentConfig(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != "no agent profile configured for this plugin" {
+		t.Fatalf("InvokeUtilityAgent() error = %v, want missing direct profile", err)
+	}
+	if d.utilAgents.calls != 0 || d.utilRun.calls != 0 {
+		t.Fatalf("undeclared legacy config touched utility lookup %d times and runner %d times", d.utilAgents.calls, d.utilRun.calls)
 	}
 }
 

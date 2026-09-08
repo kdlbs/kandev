@@ -36,11 +36,11 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 		return err
 	}
 	merged := mergeMaskedSecrets(config, existing, rec.ConfigSchema)
-	// Direct-profile plugins can be upgraded from the legacy utility-agent
-	// selector. Keep that selector across the full-replacement settings write
-	// when the new form does not submit it, so host-side compatibility remains
-	// durable after the operator saves the new settings.
-	merged = preserveLegacyUtilityAgentConfig(merged, existing, rec.ConfigSchema)
+	// A direct-profile plugin upgraded from the legacy utility-agent selector
+	// carries a persisted provenance marker. Keep that selector across the
+	// full-replacement settings write when the new form does not submit it, so
+	// host-side compatibility remains durable after the operator saves.
+	merged = preserveLegacyUtilityAgentConfig(merged, existing, rec.ConfigSchema, rec.LegacyUtilityAgentFallback)
 	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
 		return err
 	}
@@ -69,8 +69,8 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	return s.restartForConfigChange(rec)
 }
 
-func preserveLegacyUtilityAgentConfig(config, existing, schema map[string]any) map[string]any {
-	if !hasAgentProfileConfig(schema) {
+func preserveLegacyUtilityAgentConfig(config, existing, schema map[string]any, allowLegacyFallback bool) map[string]any {
+	if !allowLegacyFallback || !hasAgentProfileConfig(schema) {
 		return config
 	}
 	if _, submitted := config[utilityAgentConfigKey]; submitted {

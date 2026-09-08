@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -43,6 +44,24 @@ func TestServiceInstallDuplicateVersionReturnsErrVersionExists(t *testing.T) {
 	_, err := svc.Install(context.Background(), testPackage(t, "kandev-plugin-slack", "1.0.0", false))
 	if !errors.Is(err, pkgtar.ErrVersionExists) {
 		t.Fatalf("Install() duplicate error = %v, want pkgtar.ErrVersionExists", err)
+	}
+}
+
+func TestLegacyUtilityAgentFallbackOnlyTracksManifestUpgrade(t *testing.T) {
+	legacySchema := map[string]any{"properties": map[string]any{
+		utilityAgentConfigKey: map[string]any{"type": "string", "format": "utility-agent"},
+	}}
+	directSchema := map[string]any{"properties": map[string]any{
+		agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+	}}
+	if !legacyUtilityAgentFallback(&store.Record{Manifest: manifest.Manifest{ConfigSchema: legacySchema}}, true, directSchema) {
+		t.Fatal("legacy utility-agent manifest upgrade did not retain fallback")
+	}
+	if legacyUtilityAgentFallback(&store.Record{Manifest: manifest.Manifest{ConfigSchema: directSchema}}, true, directSchema) {
+		t.Fatal("direct-profile manifest unexpectedly retained fallback")
+	}
+	if legacyUtilityAgentFallback(nil, false, directSchema) {
+		t.Fatal("new direct-profile install unexpectedly retained fallback")
 	}
 }
 

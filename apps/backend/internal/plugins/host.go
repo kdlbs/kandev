@@ -49,6 +49,10 @@ type pluginHost struct {
 	// GetConfig to know which fields are secret (and therefore stored as
 	// vault references to resolve back to cleartext).
 	configSchema map[string]any
+	// legacyUtilityAgentFallback is persisted only for a verified manifest
+	// upgrade from the legacy selector. It prevents arbitrary undeclared config
+	// fields from selecting a utility agent.
+	legacyUtilityAgentFallback bool
 
 	state   *state.Store
 	secrets SecretVault
