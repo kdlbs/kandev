@@ -41,6 +41,26 @@ func (s *DashboardService) UpdateTaskPriority(ctx context.Context, taskID, prior
 	return nil
 }
 
+// SetTaskAssigneeUser sets (or clears, on empty string) the human assignee.
+//
+// The human assignee is advisory and independent of the agent assignee: it
+// records who on the team owns the task, gates nothing, and setting it never
+// touches the runner participant. Taking a task over is this write plus a
+// prompt, not a lock.
+func (s *DashboardService) SetTaskAssigneeUser(ctx context.Context, taskID, userID string) error {
+	if s.assigneeWriter == nil {
+		return errors.New("human assignee is not available: no assignee writer configured")
+	}
+	// The task service authorizes the caller and validates the assignee, then
+	// persists. Office only mirrors the result onto its own event stream so the
+	// board and the open task detail refresh.
+	if err := s.assigneeWriter.SetHumanAssignee(ctx, taskID, userID); err != nil {
+		return err
+	}
+	s.publishTaskUpdated(ctx, taskID, []string{"assignee_user_id"})
+	return nil
+}
+
 // UpdateTaskProjectID sets the project_id field. Empty string clears the
 // project. When non-empty, validates that the project belongs to the same
 // workspace as the task.

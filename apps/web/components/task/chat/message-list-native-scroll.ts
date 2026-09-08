@@ -26,11 +26,24 @@ import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
+const placementDebug = createDebugLogger("messages:scroll-placement");
 // i18n-exempt: IntersectionObserver root-margin configuration, not user-facing copy.
 export const TRANSCRIPT_SENTINEL_ROOT_MARGIN = "200px 0px 0px 0px";
 
 // INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
+const USER_SCROLL_INTENT_WINDOW_MS = 250;
+const SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
 
 /** Writes a clamped maximum so the browser resolves the native bottom without
  * forcing a synchronous scrollHeight layout read. */
@@ -630,6 +643,7 @@ export function useAutoScroll(params: {
     scrollRef,
     messages,
     isWorking,
+    sessionId,
     enabled,
     hasUnreadDivider,
     isNearBottomRef,
@@ -653,6 +667,7 @@ export function useAutoScroll(params: {
   return { isNearBottomRef, resyncIsNearBottom, markNotNearBottom };
 }
 
+// eslint-disable-next-line max-lines-per-function -- persisted placement coordinates user intent, session resets, and layout recovery.
 function usePersistedTranscriptScroll({
   scrollRef,
   sessionId,
@@ -677,6 +692,7 @@ function usePersistedTranscriptScroll({
   initialPlacementPending: boolean;
 }) {
   const frozenScrollTopRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
   const latestSessionIdRef = useRef(sessionId);
   if (latestSessionIdRef.current !== sessionId) {
     latestSessionIdRef.current = sessionId;
@@ -685,6 +701,15 @@ function usePersistedTranscriptScroll({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const markUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
+    };
+    const clearUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = 0;
+    };
+    const markScrollKeyIntent = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) markUserScrollIntent();
+    };
     /** Persists the container's current scrollTop for the session (used when
      * auto-scroll is disabled). */
     const captureScrollTop = () => {
@@ -703,11 +728,37 @@ function usePersistedTranscriptScroll({
     const onScroll = () => {
       if (!isVisibleRef.current) return;
       resyncIsNearBottom();
-      if (!enabled) frozenScrollTopRef.current = el.scrollTop;
+      // A layout change can clamp a disabled transcript's scrollTop and emit a
+      // native scroll event. Only adopt an offset when a recent user gesture
+      // explains the movement; otherwise the layout effect must restore the
+      // frozen offset on the next render.
+      if (!enabled && userScrollIntentUntilRef.current >= Date.now()) {
+        frozenScrollTopRef.current = el.scrollTop;
+      }
       coalescer.schedule();
     };
+    el.addEventListener("wheel", markUserScrollIntent, { passive: true });
+    el.addEventListener("touchstart", markUserScrollIntent, { passive: true });
+    el.addEventListener("touchmove", markUserScrollIntent, { passive: true });
+    el.addEventListener("pointerdown", markUserScrollIntent, { passive: true });
+    el.addEventListener("pointerup", clearUserScrollIntent, { passive: true });
+    el.addEventListener("pointercancel", clearUserScrollIntent, { passive: true });
+    el.addEventListener("touchend", clearUserScrollIntent, { passive: true });
+    el.addEventListener("touchcancel", clearUserScrollIntent, { passive: true });
+    el.addEventListener("keydown", markScrollKeyIntent);
+    el.addEventListener("scrollend", clearUserScrollIntent);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      el.removeEventListener("wheel", markUserScrollIntent);
+      el.removeEventListener("touchstart", markUserScrollIntent);
+      el.removeEventListener("touchmove", markUserScrollIntent);
+      el.removeEventListener("pointerdown", markUserScrollIntent);
+      el.removeEventListener("pointerup", clearUserScrollIntent);
+      el.removeEventListener("pointercancel", clearUserScrollIntent);
+      el.removeEventListener("touchend", clearUserScrollIntent);
+      el.removeEventListener("touchcancel", clearUserScrollIntent);
+      el.removeEventListener("keydown", markScrollKeyIntent);
+      el.removeEventListener("scrollend", clearUserScrollIntent);
       el.removeEventListener("scroll", onScroll);
       // Final capture on unmount so a disabled session's exact position
       // survives a dockview panel teardown/remount (e.g. navigating away
@@ -715,7 +766,16 @@ function usePersistedTranscriptScroll({
       // if a coalesced write above was still pending.
       if (!initialPlacementPending || latestSessionIdRef.current !== sessionId) coalescer.flush();
     };
-  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled, initialPlacementPending]);
+  }, [
+    scrollRef,
+    sessionId,
+    storeApi,
+    resyncIsNearBottom,
+    enabled,
+    frozenScrollTopRef,
+    userScrollIntentUntilRef,
+    initialPlacementPending,
+  ]);
 
   // Own the disabled offset across every transcript layout update. Sending a
   // prompt can briefly shrink the scroll range before the new message row is
@@ -744,6 +804,7 @@ function useAutoScrollOnContent({
   scrollRef,
   messages,
   isWorking,
+  sessionId,
   enabled,
   hasUnreadDivider,
   isNearBottomRef,
@@ -755,6 +816,7 @@ function useAutoScrollOnContent({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   messages: Message[];
   isWorking: boolean;
+  sessionId: string | null;
   enabled: boolean;
   hasUnreadDivider: boolean;
   isNearBottomRef: React.RefObject<boolean>;
@@ -763,6 +825,8 @@ function useAutoScrollOnContent({
   prevIsWorkingRef: React.MutableRefObject<boolean>;
   initialPlacementPending: boolean;
 }) {
+  const lastLoggedMessageCountRef = useRef(messages.length);
+
   // When isWorking transitions to true, force scroll to bottom (unless
   // disabled, locked, or a layout rebuild scroll restore is pending).
   useEffect(() => {
@@ -782,12 +846,14 @@ function useAutoScrollOnContent({
       if (el) {
         scrollNativeToBottom(el);
         isNearBottomRef.current = true;
+        placementDebug("work-start bottom", { sessionId });
       }
     }
     prevIsWorkingRef.current = isWorking;
   }, [
     hasUnreadDivider,
     isWorking,
+    sessionId,
     scrollRef,
     enabled,
     isProgrammaticScrollLocked,
@@ -808,8 +874,22 @@ function useAutoScrollOnContent({
       enabled
     ) {
       scrollNativeToBottom(el);
+      if (messages.length !== lastLoggedMessageCountRef.current) {
+        placementDebug("message-update bottom", {
+          sessionId,
+          messageCount: messages.length,
+        });
+      }
     }
-  }, [messages, scrollRef, enabled, isProgrammaticScrollLocked, initialPlacementPending]);
+    lastLoggedMessageCountRef.current = messages.length;
+  }, [
+    messages,
+    sessionId,
+    scrollRef,
+    enabled,
+    isProgrammaticScrollLocked,
+    initialPlacementPending,
+  ]);
 }
 
 function useCatchUpOnVisible({
@@ -1090,7 +1170,9 @@ type InitialScrollApplyParams = {
   isVisibleRef: React.RefObject<boolean>;
   isNearBottomRef: React.RefObject<boolean>;
   envSwitchPlacementToken: number | null;
+  hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
+  phase: "provisional" | "final";
 };
 
 function markInitialScrollConsumed(
@@ -1103,8 +1185,85 @@ function markInitialScrollConsumed(
 
 function completeEnvSwitchPlacement(envSwitchPlacementToken: number | null): void {
   if (envSwitchPlacementToken !== null) {
+    if (isDebug()) {
+      placementDebug("placement request completed", { token: envSwitchPlacementToken });
+    }
     useDockviewStore.getState().completePendingChatInitialPlacement(envSwitchPlacementToken);
   }
+}
+
+function isCurrentEnvSwitchPlacement(
+  pending: { sessionId: string; token: number } | null,
+  sessionId: string | null,
+  token: number | null,
+): boolean {
+  if (token === null) return true;
+  return pending?.token === token && pending.sessionId === sessionId;
+}
+
+type CompetingInitialScrollOwner =
+  | "layout-restore"
+  | "explicit-target"
+  | "unread-divider"
+  | "programmatic-scroll";
+
+function resolveCompetingInitialScrollOwner(params: {
+  hasPendingLayoutRestore: boolean;
+  hasExplicitScrollTarget: boolean;
+  hasUnreadDivider: boolean;
+  isProgrammaticScrollLocked: () => boolean;
+}): CompetingInitialScrollOwner | null {
+  if (params.hasPendingLayoutRestore) return "layout-restore";
+  if (params.hasExplicitScrollTarget) return "explicit-target";
+  if (params.hasUnreadDivider) return "unread-divider";
+  if (params.isProgrammaticScrollLocked()) return "programmatic-scroll";
+  return null;
+}
+
+function reportInitialPlacement(
+  phase: InitialScrollApplyParams["phase"],
+  element: HTMLDivElement,
+  sessionId: string | null,
+  token: number | null,
+  enabled: boolean,
+): void {
+  if (!isDebug()) return;
+  placementDebug(`${phase} placement`, {
+    sessionId,
+    token,
+    owner: enabled ? "bottom" : "saved-position",
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  });
+}
+
+function completeFinalEnvSwitchPlacement(
+  phase: InitialScrollApplyParams["phase"],
+  token: number | null,
+): void {
+  if (phase === "final") completeEnvSwitchPlacement(token);
+}
+
+function finishAppliedInitialPlacement(params: {
+  phase: InitialScrollApplyParams["phase"];
+  enabled: boolean;
+  scrollTop: number;
+  element: HTMLDivElement;
+  envSwitchPlacementToken: number | null;
+  syncNearBottom: () => void;
+}): void {
+  if (params.phase === "provisional") return;
+  if (params.enabled || params.scrollTop <= 0 || params.element.scrollTop >= params.scrollTop - 1) {
+    completeEnvSwitchPlacement(params.envSwitchPlacementToken);
+    return;
+  }
+  scheduleClampedScrollRestore({
+    element: params.element,
+    targetScrollTop: params.scrollTop,
+    onApply: params.syncNearBottom,
+    onComplete: () => completeEnvSwitchPlacement(params.envSwitchPlacementToken),
+  });
 }
 
 function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
@@ -1118,14 +1277,36 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
     isVisibleRef,
     isNearBottomRef,
     envSwitchPlacementToken,
+    hasUnreadDivider,
     isProgrammaticScrollLocked,
+    phase,
   } = params;
   if (!isVisibleRef.current) return;
   const dockviewState = useDockviewStore.getState();
+  if (
+    !isCurrentEnvSwitchPlacement(
+      dockviewState.pendingChatInitialPlacement,
+      sessionId,
+      envSwitchPlacementToken,
+    )
+  )
+    return;
   const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
   const hasExplicitScrollTarget =
     sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
-  if (hasPendingLayoutRestore || hasExplicitScrollTarget || isProgrammaticScrollLocked()) {
+  const competingOwner = resolveCompetingInitialScrollOwner({
+    hasPendingLayoutRestore,
+    hasExplicitScrollTarget,
+    hasUnreadDivider,
+    isProgrammaticScrollLocked,
+  });
+  if (competingOwner) {
+    if (phase === "provisional") return;
+    placementDebug(`${phase} placement delegated`, {
+      sessionId,
+      owner: competingOwner,
+      token: envSwitchPlacementToken,
+    });
     markInitialScrollConsumed(didInitialScroll, activationPendingRef);
     completeEnvSwitchPlacement(envSwitchPlacementToken);
     return;
@@ -1141,9 +1322,11 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
     savedScrollTop,
     scrollHeight: element.scrollHeight,
   });
-  markInitialScrollConsumed(didInitialScroll, activationPendingRef);
+  if (phase === "final") {
+    markInitialScrollConsumed(didInitialScroll, activationPendingRef);
+  }
   if (scrollTop === null) {
-    completeEnvSwitchPlacement(envSwitchPlacementToken);
+    completeFinalEnvSwitchPlacement(phase, envSwitchPlacementToken);
     return;
   }
 
@@ -1156,16 +1339,36 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
   };
   element.scrollTop = scrollTop;
   syncNearBottom();
-  if (enabled || scrollTop <= 0 || element.scrollTop >= scrollTop - 1) {
-    completeEnvSwitchPlacement(envSwitchPlacementToken);
-    return;
-  }
-  scheduleClampedScrollRestore({
+  reportInitialPlacement(phase, element, sessionId, envSwitchPlacementToken, enabled);
+  finishAppliedInitialPlacement({
+    phase,
+    enabled,
+    scrollTop,
     element,
-    targetScrollTop: scrollTop,
-    onApply: syncNearBottom,
-    onComplete: () => completeEnvSwitchPlacement(envSwitchPlacementToken),
+    envSwitchPlacementToken,
+    syncNearBottom,
   });
+}
+
+function shouldSkipProvisionalPlacement(
+  phase: InitialScrollApplyParams["phase"],
+  hasUnreadDivider: boolean,
+  appliedToken: number | null,
+  currentToken: number | null,
+): boolean {
+  return phase === "provisional" && (hasUnreadDivider || appliedToken === currentToken);
+}
+
+function useInitialPlacementLatches(envSwitchPlacementToken: number | null) {
+  const didInitialScroll = useRef(false);
+  const lastTokenRef = useRef<number | null>(null);
+  const provisionalTokenRef = useRef<number | null>(null);
+  if (envSwitchPlacementToken !== null && envSwitchPlacementToken !== lastTokenRef.current) {
+    lastTokenRef.current = envSwitchPlacementToken;
+    provisionalTokenRef.current = null;
+    didInitialScroll.current = false;
+  }
+  return { didInitialScroll, provisionalTokenRef };
 }
 
 function useInitialScrollPosition({
@@ -1173,6 +1376,7 @@ function useInitialScrollPosition({
   itemCount,
   sessionId,
   enabled,
+  hasUnreadDivider,
   isNearBottomRef,
   isVisible,
   historyRefreshPending,
@@ -1184,6 +1388,7 @@ function useInitialScrollPosition({
   itemCount: number;
   sessionId: string | null;
   enabled: boolean;
+  hasUnreadDivider: boolean;
   isNearBottomRef: React.RefObject<boolean>;
   isVisible: boolean;
   historyRefreshPending: boolean;
@@ -1192,15 +1397,8 @@ function useInitialScrollPosition({
   isProgrammaticScrollLocked: () => boolean;
 }) {
   const storeApi = useAppStoreApi();
-  const didInitialScroll = useRef(false);
-  const lastEnvSwitchPlacementTokenRef = useRef<number | null>(null);
-  if (
-    envSwitchPlacementToken !== null &&
-    envSwitchPlacementToken !== lastEnvSwitchPlacementTokenRef.current
-  ) {
-    lastEnvSwitchPlacementTokenRef.current = envSwitchPlacementToken;
-    didInitialScroll.current = false;
-  }
+  const { didInitialScroll, provisionalTokenRef } =
+    useInitialPlacementLatches(envSwitchPlacementToken);
   const { isVisibleRef, activationPendingRef } = useActivationPending(
     isVisible,
     envSwitchPlacementToken,
@@ -1209,8 +1407,9 @@ function useInitialScrollPosition({
     if (!isVisible) {
       return;
     }
-    if (envSwitchPlacementToken !== null && (isRestoringLayout || historyRefreshPending)) return;
+    if (envSwitchPlacementToken !== null && isRestoringLayout) return;
     if (envSwitchPlacementToken !== null && itemCount === 0) {
+      if (historyRefreshPending) return;
       markInitialScrollConsumed(didInitialScroll, activationPendingRef);
       completeEnvSwitchPlacement(envSwitchPlacementToken);
       return;
@@ -1219,7 +1418,19 @@ function useInitialScrollPosition({
     const el = scrollRef.current;
     if (!el) return;
 
-    const applyInitialScroll = () =>
+    const phase =
+      envSwitchPlacementToken !== null && historyRefreshPending ? "provisional" : "final";
+    if (
+      shouldSkipProvisionalPlacement(
+        phase,
+        hasUnreadDivider,
+        provisionalTokenRef.current,
+        envSwitchPlacementToken,
+      )
+    ) {
+      return;
+    }
+    const applyInitialScroll = () => {
       applyInitialScrollPosition({
         element: el,
         sessionId,
@@ -1230,8 +1441,14 @@ function useInitialScrollPosition({
         isVisibleRef,
         isNearBottomRef,
         envSwitchPlacementToken,
+        hasUnreadDivider,
         isProgrammaticScrollLocked,
+        phase,
       });
+      if (phase === "provisional") {
+        provisionalTokenRef.current = envSwitchPlacementToken;
+      }
+    };
 
     if (activationPendingRef.current) {
       return scheduleAfterPanelRestore(applyInitialScroll);
@@ -1241,6 +1458,7 @@ function useInitialScrollPosition({
     itemCount,
     sessionId,
     enabled,
+    hasUnreadDivider,
     isNearBottomRef,
     storeApi,
     isVisible,
@@ -1351,6 +1569,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
     itemCount: items.length,
     sessionId,
     enabled,
+    hasUnreadDivider,
     isNearBottomRef,
     isVisible,
     historyRefreshPending,

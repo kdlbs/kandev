@@ -39,7 +39,7 @@ func TestWorkflowStore_LoadState(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 
 	agentMgr := &mockAgentManager{isPassthrough: true}
-	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger(), &operationLedger{})
 
 	state, err := store.LoadState(ctx, "t1", "s1")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestWorkflowStore_LoadState_BlankSessionIDResolvesFromTaskRow(t *testing.T)
 	seedTaskWithoutSession(t, repo, "t1", "step1")
 
 	agentMgr := &mockAgentManager{isPassthrough: true}
-	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger(), &operationLedger{})
 
 	state, err := store.LoadState(ctx, "t1", "")
 	if err != nil {
@@ -108,7 +108,7 @@ func TestWorkflowStore_LoadStep(t *testing.T) {
 		Position:   0,
 	}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	spec, err := store.LoadStep(ctx, "wf1", "step1")
 	if err != nil {
@@ -140,7 +140,7 @@ func TestWorkflowStore_LoadNextStep(t *testing.T) {
 		ID: "step3", WorkflowID: "wf1", Name: "Step 3", Position: 2,
 	}
 
-	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	t.Run("returns next step by position", func(t *testing.T) {
 		spec, err := store.LoadNextStep(ctx, "wf1", 0)
@@ -168,7 +168,7 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 
 	err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
 	if err != nil {
@@ -200,7 +200,7 @@ func TestWorkflowStore_ApplyTransitionRejectsStaleSourceStep(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	err := store.ApplyTransition(ctx, "t1", "s1", "stale-step", "step2", "on_turn_complete")
 	require.Error(t, err)
@@ -220,7 +220,7 @@ func TestWorkflowStore_ConcurrentDestinationRoutesAllocateOneStepEntry(t *testin
 		ID: "step2", WorkflowID: "wf1", Name: "Done", Position: 1,
 		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterClearDecisions}}},
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	start := make(chan struct{})
 	type outcome struct {
@@ -287,7 +287,7 @@ func TestWorkflowStore_ApplyTransitionSyncsWorkflowIDAcrossWorkflows(t *testing.
 	stepGetter.steps["step-wf2"] = &wfmodels.WorkflowStep{
 		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "manual_move"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
@@ -328,7 +328,7 @@ func TestWorkflowStore_ApplyTransitionPublishesOldWorkflowIDOnCrossWorkflowMove(
 		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
 	}
 	pub := &capturingPublisher{}
-	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger(), &operationLedger{})
 
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "manual_move"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
@@ -366,7 +366,7 @@ func TestWorkflowStore_ApplyTransitionQueuesFullWIPLimitedTarget(t *testing.T) {
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID: "step2", WorkflowID: "wf1", Name: "Limited", Position: 1, WIPLimit: 1,
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
 	if err != nil {
@@ -420,7 +420,7 @@ func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) 
 		ID: "step-next", WorkflowID: "wf1", Name: "Next", Position: 1,
 	}
 	var movedTaskID string
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(),
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{},
 		func(_ context.Context, task *models.Task, _, _, _, _ string) {
 			movedTaskID = task.ID
 		})
@@ -455,7 +455,7 @@ func TestWorkflowStore_ApplyTransitionIfAtStep_AppliesWhenStepMatches(t *testing
 		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 	}
 	pub := &capturingPublisher{}
-	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger(), &operationLedger{})
 
 	applied, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
 	if err != nil {
@@ -500,7 +500,7 @@ func TestWorkflowStore_ApplyTransitionIfAtStep_LostRaceReturnsFalseWithoutSideEf
 		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 	}
 	pub := &capturingPublisher{}
-	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger(), &operationLedger{})
 
 	applied, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "not-the-current-step", "step2", "on_turn_complete")
 	if err != nil {
@@ -532,7 +532,7 @@ func TestWorkflowStore_ApplyTransitionIfAtStep_ErrorsWhenTargetStepMissing(t *te
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 
 	_, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "step1", "missing-step", "on_turn_complete")
 	if err == nil {
@@ -545,7 +545,7 @@ func TestWorkflowStore_PersistData(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 
 	// Persist initial data
 	err := store.PersistData(ctx, "s1", map[string]any{"plan_mode": true})
@@ -590,7 +590,7 @@ func TestWorkflowStore_PersistData(t *testing.T) {
 
 func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 	ctx := context.Background()
-	store := newWorkflowStore(nil, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(nil, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 
 	t.Run("empty operation ID returns false", func(t *testing.T) {
 		applied, err := store.IsOperationApplied(ctx, "")
@@ -626,6 +626,20 @@ func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 			t.Error("expected marked operation to return true")
 		}
 	})
+
+	t.Run("marking empty operation ID is a no-op", func(t *testing.T) {
+		if err := store.MarkOperationApplied(ctx, ""); err != nil {
+			t.Fatalf("MarkOperationApplied failed: %v", err)
+		}
+
+		applied, err := store.IsOperationApplied(ctx, "")
+		if err != nil {
+			t.Fatalf("IsOperationApplied failed: %v", err)
+		}
+		if applied {
+			t.Error("expected empty operation ID to never be stored")
+		}
+	})
 }
 
 func TestWorkflowStore_DeferredApplyReusesPersistedOperationIdentity(t *testing.T) {
@@ -636,7 +650,7 @@ func TestWorkflowStore_DeferredApplyReusesPersistedOperationIdentity(t *testing.
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID: "step2", WorkflowID: "wf1", Name: "Done", Position: 1,
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 	operation := routing.Operation{
 		ID: "deferred-operation", TaskID: "t1", WorkspaceID: "ws1",
 		Producer: routing.ProducerMergedPR, ExpectedStepID: "step1",
@@ -678,7 +692,7 @@ func TestWorkflowStore_MarkDeferredMoveAppliedSettlesPendingOperationAtCurrentTa
 	task.WorkflowStepID = "step2"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	require.NoError(t, store.MarkDeferredMoveApplied(ctx, "t1", operation.ID))
 
 	readback, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)

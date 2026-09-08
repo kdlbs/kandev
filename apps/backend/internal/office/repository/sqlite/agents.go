@@ -275,21 +275,33 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles SET
-			name = ?, role = ?, icon = ?, status = ?,
+			name = ?, role = ?, icon = ?,
+			status = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
+				ELSE ?
+			END,
 			reports_to = ?, permissions = ?, budget_monthly_cents = ?,
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			last_run_finished_at = ?,
 			skill_ids = ?, desired_skills = ?, executor_preference = ?,
-			pause_reason = ?, failure_threshold = ?, settings = ?,
+			pause_reason = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN pause_reason
+				ELSE ?
+			END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' THEN working_run_id
+				ELSE ''
+			END,
+			failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
 			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
-	`), agent.Name, string(agent.Role), agent.Icon, status,
+	`), agent.Name, string(agent.Role), agent.Icon, status, status,
 		agent.ReportsTo, permissions, agent.BudgetMonthlyCents,
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.LastRunFinishedAt,
 		skillIDs, desiredSkills, agent.ExecutorPreference,
-		agent.PauseReason, threshold, settings,
+		status, agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
 		agent.UpdatedAt, agent.ID)
 	return err
@@ -396,10 +408,65 @@ func (r *Repository) UpdateAgentStatusFields(
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET status = ?, pause_reason = ?, updated_at = ?
+		SET status = CASE WHEN ? = 'working' THEN status ELSE ? END,
+			pause_reason = CASE WHEN ? = 'working' THEN pause_reason ELSE ? END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' AND ? = 'working' THEN working_run_id
+				ELSE ''
+			END,
+			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
-	`), status, pauseReason, now, id)
+	`), status, status, status, pauseReason, status, now, id)
 	return err
+}
+
+// UpdateAgentStatusFieldsIfCurrent updates status fields only when the
+// agent still has expectedStatus. The affected-row result makes a stale
+// caller observable instead of allowing it to overwrite a newer status.
+func (r *Repository) UpdateAgentStatusFieldsIfCurrent(
+	ctx context.Context, id, expectedStatus, status, pauseReason string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = CASE WHEN ? = 'working' THEN status ELSE ? END,
+			pause_reason = CASE WHEN ? = 'working' THEN pause_reason ELSE ? END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' AND ? = 'working' THEN working_run_id
+				ELSE ''
+			END,
+			updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), status, status, status, pauseReason, status, now, id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// ClearAgentPauseReasonIfCurrent clears only pause_reason when the agent
+// still has expectedStatus. This preserves a concurrent working or stopped
+// status while avoiding a stale status write.
+func (r *Repository) ClearAgentPauseReasonIfCurrent(
+	ctx context.Context, id, expectedStatus string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET pause_reason = '', updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), time.Now().UTC(), id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // GetAgentInstanceByNameAny returns the first agent instance matching a name
@@ -517,8 +584,12 @@ func (r *Repository) DeleteAgentInstanceTx(ctx context.Context, tx *sqlx.Tx, id 
 
 func (r *Repository) deleteAgentInstance(ctx context.Context, ext sqlx.ExtContext, id string) error {
 	now := time.Now().UTC()
+	if _, err := ext.ExecContext(ctx, r.db.Rebind(
+		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id); err != nil {
+		return err
+	}
 	_, err := ext.ExecContext(ctx, r.db.Rebind(
-		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
+		`DELETE FROM office_agent_pause_recoveries WHERE agent_id = ?`), id)
 	return err
 }
 

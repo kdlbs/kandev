@@ -80,6 +80,8 @@ history or returning an unbounded log export.
 - Every error toast displayed through either supported frontend toast system
   is reported immediately to the backend and written as an `error` entry named
   `frontend error toast`.
+- A backend-reload alert is not an error toast. Its allow-listed recovery report
+  uses the info-level contract in part 2 of this design.
 - Toast reporting includes the visible toast text plus rich browser context:
   the browser URL origin and pathname with query and fragment removed, browser
   identity fields, viewport dimensions, a client timestamp, the toast

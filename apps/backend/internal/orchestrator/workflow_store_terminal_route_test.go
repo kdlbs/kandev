@@ -32,7 +32,7 @@ func TestWorkflowStoreTerminalRouteCommitsTaskStateAndPendingSettlement(t *testi
 	steps.steps["step-done"] = &wfmodels.WorkflowStep{
 		ID: "step-done", WorkflowID: "wf1", Name: "Done", Position: 1,
 	}
-	store := newWorkflowStore(repo, steps, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, steps, nil, noopPublisher, testLogger(), &operationLedger{})
 	operation := routing.Operation{
 		ID: "terminal-engine-operation", TaskID: "terminal-task",
 		Producer: routing.ProducerWorkflow, ExpectedStepID: "step-pr", TargetStepID: "step-done",

@@ -190,4 +190,24 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     order: 670,
     requires: "users",
   },
+  // Grouped with access control, not system: an organization is a boundary
+  // above users, and System is for operating the instance.
+  {
+    id: "settings-units",
+    kind: "page",
+    labelKey: "settings:navUnits",
+    groupId: "access",
+    href: "/settings/units",
+    order: 659,
+    requires: "users",
+  },
+  {
+    id: "system-organizations",
+    kind: "page",
+    labelKey: "orgs:navOrganizations",
+    groupId: "access",
+    href: "/settings/system/organizations",
+    order: 661,
+    requires: "organizations",
+  },
 ];

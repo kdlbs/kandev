@@ -79,7 +79,7 @@ These protocols are separate:
 - **REST and WebSocket** are backend/client and agentctl control surfaces.
 - **MCP** supplies Kandev and profile-configured tools to an agent. It is not an agent runtime adapter.
 
-agentctl hosts task MCP endpoints and relays tool calls over the agent stream to backend handlers. The backend also exposes external MCP routes. Kandev currently adds no user-auth middleware to those external routes; do not expose them on an untrusted network without binding, proxy authentication, and scoped credentials. See [Automation and MCP](automation-and-mcp.md).
+agentctl hosts task MCP endpoints and relays tool calls over the agent stream to backend handlers. The backend also exposes external MCP routes. Those routes remain open while authentication is disabled; when the experimental authentication feature is enabled, they require an authenticated identity and carry that user into dispatch. External clients use personal access tokens, while same-origin browser tooling can use a session. Do not expose them on an untrusted network without binding, TLS, and scoped credentials. See [Automation and MCP](automation-and-mcp.md).
 
 ## Events and persistence
 

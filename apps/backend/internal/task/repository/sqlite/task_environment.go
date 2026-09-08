@@ -190,7 +190,8 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),
@@ -209,6 +210,40 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, env.ID)
 	}
 	return tx.Commit()
+}
+
+// SetTaskEnvironmentTaskDirNameIfEmpty claims the stable task-root identity
+// without rewriting the rest of an environment row. The compare-and-set keeps
+// concurrent inherited launches from choosing different physical roots.
+func (r *Repository) SetTaskEnvironmentTaskDirNameIfEmpty(ctx context.Context, environmentID, taskDirName string) (bool, error) {
+	if environmentID == "" || taskDirName == "" {
+		return false, fmt.Errorf("set task environment task directory name: environment and task directory name are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	taskID, _, err := r.taskEnvironmentStateTx(ctx, tx, environmentID)
+	if err != nil {
+		return false, err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET task_dir_name = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(task_dir_name, '') = ''
+	`), taskDirName, time.Now().UTC(), environmentID)
+	if err != nil {
+		return false, err
+	}
+	claimed, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return claimed == 1, nil
 }
 
 func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.Tx, environmentID string) error {
@@ -309,7 +344,7 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			control_port = ?, status = ?, materialization_session_id = '',
 			workspace_path = ?, container_id = ?,
 			container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
-			sandbox_id = ?, task_dir_name = ?, updated_at = ?
+			sandbox_id = ?, task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name), updated_at = ?
 		WHERE id = ? AND status = ? AND materialization_session_id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
@@ -417,7 +452,8 @@ func (r *Repository) updateTaskEnvironmentTransitionTx(
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),

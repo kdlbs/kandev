@@ -2,6 +2,10 @@ import type { AgentProfile } from "../../../lib/types/http-agents";
 import type { ApiClient } from "../../helpers/api-client";
 
 export const UNADVERTISED_MODEL = "host-only-model";
+export const MODEL_VARIATION_BASE = "opus";
+export const UNIQUE_MODEL_VARIATION = "opus[1m]";
+export const AMBIGUOUS_MODEL_VARIATIONS = ["opus[270k]", "opus[1m, fast]"] as const;
+const MODEL_CATALOG_ENV = "MOCK_AGENT_MODEL_CATALOG";
 
 export async function createMismatchedProfile(
   apiClient: ApiClient,
@@ -11,6 +15,20 @@ export async function createMismatchedProfile(
   const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
   if (!agent) throw new Error("The E2E fixture must provide a mock agent");
   return apiClient.createAgentProfile(agent.id, name, { model: UNADVERTISED_MODEL });
+}
+
+export async function createModelVariationProfile(
+  apiClient: ApiClient,
+  name: string,
+  catalog: "unique" | "ambiguous",
+): Promise<AgentProfile> {
+  const { agents } = await apiClient.listAgents();
+  const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+  if (!agent) throw new Error("The E2E fixture must provide a mock agent");
+  return apiClient.createAgentProfile(agent.id, name, {
+    model: MODEL_VARIATION_BASE,
+    env_vars: [{ key: MODEL_CATALOG_ENV, value: catalog }],
+  });
 }
 
 export async function readModelSelectionWarnings(

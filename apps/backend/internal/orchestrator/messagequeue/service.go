@@ -74,6 +74,13 @@ func (s *Service) LifecycleGeneration(ctx context.Context, taskID string) (int64
 	return s.repo.LifecycleGeneration(ctx, taskID)
 }
 
+// ListDurableLifecycleEntries returns lifecycle rows that remain persisted
+// until executor acceptance. Startup recovery uses it to reconcile queue rows
+// with their owning automation reservations.
+func (s *Service) ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error) {
+	return s.repo.ListDurableLifecycleEntries(ctx)
+}
+
 // SetMaxPerSession applies a new admission cap without pruning existing rows.
 // Non-positive values disable the cap.
 func (s *Service) SetMaxPerSession(maxPerSession int) {
@@ -447,29 +454,82 @@ func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, nil)
+}
+
+// QueueLifecycleMessageWithCoalesceKeyAfterInsert runs afterInsert while the
+// queue admission lock is held. If the callback fails, the exact queue
+// snapshot from before admission is restored before the error is returned.
+// Lifecycle dispatch uses this boundary when it must reserve durable attempt
+// metadata together with a queue entry.
+func (s *Service) QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+	ctx context.Context,
+	sessionID, taskID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	coalesceKey string,
+	allowInsert bool,
+	afterInsert func(context.Context, *QueuedMessage, bool) error,
+) (*QueuedMessage, bool, bool, error) {
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, afterInsert)
 }
 
 // RequeueLifecycleMessageWithCoalesceKey preserves the generation captured by
 // an existing durable row. This prevents a stale retry from becoming a new
 // prompt after the task was archived and then unarchived.
 func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true, nil)
 }
 
 // queueLifecycleMessageWithCoalesceKey is the lifecycle-guarded core of the lifecycle queue methods.
-func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
+func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, afterInsert func(context.Context, *QueuedMessage, bool) error) (*QueuedMessage, bool, bool, error) {
 	var queued *QueuedMessage
 	var replaced, accepted bool
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var snapshot []QueuedMessage
+		var pendingMove *PendingMove
+		if afterInsert != nil {
+			var snapshotErr error
+			snapshot, snapshotErr = s.repo.ListBySession(admittedCtx, sessionID)
+			if snapshotErr != nil {
+				return snapshotErr
+			}
+			pendingMove, snapshotErr = s.repo.GetPendingMove(admittedCtx, sessionID)
+			if snapshotErr != nil {
+				return snapshotErr
+			}
+		}
 		var err error
 		queued, replaced, accepted, err = s.insertLifecycleMessageWithCoalesceKey(
 			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments,
 			metadata, coalesceKey, allowInsert, isRetry,
 		)
-		return err
+		if err != nil || !accepted || afterInsert == nil {
+			return err
+		}
+		if err := afterInsert(admittedCtx, queued, replaced); err != nil {
+			rollbackErr := s.restoreCoalescedAdmission(context.WithoutCancel(admittedCtx), sessionID, snapshot, pendingMove)
+			queued = nil
+			replaced = false
+			accepted = false
+			if rollbackErr != nil {
+				return fmt.Errorf("coalesced lifecycle admission callback failed: %w (queue rollback failed: %v)", err, rollbackErr)
+			}
+			return err
+		}
+		return nil
 	})
 	return queued, replaced, accepted, err
+}
+
+func (s *Service) restoreCoalescedAdmission(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if err := s.repo.ReplaceSession(ctx, sessionID, entries, pendingMove); err != nil {
+		s.logger.Error("failed to roll back lifecycle queue admission",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // insertLifecycleMessageWithCoalesceKey inserts or replaces a lifecycle entry under the admission lock.
