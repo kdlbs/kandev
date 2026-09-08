@@ -642,9 +642,12 @@ func (e *pausedDispatchError) Unwrap() error {
 // since the fire is blocked either way) and returns a *pausedDispatchError
 // wrapping shared.ErrWorkspacePaused. A gate-read error writes no row
 // (nothing to retry from — the caller gets shared.ErrPauseGateUnavailable
-// and the next tick/call tries again) and fails closed.
+// and the next tick/call tries again) and fails closed. An empty
+// workspaceID takes the not-found branch instead: no pause record can name
+// the empty workspace, so an unattributed routine proceeds ungated rather
+// than failing closed on a gate-read error it has no workspace to apply.
 func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routineID, triggerID, source string) error {
-	if s.pauseGate == nil {
+	if s.pauseGate == nil || workspaceID == "" {
 		return nil
 	}
 	active, err := s.pauseGate.PauseState(ctx, workspaceID)
