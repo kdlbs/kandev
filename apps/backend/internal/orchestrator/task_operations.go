@@ -2653,7 +2653,10 @@ func (s *Service) attemptColdResume(
 	}
 
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if lookupErr != nil || running == nil {
+	if lookupErr != nil && !errors.Is(lookupErr, models.ErrExecutorRunningNotFound) {
+		return false, fmt.Errorf("get executor running row: %w", lookupErr)
+	}
+	if running == nil {
 		return false, fmt.Errorf("%w (state: %s)", errSessionAwaitingRuntimeLaunch, session.State)
 	}
 

@@ -888,7 +888,10 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("queue_id", queuedMsg.ID))
 			return
 		}
-		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
+		alreadyProcessed, _ := queuedMsg.Metadata[MetaKeyTurnStartAlreadyProcessed].(bool)
+		if !alreadyProcessed {
+			s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
+		}
 	}
 
 	// Call promptTask with this entry's ID as a second ownership check. The
@@ -998,13 +1001,8 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
-	// ErrSessionRuntimeUnavailable means the session's runtime has not
-	// finished launching yet (see errSessionAwaitingRuntimeLaunch) — the
-	// exact condition this dispatch was taken under, since
-	// checkSessionPromptable does not know the difference between
-	// "promptable" and "promptable with a live runtime". A future launch
-	// (workflow on_enter, agent.boot_ready) will drain the queue once the
-	// runtime is actually up, so requeue instead of dropping.
+	// ErrSessionRuntimeUnavailable: the runtime for a just-promoted session has
+	// not finished launching. Requeue so the drain on agent.boot_ready delivers it.
 	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||

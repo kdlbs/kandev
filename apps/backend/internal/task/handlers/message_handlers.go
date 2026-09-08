@@ -1000,8 +1000,13 @@ func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 	if err != nil || session == nil || isTerminalSessionState(session.State) {
 		return false
 	}
+	// wsAddMessage already ran ProcessOnTurnStart synchronously for this prompt
+	// before the runtime-unavailable failure was even known; tag the queued
+	// entry so the drain path (executeQueuedMessageWithReservation) does not
+	// fire on_turn_start a second time on the replacement session.
+	queueMetadata := map[string]interface{}{orchestrator.MetaKeyTurnStartAlreadyProcessed: true}
 	if queueErr := h.orchestrator.QueueUserPrompt(
-		ctx, taskID, sessionID, content, model, planMode, attachments, nil, true,
+		ctx, taskID, sessionID, content, model, planMode, attachments, queueMetadata, true,
 	); queueErr != nil {
 		h.logger.Warn("failed to queue prompt after runtime-unavailable prompt failure",
 			zap.String("task_id", taskID),

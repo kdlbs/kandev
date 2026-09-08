@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TestQueueUserPrompt_RuntimeUnavailableSurvivesFastPathRedispatch is the
@@ -154,5 +155,42 @@ func TestPromptTask_ExhaustedColdResumeNotClassifiedRuntimeUnavailable(t *testin
 	if errors.Is(err, ErrSessionRuntimeUnavailable) {
 		t.Fatalf("a genuine resume failure must not classify as ErrSessionRuntimeUnavailable "+
 			"(it would be silently queued with no visible error): %v", err)
+	}
+}
+
+// executorLookupErrorRepo wraps the real repo but forces
+// GetExecutorRunningBySessionID to fail with a non-not-found error, standing
+// in for a transient DB/context/deserialization failure.
+type executorLookupErrorRepo struct {
+	*sqliterepo.Repository
+	err error
+}
+
+func (r *executorLookupErrorRepo) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	return nil, r.err
+}
+
+// TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable pins a
+// second negative case for Review round 1's F2 finding, raised again in PR
+// fixup review: a genuine executor-lookup failure (DB error, context
+// cancellation, metadata deserialization) is not the "no row yet" shape
+// errSessionAwaitingRuntimeLaunch exists for. It must stay visible instead of
+// being classified as ErrSessionRuntimeUnavailable and silently queued with
+// no future agent.boot_ready to drain it.
+func TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.executor = executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{})
+	svc.repo = &executorLookupErrorRepo{Repository: repo, err: errors.New("db unavailable")}
+
+	_, err := svc.PromptTask(ctx, "t1", "s1", "hello", "", false, nil, false)
+	if err == nil {
+		t.Fatal("expected a visible error for a genuine executor lookup failure")
+	}
+	if errors.Is(err, ErrSessionRuntimeUnavailable) {
+		t.Fatalf("a genuine executor lookup error must not classify as ErrSessionRuntimeUnavailable "+
+			"(it would be silently queued with no future drain trigger): %v", err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -146,6 +147,74 @@ func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) 
 
 	if len(mc.userMessages) != 0 {
 		t.Fatalf("expected 0 user messages (already recorded before queueing), got %d", len(mc.userMessages))
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected the prompt to still reach PromptAgent, captured=%d", len(agentMgr.capturedPrompts))
+	}
+}
+
+// TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed is the
+// regression test for the PR-fixup-round finding raised independently by two
+// automated reviewers: wsAddMessage's queuePromptIfRuntimeUnavailable path
+// queues a prompt after ProcessOnTurnStart already ran synchronously for it,
+// so the queued-dispatch path must not fire on_turn_start a second time.
+// Without the metaKeyTurnStartAlreadyProcessed guard, this drain would move
+// the task's step twice for one prompt.
+func TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnStart: []wfmodels.OnTurnStartAction{
+				{Type: wfmodels.OnTurnStartMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		Events: wfmodels.StepEvents{},
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "hello",
+		QueuedBy:  "test",
+		Metadata: map[string]interface{}{
+			MetaKeyTurnStartAlreadyProcessed: true,
+		},
+	}
+
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("on_turn_start fired a second time: task moved to %q, want it to stay on step1", task.WorkflowStepID)
 	}
 	if len(agentMgr.capturedPrompts) != 1 {
 		t.Fatalf("expected the prompt to still reach PromptAgent, captured=%d", len(agentMgr.capturedPrompts))
