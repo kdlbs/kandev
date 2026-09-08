@@ -534,7 +534,7 @@ func newRepositoryHTTPTestRouterWithConfig(t *testing.T, discoveryConfig service
 		Workflows:        repo,
 		RepoEntities:     repo,
 		DiscoveryRoots:   repo,
-	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	}, eventBus, log, discoveryConfig)
 	router := gin.New()
 	NewRepositoryHandlers(svc, log).registerHTTP(router)
 	return router, repo, svc
