@@ -341,6 +341,34 @@ describe("toKanbanTask priority", () => {
   });
 });
 
+describe("toKanbanTask runner mutability", () => {
+  it("carries an explicit true/false and reason through both task shapes", () => {
+    const http = toKanbanTask(
+      httpDTO({ runner_editable: true, runner_ineligible_reason: "eligible" }),
+    );
+    expect(http.runnerEditable).toBe(true);
+    expect(http.runnerIneligibleReason).toBe("eligible");
+
+    const ws = toKanbanTask(
+      wsPayload({ runner_editable: false, runner_ineligible_reason: "session_exists" }),
+    );
+    expect(ws.runnerEditable).toBe(false);
+    expect(ws.runnerIneligibleReason).toBe("session_exists");
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-001.9: an omitted projection must fail closed, never
+  // read as the last-known value — unlike executor identity, this is not
+  // gap-filled from a cached task on merge (see mergeTaskUpdate in
+  // lib/ws/handlers/tasks.ts, which has no preserve entry for these fields).
+  it("fails closed to editable=false when the source omits the projection", () => {
+    const task = toKanbanTask(
+      httpDTO({ runner_editable: undefined, runner_ineligible_reason: undefined }),
+    );
+    expect(task.runnerEditable).toBe(false);
+    expect(task.runnerIneligibleReason).toBe("evaluation_unavailable");
+  });
+});
+
 describe("preserveOmittedExecutorFields", () => {
   const existing = toKanbanTask(
     httpDTO({

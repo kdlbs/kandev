@@ -97,6 +97,8 @@ export type TaskLike = {
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
   status_summary_invalidated?: boolean;
+  runner_editable?: boolean;
+  runner_ineligible_reason?: string;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -178,6 +180,19 @@ function primaryExecutorProjection(source: TaskLike) {
     primaryExecutorType: source.primary_executor_type ?? undefined,
     primaryExecutorName: source.primary_executor_name ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
+  };
+}
+
+/**
+ * Unlike {@link primaryExecutorProjection}, an omitted value here maps to the
+ * fail-closed default rather than `undefined` — this projection must never be
+ * gap-filled from a cached task on merge (a permission-shaped flag going
+ * stale-open is worse than it going stale-closed).
+ */
+function runnerMutabilityProjection(source: TaskLike) {
+  return {
+    runnerEditable: source.runner_editable ?? false,
+    runnerIneligibleReason: source.runner_ineligible_reason ?? "evaluation_unavailable",
   };
 }
 
@@ -281,6 +296,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     ...primaryExecutorProjection(source),
+    ...runnerMutabilityProjection(source),
     primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
