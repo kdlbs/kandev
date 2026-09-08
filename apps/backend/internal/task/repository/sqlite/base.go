@@ -176,3 +176,8 @@ func (r *Repository) Close() error {
 func (r *Repository) DB() *sql.DB {
 	return r.db.DB
 }
+
+// DriverName reports the database driver's SQLX binding behavior.
+func (r *Repository) DriverName() string {
+	return r.db.DriverName()
+}

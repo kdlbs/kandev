@@ -27,22 +27,24 @@ func TestRequestFreshCIRunRejectsGrantRevokedAtRerunStart(t *testing.T) {
 	}
 }
 
-func TestRequestFreshCIRunRejectsLaneChangeAtDispatchStart(t *testing.T) {
+func TestRequestFreshCIRunTerminatesPersistedDispatchFallbackWithoutRevalidation(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	client.listHook = func() {
-		client.listHook = nil
-		_, _ = service.store.db.Exec(`UPDATE tasks SET workflow_step_id = 'review' WHERE id = 'target-1'`)
+	request := testCIRunRequest(testCIRunGrant(service.ciRunClock()().UTC()), service.ciRunClock()().UTC())
+	request.ID = "persisted-dispatch-fallback"
+	request.Operation = CIRunOperationWorkflowDispatch
+	request.Status = CIRunRequestPending
+	if _, _, err := service.store.ClaimCIRunRequest(context.Background(), request); err != nil {
+		t.Fatal(err)
 	}
 
-	_, err := service.RequestFreshCIRun(context.Background(), input)
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureWorkflowStepMismatch {
-		t.Fatalf("error = %#v, want workflow_step_mismatch", err)
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchRefUnavailable {
+		t.Fatalf("error = %#v, want dispatch_ref_unavailable", err)
 	}
-	if client.dispatches != 0 {
-		t.Fatalf("provider dispatches = %d, want zero after lane change", client.dispatches)
+	if receipt.RequestID != request.ID || client.reruns != 0 || client.listCalls != 0 || client.dispatches != 0 {
+		t.Fatalf("receipt = %+v; provider calls reruns=%d list=%d dispatches=%d", receipt, client.reruns, client.listCalls, client.dispatches)
 	}
 }
 
@@ -98,7 +100,7 @@ func TestRequestFreshCIRunReconcilesAmbiguousMutationWithoutResending(t *testing
 		t.Fatal(err)
 	}
 	if receipt.Status != CIRunRequestSucceeded || receipt.Attempt != 2 ||
-		receipt.WorkflowName != "E2E" || receipt.WorkflowPath != reviewedDispatchWorkflow {
+		receipt.WorkflowName != "E2E" || receipt.WorkflowPath != ".github/workflows/e2e-tests.yml" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 	if client.reruns != 1 {

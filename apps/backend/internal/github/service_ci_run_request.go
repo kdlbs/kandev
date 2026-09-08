@@ -123,6 +123,9 @@ func (s *Service) continueCIRunRequest(
 	if !acquired {
 		return receiptFromCIRunRequest(request), nil
 	}
+	if request.Operation == CIRunOperationWorkflowDispatch {
+		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
+	}
 	if input.EvidenceKind == CIRunEvidenceCurrentMerge {
 		return s.failCIRunRequest(ctx, request, CIRunFailureMergeEvidenceUnavailable)
 	}
@@ -139,9 +142,6 @@ func (s *Service) continueCIRunRequest(
 	}
 	request.ObservedPRHeadSHA = verified.PR.HeadSHA
 	request.ProviderEvent = verified.Run.Event
-	if request.Operation == CIRunOperationWorkflowDispatch {
-		return s.executeCIRunDispatchFallback(ctx, client, binding, request, verified)
-	}
 	return s.executeCIRunRequest(ctx, client, request, verified)
 }
 
@@ -399,16 +399,7 @@ func (s *Service) executeCIRunRequest(
 	if ciRunFailureFromError(err) != CIRunFailureRerunIneligible {
 		return s.handleCIRunMutationError(ctx, request, err)
 	}
-	if err := s.store.PrepareCIRunDispatchFallback(ctx, request, s.ciRunClock()().UTC()); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return s.reloadCIRunResult(ctx, request)
-		}
-		return nil, err
-	}
-	if err := s.auditCIRun(ctx, request, "rerun_ineligible", CIRunFailureRerunIneligible); err != nil {
-		return nil, err
-	}
-	return s.continueCIRunRequest(ctx, latestBinding, request, inputFromCIRunRequest(request))
+	return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
 }
 
 func revalidateCIRunProviderSource(

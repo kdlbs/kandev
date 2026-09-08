@@ -22,22 +22,6 @@ func (s *Service) handleCIRunPreflightError(
 	return s.failCIRunRequest(ctx, request, ciRunFailureFromError(classified))
 }
 
-func (s *Service) handleCIRunWorkflowContentReadError(
-	ctx context.Context, request *CIRunRequest, err error,
-) (*CIRunReceipt, error) {
-	classified := classifyCIRunProviderError(err, false, false)
-	applyCIRunProviderMetadata(request, GitHubRequestMetadata{}, classified)
-	class := ciRunFailureFromError(classified)
-	if class == CIRunFailureProviderRateLimited {
-		return s.deferCIRunForRateLimit(ctx, request, classified)
-	}
-	if class == CIRunFailureProviderUnavailable ||
-		class == CIRunFailureInstallationPermission || class == CIRunFailureInstallationRequired {
-		return s.failCIRunRequest(ctx, request, class)
-	}
-	return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
-}
-
 func (s *Service) handleCIRunReconciliationReadError(
 	ctx context.Context, request *CIRunRequest, err error,
 ) (*CIRunReceipt, error) {

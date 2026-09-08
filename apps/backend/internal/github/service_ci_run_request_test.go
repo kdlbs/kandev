@@ -413,19 +413,24 @@ func TestRequestFreshCIRunDeniesSessionsOutsideTheCoordinatorTask(t *testing.T) 
 	}
 }
 
-func TestRequestFreshCIRunDeniesUnreviewedDispatchWorkflow(t *testing.T) {
+func TestRequestFreshCIRunTerminatesRerunIneligibleWithoutDispatchFallback(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
 	client.run.WorkflowPath = ".github/workflows/arbitrary.yml"
 	client.workflow.Path = client.run.WorkflowPath
 	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
-	_, err := service.RequestFreshCIRun(context.Background(), input)
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchDenied {
-		t.Fatalf("error = %#v", err)
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchRefUnavailable {
+		t.Fatalf("error = %#v, want dispatch_ref_unavailable", err)
 	}
-	if client.dispatches != 0 {
-		t.Fatal("unreviewed workflow was dispatched")
+	if client.dispatches != 0 || client.listCalls != 0 {
+		t.Fatalf("dispatch fallback was inspected: dispatches=%d list calls=%d", client.dispatches, client.listCalls)
+	}
+	request, loadErr := service.store.GetCIRunRequest(context.Background(), receipt.RequestID)
+	if loadErr != nil || request.Status != CIRunRequestFailed ||
+		request.FailureClass != string(CIRunFailureDispatchRefUnavailable) {
+		t.Fatalf("durable denial = %+v, error = %v", request, loadErr)
 	}
 }
 
@@ -470,7 +475,7 @@ func TestRequestFreshCIRunFailsClosedWhenDispatchOnlyHasMutableBranchRef(t *test
 	}
 }
 
-func TestRequestFreshCIRunDeniesChangedHeadWorkflow(t *testing.T) {
+func TestRequestFreshCIRunDoesNotInspectChangedHeadWorkflowAfterIneligibleRerun(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
 	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
@@ -478,8 +483,8 @@ func TestRequestFreshCIRunDeniesChangedHeadWorkflow(t *testing.T) {
 
 	_, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchDenied {
-		t.Fatalf("error = %#v, want workflow_dispatch_denied", err)
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchRefUnavailable {
+		t.Fatalf("error = %#v, want dispatch_ref_unavailable", err)
 	}
 	if client.dispatches != 0 {
 		t.Fatal("changed head workflow was dispatched")
@@ -516,13 +521,13 @@ func TestRequestFreshCIRunRevalidatesGrantAndLaneBeforeProviderWrite(t *testing.
 	}
 }
 
-func TestRequestFreshCIRunDeniesForkDispatchAndPreservesProviderClasses(t *testing.T) {
+func TestRequestFreshCIRunTerminatesForkIneligibleRerunsAndPreservesProviderClasses(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, true)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
 	_, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureForkDispatchDisallowed {
-		t.Fatalf("fork fallback error = %#v", err)
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchRefUnavailable {
+		t.Fatalf("fork rerun error = %#v", err)
 	}
 	if client.dispatches != 0 {
 		t.Fatal("fork workflow was dispatched")
@@ -613,23 +618,6 @@ func TestRequestFreshCIRunAuditFailurePreventsProviderMutation(t *testing.T) {
 	}
 	if client.reruns != 0 || client.dispatches != 0 {
 		t.Fatalf("provider mutated after audit failure: rerun=%d dispatch=%d", client.reruns, client.dispatches)
-	}
-}
-
-func TestWorkflowDispatchDeclarationMustBeUnderTopLevelOn(t *testing.T) {
-	if !workflowDispatchDeclared([]byte("name: E2E\non:\n  workflow_dispatch:\njobs: {}\n")) {
-		t.Fatal("top-level on.workflow_dispatch was not recognized")
-	}
-	for _, source := range []string{
-		"jobs:\n  workflow_dispatch:\n",
-		"# workflow_dispatch:\non:\n  pull_request:\n",
-		"name: workflow_dispatch:\non:\n  push:\n",
-		"on: workflow_dispatch\n",
-		"on: [push, workflow_dispatch]\n",
-	} {
-		if workflowDispatchDeclared([]byte(source)) {
-			t.Fatalf("untrusted declaration accepted: %q", source)
-		}
 	}
 }
 

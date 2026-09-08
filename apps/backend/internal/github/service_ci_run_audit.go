@@ -1,14 +1,9 @@
 package github
 
 import (
-	"context"
 	"encoding/json"
 	"github.com/google/uuid"
 )
-
-func (s *Service) auditCIRun(ctx context.Context, request *CIRunRequest, event string, class CIRunFailureClass) error {
-	return s.store.AppendCIRunAuditEvent(ctx, s.newCIRunAuditEvent(request, event, class))
-}
 
 func (s *Service) newCIRunAuditEvent(
 	request *CIRunRequest, event string, class CIRunFailureClass,

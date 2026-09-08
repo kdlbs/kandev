@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 type e2eResetTaskDeleterStub struct {
@@ -128,7 +129,7 @@ func TestE2EResetDeletesWorkspaceCIRunStateInDependencyOrder(t *testing.T) {
 		t.Fatalf("seed database: %v", err)
 	}
 
-	if err := deleteGitHubCIRunStateForReset(context.Background(), database.DB, "ws-1"); err != nil {
+	if err := deleteGitHubCIRunStateForReset(context.Background(), database.DB, database.DriverName(), "ws-1"); err != nil {
 		t.Fatalf("delete CI run state: %v", err)
 	}
 	assertWorkspaceRows(t, database, "github_ci_run_grants", "ws-1", 0)
@@ -148,6 +149,41 @@ func TestE2EResetDeletesWorkspaceCIRunStateInDependencyOrder(t *testing.T) {
 			t.Fatalf("%s rows = %d, want %d", tc.id, got, tc.want)
 		}
 	}
+}
+
+func TestE2EResetDeletesWorkspaceCIRunStateOnPostgres(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE github_ci_run_grants (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL
+		);
+		CREATE TABLE github_ci_run_requests (
+			id TEXT PRIMARY KEY,
+			grant_id TEXT NOT NULL REFERENCES github_ci_run_grants(id),
+			workspace_id TEXT NOT NULL
+		);
+		CREATE TABLE github_ci_run_audit_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL REFERENCES github_ci_run_requests(id)
+		);
+		INSERT INTO github_ci_run_grants VALUES ('grant-1', 'ws-1'), ('grant-2', 'ws-2');
+		INSERT INTO github_ci_run_requests VALUES
+			('request-1', 'grant-1', 'ws-1'),
+			('request-2', 'grant-2', 'ws-2');
+		INSERT INTO github_ci_run_audit_events VALUES
+			('audit-1', 'request-1'), ('audit-2', 'request-2');
+	`); err != nil {
+		t.Fatalf("seed database: %v", err)
+	}
+
+	if err := deleteGitHubCIRunStateForReset(context.Background(), database.DB, database.DriverName(), "ws-1"); err != nil {
+		t.Fatalf("delete CI run state: %v", err)
+	}
+	assertWorkspaceRows(t, database, "github_ci_run_grants", "ws-1", 0)
+	assertWorkspaceRows(t, database, "github_ci_run_grants", "ws-2", 1)
+	assertWorkspaceRows(t, database, "github_ci_run_requests", "ws-1", 0)
+	assertWorkspaceRows(t, database, "github_ci_run_requests", "ws-2", 1)
 }
 
 func TestWaitForE2ETaskCleanupWithReader(t *testing.T) {

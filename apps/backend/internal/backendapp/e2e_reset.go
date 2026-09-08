@@ -151,7 +151,7 @@ func handleE2EReset(
 				log.Warn("e2e reset: repository set cleanup failed", zap.String("sql", q), zap.Error(err))
 			}
 		}
-		if err := deleteGitHubCIRunStateForReset(ctx, repo.DB(), workspaceID); err != nil {
+		if err := deleteGitHubCIRunStateForReset(ctx, repo.DB(), repo.DriverName(), workspaceID); err != nil {
 			log.Error("e2e reset: GitHub CI run cleanup failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub CI run cleanup failed"})
 			return
@@ -534,8 +534,8 @@ func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID
 	return tx.Commit()
 }
 
-func deleteGitHubCIRunStateForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
-	tx, err := sqlx.NewDb(database, "sqlite3").BeginTxx(ctx, nil)
+func deleteGitHubCIRunStateForReset(ctx context.Context, database *sql.DB, driverName, workspaceID string) error {
+	tx, err := sqlx.NewDb(database, driverName).BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
