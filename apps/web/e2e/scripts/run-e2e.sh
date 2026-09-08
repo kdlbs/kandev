@@ -72,7 +72,9 @@ docker_up() {
   local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
   while kill -0 "$pid" 2>/dev/null; do
     if (( tick >= max_ticks )); then
-      kill "$pid" 2>/dev/null
+      # SIGKILL, not SIGTERM: a wedged docker client can be blocked in a way
+      # that doesn't honor SIGTERM, and `wait` below blocks until it exits.
+      kill -9 "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
       log "docker info did not respond within ${DOCKER_PROBE_TIMEOUT}s; treating Docker as unavailable (pass --host to skip this probe)"
       return 1

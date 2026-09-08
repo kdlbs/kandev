@@ -435,6 +435,38 @@ describe("run-e2e.sh", () => {
     expect(elapsedMs).toBeLessThan(15_000);
   });
 
+  it("bounds the docker info probe even when the hung process ignores SIGTERM", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const dockerPath = path.join(binDir, "docker");
+    fs.writeFileSync(
+      dockerPath,
+      '#!/usr/bin/env sh\nif [ "$1" = "info" ]; then trap "" TERM; sleep 10; exit 0; fi\nexit 0\n',
+    );
+    fs.chmodSync(dockerPath, 0o755);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nexit 0\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const start = Date.now();
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--no-build", "--project", "chromium", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir, { KANDEV_E2E_DOCKER_PROBE_TIMEOUT: "1" }),
+      },
+    );
+    const elapsedMs = Date.now() - start;
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(
+      "docker info did not respond within 1s; treating Docker as unavailable",
+    );
+    expect(result.stderr).toContain("mode=host");
+    expect(elapsedMs).toBeLessThan(5_000);
+  }, 20_000);
+
   it("applies the worker guard to raw Playwright runs", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
     tempDirs.push(binDir);
