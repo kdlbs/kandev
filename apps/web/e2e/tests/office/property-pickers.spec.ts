@@ -448,15 +448,21 @@ test.describe("property pickers", () => {
     await newerSuccess;
     await olderFailure;
 
-    // The stale failure's catch handler must not roll the UI back to "todo"
-    // (the pre-mutation snapshot) or "In Progress" (request A's optimistic
-    // patch) — the newer, server-confirmed "Blocked" must stand.
-    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
-
+    // Read the backend's settled value before asserting the UI. This HTTP
+    // round trip gives the older failure's own catch handler — a same-tick
+    // continuation of the response `waitForHttp` already observed above —
+    // time to run, so the UI assertion below checks the truly settled label
+    // instead of racing a still-optimistic "Blocked" that a buggy rollback
+    // has not yet overwritten.
     const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
     const inner = (persisted.task as Record<string, unknown>) ?? persisted;
     const status = (inner.status as string) ?? (inner.state as string) ?? "";
     expect(status.toLowerCase()).toContain("blocked");
+
+    // The stale failure's catch handler must not roll the UI back to "todo"
+    // (the pre-mutation snapshot) or "In Progress" (request A's optimistic
+    // patch) — the newer, server-confirmed "Blocked" must stand.
+    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
   });
 
   test("started and completed rows show timestamps after a todo -> in_progress -> done transition", async ({

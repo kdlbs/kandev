@@ -3,10 +3,11 @@
 import { createContext, useCallback, useContext } from "react";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStoreApi } from "@/components/state-provider";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { t } from "@/lib/i18n";
 import { updateTask } from "@/lib/api/domains/kanban-api";
+import { ApprovalGateError } from "@/lib/api/domains/office-status-gate";
 import {
   beginWrite,
   endWrite,
@@ -86,19 +87,33 @@ export function useOptimisticTaskMutation() {
         const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
         endWrite(taskId, TASK_SCOPE, sequence);
         if (shouldRestore) {
-          // Rollback both layers. This hook never patches title/description
-          // (see `toOfficeTaskPatch` above), so the rollback must not touch
-          // them either — those two fields are governed exclusively by the
-          // per-field guard in office-task-content-sync.ts and have their own
-          // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
-          // Restoring the full pre-mutation snapshot here would silently
-          // revert a confirmed title/description edit whenever an unrelated
-          // picker mutation fails (AC-61: exactly two writers may touch a
-          // guarded field).
-          ctx.restore(snapshot);
-          if (storeSnapshot) {
-            const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
-            storeApi.getState().patchTaskInStore(taskId, storeRollback);
+          if (err instanceof ApprovalGateError) {
+            // The backend already redirected and persisted this status
+            // server-side before returning the error, so a plain rollback
+            // would show a status the server no longer holds. Settle on the
+            // redirected status instead — status-only, not the whole
+            // snapshot, so a stale `rawStatus` on the snapshot can't
+            // re-normalize the card back to its pre-mutation column.
+            const redirectPatch: Partial<Task> = { status: err.redirectedStatus as TaskStatus };
+            ctx.applyPatch(redirectPatch);
+            if (storeSnapshot) {
+              storeApi.getState().patchTaskInStore(taskId, toOfficeTaskPatch(redirectPatch));
+            }
+          } else {
+            // Rollback both layers. This hook never patches title/description
+            // (see `toOfficeTaskPatch` above), so the rollback must not touch
+            // them either — those two fields are governed exclusively by the
+            // per-field guard in office-task-content-sync.ts and have their own
+            // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
+            // Restoring the full pre-mutation snapshot here would silently
+            // revert a confirmed title/description edit whenever an unrelated
+            // picker mutation fails (AC-61: exactly two writers may touch a
+            // guarded field).
+            ctx.restore(snapshot);
+            if (storeSnapshot) {
+              const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
+              storeApi.getState().patchTaskInStore(taskId, storeRollback);
+            }
           }
         }
         toastUpdateFailure(err);

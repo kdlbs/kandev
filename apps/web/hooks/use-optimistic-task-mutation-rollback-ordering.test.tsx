@@ -14,6 +14,7 @@ import {
   __resetOfficeTaskContentSyncForTests,
   seedInitialCanonical,
 } from "@/lib/state/office-task-content-sync";
+import { ApprovalGateError } from "@/lib/api/domains/office-status-gate";
 
 vi.mock("sonner", () => ({
   toast: {
@@ -382,5 +383,47 @@ describe("useOptimisticTaskMutation generation guard — overlapping status muta
     expect(taskRef.current.status).toBe("todo");
     expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("todo");
     expect(toast.error).toHaveBeenCalledTimes(2);
+  });
+
+  it("gate-redirect superseded by a newer success does not clobber the newer status", async () => {
+    const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
+    render(<Wrapper />);
+
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    let p1!: Promise<void>;
+    let p2!: Promise<void>;
+
+    // The older mutation (todo -> done) hits the approver gate; the newer one
+    // (in_progress -> blocked) issues while it is still pending and succeeds
+    // first, matching a status pick immediately followed by a board drag.
+    act(() => {
+      p1 = mutateRef.current!("t-1", { status: "done" }, () => older.promise);
+    });
+    act(() => {
+      p2 = mutateRef.current!("t-1", { status: "blocked" }, () => newer.promise);
+    });
+    const p1Settled = p1.catch(() => undefined);
+
+    await act(async () => {
+      newer.resolve();
+      await p2;
+    });
+    expect(taskRef.current.status).toBe("blocked");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("blocked");
+
+    // The older mutation's gate redirect resolves after the newer mutation
+    // already succeeded: settling on "in_review" here would clobber the
+    // newer, server-confirmed "blocked" status the same way an unconditional
+    // rollback would.
+    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    await act(async () => {
+      older.reject(new ApprovalGateError(gate, "in_review"));
+      await p1Settled;
+    });
+    expect(taskRef.current.status).toBe("blocked");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("blocked");
+    await expect(p1).rejects.toThrow(gate);
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
