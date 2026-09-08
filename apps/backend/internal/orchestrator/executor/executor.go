@@ -126,6 +126,14 @@ type taskEnvironmentTransitionPersister interface {
 	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
 }
 
+// taskEnvironmentTaskDirNameStamper claims the stable task-root identity on a
+// shared environment without rewriting unrelated environment fields. It is
+// optional so lightweight test and legacy stores can retain the compatibility
+// path in executor_execute.go.
+type taskEnvironmentTaskDirNameStamper interface {
+	SetTaskEnvironmentTaskDirNameIfEmpty(context.Context, string, string) (bool, error)
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories
@@ -190,6 +198,18 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
+// ProbeResult re-exports client.ProbeResult so callers above this package
+// (e.g. internal/orchestrator) can reference it without a direct import of
+// internal/agent/runtime/agentctl, which is restricted to this package and
+// internal/agent/runtime/ (see ARCH-RUNTIME-IMPORT).
+type ProbeResult = client.ProbeResult
+
+const (
+	ProbeResultLive    = client.ProbeResultLive
+	ProbeResultSettled = client.ProbeResultSettled
+	ProbeResultUnknown = client.ProbeResultUnknown
+)
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -223,6 +243,11 @@ type AgentManagerClient interface {
 	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
 	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
 	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+
+	// ProbeBackgroundWorkloads samples a session's agent process for
+	// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+	// No timeout is applied here — the caller wraps ctx with the probe budget.
+	ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -807,6 +832,7 @@ type Executor struct {
 	gitlabCredentials   GitLabCredentialResolver
 	coordinatorResolver CoordinatorProfileResolver
 	logger              *logger.Logger
+	canvasesEnabled     bool
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -1097,6 +1123,13 @@ func (e *Executor) SetCoordinatorProfileResolver(resolver CoordinatorProfileReso
 	e.coordinatorResolver = resolver
 }
 
+// SetCanvasesEnabled controls whether task MCP profiles receive the gated
+// canvas-authoring capability. The flag is applied during backend startup
+// before any new agent session is launched.
+func (e *Executor) SetCanvasesEnabled(enabled bool) {
+	e.canvasesEnabled = enabled
+}
+
 // SetOnTaskStateChange sets a callback for task state changes.
 // This allows the orchestrator to route state changes through the task service layer
 // which publishes WebSocket events. Without this, async goroutines would only update
@@ -1220,4 +1253,10 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (e *Executor) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return e.agentManager.ProbeBackgroundWorkloads(ctx, sessionID)
 }

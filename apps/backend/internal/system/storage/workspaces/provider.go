@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 type Provider struct {
@@ -42,10 +43,11 @@ func New(config Config) *Provider {
 }
 
 type candidate struct {
-	path     string
-	owner    OwnershipMarker
-	size     int64
-	measured bool
+	path              string
+	owner             OwnershipMarker
+	size              int64
+	measured          bool
+	measurementFailed bool
 }
 
 func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
@@ -54,20 +56,33 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		return Analysis{}, err
 	}
 	analysis := Analysis{Warnings: warnings}
+	scanner := p.config.Scanner
+	if scanner == nil {
+		scanner = filescan.NewLimiter(4)
+	}
+	measurementRoots := make([]filescan.Root, len(roots))
 	for index := range roots {
-		size, sizeErr := directorySizeNoFollow(roots[index].path)
-		if sizeErr != nil {
+		measurementRoots[index] = filescan.Root{Path: roots[index].path, SymlinkPolicy: filescan.SkipSymlinks}
+	}
+	measurements := scanner.Measure(ctx, measurementRoots, p.config.OnProgress)
+	for index := range roots {
+		measurement := measurements[index]
+		if measurement.Err != nil {
+			if errors.Is(measurement.Err, context.Canceled) || errors.Is(measurement.Err, context.DeadlineExceeded) {
+				return analysis, measurement.Err
+			}
 			analysis.Warnings = append(
 				analysis.Warnings,
-				fmt.Sprintf("measure workspace %s: %v", roots[index].path, sizeErr),
+				fmt.Sprintf("measure workspace %s: %v", roots[index].path, measurement.Err),
 			)
+			roots[index].measurementFailed = true
 			continue
 		}
-		roots[index].size = size
+		roots[index].size = measurement.Bytes
 		roots[index].measured = true
-		analysis.TotalBytes += size
+		analysis.TotalBytes += measurement.Bytes
 		if _, active := protected[roots[index].path]; active {
-			analysis.ActiveBytes += size
+			analysis.ActiveBytes += measurement.Bytes
 		}
 	}
 	candidates, err := p.eligibleCandidates(roots, protected, trashTasks)
@@ -78,6 +93,15 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		analysis.CandidateBytes += item.size
 	}
 	return analysis, nil
+}
+
+func (p *Provider) AnalyzeWithProgress(
+	ctx context.Context,
+	onProgress func(filescan.Progress),
+) (Analysis, error) {
+	copy := *p
+	copy.config.OnProgress = onProgress
+	return copy.Analyze(ctx)
 }
 
 func (p *Provider) Cleanup(ctx context.Context) (CleanupResult, error) {
@@ -139,6 +163,9 @@ func (p *Provider) eligibleCandidates(
 	cutoff := p.config.Now().Add(-p.config.GracePeriod)
 	candidates := make([]candidate, 0)
 	for _, root := range roots {
+		if root.measurementFailed {
+			continue
+		}
 		if _, keep := protected[root.path]; keep {
 			continue
 		}

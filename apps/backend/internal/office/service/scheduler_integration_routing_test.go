@@ -2,6 +2,9 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,11 +23,13 @@ type captureDispatcher struct {
 	calls  []service.LaunchContext
 	runs   []*models.Run
 	agents []*models.AgentInstance
-	// launched controls the (launched, parked, err) tuple the fake
-	// returns. Default zero-value is (false, false, nil) — routing
-	// fall-through — so callers don't need to set it for the assertion
-	// path tested here.
+	// launched, parked, and err control the (launched, parked, err) tuple
+	// the fake returns. Default zero-value is (false, false, nil) — routing
+	// fall-through — so callers don't need to set anything for the
+	// assertion path tested here.
 	launched bool
+	parked   bool
+	err      error
 }
 
 func (c *captureDispatcher) DispatchWithRouting(
@@ -36,7 +41,7 @@ func (c *captureDispatcher) DispatchWithRouting(
 	c.calls = append(c.calls, launch)
 	c.runs = append(c.runs, run)
 	c.agents = append(c.agents, agent)
-	return c.launched, false, nil
+	return c.launched, c.parked, c.err
 }
 
 func (c *captureDispatcher) HandlePostStartFailure(
@@ -131,6 +136,75 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 	}
 }
 
+func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	dispatcher := &captureDispatcher{}
+	svc.SetRoutingDispatcher(dispatcher)
+	svc.SetWorkflowEngineDispatcher(&seatSpyDispatcher{})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "decision-agent-1",
+		WorkspaceID:        "ws-1",
+		Name:               "decision-reviewer",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-decision", "review")
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"task-decision", "ws-1", "step-decision", "Decision task", "Review the change")
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-decision"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("expected one routing dispatch, got %d", dispatcher.callCount())
+	}
+	prompt := dispatcher.lastCall().Prompt
+	allowedIdx := strings.Index(prompt, "- Allowed actions:")
+	if allowedIdx == -1 || !containsIgnoreCase(prompt[allowedIdx:], "record_step_decision") {
+		t.Fatalf("prompt must advertise the seat-derived action: %s", dispatcher.lastCall().Prompt)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var run *models.Run
+	for _, candidate := range runs {
+		if candidate.AgentProfileID == agent.ID && candidate.Reason == service.RunReasonTaskAssigned {
+			run = candidate
+			break
+		}
+	}
+	if run == nil {
+		t.Fatal("missing decision run")
+	}
+	var capabilities map[string]any
+	if err := json.Unmarshal([]byte(run.Capabilities), &capabilities); err != nil {
+		t.Fatalf("decode persisted capabilities: %v", err)
+	}
+	if _, ok := capabilities["record_step_decision"]; ok {
+		t.Fatalf("seat-derived action must not be persisted as a runtime capability: %s", run.Capabilities)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal([]byte(run.InputSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode persisted input snapshot: %v", err)
+	}
+	if actions, ok := snapshot["available_actions"].([]any); !ok || len(actions) != 1 || actions[0] != "record_step_decision" {
+		t.Fatalf("persisted snapshot missing advisory action: %#v", snapshot["available_actions"])
+	}
+}
+
 // TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy asserts
 // the routing seam preserves the legacy fall-through behavior: when the
 // dispatcher returns (launched=false, parked=false, err=nil), the
@@ -171,4 +245,88 @@ func TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy(t *testing.T)
 	if mock.lastCall().Prompt == "" {
 		t.Error("legacy StartTask received empty prompt after routing fall-through")
 	}
+}
+
+// TestSchedulerIntegration_RoutingParked_LeavesAgentIdle is the regression
+// test for DR-14 review round 1 Finding 1: a routing dispatcher that parks
+// a run (no candidate, waiting for capacity, parkRunMaxAttempts) never
+// invokes an adapter, so no AgentCompleted/AgentStopped/AgentFailed event
+// will ever arrive to clear the agent's "working" status. launchAgent must
+// report launched=false for this outcome so prepareAndLaunch clears it.
+func TestSchedulerIntegration_RoutingParked_LeavesAgentIdle(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	dispatcher := &captureDispatcher{parked: true}
+	svc.SetRoutingDispatcher(dispatcher)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "routing-parked-1",
+		WorkspaceID:        "ws-1",
+		Name:               "parked-worker",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+		VALUES ('task-parked-1', 'ws-1', 'Parked Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-parked-1"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("expected routing dispatcher consulted; got %d calls", dispatcher.callCount())
+	}
+	if mock.callCount() != 0 {
+		t.Fatalf("legacy StartTask must not run for a parked dispatch; got %d calls", mock.callCount())
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after a parked routing dispatch (no adapter was ever invoked)")
+}
+
+// TestSchedulerIntegration_RoutingDispatchError_LeavesAgentIdle is the
+// regression test for DR-14 review round 1 Finding 2: a routing dispatch
+// error is handled via HandleRunFailure (retry or eventual escalation),
+// never invokes an adapter, and must not leave the agent showing "working".
+func TestSchedulerIntegration_RoutingDispatchError_LeavesAgentIdle(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	dispatcher := &captureDispatcher{err: errors.New("provider unavailable")}
+	svc.SetRoutingDispatcher(dispatcher)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "routing-error-1",
+		WorkspaceID:        "ws-1",
+		Name:               "error-worker",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+		VALUES ('task-routing-err-1', 'ws-1', 'Routing Error Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-routing-err-1"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("expected routing dispatcher consulted; got %d calls", dispatcher.callCount())
+	}
+	if mock.callCount() != 0 {
+		t.Fatalf("legacy StartTask must not run after a routing dispatch error; got %d calls", mock.callCount())
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after a routing dispatch error (no adapter was ever invoked)")
 }

@@ -71,6 +71,9 @@ var taskScanColumns = []taskScanColumn{
 	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
 		return runnerProjection(alias) + ` AS assignee_agent_profile_id`
 	}},
+	// The HUMAN assignee, independent of the agent one above. A task can have
+	// both: an Office agent doing the work and a person accountable for it.
+	{name: "assignee_user_id"},
 	{name: "origin"},
 	{name: "project_id"},
 	{name: "labels"},
@@ -356,9 +359,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		externalID = task.ExternalID
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID)
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -516,6 +519,26 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 	return task, err
 }
 
+// UpdateTaskPriority updates only the priority column and its modification
+// timestamp. Priority changes must not write a task snapshot that can carry
+// stale title, metadata, workflow, or position values.
+func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(
+		`UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?`),
+		priority, r.nowUTC(), taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	return nil
+}
+
 // UpdateTask updates an existing task. The runner write lands as an
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
@@ -612,7 +635,7 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	task.UpdatedAt = r.nowUTC()
 
 	updateQuery := `
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`
 	if models.IsAgentTitlePending(task.Metadata) {
@@ -624,11 +647,11 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
-				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 			WHERE id = ?
 		`, pending, metadataMerge)
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
 	if err != nil {
 		return "", err
 	}
@@ -921,6 +944,68 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 // task fields. It returns whether the key was present and removed.
 func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
 	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
+}
+
+// ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
+// and completed markers for a manual move only while the completed marker and
+// task update generation still match the recovery snapshot. A new move clears
+// the old completed marker in the same task write that creates its pending
+// marker, and a later completion reuses the boolean marker value, so the
+// generation predicate prevents either newer move from being erased.
+func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				#- ARRAY[?]::text[] #- ARRAY[?]::text[]
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			models.MetaKeyManualMoveLifecyclePending,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			r.nowUTC(),
+			taskID,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			completedAt,
+		}
+	} else {
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, ?
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			jsonPath(models.MetaKeyManualMoveLifecyclePending),
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			r.nowUTC(),
+			taskID,
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			completedAt,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // RemoveTaskMetadataKeyIfStamp removes one metadata object only when its
@@ -2379,7 +2464,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
-		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
+		&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 		&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 	)
 	if err != nil {
@@ -2421,7 +2506,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
-			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
+			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 		)
 		if err != nil {

@@ -244,6 +244,31 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
     expect(statsLayer.className.split(/\s+/)).toContain("opacity-0");
     expect(actionsLayer.className.split(/\s+/)).toContain("opacity-100");
   });
+
+  it("keeps the pending spinner inside a touch-sized target for coarse pointers", () => {
+    responsive.isFinePointer = false;
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "pending-mobile.go" }}
+            isPending
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const spinner = container.querySelector("svg.animate-spin");
+    expect(spinner).not.toBeNull();
+    expect(spinner?.parentElement?.className).toContain("min-h-11");
+    expect(spinner?.parentElement?.className).toContain("min-w-11");
+  });
 });
 
 describe("FileRow tree-mode hover stage action", () => {

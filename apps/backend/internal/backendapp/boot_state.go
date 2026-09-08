@@ -535,6 +535,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 		sessionDTO := taskdto.FromTaskSession(item.Session)
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
+			taskdto.EnrichParkedProjection(&sessionDTO, b.p.orchestratorSvc)
 		}
 		taskSessions[item.SessionID] = sessionDTO
 	}
@@ -801,6 +802,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount,
 			info.reviewStatus,
 			info.executorID,
+			info.executorProfileID,
 			info.executorType,
 			info.executorName,
 			info.agentName,
@@ -816,6 +818,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		// No-op when no session is running.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
+			taskdto.EnrichTaskParkedProjection(&dto, b.p.orchestratorSvc)
 		}
 		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
 		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
@@ -858,15 +861,16 @@ func taskDTOs(tasks []*taskmodels.Task) []taskdto.TaskDTO {
 }
 
 type bootSessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     taskmodels.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	agentProfileID   *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      taskmodels.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
@@ -886,6 +890,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 	if session.ExecutorID != "" {
 		value := session.ExecutorID
 		info.executorID = &value
+	}
+	if session.ExecutorProfileID != "" {
+		value := session.ExecutorProfileID
+		info.executorProfileID = &value
 	}
 	if session.ExecutorSnapshot != nil {
 		if value, ok := session.ExecutorSnapshot["executor_type"].(string); ok && value != "" {
@@ -1130,6 +1138,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
 			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
+			taskdto.EnrichParkedProjection(&dto, b.p.orchestratorSvc)
 		}
 		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto

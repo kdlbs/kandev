@@ -26,7 +26,7 @@ Open **Settings → Workspaces → select a workspace → Workflows**.
 
 Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
-> **Network security:** The HTTP routes are unauthenticated. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing them to a network.
+> **Network security:** With authentication disabled, these HTTP routes are open. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing them to a network.
 
 <details>
 <summary>HTTP format, fields, and reconciliation details</summary>

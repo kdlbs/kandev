@@ -72,6 +72,7 @@ export const defaultState = {
   gitStatus: defaultSessionRuntimeState.gitStatus,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
+  gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
@@ -291,6 +292,10 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
     },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
   };
 }
 
@@ -441,6 +446,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     processes: { ...defaultState.processes, ...initialState.processes },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
+    gitCheckoutGeneration: {
+      ...defaultState.gitCheckoutGeneration,
+      ...initialState.gitCheckoutGeneration,
+    },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },

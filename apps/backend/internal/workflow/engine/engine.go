@@ -90,6 +90,9 @@ type HandleInput struct {
 	Trigger      Trigger
 	OperationID  string
 	EvaluateOnly bool // when true, skip ApplyTransition and PersistData; caller handles persistence
+	// DeferOperationMark leaves OperationID unmarked. The caller must mark it
+	// after completing any side effect outside the engine.
+	DeferOperationMark bool
 
 	// PreloadedState, when set, skips the LoadState call in the engine.
 	// Use this to avoid redundant DB reads when the caller already loaded the session and task.
@@ -263,8 +266,13 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 	}
 
 	actions := step.Events[in.Trigger]
+	if in.OperationID != "" {
+		if err := e.validateActionCallbacks(actions, filter); err != nil {
+			return HandleResult{}, err
+		}
+	}
 	if len(actions) == 0 {
-		return HandleResult{}, e.markOperationApplied(ctx, in.OperationID)
+		return HandleResult{}, e.markOperationAppliedForInput(ctx, in)
 	}
 
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
@@ -272,7 +280,26 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 		return HandleResult{}, err
 	}
 
-	return result, e.markOperationApplied(ctx, in.OperationID)
+	return result, e.markOperationAppliedForInput(ctx, in)
+}
+
+// validateActionCallbacks rejects operation-bearing triggers that include an
+// action without a registered callback. Without this preflight, the legacy
+// no-op behavior could mark the operation applied before a late-wired callback
+// became available, preventing the trigger from ever being retried.
+func (e *Engine) validateActionCallbacks(actions []Action, filter func(ActionKind) bool) error {
+	for _, action := range actions {
+		if filter != nil && !filter(action.Kind) {
+			continue
+		}
+		if isTransitionAction(action.Kind) {
+			continue
+		}
+		if _, ok := e.callbacks.Get(action.Kind); !ok {
+			return fmt.Errorf("%w: action %s has no registered callback", ErrActionNotYetWired, action.Kind)
+		}
+	}
+	return nil
 }
 
 // processActions evaluates actions, persists data, and applies transitions.
@@ -322,6 +349,13 @@ func (e *Engine) markOperationApplied(ctx context.Context, operationID string) e
 		return nil
 	}
 	return e.store.MarkOperationApplied(ctx, operationID)
+}
+
+func (e *Engine) markOperationAppliedForInput(ctx context.Context, in HandleInput) error {
+	if in.DeferOperationMark {
+		return nil
+	}
+	return e.markOperationApplied(ctx, in.OperationID)
 }
 
 func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (MachineState, StepSpec, error) {

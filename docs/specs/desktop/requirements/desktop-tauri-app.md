@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-08-19
+updated: 2026-08-27
 owners:
   - tbd
 ---
@@ -28,6 +28,9 @@ Kandev's installed desktop app should behave like a native application without d
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.6:** persisted window size, position, and maximized state, restored onto a visible display;
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.7:** signed, prompt-before-install desktop updates through the existing System > Updates page;
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.8:** native notifications for selected turn-finished, clarification-requested, and session-failure events;
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.9:** an origin-checked native directory
+  picker for explicit repository discovery and task-folder selection, without
+  exposing general filesystem access to the SPA.
 
 ## System design
 

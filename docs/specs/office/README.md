@@ -113,6 +113,7 @@ dashboard projections, and Office testing contracts.
 - [Office Scheduler System Design Part 2](system-design/scheduler-02.md)
 - [Office Tasks System Design Part 1](system-design/tasks-01.md)
 - [Office Tasks System Design Part 2](system-design/tasks-02.md)
+- [Office: Slack-Style Unread Divider System Design](system-design/unread-divider.md)
 
 ## Migration record
 

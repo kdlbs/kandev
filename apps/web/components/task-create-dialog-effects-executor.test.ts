@@ -22,6 +22,7 @@ type DefaultSelFake = Pick<
   | "setExecutorId"
   | "setExecutorProfileId"
   | "noRepository"
+  | "preferLocalExecutor"
   | "repositories"
   | "remoteRepos"
   | "useRemote"
@@ -38,6 +39,7 @@ function makeDefaultSelFs(overrides: Partial<DefaultSelFake> = {}): DialogFormSt
     setExecutorId: vi.fn(),
     setExecutorProfileId: vi.fn(),
     noRepository: false,
+    preferLocalExecutor: false,
     repositories: [],
     remoteRepos: [],
     useRemote: false,
@@ -271,6 +273,31 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
 
     await waitFor(() => expect(setExecutorId).toHaveBeenCalledWith(local.id));
     expect(setExecutorId).not.toHaveBeenCalledWith(worktree.id);
+  });
+});
+
+describe("useDefaultSelectionsEffect - launch preferences", () => {
+  it("honors a launch-only local preference over the workspace default", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: "",
+      executorProfileId: "",
+      noRepository: true,
+      preferLocalExecutor: true,
+    });
+    const docker = dockerExecutor();
+    const local = localExecutor();
+    const sel = makeSel({
+      executors: [docker, local],
+      workspaceDefaults: {
+        default_executor_id: docker.id,
+      } as StoreSelections["workspaceDefaults"],
+      userSettingsLoaded: true,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
   });
 });
 

@@ -98,14 +98,31 @@ function isUnsettledStartupModelsPayload(
   );
 }
 
+// activeModel only ever records a selection the user made in this store, so a
+// payload reporting that model is the provider confirming that selection rather
+// than stale resume state. The cached session metadata still names the
+// pre-switch model until a session update lands, so it cannot arbitrate here.
+function payloadConfirmsUserSelection(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+): boolean {
+  const selected = state.activeModel?.bySessionId?.[sessionId];
+  return !!selected && resolveCurrentModelId(payload) === selected;
+}
+
 function shouldHydrateSessionModelsPayload(
   payload: SessionModelsPayload,
   matchesPersisted: boolean,
+  confirmsUserSelection: boolean,
   unsettledStartup: boolean,
 ): boolean {
   // Two-layer defense: the backend gates unsettled startup events, while this
   // barrier protects reconnects where the client session state lags.
-  return payload.config_options_settled === true || (matchesPersisted && !unsettledStartup);
+  return (
+    payload.config_options_settled === true ||
+    ((matchesPersisted || confirmsUserSelection) && !unsettledStartup)
+  );
 }
 
 function shouldUsePersistedRuntimeConfig(hydrated: boolean, unsettledStartup: boolean): boolean {
@@ -345,7 +362,15 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       );
       const persisted = usePersistedRuntime ? persistedRuntimeConfig(state, sessionId) : {};
       const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
-      if (shouldHydrateSessionModelsPayload(payload, matchesPersisted, unsettledStartup)) {
+      const confirmsUserSelection = payloadConfirmsUserSelection(state, sessionId, payload);
+      if (
+        shouldHydrateSessionModelsPayload(
+          payload,
+          matchesPersisted,
+          confirmsUserSelection,
+          unsettledStartup,
+        )
+      ) {
         hydrated.add(sessionId);
       }
       const pendingRuntime = shouldUsePersistedRuntimeConfig(

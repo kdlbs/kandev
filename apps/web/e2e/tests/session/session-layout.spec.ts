@@ -150,6 +150,11 @@ test.describe("Session layout", () => {
     // Type a command in the terminal, then maximize
     await session.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await session.expectTerminalHasText(TERMINAL_MARKER);
+
+    // Git updates can focus Changes while the task settles. Select Files after
+    // the terminal command so closing the maximized terminal restores the
+    // layout this test asserts.
+    await session.clickTab("Files");
     await session.clickMaximize();
     await session.expectMaximized();
 

@@ -20,6 +20,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
+  it("keeps canvases disabled by default", () => {
+    expect(defaultFeatureFlags.canvases).toBe(false);
+  });
+
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {
     const backendConfig = await readFile(backendConfigPath, "utf8");
 

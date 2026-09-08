@@ -173,6 +173,7 @@ test.describe("Mobile sidebar — view system", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile New View Task"]);
     const newView = sheet.getByTestId("sidebar-new-view");
@@ -235,6 +236,62 @@ test.describe("Mobile sidebar — view system", () => {
         .getByTestId("sidebar-view-chip")
         .filter({ hasText: "New view" }),
     ).toHaveAttribute("data-active", "true");
+
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const deleteDrawer = testPage.getByTestId("sidebar-filter-drawer");
+    const deleteEditor = deleteDrawer.getByTestId("sidebar-filter-popover");
+    const deleteButton = deleteEditor.getByTestId("view-delete-button");
+    await deleteButton.scrollIntoViewIfNeeded();
+    const deleteButtonBox = await deleteButton.boundingBox();
+    expect(deleteButtonBox).not.toBeNull();
+    expect(deleteButtonBox!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await deleteButton.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || (hit !== null && element.contains(hit));
+      }),
+    ).toBe(true);
+    await deleteButton.tap();
+    const confirmation = deleteEditor.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete New view?");
+    await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(2);
+    for (const action of await confirmation.getByRole("button").all()) {
+      const box = await action.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await prCapture.screenshot("saved-task-view-delete-mobile", {
+      caption: "Mobile confirmation stays inline in the existing task-filter drawer.",
+    });
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(deleteDrawer).toBeVisible();
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "New view",
+    );
+
+    await deleteEditor.getByTestId("view-delete-button").tap();
+    const settingsWrite = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/user/settings") &&
+        response.request().method() === "PATCH" &&
+        response.ok(),
+    );
+    await deleteEditor
+      .getByTestId("saved-task-view-delete-confirmation")
+      .getByRole("button", { name: "Delete New view" })
+      .tap();
+    await settingsWrite;
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "All tasks",
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("editing filters in the mobile sheet narrows the task list live", async ({
@@ -382,6 +439,7 @@ test.describe("Mobile sidebar — view system", () => {
     await gear.tap();
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-sort-settings-toggle").tap();
     await popover.getByTestId("sort-key-select").tap();
     await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
       "Last task summary refresh. Background events can change it.",
@@ -530,6 +588,7 @@ test.describe("Mobile sidebar — view system", () => {
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(drawer).toBeVisible();
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-group-settings-toggle").tap();
     await popover.getByTestId("group-key-select").tap();
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },

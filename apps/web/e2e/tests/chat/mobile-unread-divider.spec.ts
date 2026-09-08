@@ -1,6 +1,20 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
 import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
+import { routeMarkReadResponseHold } from "../../helpers/mark-read-response-hold";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+
+const MOBILE_END_TOLERANCE_PX = 10;
+
+async function switchMobileTask(testPage: Page, title: string): Promise<void> {
+  await testPage.getByTestId("mobile-session-menu").tap();
+  const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+  const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
+  await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await taskRow.click();
+  await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
 
 /**
  * Mobile parity for the Slack-style unread divider: the same
@@ -88,5 +102,67 @@ test.describe("Mobile unread divider", () => {
     await session.sendMessageViaButton("prompt while actively reading");
     await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
+  });
+
+  test("completed task switch keeps each read cursor and returns to the bottom on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskA = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor mobile A",
+    );
+    const taskB = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor mobile B",
+    );
+    const responseHold = await routeMarkReadResponseHold(testPage, taskA.sessionId);
+
+    const session = await openTaskSession(testPage, taskA.taskId);
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+    await expect(session.activeChat().getByTestId("unread-divider")).toBeVisible();
+    await responseHold.waitUntilHeld();
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    const taskBMarkRead = testPage.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/task-sessions/${taskB.sessionId}/mark-read`) &&
+        response.request().method() === "POST",
+    );
+    await switchMobileTask(testPage, "Completed read cursor mobile B");
+    await waitForStableActiveSession(testPage, taskB.sessionId);
+    await taskBMarkRead;
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    await responseHold.releaseHeldResponse();
+    await switchMobileTask(testPage, "Completed read cursor mobile A");
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+
+    const activeChat = session.activeChat();
+    const scrollContainer = activeChat.locator(".chat-message-list");
+    await expect(activeChat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
   });
 });

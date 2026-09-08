@@ -31,6 +31,7 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	queue := &fakeRunQueue{}
 	parts := newSmokeParticipants(steps)
 	decisions := newFakeDecisionStore()
+	seatWriter := &fakeParticipantSeatWriter{hasSeat: true}
 
 	registry := MapRegistry{
 		ActionAutoStartAgent: noOpCallback{},
@@ -45,6 +46,10 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 			Participants: parts,
 		},
 		ActionClearDecisions: ClearDecisionsCallback{Decisions: decisions},
+		ActionEnsureParticipantSeat: EnsureParticipantSeatCallback{
+			Writer: seatWriter,
+			Caster: &fakeParticipantSeatCaster{},
+		},
 	}
 	eng := New(store, registry,
 		WithRunQueue(queue),

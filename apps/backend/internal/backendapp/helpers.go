@@ -33,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
@@ -66,6 +67,9 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
@@ -102,6 +106,7 @@ import (
 const (
 	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
 	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
@@ -690,6 +695,7 @@ type routeParams struct {
 	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
+	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -737,6 +743,11 @@ func registerRoutes(p routeParams) {
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -985,6 +996,16 @@ func readyHandler(p routeParams) gin.HandlerFunc {
 			})
 			return
 		}
+		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+				"reason":        "persistence",
+				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			statusKey:       "ok",
 			serviceFieldKey: kandevName,
@@ -1042,9 +1063,11 @@ func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
-		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
-		Locale:        i18n.FromRequest(req),
-		TitlePrefix:   strings.TrimSpace(titlePrefix),
+		NonProduction:               profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:                      i18n.FromRequest(req),
+		TitlePrefix:                 strings.TrimSpace(titlePrefix),
+		NativeFolderPickerAvailable: strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
+		DesktopRuntime:              strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
 	}
 }
 
@@ -1245,11 +1268,19 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
+	if p.services != nil && p.services.Org != nil {
+		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
+	}
+	if p.services.OrgUnits != nil {
+		orgunit.NewController(p.services.OrgUnits, p.log).RegisterRoutes(p.router)
+	}
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1422,9 +1453,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {
@@ -1469,6 +1500,10 @@ func registerSecondaryRoutes(
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
 		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		if p.features.Canvases {
+			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
+			registerCanvasRoutes(p)
+		}
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
@@ -1528,6 +1563,8 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
@@ -1628,17 +1665,28 @@ type lifecycleAccessAuthorizer interface {
 	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
 	AuthorizeTaskAccess(ctx context.Context, taskID string) error
 	AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error
+	AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error
+	AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error
 }
 
 // wireLifecycleAccessCheckers installs every per-user visibility check on the
 // lifecycle manager. Kept together so a surface that needs a new kind of check
 // has one place to add it, rather than another setter call somewhere else in
 // startup that nothing asserts on.
-func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, authz lifecycleAccessAuthorizer) {
-	lifecycleMgr.SetSessionAccessChecker(authz.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(authz.AuthorizeEnvironmentAccess)
-	lifecycleMgr.SetTaskAccessChecker(authz.AuthorizeTaskAccess)
-	lifecycleMgr.SetTaskEnvironmentAccessChecker(authz.AuthorizeTaskEnvironmentAccess)
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, access lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(access.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(access.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(access.AuthorizeTaskAccess)
+	lifecycleMgr.SetTaskEnvironmentAccessChecker(access.AuthorizeTaskEnvironmentAccess)
+	// Execution surfaces (terminal, shell, file writes, VS Code, port
+	// previews) require session.exec, which a viewer does not hold. They are
+	// keyed either by session or by environment, so both slots get one.
+	lifecycleMgr.SetSessionExecAccessChecker(func(ctx context.Context, sessionID string) error {
+		return access.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionExec)
+	})
+	lifecycleMgr.SetEnvironmentExecAccessChecker(func(ctx context.Context, environmentID string) error {
+		return access.AuthorizeEnvironmentScope(ctx, environmentID, authz.ScopeSessionExec)
+	})
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -1797,6 +1845,12 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
+		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
+			p.services.Canvas, p.services.Plugins, p.taskSvc,
+			lifecycleCanvasExecutionResolver{manager: p.lifecycleMgr}, p.homeDir, p.log,
+		))
+	}
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
@@ -1820,6 +1874,9 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
+	}
+	if p.orchestratorSvc != nil {
+		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)
 	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)

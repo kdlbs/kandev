@@ -64,6 +64,10 @@ test.describe("mobile quick chat tabs", () => {
       );
       const terminalReference = await terminalSortable.getAttribute("data-tab-reference");
       if (!terminalReference) throw new Error("quick terminal reference was not rendered");
+      const terminalSequence = await dialog
+        .getByTestId("quick-terminal-tab")
+        .getAttribute("data-terminal-sequence");
+      if (!terminalSequence) throw new Error("quick terminal sequence was not rendered");
 
       await dialog.getByTestId("quick-chat-add-menu-trigger").tap();
       await testPage.getByTestId("quick-chat-new-agent").tap();
@@ -80,8 +84,12 @@ test.describe("mobile quick chat tabs", () => {
         .toEqual([firstReference, secondReference, terminalReference]);
 
       const terminalTab = dialog.getByTestId("quick-terminal-tab");
-      await terminalTab.getByRole("button", { name: "Actions for Terminal 1" }).tap();
-      await testPage.getByRole("menuitem", { name: "Move Terminal 1 left" }).tap();
+      await terminalTab
+        .getByRole("button", { name: `Actions for Terminal ${terminalSequence}` })
+        .tap();
+      await testPage
+        .getByRole("menuitem", { name: `Move Terminal ${terminalSequence} left` })
+        .tap();
       await expect
         .poll(() => quickChatTabReferences(dialog), { timeout: 15_000 })
         .toEqual([firstReference, terminalReference, secondReference]);
@@ -113,8 +121,10 @@ test.describe("mobile quick chat tabs", () => {
       }
       await assertNoDocumentHorizontalOverflow(testPage, "mobile mixed Quick Chat tabs");
 
-      await terminalTab.getByRole("button", { name: "Actions for Terminal 1" }).tap();
-      await testPage.getByRole("menuitem", { name: "Close Terminal 1" }).tap();
+      await terminalTab
+        .getByRole("button", { name: `Actions for Terminal ${terminalSequence}` })
+        .tap();
+      await testPage.getByRole("menuitem", { name: `Close Terminal ${terminalSequence}` }).tap();
       await expect(dialog.getByTestId("quick-terminal-tab")).toHaveCount(0);
     } finally {
       await closeSurvivingQuickChatTerminals(testPage);
