@@ -1594,10 +1594,11 @@ func (r *Repository) UpdateTaskSessionDynamicRouteIfCurrent(
 	return rows > 0, now, nil
 }
 
-// CancelActiveTaskSession atomically transitions one active session to
-// CANCELLED. A false result means the row exists in a non-active state or was
-// concurrently changed before this conditional write; callers re-read to
-// distinguish those cases from a missing row. The returned timestamp belongs
+// CancelActiveTaskSession atomically transitions one active session, including
+// a parked IDLE session, to CANCELLED. A false result means the row exists in
+// a non-active state, or it was concurrently changed before this conditional
+// write; callers re-read to distinguish those cases from a missing row. The
+// returned timestamp belongs
 // to the committed cancellation, so accepting callers never need a fallible
 // post-write read before scheduling teardown.
 func (r *Repository) CancelActiveTaskSession(ctx context.Context, id, reason string) (bool, time.Time, error) {
@@ -1606,7 +1607,7 @@ func (r *Repository) CancelActiveTaskSession(ctx context.Context, id, reason str
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
-			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT', 'IDLE')
 	`), string(models.TaskSessionStateCancelled), reason, now, now, id)
 	if err != nil {
 		return false, time.Time{}, err

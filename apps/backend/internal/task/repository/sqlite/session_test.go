@@ -1478,6 +1478,7 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 		t.Fatalf("seed running state: %v", err)
 	}
 	insertSession(t, repo, "session-completed", "task-cas", string(models.TaskSessionStateCompleted))
+	insertSession(t, repo, "session-idle", "task-cas", string(models.TaskSessionStateIdle))
 
 	changed, cancelledAt, err := repo.CancelActiveTaskSession(ctx, "session-running", "coordinator stop")
 	if err != nil {
@@ -1488,6 +1489,16 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 	if got := sessionState(t, repo, "session-running"); got != string(models.TaskSessionStateCancelled) {
 		t.Fatalf("running session state = %q, want CANCELLED", got)
+	}
+	changed, _, err = repo.CancelActiveTaskSession(ctx, "session-idle", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel idle session: %v", err)
+	}
+	if !changed {
+		t.Fatal("idle session was not cancelled")
+	}
+	if got := sessionState(t, repo, "session-idle"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("idle session state = %q, want CANCELLED", got)
 	}
 	cancelled, err := repo.GetTaskSession(ctx, "session-running")
 	if err != nil {

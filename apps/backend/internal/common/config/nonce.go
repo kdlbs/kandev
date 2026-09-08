@@ -1,19 +1,23 @@
 package config
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 // nonceFingerprintLength is the number of leading hex characters of a
-// bootstrap nonce kept for diagnostics. Long enough to distinguish nonces
-// across a handful of concurrent launches, short enough that logging it never
-// exposes anything close to the full secret.
+// SHA-256 digest kept for diagnostics.
 const nonceFingerprintLength = 8
 
-// NonceFingerprint returns the first nonceFingerprintLength hex characters of
-// a hex-encoded bootstrap nonce, safe to log on both the backend launcher and
-// the agentctl control server. It lets a rejected handshake be correlated
-// against the nonce each side actually used without ever logging the nonce
-// itself.
+// NonceFingerprint returns a short SHA-256 digest of the bootstrap nonce,
+// safe to log on both the backend launcher and the agentctl control server.
+// It lets a rejected handshake be correlated against the nonce each side used
+// without logging any characters from the nonce itself.
 func NonceFingerprint(nonce string) string {
-	if len(nonce) <= nonceFingerprintLength {
-		return nonce
+	if nonce == "" {
+		return ""
 	}
-	return nonce[:nonceFingerprintLength]
+	digest := sha256.Sum256([]byte(nonce))
+	encoded := hex.EncodeToString(digest[:])
+	return encoded[:nonceFingerprintLength]
 }

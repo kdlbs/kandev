@@ -38,6 +38,26 @@ func TestAwaitRemoteAgentctlReadyTimeoutReturnsLivePid(t *testing.T) {
 	}
 }
 
+func TestAwaitRemoteAgentctlReadyPreservesPidWhenLivenessIsUnknown(t *testing.T) {
+	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		if strings.Contains(command, "kill -0") {
+			return sshFail("Operation not permitted")
+		}
+		return sshOut("agentctl: still starting up\n")
+	})
+
+	pid, err := awaitRemoteAgentctlReady(
+		context.Background(), server.dial(t), "/remote/session", 45000, 4242,
+		50*time.Millisecond, 10*time.Millisecond, newTestLogger(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "readiness probe failed") {
+		t.Fatalf("error = %v, want an unknown-liveness probe error", err)
+	}
+	if pid != 4242 {
+		t.Fatalf("pid = %d, want the pid preserved for teardown", pid)
+	}
+}
+
 func TestRetryRemoteAgentctlPortPreservesPidOnTerminalError(t *testing.T) {
 	wantErr := errors.New("ssh: agentctl did not become ready within 30s")
 	port, pid, err := retryRemoteAgentctlPort(

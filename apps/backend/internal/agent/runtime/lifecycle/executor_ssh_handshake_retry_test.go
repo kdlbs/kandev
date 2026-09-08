@@ -31,8 +31,9 @@ func TestRetryAgentctlHandshakeRetriesRejectedHandshakes(t *testing.T) {
 		}
 		return 5003, 103, "token-3", nil
 	}
-	teardown := func(port, pid int) {
+	teardown := func(port, pid int) error {
 		torndown = append(torndown, port)
+		return nil
 	}
 
 	port, pid, token, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
@@ -62,7 +63,7 @@ func TestRetryAgentctlHandshakeDoesNotRetryOtherFailures(t *testing.T) {
 		attempt := func() (int, int, string, error) {
 			return 0, 0, "", wantErr
 		}
-		teardown := func(int, int) { teardownCalls++ }
+		teardown := func(int, int) error { teardownCalls++; return nil }
 
 		_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 		if !errors.Is(err, wantErr) {
@@ -79,7 +80,10 @@ func TestRetryAgentctlHandshakeDoesNotRetryOtherFailures(t *testing.T) {
 		attempt := func() (int, int, string, error) {
 			return 5001, 101, "", wantErr
 		}
-		teardown := func(port, pid int) { torndownPort, torndownPID = port, pid }
+		teardown := func(port, pid int) error {
+			torndownPort, torndownPID = port, pid
+			return nil
+		}
 
 		_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 		if !errors.Is(err, wantErr) {
@@ -106,7 +110,7 @@ func TestRetryAgentctlHandshakeExhaustsAttemptsWithDiagnosis(t *testing.T) {
 			errSSHAgentctlHandshakeRejected, 6000+attempts, 200+attempts,
 		)
 	}
-	teardown := func(int, int) { torndown++ }
+	teardown := func(int, int) error { torndown++; return nil }
 
 	_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
 	if err == nil {
@@ -147,7 +151,7 @@ func TestRetryAgentctlHandshakeWaitsBetweenRejectedAttempts(t *testing.T) {
 		}
 		return 5003, 103, "token-3", nil
 	}
-	teardown := func(int, int) {}
+	teardown := func(int, int) error { return nil }
 
 	_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, fakeDelay)
 	if err != nil {
@@ -176,7 +180,7 @@ func TestRetryAgentctlHandshakeDelayCancellationAbortsRetry(t *testing.T) {
 		return 5001, 101, "", fmt.Errorf("%w: status 403", errSSHAgentctlHandshakeRejected)
 	}
 	var teardownCalls int
-	teardown := func(int, int) { teardownCalls++ }
+	teardown := func(int, int) error { teardownCalls++; return nil }
 	cancelledDelay := func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 
 	_, _, _, err := retryAgentctlHandshake(ctx, attempt, teardown, cancelledDelay)
@@ -188,5 +192,26 @@ func TestRetryAgentctlHandshakeDelayCancellationAbortsRetry(t *testing.T) {
 	}
 	if teardownCalls != 1 {
 		t.Fatalf("teardown calls = %d, want 1 (the first rejected attempt is still torn down)", teardownCalls)
+	}
+}
+
+func TestRetryAgentctlHandshakeStopsWhenTeardownFails(t *testing.T) {
+	wantTeardownErr := errors.New("remote cleanup failed")
+	var attempts int
+	attempt := func() (int, int, string, error) {
+		attempts++
+		return 5001, 101, "", fmt.Errorf("%w: status 403", errSSHAgentctlHandshakeRejected)
+	}
+	teardown := func(int, int) error { return wantTeardownErr }
+
+	_, _, _, err := retryAgentctlHandshake(context.Background(), attempt, teardown, noDelay)
+	if !errors.Is(err, wantTeardownErr) {
+		t.Fatalf("error = %v, want teardown error %v", err, wantTeardownErr)
+	}
+	if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+		t.Fatalf("error = %v, want original handshake rejection preserved", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 after teardown failure", attempts)
 	}
 }

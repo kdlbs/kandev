@@ -554,6 +554,7 @@ func TestBootstrapNonceDiagnosticsSurviveNonceBurn(t *testing.T) {
 }
 
 func TestBootstrapNonceDiagnosticsUnconfigured(t *testing.T) {
+	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "")
 	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
 		Configured:                true,
 		IdleTimeout:               time.Hour,

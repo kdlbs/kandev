@@ -635,8 +635,14 @@ func awaitRemoteAgentctlReady(
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
 		// Also catch "exited without binding" via pid check — if the wrapper
-		// exited before logging, kill -0 fails and we fail fast.
-		if !isRemoteAgentctlAlive(ctx, client, pid) {
+		// exited before logging, kill -0 confirms absence and we fail fast.
+		alive, probeErr := probeRemoteAgentctlLiveness(ctx, client, pid)
+		if !alive {
+			if probeErr != nil {
+				return pid, fmt.Errorf(
+					"ssh: agentctl readiness probe failed: %w; log tail:\n%s",
+					probeErr, lastLines(logOut, sshAgentctlLogTailLines))
+			}
 			return 0, fmt.Errorf(
 				"ssh: agentctl exited before becoming ready; log tail:\n%s",
 				lastLines(logOut, sshAgentctlLogTailLines))
@@ -645,11 +651,10 @@ func awaitRemoteAgentctlReady(
 	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	// The loop above only reaches the deadline by way of an isRemoteAgentctlAlive
-	// probe that returned true on its last iteration — otherwise the "exited
-	// before becoming ready" branch would already have returned. So the process
-	// is provably still running; return its pid (not 0) so the caller can tear
-	// it down instead of leaking it.
+	// The loop above only reaches the deadline after a liveness probe reported
+	// the process alive. That probe is not a permanent guarantee, so describe
+	// it as alive on the last probe before the deadline. Return its pid so the
+	// caller can tear it down instead of leaking it.
 	return pid, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
 		timeout, tail)
 }
@@ -837,13 +842,15 @@ const sshAgentctlHandshakeRetryDelay = 15 * time.Second
 // stale process left on the picked port). Any other failure (bind
 // exhaustion, transport, a malformed response) is terminal and returned
 // immediately after tearing down anything attempt already started (pid > 0).
+// A teardown error is terminal too, because the next attempt would reuse the
+// same session directory while the old process may still own its pid and log.
 // delay is called between attempts (not after the last one) and is injectable
 // so tests can run the retry loop without waiting on the real backoff; ctx
 // cancellation during the wait aborts the retry immediately.
 func retryAgentctlHandshake(
 	ctx context.Context,
 	attempt func() (port, pid int, token string, err error),
-	teardown func(port, pid int),
+	teardown func(port, pid int) error,
 	delay func(ctx context.Context, d time.Duration) error,
 ) (port, pid int, token string, err error) {
 	var lastErr error
@@ -853,8 +860,14 @@ func retryAgentctlHandshake(
 			return port, pid, token, nil
 		}
 		if pid > 0 {
-			teardown(port, pid)
+			if teardownErr := teardown(port, pid); teardownErr != nil {
+				return 0, 0, "", fmt.Errorf(
+					"ssh: agentctl teardown after attempt %d: %w",
+					i+1, errors.Join(teardownErr, err))
+			}
 		}
+		// teardown removes sessionDir. startRemoteAgentctl recreates it before
+		// each new pid/log pair, so every retry starts with a clean directory.
 		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
 			return 0, 0, "", err
 		}

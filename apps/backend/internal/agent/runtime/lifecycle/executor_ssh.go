@@ -486,15 +486,20 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 				// agentctl's own handshake log line for the same nonce —
 				// distinguishing a mismatch/already-burned nonce from
 				// bootstrap mode never having been configured on the remote.
+				logCtx, logCancel := sshRemoteCleanupContext(ctx)
+				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir)
+				logCancel()
 				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
-					err, port, pid, nonceFingerprint, readRemoteAgentctlLogTail(ctx, client, sessionDir))
+					err, port, pid, nonceFingerprint, logTail)
 			}
 			return port, pid, "", err
 		}
 		return port, pid, token, nil
 	}
-	teardown := func(_, pid int) {
-		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
+	teardown := func(_, pid int) error {
+		cleanupCtx, cleanupCancel := sshRemoteCleanupContext(ctx)
+		defer cleanupCancel()
+		return stopRemoteAgentctl(cleanupCtx, client, sessionDir, pid)
 	}
 	return retryAgentctlHandshake(ctx, attempt, teardown, sleepOrContextDone)
 }

@@ -9,19 +9,19 @@ func TestNonceFingerprint(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "32-byte hex nonce keeps only the first 8 characters",
+			name:  "32-byte hex nonce hashes to a short digest",
 			nonce: "0123456789abcdef0123456789abcdef",
-			want:  "01234567",
+			want:  "3eb1bd43",
 		},
 		{
-			name:  "nonce shorter than the fingerprint length is returned unchanged",
+			name:  "nonce shorter than the fingerprint length is hashed",
 			nonce: "abc123",
-			want:  "abc123",
+			want:  "6ca13d52",
 		},
 		{
-			name:  "nonce exactly the fingerprint length is returned unchanged",
+			name:  "nonce exactly the fingerprint length is hashed",
 			nonce: "abcdef01",
-			want:  "abcdef01",
+			want:  "aa280d2e",
 		},
 		{
 			name:  "empty nonce fingerprints to empty",
@@ -39,19 +39,13 @@ func TestNonceFingerprint(t *testing.T) {
 	}
 }
 
-// TestNonceFingerprintNeverExposesFullSecret pins the truncation itself: two
-// nonces that only differ after the fingerprint length must fingerprint
-// identically, proving the fingerprint cannot be used to reconstruct or
-// distinguish the full secret.
-func TestNonceFingerprintNeverExposesFullSecret(t *testing.T) {
-	a := "deadbeef0000000000000000000000000000000000000000000000000000"
-	b := "deadbeefffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-
-	fa, fb := NonceFingerprint(a), NonceFingerprint(b)
-	if fa != fb {
-		t.Fatalf("fingerprints diverged past the truncation point: %q vs %q", fa, fb)
+func TestNonceFingerprintDoesNotExposeNoncePrefix(t *testing.T) {
+	nonce := "deadbeef0000000000000000000000000000000000000000000000000000"
+	got := NonceFingerprint(nonce)
+	if got == nonce[:nonceFingerprintLength] {
+		t.Fatalf("fingerprint %q exposes the nonce prefix", got)
 	}
-	if len(fa) != nonceFingerprintLength {
-		t.Fatalf("fingerprint length = %d, want %d", len(fa), nonceFingerprintLength)
+	if len(got) != nonceFingerprintLength {
+		t.Fatalf("fingerprint length = %d, want %d", len(got), nonceFingerprintLength)
 	}
 }
