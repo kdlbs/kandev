@@ -465,6 +465,9 @@ func restoreSnapshot(source, destination, expectedManifest string) error {
 
 //nolint:cyclop // The copy walk handles each filesystem type explicitly.
 func copySnapshotEntries(source, destination string) error {
+	if err := removeDestinationTypeMismatches(source, destination); err != nil {
+		return err
+	}
 	if err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -492,6 +495,89 @@ func copySnapshotEntries(source, destination string) error {
 		}
 		return copySnapshotEntry(source, destination, path, entry)
 	})
+}
+
+type recoveryEntryType uint8
+
+const (
+	recoveryEntryDirectory recoveryEntryType = iota
+	recoveryEntryFile
+	recoveryEntrySymlink
+)
+
+// removeDestinationTypeMismatches clears only entries which the verified
+// snapshot proves must change type. This runs before the absence cleanup so a
+// fresh tracked directory cannot make a snapshot file appear as an invalid
+// descendant, and no copy operation can follow a replaced symlink.
+func removeDestinationTypeMismatches(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == source {
+			return nil
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		sourceType, err := recoveryTypeForDirEntry(entry)
+		if err != nil {
+			return fmt.Errorf("inspect recovery snapshot entry %q: %w", rel, err)
+		}
+		target := filepath.Join(destination, rel)
+		existing, err := os.Lstat(target)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		destinationType, err := recoveryTypeForFileInfo(existing)
+		if err != nil {
+			return fmt.Errorf("unsupported recovery destination entry %q: %w", target, err)
+		}
+		if sourceType == destinationType {
+			return nil
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("replace recovery destination entry %q: %w", target, err)
+		}
+		return nil
+	})
+}
+
+func recoveryTypeForDirEntry(entry os.DirEntry) (recoveryEntryType, error) {
+	if entry.IsDir() {
+		return recoveryEntryDirectory, nil
+	}
+	if entry.Type()&os.ModeSymlink != 0 {
+		return recoveryEntrySymlink, nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return 0, err
+	}
+	return recoveryTypeForFileInfo(info)
+}
+
+func recoveryTypeForFileInfo(info os.FileInfo) (recoveryEntryType, error) {
+	if info.IsDir() {
+		return recoveryEntryDirectory, nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return recoveryEntrySymlink, nil
+	}
+	if info.Mode().IsRegular() {
+		return recoveryEntryFile, nil
+	}
+	return 0, fmt.Errorf("entry mode %s", info.Mode())
 }
 
 func removeDestinationDirectoriesAbsentFromSnapshot(source, destination string) error {
@@ -540,18 +626,45 @@ func copySnapshotEntry(source, destination, path string, entry os.DirEntry) erro
 		return err
 	}
 	target := filepath.Join(destination, rel)
+	entryType, err := recoveryTypeForDirEntry(entry)
+	if err != nil {
+		return err
+	}
 	if entry.IsDir() {
 		return copySnapshotDirectory(entry, target)
 	}
 	if entry.Type()&os.ModeSymlink != 0 {
-		link, err := os.Readlink(path)
-		if err != nil {
-			return err
-		}
-		_ = os.Remove(target)
-		return os.Symlink(link, target)
+		return copySnapshotSymlink(path, target)
+	}
+	if entryType != recoveryEntryFile {
+		return fmt.Errorf("unsupported recovery snapshot entry %q", rel)
 	}
 	return copySnapshotFile(path, target, entry)
+}
+
+func copySnapshotSymlink(source, target string) error {
+	link, err := os.Readlink(source)
+	if err != nil {
+		return err
+	}
+	if err := removeExistingRecoverySymlink(target); err != nil {
+		return err
+	}
+	return os.Symlink(link, target)
+}
+
+func removeExistingRecoverySymlink(target string) error {
+	existing, err := os.Lstat(target)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if existing.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("recovery destination type changed before symlink restore: %q", target)
+	}
+	return os.Remove(target)
 }
 
 func copySnapshotDirectory(entry os.DirEntry, target string) error {
@@ -560,12 +673,7 @@ func copySnapshotDirectory(entry os.DirEntry, target string) error {
 		return err
 	}
 	if existing, err := os.Lstat(target); err == nil && !existing.IsDir() {
-		if !existing.Mode().IsRegular() && existing.Mode()&os.ModeSymlink == 0 {
-			return fmt.Errorf("unsupported recovery destination entry %q", target)
-		}
-		if err := os.Remove(target); err != nil {
-			return err
-		}
+		return fmt.Errorf("recovery destination type changed before directory restore: %q", target)
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -587,14 +695,25 @@ func copySnapshotFile(source, target string, entry os.DirEntry) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	if existing, err := os.Lstat(target); err == nil && existing.Mode()&os.ModeSymlink != 0 {
+	if existing, err := os.Lstat(target); err == nil {
+		if !existing.Mode().IsRegular() {
+			return fmt.Errorf("recovery destination type changed before file restore: %q", target)
+		}
 		if err := os.Remove(target); err != nil {
 			return err
 		}
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
 		return err
 	}
 	return os.Chmod(target, info.Mode().Perm())

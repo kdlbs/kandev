@@ -764,6 +764,126 @@ func TestManager_RecoverWorktreeRemovesDestinationDirectoriesAbsentFromSnapshot(
 	}
 }
 
+func TestManager_RecoverWorktreeOverlaysAllEntryTypeTransitions(t *testing.T) {
+	entryTypes := []string{"directory", "file", "symlink"}
+	for _, destinationType := range entryTypes {
+		for _, snapshotType := range entryTypes {
+			if destinationType == snapshotType {
+				continue
+			}
+			t.Run(destinationType+"-to-"+snapshotType, func(t *testing.T) {
+				ctx := context.Background()
+				cfg := newTestConfig(t)
+				repoPath := initGitRepoForWorktreeTest(t)
+				external := filepath.Join(t.TempDir(), "external")
+				if err := os.Mkdir(external, 0750); err != nil {
+					t.Fatalf("create external sentinel directory: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(external, "sentinel"), []byte("untouched\n"), 0600); err != nil {
+					t.Fatalf("write external sentinel: %v", err)
+				}
+				writeRecoveryEntry(t, repoPath, "collision", destinationType, external)
+				runGit(t, repoPath, "add", "collision")
+				runGit(t, repoPath, "commit", "-m", "add recovery collision")
+
+				worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree-"+destinationType+"-to-"+snapshotType)
+				branch := "feature/recover-" + destinationType + "-to-" + snapshotType
+				runGit(t, repoPath, "worktree", "add", "-b", branch, worktreePath, "main")
+				if err := os.RemoveAll(filepath.Join(worktreePath, "collision")); err != nil {
+					t.Fatalf("remove damaged checkout collision: %v", err)
+				}
+				writeRecoveryEntry(t, worktreePath, "collision", snapshotType, external)
+				removeRecoveryAdminDirectory(t, worktreePath)
+
+				store := newMockStore()
+				original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: branch, RepositoryPath: repoPath,
+					Path: worktreePath, Branch: branch, BaseBranch: "main", Status: StatusActive}
+				store.worktrees[original.ID] = original
+				mgr, err := NewManager(cfg, store, newTestLogger())
+				if err != nil {
+					t.Fatalf("NewManager failed: %v", err)
+				}
+
+				replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+				if err != nil {
+					t.Fatalf("RecoverWorktree: %v", err)
+				}
+				assertRecoveryEntry(t, replacement.Path, "collision", snapshotType)
+				if content, err := os.ReadFile(filepath.Join(external, "sentinel")); err != nil || string(content) != "untouched\n" {
+					t.Fatalf("external symlink target changed: content=%q err=%v", content, err)
+				}
+			})
+		}
+	}
+}
+
+func writeRecoveryEntry(t *testing.T, root, name, entryType, external string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	switch entryType {
+	case "directory":
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatalf("create recovery directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "preserved"), []byte("directory content\n"), 0600); err != nil {
+			t.Fatalf("write recovery directory content: %v", err)
+		}
+	case "file":
+		if err := os.WriteFile(path, []byte("file content\n"), 0600); err != nil {
+			t.Fatalf("write recovery file: %v", err)
+		}
+	case "symlink":
+		if err := os.Symlink(external, path); err != nil {
+			t.Skipf("create recovery symlink: %v", err)
+		}
+	default:
+		t.Fatalf("unknown recovery entry type %q", entryType)
+	}
+}
+
+func assertRecoveryEntry(t *testing.T, root, name, entryType string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat recovered entry: %v", err)
+	}
+	switch entryType {
+	case "directory":
+		if !info.IsDir() || info.Mode().Perm() != 0700 {
+			t.Fatalf("recovered entry mode = %s, want directory mode 0700", info.Mode())
+		}
+		if content, err := os.ReadFile(filepath.Join(path, "preserved")); err != nil || string(content) != "directory content\n" {
+			t.Fatalf("recovered directory content = %q, err=%v", content, err)
+		}
+	case "file":
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+			t.Fatalf("recovered entry mode = %s, want regular file mode 0600", info.Mode())
+		}
+		if content, err := os.ReadFile(path); err != nil || string(content) != "file content\n" {
+			t.Fatalf("recovered file content = %q, err=%v", content, err)
+		}
+	case "symlink":
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("recovered entry mode = %s, want symlink", info.Mode())
+		}
+	default:
+		t.Fatalf("unknown recovery entry type %q", entryType)
+	}
+}
+
+func removeRecoveryAdminDirectory(t *testing.T, worktreePath string) {
+	t.Helper()
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove admin directory: %v", err)
+	}
+}
+
 func TestCopySnapshotEntriesReplacesDestinationSymlinkWithDirectory(t *testing.T) {
 	source := t.TempDir()
 	if err := os.Mkdir(filepath.Join(source, "empty"), 0700); err != nil {
