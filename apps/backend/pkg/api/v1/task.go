@@ -18,10 +18,26 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// TaskChangeRequestSummary is a compact provider-neutral view of a pull or
+// merge request associated with a task.
+type TaskChangeRequestSummary struct {
+	Provider     string     `json:"provider"`
+	RepositoryID string     `json:"repository_id,omitempty"`
+	Number       int        `json:"number"`
+	URL          string     `json:"url"`
+	Title        string     `json:"title,omitempty"`
+	State        string     `json:"state"`
+	Draft        *bool      `json:"draft,omitempty"`
+	BaseRef      string     `json:"base_ref,omitempty"`
+	HeadRef      string     `json:"head_ref,omitempty"`
+	MergedAt     *time.Time `json:"merged_at,omitempty"`
+	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+}
+
 // TaskPRSummary is a compact view of a GitHub pull request associated with a
-// task. Surfaced through the task-listing MCP tools so agents can reason about
-// PR status. State is one of "open", "closed", "merged"; MergedAt is set only
-// when the PR has merged, so agents can report when the work landed.
+// task. Surfaced through the task-listing MCP tools for compatibility with
+// existing agents. State is one of "open", "closed", "merged"; MergedAt is set
+// only when the PR has merged, so agents can report when the work landed.
 type TaskPRSummary struct {
 	Number   int        `json:"number"`
 	URL      string     `json:"url"`

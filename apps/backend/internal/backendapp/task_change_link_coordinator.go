@@ -17,14 +17,26 @@ import (
 // delegates persistence and provider reads to the established services.
 type taskChangeLinkCoordinator struct {
 	tasks  *taskservice.Service
-	github *github.Service
-	gitlab *gitlab.Service
+	github githubChangeLinkProvider
+	gitlab gitlabChangeLinkProvider
 }
 
 const (
 	taskChangeProviderGitHub = "github"
 	taskChangeProviderGitLab = "gitlab"
 )
+
+type githubChangeLinkProvider interface {
+	AssociateExistingPRByURL(context.Context, string, string, string) (*github.TaskPR, error)
+	DetachTaskPR(context.Context, string, string) (*github.TaskPR, error)
+	ListTaskPRs(context.Context, []string) (map[string][]*github.TaskPR, error)
+}
+
+type gitlabChangeLinkProvider interface {
+	AssociateExistingMRByURL(context.Context, string, string, string, string) (*gitlab.TaskMR, error)
+	ListTaskMRsByTask(context.Context, string) ([]*gitlab.TaskMR, error)
+	UnlinkTaskMR(context.Context, string, string) error
+}
 
 func (c taskChangeLinkCoordinator) LinkTaskChange(ctx context.Context, req mcp.TaskChangeLinkRequest) ([]mcp.TaskChangeLink, error) {
 	if err := c.link(ctx, req.TaskID, req.Link); err != nil {
@@ -44,15 +56,32 @@ func (c taskChangeLinkCoordinator) ReplaceTaskChange(ctx context.Context, req mc
 	if req.Old == nil {
 		return nil, fmt.Errorf("current task change identity is required")
 	}
+	before, err := c.list(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	newAlreadyLinked := taskChangeLinksContain(before, req.Link)
 	// Resolve and persist the incoming association first. A failed provider
 	// fetch therefore leaves the current association untouched.
 	if err := c.link(ctx, req.TaskID, req.Link); err != nil {
 		return nil, err
 	}
 	if err := c.unlink(ctx, req.TaskID, *req.Old); err != nil {
+		if !newAlreadyLinked {
+			_ = c.unlink(ctx, req.TaskID, req.Link)
+		}
 		return nil, err
 	}
 	return c.list(ctx, req.TaskID)
+}
+
+func taskChangeLinksContain(links []mcp.TaskChangeLink, target mcp.TaskChangeLink) bool {
+	for _, link := range links {
+		if link.Provider == target.Provider && link.RepositoryID == target.RepositoryID && link.Number == target.Number {
+			return true
+		}
+	}
+	return false
 }
 
 func (c taskChangeLinkCoordinator) link(ctx context.Context, taskID string, link mcp.TaskChangeLink) error {
@@ -185,7 +214,10 @@ func (c taskChangeLinkCoordinator) taskRepository(ctx context.Context, taskID, r
 }
 
 func githubChangeURL(host, owner, name string, number int) (string, error) {
-	if strings.TrimSpace(host) != "" && !strings.Contains(strings.ToLower(host), "github.com") {
+	normalizedHost := strings.TrimRight(strings.TrimSpace(strings.ToLower(host)), "/")
+	normalizedHost = strings.TrimPrefix(normalizedHost, "https://")
+	normalizedHost = strings.TrimPrefix(normalizedHost, "http://")
+	if normalizedHost != "" && normalizedHost != "github.com" && !strings.HasSuffix(normalizedHost, ".github.com") {
 		return "", fmt.Errorf("repository is not a GitHub repository")
 	}
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {

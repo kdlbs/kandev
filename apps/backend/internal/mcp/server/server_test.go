@@ -615,6 +615,9 @@ func TestServerModeTask_AbsentProvidersFailClosedForReviewAutomation(t *testing.
 	assert.NotContains(t, tools, "update_task_pr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "update_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "link_task_pr_kandev")
+	assert.NotContains(t, tools, "unlink_task_pr_kandev")
+	assert.NotContains(t, tools, "replace_task_pr_kandev")
 }
 
 func TestServerModeTask_ProviderMembership(t *testing.T) {
@@ -639,10 +642,14 @@ func TestServerModeTask_ProviderMembership(t *testing.T) {
 			t.Cleanup(backend.Close)
 			s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, tt.providers)
 			tools := getRegisteredToolNames(s)
+			wantLinkTools := tt.wantPR || tt.wantMR
 			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "link_task_pr_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "unlink_task_pr_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "replace_task_pr_kandev"))
 			assert.Contains(t, tools, "stop_task_kandev")
 		})
 	}
@@ -661,6 +668,9 @@ func TestServerSetProvidersPreservesModeAndRebuildsTools(t *testing.T) {
 	assert.Contains(t, tools, "set_task_title_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.Contains(t, tools, "link_task_pr_kandev")
+	assert.Contains(t, tools, "unlink_task_pr_kandev")
+	assert.Contains(t, tools, "replace_task_pr_kandev")
 }
 
 type providerRefreshTestSession struct {

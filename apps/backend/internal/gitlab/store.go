@@ -619,6 +619,31 @@ func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR
 	return out, nil
 }
 
+// ListTaskMRsByTaskIDs returns every MR association for the supplied tasks,
+// grouped by task_id and ordered by created_at within each task.
+func (s *Store) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskMR, error) {
+	if len(taskIDs) == 0 {
+		return map[string][]*TaskMR{}, nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		 WHERE task_id IN (?) ORDER BY created_at ASC`, taskIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	query = s.ro.Rebind(query)
+	var mrs []TaskMR
+	if err := s.ro.SelectContext(ctx, &mrs, query, args...); err != nil {
+		return nil, err
+	}
+	out := make(map[string][]*TaskMR)
+	for i := range mrs {
+		out[mrs[i].TaskID] = append(out[mrs[i].TaskID], &mrs[i])
+	}
+	return out, nil
+}
+
 // ListTaskMRsByWorkspaceID returns every MR association for tasks inside the
 // given workspace, grouped by task_id. Empty map when the workspace has no
 // GitLab MRs.

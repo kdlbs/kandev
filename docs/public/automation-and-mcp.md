@@ -200,6 +200,9 @@ For example, link GitLab merge request 42 to its target task with
 `replace_task_pr_kandev` also requires `old_provider`, `old_repository_id`, and
 `old_number`. Every successful mutation returns the resulting active link set.
 The target task must be reachable from the calling task's workspace.
+`list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
+GitLab MR associations in the provider-neutral `change_requests` field; the
+legacy `prs` field remains GitHub-only for compatibility.
 
 Unlinking changes only the active association and its matching automation
 state. It does not delete conversation history, terminal receipts, or the

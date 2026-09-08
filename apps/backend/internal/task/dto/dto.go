@@ -252,6 +252,9 @@ type TaskDTO struct {
 	// task-listing MCP tools so agents can reason about PR status (e.g. find
 	// tasks whose PRs are merged). Omitted when empty.
 	PRs []v1.TaskPRSummary `json:"prs,omitempty"`
+	// ChangeRequests lists the provider-neutral GitHub PR and GitLab MR
+	// associations for this task. Omitted when no associations exist.
+	ChangeRequests []v1.TaskChangeRequestSummary `json:"change_requests,omitempty"`
 
 	// StatusSummary is the bounded task-level projection consumed by task rows.
 	// It is loaded in batches and is absent when no projection exists yet; the
