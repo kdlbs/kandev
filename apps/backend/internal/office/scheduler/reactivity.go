@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
@@ -198,7 +199,8 @@ func (ss *SchedulerService) reactToStatusChange(
 		ss.cascadeReviewRequested(ctx, task, change, queue)
 
 	case prev == statusBlocked && next != statusBlocked:
-		// Unblocked — wake assignee with task_unblocked.
+		// Unblocked — no durable occurrence row to key on: keyless by design.
+		runsservice.ReportKeylessEnqueue(RunReasonTaskUnblocked, runsservice.KeylessCauseByDesign, "")
 		queue(task.AssigneeAgentProfileID, RunContext{
 			Reason:      RunReasonTaskUnblocked,
 			TaskID:      task.ID,
@@ -208,7 +210,7 @@ func (ss *SchedulerService) reactToStatusChange(
 		})
 
 	case (prev == statusDone || prev == statusCancelled) && (next == statusTodo || next == statusInProgress):
-		// Reopen — different reason if a comment was attached.
+		// Reopen — different reason (and dedup identity) if a comment was attached.
 		reason := RunReasonTaskReopened
 		commentID := ""
 		if change.Comment != nil {
@@ -219,13 +221,21 @@ func (ss *SchedulerService) reactToStatusChange(
 			// Explicit resume always uses the comment-flavoured reason.
 			reason = RunReasonTaskReopenedComment
 		}
+		var key string
+		if reason == RunReasonTaskReopenedComment {
+			key = fmt.Sprintf("%s:%s:%s", RunReasonTaskReopenedComment, commentID, task.AssigneeAgentProfileID)
+		} else {
+			// Silent reopen (no comment) — no durable occurrence row: keyless by design.
+			runsservice.ReportKeylessEnqueue(RunReasonTaskReopened, runsservice.KeylessCauseByDesign, "")
+		}
 		queue(task.AssigneeAgentProfileID, RunContext{
-			Reason:      reason,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     change.ActorID,
-			ActorType:   change.ActorType,
-			CommentID:   commentID,
+			Reason:         reason,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        change.ActorID,
+			ActorType:      change.ActorType,
+			CommentID:      commentID,
+			IdempotencyKey: key,
 		})
 	}
 }
@@ -298,13 +308,15 @@ func (ss *SchedulerService) reactToComment(
 
 	// Assignee wake — skip if self-comment or task is closed.
 	if !comment.SkipAssigneeWake && !selfComment && !closed {
+		key := commentkeys.TaskComment(comment.ID) + ":" + task.AssigneeAgentProfileID
 		queue(task.AssigneeAgentProfileID, RunContext{
-			Reason:      RunReasonTaskComment,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     comment.AuthorID,
-			ActorType:   comment.AuthorType,
-			CommentID:   comment.ID,
+			Reason:         RunReasonTaskComment,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        comment.AuthorID,
+			ActorType:      comment.AuthorType,
+			CommentID:      comment.ID,
+			IdempotencyKey: key,
 		})
 	}
 
@@ -322,13 +334,15 @@ func (ss *SchedulerService) reactToComment(
 		if agentID == comment.AuthorID {
 			continue
 		}
+		key := fmt.Sprintf("%s:%s:%s", RunReasonTaskMentioned, comment.ID, agentID)
 		queue(agentID, RunContext{
-			Reason:      RunReasonTaskMentioned,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     comment.AuthorID,
-			ActorType:   comment.AuthorType,
-			CommentID:   comment.ID,
+			Reason:         RunReasonTaskMentioned,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        comment.AuthorID,
+			ActorType:      comment.AuthorType,
+			CommentID:      comment.ID,
+			IdempotencyKey: key,
 		})
 	}
 }
@@ -363,6 +377,9 @@ func (ss *SchedulerService) cascadeReviewRequested(
 		if p.Role != models.ParticipantRoleReviewer && p.Role != models.ParticipantRoleApprover {
 			continue
 		}
+		// No durable occurrence row to key on: keyless by design, reported
+		// per recipient so the fan-out's full volume is countable.
+		runsservice.ReportKeylessEnqueue(RunReasonTaskReviewRequested, runsservice.KeylessCauseByDesign, "")
 		queue(p.AgentProfileID, RunContext{
 			Reason:      RunReasonTaskReviewRequested,
 			TaskID:      task.ID,
