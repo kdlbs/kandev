@@ -1061,15 +1061,19 @@ func removeRemoteDirCommand(dir string) string {
 // reuse by an unrelated process owned by the same SSH user is a real risk on
 // a shared runner — probeRemoteAgentctlLiveness alone only proves *some*
 // process holds the pid, not that it is ours. The remote launch command line
-// always includes "agentctl" and the persisted workdir (sessionDir or
-// taskDir), so a `ps` command-line match is sufficient identity evidence.
+// always includes "agentctl" and the persisted taskDir, but taskDir is
+// shared by every sibling session of the same task (workspace reuse), so a
+// `ps` match only proves "some agentctl for this task" — not this row's own
+// session. remoteAgentctlPidFileMatches supplies the missing per-session
+// evidence via the launch wrapper's own pidfile.
 //
-// Returns false (no error) when the pid is gone or belongs to something
-// else — both are "safe to skip the kill" outcomes for the caller. An error
-// return means the identity probe itself failed (e.g. an SSH-level fault,
-// not merely "no such process"), and the caller should treat this the same
-// as a failed stop: preserve the row rather than risk either signalling an
-// unverified pid or reporting an orphan as reaped.
+// Returns false (no error) when the pid is gone, belongs to something else,
+// or fails the pidfile cross-check — all "safe to skip the kill" outcomes
+// for the caller. An error return means the identity probe itself failed
+// (e.g. an SSH-level fault, not merely "no such process"), and the caller
+// should treat this the same as a failed stop: preserve the row rather than
+// risk either signalling an unverified pid or reporting an orphan as
+// reaped.
 func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error) {
 	if pid <= 0 {
 		return false, nil
@@ -1080,25 +1084,49 @@ func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid i
 		if !errors.As(err, &exitErr) {
 			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
 		}
-		if !remoteProcessProbeConfirmsAbsence(stderr) {
+		if !remotePsProbeConfirmsAbsence(stdout, stderr) {
 			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
 		}
 		return false, nil
 	}
-	return remoteAgentctlCommandLineMatches(stdout, sessionDir, taskDir), nil
+	if !remoteAgentctlCommandLineMatches(stdout, taskDir) {
+		return false, nil
+	}
+	return remoteAgentctlPidFileMatches(ctx, client, sessionDir, pid), nil
 }
 
 func remoteProcessCommandLineCommand(pid int) string {
 	return fmt.Sprintf("ps -p %d -o command=", pid)
 }
 
-func remoteAgentctlCommandLineMatches(commandLine, sessionDir, taskDir string) bool {
+func remoteAgentctlCommandLineMatches(commandLine, taskDir string) bool {
 	line := strings.TrimSpace(commandLine)
 	if line == "" || !strings.Contains(line, "agentctl") {
 		return false
 	}
-	return (sessionDir != "" && strings.Contains(line, sessionDir)) ||
-		(taskDir != "" && strings.Contains(line, taskDir))
+	return taskDir != "" && strings.Contains(line, taskDir)
+}
+
+// remoteAgentctlPidFileMatches supplies the per-session identity evidence a
+// `ps` argv match cannot: it reads the pidfile the launch wrapper writes at
+// <sessionDir>/agentctl.pid (see startRemoteAgentctlOnPort) and compares its
+// content to the pid about to be signalled. Any failure to confirm a
+// match — the file is gone, unreadable, or names a different pid — returns
+// false so the caller skips the kill; the row's own session directory is
+// still safe to reclaim regardless of pid identity.
+func remoteAgentctlPidFileMatches(ctx context.Context, client *ssh.Client, sessionDir string, pid int) bool {
+	if strings.TrimSpace(sessionDir) == "" {
+		return false
+	}
+	stdout, _, err := runSSHCommand(ctx, client, "cat -- "+shellQuote(sessionDir+"/agentctl.pid"))
+	if err != nil {
+		return false
+	}
+	filePID, err := strconv.Atoi(strings.TrimSpace(stdout))
+	if err != nil {
+		return false
+	}
+	return filePID == pid
 }
 
 // probeRemoteAgentctlLiveness distinguishes a completed remote process probe
@@ -1126,6 +1154,21 @@ func remoteProcessProbeConfirmsAbsence(stderr string) bool {
 	return strings.Contains(message, "no such process") ||
 		strings.Contains(message, "no such pid") ||
 		strings.Contains(message, "esrch")
+}
+
+// remotePsProbeConfirmsAbsence distinguishes a `ps -p <pid>` selection miss
+// from a genuine probe fault. Unlike `kill -0`, `ps -p <absent-pid> -o
+// command=` never writes a "no such process" style message — on every
+// observed platform (macOS, procps/Linux) it exits non-zero with both
+// stdout and stderr empty. Treating that shape as confirmed absence keeps
+// this fail-closed: any real stderr content (a busybox/unsupported flag, a
+// permission fault, an SSH-level error) still falls through to an error
+// instead of being read as "process gone".
+func remotePsProbeConfirmsAbsence(stdout, stderr string) bool {
+	if remoteProcessProbeConfirmsAbsence(stderr) {
+		return true
+	}
+	return strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == ""
 }
 
 func remoteProcessProbeError(command string, pid int, err error, stderr string) error {

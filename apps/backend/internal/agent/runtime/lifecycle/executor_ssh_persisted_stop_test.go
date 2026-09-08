@@ -20,6 +20,7 @@ func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
 	// exercises the identity branch that actually fires in production.
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -46,6 +47,113 @@ func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
 	if len(exec.sessions) != 0 {
 		t.Fatal("a persisted-metadata stop must not leave tracked session state behind")
 	}
+}
+
+// TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly covers R3-F1: a
+// dead pid probed via `ps -p <pid> -o command=` exits non-zero with empty
+// stdout and empty stderr on every observed platform — the ordinary shape
+// for the common "the orphan already exited" case, not the exception. That
+// must be read as confirmed absence, not as a probe fault: the stop must
+// succeed without signalling anything, and the session dir must still be
+// reclaimed so the row is prunable.
+func TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
+		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
+	).handle)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "orphaned-instance",
+		StopReason: "startup terminal session cleanup",
+		Metadata:   metadata,
+	}, true)
+	if err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+	if _, ok := server.lastCommandContaining("kill 4242"); ok {
+		t.Fatalf("expected no kill for a confirmed-dead pid, commands: %v", server.commands())
+	}
+	if _, ok := server.lastCommandContaining("rm -rf '/remote/session'"); !ok {
+		t.Fatalf("expected the session dir to still be reclaimed, commands: %v", server.commands())
+	}
+}
+
+// TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile covers R3-F2:
+// taskDir is shared by every sibling session of the same task (workspace
+// reuse), so a `ps` argv match alone only proves "some agentctl for this
+// task" — a stale row's persisted pid can be recycled by a live sibling
+// session's agentctl on the same taskDir. The per-session pidfile at
+// <sessionDir>/agentctl.pid must also name the same pid before a kill is
+// sent. Two rows share taskDir here — only the row whose own sessionDir
+// pidfile matches its persisted pid may be signalled.
+func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
+	sharedArgv := sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")
+
+	t.Run("row whose own pidfile confirms the pid is still killed despite shared taskDir", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sharedArgv},
+			// session-a's own launch recorded pid 4242 in its own pidfile —
+			// the shared taskDir argv match alone would be ambiguous
+			// between the two sibling sessions, but the pidfile disambiguates.
+			sshScriptRule{match: "cat -- '/remote/session-a/agentctl.pid'", result: sshOut("4242")},
+			sshScriptRule{match: "rm -rf '/remote/session-a'", result: sshOK},
+		).handle)
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+		metadata := sshConnectionMetadata(t, server)
+		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+		metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session-a"
+		metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+		err := exec.StopInstance(context.Background(), &ExecutorInstance{
+			InstanceID: "session-a-instance",
+			StopReason: "startup terminal session cleanup",
+			Metadata:   metadata,
+		}, true)
+		if err != nil {
+			t.Fatalf("StopInstance: %v", err)
+		}
+		if _, ok := server.lastCommandContaining("kill 4242"); !ok {
+			t.Fatalf("expected session-a's own confirmed pid to be killed, commands: %v", server.commands())
+		}
+	})
+
+	t.Run("row whose metadata pid was corrupted to a sibling's live pid is not signalled", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sharedArgv},
+			// session-b's own launch recorded a different pid (9999); its
+			// persisted metadata pid of 4242 does not belong to it.
+			sshScriptRule{match: "cat -- '/remote/session-b/agentctl.pid'", result: sshOut("9999")},
+			sshScriptRule{match: "rm -rf '/remote/session-b'", result: sshOK},
+		).handle)
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+		metadata := sshConnectionMetadata(t, server)
+		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+		metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session-b"
+		metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+		err := exec.StopInstance(context.Background(), &ExecutorInstance{
+			InstanceID: "session-b-instance",
+			StopReason: "startup terminal session cleanup",
+			Metadata:   metadata,
+		}, true)
+		if err != nil {
+			t.Fatalf("StopInstance: %v", err)
+		}
+		if _, ok := server.lastCommandContaining("kill 4242"); ok {
+			t.Fatalf("expected no kill when the pidfile names a different pid, commands: %v", server.commands())
+		}
+		if _, ok := server.lastCommandContaining("rm -rf '/remote/session-b'"); !ok {
+			t.Fatalf("expected session-b's own session dir to still be reclaimed, commands: %v", server.commands())
+		}
+	})
 }
 
 // TestSSHExecutorStopInstanceIdentityMismatchSkipsKill covers F2: a pid
@@ -174,6 +282,7 @@ func TestSSHExecutorStopInstanceIdentityProbeFailurePreservesRow(t *testing.T) {
 func TestSSHExecutorStopInstanceStopCommandFailurePropagatesError(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())

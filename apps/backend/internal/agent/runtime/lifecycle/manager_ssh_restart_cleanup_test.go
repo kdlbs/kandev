@@ -30,6 +30,7 @@ func TestStopAgentWithReasonReapsPersistedSSHAgentctlAfterRestart(t *testing.T) 
 	// exercises the identity branch that actually fires in production.
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshOK},
 	).handle)
 	log := newTestRegistryLogger()
@@ -120,6 +121,7 @@ func TestStopAgentWithReasonPersistedSSHBackendShutdownWithoutForcePreservesRemo
 func TestStopAgentWithReasonPropagatesPersistedSSHStopFailure(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
 	).handle)
 	log := newTestRegistryLogger()

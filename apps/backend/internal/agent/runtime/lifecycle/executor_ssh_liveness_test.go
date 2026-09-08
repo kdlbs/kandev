@@ -63,10 +63,17 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 // exit — only a confirmed-absent process is a safe "not ours", any other
 // probe failure (missing/unsupported ps, a permission fault, an SSH-level
 // fault) must be reported as an error rather than folded into "no match".
+//
+// It also covers R3-F2: the `ps` argv match alone only proves "some agentctl
+// for this taskDir" — sibling sessions of the same task share taskDir in
+// their launch argv — so identity additionally requires the per-session
+// pidfile the launch wrapper writes at <sessionDir>/agentctl.pid to name the
+// same pid.
 func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
-	t.Run("matching command line reports identity", func(t *testing.T) {
+	t.Run("matching command line and pidfile reports identity", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		).handle)
 
 		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
@@ -86,9 +93,42 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 		}
 	})
 
-	t.Run("completed remote probe reports absence as no identity", func(t *testing.T) {
+	// R3-F2: a stale row's pid was recycled by a live sibling session's
+	// agentctl on the same taskDir — the argv matches, but this row's own
+	// sessionDir pidfile still names the pid its own (now-dead) launch
+	// recorded, which differs from the pid actually being probed.
+	t.Run("command line matches but pidfile names a different pid reports no identity", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("9999")},
+		).handle)
+
+		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
+		if err != nil || ours {
+			t.Fatalf("verify = (%v, %v), want (false, nil)", ours, err)
+		}
+	})
+
+	t.Run("missing pidfile reports no identity", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshFail("No such file or directory")},
+		).handle)
+
+		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
+		if err != nil || ours {
+			t.Fatalf("verify = (%v, %v), want (false, nil)", ours, err)
+		}
+	})
+
+	// R3-F1: real `ps -p <absent-pid> -o command=` exits non-zero with both
+	// stdout and stderr empty — it never writes a "no such process" message
+	// the way `kill -0` does. sshFail("") reproduces that shape; a fixture
+	// using sshFail("no such process") here would fabricate a shape `ps`
+	// never actually produces and let the dead-pid case regress silently.
+	t.Run("completed remote probe with empty stderr reports absence as no identity", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult {
-			return sshFail("no such process")
+			return sshFail("")
 		})
 
 		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
