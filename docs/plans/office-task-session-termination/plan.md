@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-status: draft
+status: implemented
 requirements:
   - REQ-OFFICE-SESSION-TERM-001
   - REQ-OFFICE-SESSION-TERM-002
@@ -171,8 +171,8 @@ excludes any user-visible surface.
 
 ## Work orders
 
-- [ ] [Task 01: Guard Session Termination On Retained Capacity](task-01-guard-retained-capacity.md)
-- [ ] [Task 02: Record Suppressed Session Terminations](task-02-record-suppressed-terminations.md)
+- [completed] [Task 01: Guard Session Termination On Retained Capacity](task-01-guard-retained-capacity.md)
+- [completed] [Task 02: Record Suppressed Session Terminations](task-02-record-suppressed-terminations.md)
 
 ## Dependency order
 
@@ -185,7 +185,14 @@ verifies. The package is sequential.
 
 ## Verification results
 
-Pending.
+- `internal/office/dashboard` and `internal/orchestrator` pass with `-race`;
+  no pre-existing test required a change.
+- The guard's tests were confirmed non-vacuous by short-circuiting
+  `retainsTaskCapacity` to "no capacity": 10 new tests fail, and the three
+  tests covering terminations that must still proceed pass in both states.
+- Full-repo `golangci-lint run ./...` reports 0 issues; `go build ./...`
+  passes; `gofmt` reports no files.
+- Specification lint passes.
 
 ## Risks
 
