@@ -94,3 +94,76 @@ func TestTickScheduledTriggers_UnsatisfiableExpression_DisarmsInsteadOfLooping(t
 		t.Fatalf("expected still no dispatch after second tick, got %d", len(enq.created))
 	}
 }
+
+// TestTickScheduledTriggers_RecoverableCatchUpFailure_RearmsForRetry is a
+// regression test for a catch-up failure that is NOT expression
+// unsatisfiability (e.g. the timezone database is transiently unavailable).
+// Unlike the unsatisfiable case, this must re-arm next_run_at to the
+// original due time so the next tick retries once the underlying issue
+// clears, instead of leaving the trigger permanently disarmed.
+func TestTickScheduledTriggers_RecoverableCatchUpFailure_RearmsForRetry(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	svc := routines.NewRoutineService(repo, logger.Default(), &noopActivity{})
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:            "ws-1",
+		Name:                   "Bad timezone",
+		TaskTemplate:           "",
+		AssigneeAgentProfileID: "agent-1",
+		Status:                 "active",
+		ConcurrencyPolicy:      models.ConcurrencyPolicyAlwaysCreate,
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+
+	// Bypass service-level create-time validation by writing straight
+	// through the repository, simulating a timezone that was valid at
+	// create time but whose lookup now fails (e.g. tzdata unavailable).
+	due := time.Now().UTC().Add(-time.Minute)
+	trigger := &models.RoutineTrigger{
+		RoutineID:      routine.ID,
+		Kind:           "cron",
+		CronExpression: "*/5 * * * *",
+		Timezone:       "Not/AZone",
+		Enabled:        true,
+		NextRunAt:      &due,
+	}
+	if err := repo.CreateRoutineTrigger(ctx, trigger); err != nil {
+		t.Fatalf("create trigger (bypassing validation): %v", err)
+	}
+
+	enq := &fakeWakeupEnqueuer{}
+	svc.SetWakeupEnqueuer(enq)
+
+	if err := svc.TickScheduledTriggers(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("tick scheduled triggers: %v", err)
+	}
+	if len(enq.created) != 0 {
+		t.Fatalf("expected no dispatch on a recoverable catch-up failure, got %d", len(enq.created))
+	}
+
+	triggers, err := repo.ListTriggersByRoutineID(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	if len(triggers) != 1 {
+		t.Fatalf("expected 1 trigger, got %d", len(triggers))
+	}
+	if triggers[0].NextRunAt == nil {
+		t.Fatalf("next_run_at = nil, want re-armed to the original due time so the trigger retries")
+	}
+	if !triggers[0].NextRunAt.Equal(due) {
+		t.Fatalf("next_run_at = %v, want re-armed to original due time %v", *triggers[0].NextRunAt, due)
+	}
+}

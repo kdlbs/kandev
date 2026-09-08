@@ -415,10 +415,23 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	// expressions (no fixed interval — we walk NextCronTime).
 	runCount, advanceTo, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {
-		// ClaimTrigger already cleared next_run_at; leave it cleared rather
-		// than re-arming to `now`, which would make the trigger due again
-		// on the very next tick and dispatch a run every cycle forever.
-		s.logger.Error("compute routine catch-up failed; trigger left disarmed",
+		if errors.Is(err, shared.ErrUnsatisfiableCron) {
+			// The expression can never fire again. ClaimTrigger already
+			// cleared next_run_at; leave it cleared rather than re-arming,
+			// which would dispatch nothing but retry (and fail) forever.
+			s.logger.Error("cron expression unsatisfiable; trigger permanently disarmed",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+			return err
+		}
+		// Any other failure (e.g. the timezone database is temporarily
+		// unavailable) is presumed recoverable: re-arm to the original due
+		// time so the next tick retries instead of leaving the trigger
+		// disarmed forever once the underlying issue clears.
+		if rearmErr := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, trigger.NextRunAt); rearmErr != nil {
+			s.logger.Warn("re-arm trigger after recoverable catch-up failure failed",
+				zap.String("trigger_id", trigger.ID), zap.Error(rearmErr))
+		}
+		s.logger.Warn("compute routine catch-up failed; will retry next tick",
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
 		return err
 	}
