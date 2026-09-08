@@ -78,6 +78,24 @@ func createGatedTestRoutine(t *testing.T, repo *sqlite.Repository, policy string
 	return r
 }
 
+// createUnattributedTestRoutine mirrors createGatedTestRoutine but leaves
+// WorkspaceID empty, the "no workspace attribution" case AC-002.10 and the
+// design's "Routine dispatch performs no lookup" paragraph both cover.
+func createUnattributedTestRoutine(t *testing.T, repo *sqlite.Repository, policy string) *Routine {
+	t.Helper()
+	r := &Routine{
+		Name:              "Unattributed Routine",
+		TaskTemplate:      `{"title":"{{name}} - {{date}}","description":"Run for {{date}}"}`,
+		Status:            "active",
+		ConcurrencyPolicy: models.RoutineConcurrencyPolicy(policy),
+		Variables:         `{"name":{"default":"Daily Check"}}`,
+	}
+	if err := repo.CreateRoutine(context.Background(), r); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	return r
+}
+
 // TestDispatch_BlockedByPause_SkipsRunAndRecordsSkippedRow proves a
 // confirmed pause blocks every dispatch entry point (manual fires here)
 // without writing an office_routine_runs row via the normal path — the
@@ -252,6 +270,66 @@ func TestDispatch_NoPauseGateWired_Unaffected(t *testing.T) {
 	}
 	if run.Status != models.RoutineRunStatusTaskCreated {
 		t.Errorf("status = %q, want task_created", run.Status)
+	}
+}
+
+// TestDispatch_EmptyWorkspaceRoutine_GateErrorProceedsUngated proves the
+// design's "Routine dispatch performs no lookup... An empty value there
+// takes the not-found branch... so dispatch proceeds ungated rather than
+// failing closed on a routine that carries no workspace"
+// (workspace-kill-switch-01.md, Gate points): a routine with no
+// WorkspaceID must not consult the pause gate at all, so a gate-read
+// error (which would otherwise fail dispatch closed for an attributed
+// routine) has no effect on it.
+func TestDispatch_EmptyWorkspaceRoutine_GateErrorProceedsUngated(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createUnattributedTestRoutine(t, repo, "always_create")
+
+	gate := &fakePauseGate{errs: []error{errors.New("db unavailable")}}
+	svc.SetPauseGate(gate)
+
+	run, err := svc.FireManual(context.Background(), routine.ID, nil)
+	if err != nil {
+		t.Fatalf("fire manual: %v, want no error — an unattributed routine must proceed ungated on a gate-read error", err)
+	}
+	if run.Status != models.RoutineRunStatusTaskCreated {
+		t.Errorf("status = %q, want task_created", run.Status)
+	}
+	if len(gate.calls) != 0 {
+		t.Fatalf("gate.calls = %v, want none — the gate must not be consulted for an unattributed routine", gate.calls)
+	}
+
+	runs, err := repo.ListAllRuns(context.Background(), "", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Status == models.RoutineRunStatusSkipped {
+		t.Fatalf("runs = %+v, want exactly the one dispatched run, no pause-skip row", runs)
+	}
+}
+
+// TestDispatch_EmptyWorkspaceRoutine_ConfirmedPauseProceedsUngated covers
+// the confirmed-pause half of the same rule for completeness: even if the
+// gate were consulted and found an (impossible, since no pause record can
+// name the empty workspace) active pause, an unattributed routine must
+// still dispatch. Documents behavior that was already correct before this
+// fix — no pause_id can ever equal "" — but was previously untested.
+func TestDispatch_EmptyWorkspaceRoutine_ConfirmedPauseProceedsUngated(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createUnattributedTestRoutine(t, repo, "always_create")
+
+	gate := &fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
+	svc.SetPauseGate(gate)
+
+	run, err := svc.FireManual(context.Background(), routine.ID, nil)
+	if err != nil {
+		t.Fatalf("fire manual: %v, want no error", err)
+	}
+	if run.Status != models.RoutineRunStatusTaskCreated {
+		t.Errorf("status = %q, want task_created", run.Status)
+	}
+	if len(gate.calls) != 0 {
+		t.Fatalf("gate.calls = %v, want none — the gate must not be consulted for an unattributed routine", gate.calls)
 	}
 }
 
