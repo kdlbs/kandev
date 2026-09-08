@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -368,6 +369,15 @@ func TestActionsCreateTaskDeniesCrossWorkspaceRelationsBeforePersistence(t *test
 		{
 			name: "parent", input: CreateTaskInput{Title: "task", ParentTaskID: "parent-2"},
 			tasks: map[string]taskScope{"parent-2": {WorkspaceID: "ws-2"}},
+		},
+		{
+			// parent-2 is absent from tasks (unlike the "parent" case above), so the
+			// test double's GetTaskWorkspaceID returns ("", nil) exactly like the real
+			// repository does for a missing row. This must still deny as a workspace
+			// mismatch, not surface GetTaskProjectID's "task not found" error as a 500 -
+			// locking in that the workspace check runs, and denies, before the project
+			// check is ever reached for a nonexistent parent.
+			name: "missing parent", input: CreateTaskInput{Title: "task", ParentTaskID: "parent-2"},
 		},
 		{
 			name: "assignee", input: CreateTaskInput{Title: "task", AssigneeAgentID: "agent-2"},
@@ -1100,7 +1110,11 @@ func (c *recordingTaskCreator) GetTaskProjectID(_ context.Context, taskID string
 	if c.projectLookupErr != nil {
 		return "", c.projectLookupErr
 	}
-	return c.taskScopes[taskID].ProjectID, nil
+	scope, ok := c.taskScopes[taskID]
+	if !ok {
+		return "", fmt.Errorf("task not found: %s", taskID)
+	}
+	return scope.ProjectID, nil
 }
 
 func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(

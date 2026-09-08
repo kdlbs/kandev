@@ -165,6 +165,11 @@ func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string,
 		}
 	}
 	if input.ParentTaskID != "" {
+		// The workspace check must run, and deny, before the project check.
+		// GetTaskWorkspaceID returns ("", nil) for a missing row, so a nonexistent
+		// parent ID mismatches here and never reaches GetTaskProjectID, which errors
+		// ("task not found") for the same missing row. Running them in the other
+		// order would leak task existence to the caller as a 500-vs-403 oracle.
 		parentWorkspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, input.ParentTaskID)
 		if err != nil {
 			return fmt.Errorf("get parent task workspace: %w", err)
