@@ -47,6 +47,7 @@ describe("plan selection session ownership", () => {
   });
 
   // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.2
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.5
   it("does not expose an editor that belongs to the outgoing task", () => {
     const editor = { isDestroyed: false } as Editor;
 

@@ -55,7 +55,9 @@ export function getAvailableTaskEditor(
   ownedEditor: TaskOwnedEditor,
   selectedTaskId: string | null,
 ): Editor | null {
-  if (ownedEditor?.taskId !== selectedTaskId || ownedEditor.editor.isDestroyed) return null;
+  if (!ownedEditor || ownedEditor.taskId !== selectedTaskId || ownedEditor.editor.isDestroyed) {
+    return null;
+  }
   return ownedEditor.editor;
 }
 

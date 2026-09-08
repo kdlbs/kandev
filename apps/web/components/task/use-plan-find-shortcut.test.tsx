@@ -24,6 +24,7 @@ function liveEditor(): EditorDouble {
     off: vi.fn(),
     commands: {
       clearPlanSearch: vi.fn(),
+      setPlanSearchQuery: vi.fn(),
       planSearchNext: vi.fn(),
       planSearchPrev: vi.fn(),
     },
@@ -45,6 +46,9 @@ describe("usePlanFindShortcut editor lifecycle", () => {
   it("does not use an editor that is destroyed after the hook mounts", () => {
     const editor = liveEditor();
     const view = renderHook(() => usePlanFindShortcut(createRef<HTMLDivElement>(), editor));
+    const off = editor.off;
+
+    act(() => view.result.current.open());
     editor.isDestroyed = true;
 
     Object.defineProperty(editor, "commands", {
@@ -54,8 +58,11 @@ describe("usePlanFindShortcut editor lifecycle", () => {
     });
 
     expect(() => {
+      act(() => view.result.current.setQuery("fox"));
+      act(() => view.result.current.close());
       act(() => view.result.current.findNext());
       view.unmount();
     }).not.toThrow();
+    expect(off).not.toHaveBeenCalled();
   });
 });

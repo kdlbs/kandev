@@ -41,6 +41,8 @@ open, so that an outgoing editor cannot break the selected task page.
 - **AC-UI-PLAN-EDITOR-TASK-SWITCH-001.4:** After the selected task editor is
   available, plan search shall update queries and navigate matches in that
   editor.
+- **AC-UI-PLAN-EDITOR-TASK-SWITCH-001.5:** A plan-comment command shall run
+  only against the available plan editor.
 
 ## Out of scope
 

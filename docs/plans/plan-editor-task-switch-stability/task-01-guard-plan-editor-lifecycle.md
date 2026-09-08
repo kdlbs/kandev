@@ -81,3 +81,6 @@ results, cleanup evidence, blockers, and risks. Update this task and `plan.md`.
 - Residual risk: The regression uses the desktop layout because the failure is
   in shared editor lifecycle code. Mobile composition and interaction behavior
   are unchanged.
+- PR fixup: Exact-head review added the plan-comment acceptance criterion,
+  made the empty-owner guard explicit, and expanded the destroyed-editor test
+  across query, close, navigation, and cleanup paths.
