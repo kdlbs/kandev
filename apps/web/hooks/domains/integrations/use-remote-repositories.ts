@@ -307,12 +307,19 @@ function useBuiltInRepositorySource(
   const [loading, setLoading] = useState(true);
   const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
   const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
+  const workspaceRef = useRef(workspaceId);
 
   useEffect(() => {
     let cancelled = false;
+    const sameWorkspace = workspaceRef.current === workspaceId;
+    workspaceRef.current = workspaceId;
     setRepos([]);
-    setAvailableProviders([]);
-    setSourceErrors([]);
+    setAvailableProviders((current) =>
+      sameWorkspace ? current.filter((provider) => eligibility.providers.has(provider)) : [],
+    );
+    setSourceErrors((current) =>
+      sameWorkspace ? current.filter(({ provider }) => eligibility.providers.has(provider)) : [],
+    );
     setLoading(true);
     if (eligibility.loading) {
       return () => {
