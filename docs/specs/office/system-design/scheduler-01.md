@@ -85,9 +85,12 @@ Coalescing happens entirely at the wakeup-request layer; the runs table is the e
 
 1. **Source-level dedup via `idempotency_key`** (UNIQUE column). Format:
    - `routine:<routine_id>:<trigger_id>:<unix_minute>` for cron routines.
+   - `routine:<routine_id>:webhook:<request_key>` for webhook retries that provide an `Idempotency-Key` header.
+   - `routine:<routine_id>:webhook:<run_id>` for webhook deliveries without an explicit request key.
+   - `routine:<routine_id>:manual:<run_id>` for manual fires.
    - `comment:<comment_id>` for comments.
    - `task_assigned:<task_id>:<agent_instance_id>` for task creation/assignment events.
-   Duplicate inserts in the same window are rejected silently. Handles webhook re-delivery, event-bus replay, and restart recovery.
+   Duplicate inserts with the same source identity are rejected silently. Webhook callers use `Idempotency-Key` for redelivery. Manual and unkeyed webhook fires remain distinct.
 
 2. **Claim-time merge.** The source first persists the wakeup-request with `status="queued"`. The dispatcher then looks for an in-flight run for the same agent (`queued` or `claimed`). If one exists **and it is still `queued`**: mark the persisted request with `status="coalesced"` and `run_id=<existing>`, merge its payload into the existing run's `context_snapshot`, increment the run's `coalesced_count`, and — if the existing run is periodic-classified (see "Idle wakeup skip" below) while the new request is event-classified — promote the run's `reason` to the new request's classification (monotonic: periodic -> event only, never the reverse). The promotion, request transition, count update, and payload merge use one transaction, so the scheduler cannot claim a partially updated run. The agent sees the merged context and the promoted reason when it actually runs. If the in-flight run is already **`claimed`** *and the promotion above would otherwise be required* (the run is periodic-classified and the new request is event-classified): it is not promoted or merged into — the scheduler has already read its `reason` into memory for the idle-skip decision and never re-reads the row, so mutating it afterward would race a decision already in flight. The new request instead creates its own fresh `runs` row and is marked `claimed` against it, exactly as if no in-flight run existed. A `claimed` run that needs no promotion (the existing run is already event-classified, or the new request is itself periodic-classified) is coalesced into exactly as before. If no in-flight run exists at all: create the corresponding `runs` row and mark the persisted request as `claimed` against it.
 
@@ -118,7 +121,7 @@ Variables use `{{name}}` syntax in title/description with types `text`, `number`
 
 #### Routine runs
 
-Each trigger firing creates a routine run record (`office_routine_runs`) with `routine_id`, `trigger_id`, `source` (`cron` | `webhook` | `manual`), `status` (`received` -> `task_created` | `skipped` | `coalesced` | `failed`), `trigger_payload` (resolved variable values), `linked_task_id` (heavy only), `coalesced_into_run_id`, `dispatch_fingerprint` (hash of resolved template + assignee), and lifecycle timestamps.
+Each trigger firing creates a routine run record (`office_routine_runs`) with `routine_id`, `trigger_id`, `source` (`cron` | `webhook` | `manual`), `status` (`received` -> `task_created` | `done` | `skipped` | `coalesced` | `failed`, with heavy `task_created` runs later ending as `done`, `cancelled`, or `failed`), `trigger_payload` (resolved variable values), `linked_task_id` (heavy only), `coalesced_into_run_id`, `dispatch_fingerprint` (hash of resolved template + assignee), and lifecycle timestamps.
 
 #### Heavy vs lightweight routines
 
@@ -132,7 +135,7 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 - `coalesce_if_active` (default): merge into the existing run. Mark `coalesced`.
 - `always_enqueue` / `always_create`: always proceed.
 
-"Active" means the linked task / run is not in a terminal state.
+"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age.
 
 #### Catch-up policy
 

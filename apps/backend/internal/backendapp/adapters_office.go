@@ -277,6 +277,10 @@ func (a *routineWakeupAdapter) Dispatch(ctx context.Context, requestID string) e
 	return a.dispatcher.Dispatch(ctx, requestID)
 }
 
+func (a *routineWakeupAdapter) FailWakeupRequest(ctx context.Context, requestID, reason string) error {
+	return a.repo.MarkWakeupRequestFailed(ctx, requestID, reason)
+}
+
 // configSyncerAdapter bridges config.ConfigService to the onboarding.ConfigSyncer
 // interface by converting config.ImportResult to onboarding.ApplyResult.
 type configSyncerAdapter struct {

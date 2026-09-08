@@ -46,7 +46,7 @@ type Repository interface {
 	CreateRoutineRun(ctx context.Context, run *RoutineRun) error
 	ListRoutineRuns(ctx context.Context, routineID string, limit, offset int) ([]*RoutineRun, error)
 	ListAllRuns(ctx context.Context, workspaceID string, limit int) ([]*RoutineRun, error)
-	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string, notBefore time.Time) (*RoutineRun, error)
+	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string) (*RoutineRun, error)
 	GetRoutineRunByLinkedTaskID(ctx context.Context, taskID string) (*RoutineRun, error)
 	UpdateRunStatus(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) error
 	// UpdateRunStatusIfTaskCreated closes out a run only while it is still
@@ -61,7 +61,8 @@ type Repository interface {
 	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 	// GetTaskTerminalStatus reads a task's real lifecycle state directly
 	// (not via the TaskMoved event — see applyConcurrencyPolicy) and
-	// reports "" when it is not terminal, "done", or "cancelled".
+	// reports "" when it is active, "done", "failed", "cancelled", or
+	// "missing" for the other outcomes.
 	GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error)
 }
 
@@ -75,6 +76,7 @@ type Repository interface {
 type WakeupEnqueuer interface {
 	CreateWakeupRequest(ctx context.Context, req *WakeupRequest) error
 	Dispatch(ctx context.Context, requestID string) error
+	FailWakeupRequest(ctx context.Context, requestID, reason string) error
 }
 
 // WakeupRequest mirrors *office/repository/sqlite.WakeupRequest with the
@@ -491,7 +493,21 @@ func (s *RoutineService) DispatchRoutineRun(
 	source string,
 	provided map[string]string,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, 0)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", 0)
+}
+
+// DispatchRoutineRunWithIdempotencyKey dispatches a fire with an explicit
+// source request identity. Webhook callers can use this header to make
+// retries idempotent without collapsing unrelated deliveries.
+func (s *RoutineService) DispatchRoutineRunWithIdempotencyKey(
+	ctx context.Context,
+	routine *Routine,
+	trigger *RoutineTrigger,
+	source string,
+	provided map[string]string,
+	idempotencyKey string,
+) (*RoutineRun, error) {
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, idempotencyKey, 0)
 }
 
 // DispatchRoutineRunWithMissed is the cron-tick entry point that
@@ -509,7 +525,7 @@ func (s *RoutineService) DispatchRoutineRunWithMissed(
 	provided map[string]string,
 	missedTicks int,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, missedTicks)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", missedTicks)
 }
 
 func (s *RoutineService) dispatchRoutineRun(
@@ -518,6 +534,7 @@ func (s *RoutineService) dispatchRoutineRun(
 	trigger *RoutineTrigger,
 	source string,
 	provided map[string]string,
+	idempotencyKey string,
 	missedTicks int,
 ) (*RoutineRun, error) {
 	now := time.Now().UTC()
@@ -556,7 +573,7 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, nil
 	}
 
-	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, missedTicks); err != nil {
+	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks); err != nil {
 		return run, err
 	}
 
@@ -589,12 +606,14 @@ func (s *RoutineService) materialiseRoutineRun(
 	tmpl taskTemplate,
 	title, description string,
 	vars map[string]string,
+	source string,
+	idempotencyKey string,
 	missedTicks int,
 ) error {
 	if tmpl.Title != "" && s.workflowEnsurer != nil && s.taskCreator != nil {
 		return s.materialiseHeavyRoutineRun(ctx, routine, run, title, description)
 	}
-	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, missedTicks)
+	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, source, idempotencyKey, missedTicks)
 }
 
 // materialiseHeavyRoutineRun creates a real task in the routine system
@@ -637,12 +656,10 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 // it permanently blocks the routine's next fire under skip_if_active /
 // coalesce_if_active (see the office-routine-runs triage).
 //
-// Terminal status: `done` once the request is enqueued AND handed to
-// the dispatcher successfully. `failed` when either step errors —
-// nothing else polls a wakeup-request stuck in "queued", so a Dispatch
-// error left this recorded as `done` would silently report success for
-// a fire that produced no agent run. LinkedTaskID stays empty for
-// lightweight.
+// Terminal status: `done` once the request is dispatched; `failed` when
+// enqueue or dispatch fails. A failed request is marked terminal in the
+// wakeup queue because no background poller retries direct dispatch.
+// LinkedTaskID stays empty for lightweight runs.
 //
 // missedTicks > 0 surfaces in the wakeup payload when the cron tick
 // collapsed N missed fires into one (catch-up cap policy
@@ -652,12 +669,14 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	routine *Routine,
 	run *RoutineRun,
 	vars map[string]string,
+	source string,
+	idempotencyKey string,
 	missedTicks int,
 ) error {
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 	}
-	idemKey := buildRoutineIdempotencyKey(routine.ID, run.TriggerID, run.StartedAt)
+	idemKey := buildRoutineIdempotencyKey(routine.ID, run.TriggerID, source, run.ID, idempotencyKey, run.StartedAt)
 	payloadStr, _ := marshalRoutinePayload(routine.ID, vars, missedTicks)
 	req := &WakeupRequest{
 		ID:             uuid.New().String(),
@@ -670,9 +689,8 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	}
 	if err := s.wakeup.CreateWakeupRequest(ctx, req); err != nil {
 		if errors.Is(err, ErrWakeupAlreadyRequested) {
-			// A request for this fire's idempotency key already exists —
-			// success by another fire (e.g. a cron tick and a manual fire
-			// landing in the same per-minute dedup bucket), not a failure.
+			// A request for this explicit fire identity already exists.
+			// Another delivery completed the same request.
 			return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 		}
 		s.logger.Warn("create routine wakeup request",
@@ -684,7 +702,16 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 			zap.String("routine", routine.Name),
 			zap.String("wakeup_id", req.ID),
 			zap.Error(err))
-		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
+		if failErr := s.wakeup.FailWakeupRequest(ctx, req.ID, "dispatch failed"); failErr != nil {
+			s.logger.Warn("mark failed routine wakeup request",
+				zap.String("routine", routine.Name),
+				zap.String("wakeup_id", req.ID),
+				zap.Error(failErr))
+		}
+		if finalizeErr := s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed); finalizeErr != nil {
+			return finalizeErr
+		}
+		return fmt.Errorf("dispatch routine wakeup request: %w", err)
 	}
 	return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 }
@@ -702,17 +729,25 @@ func (s *RoutineService) finalizeLightweightRun(
 }
 
 // buildRoutineIdempotencyKey composes the source-level dedup key for a
-// routine fire. Format: routine:<routineID>:<triggerID>:<unix_minute>;
-// the trigger segment is dropped when there is no trigger (manual fire).
-// Mirrors the heartbeat key shape (heartbeat:<agent>:<unix_minute>).
-func buildRoutineIdempotencyKey(routineID, triggerID string, startedAt *time.Time) string {
+// routine fire. Cron fires use the trigger and minute bucket. Manual and
+// webhook fires use a unique run identity unless the caller supplies an
+// explicit request key, so distinct event deliveries never collide.
+func buildRoutineIdempotencyKey(
+	routineID, triggerID, source, runID, explicitKey string, startedAt *time.Time,
+) string {
+	if explicitKey != "" {
+		return fmt.Sprintf("routine:%s:%s:%s", routineID, source, explicitKey)
+	}
+	if source != shared.RoutineSourceCron {
+		return fmt.Sprintf("routine:%s:%s:%s", routineID, source, runID)
+	}
 	now := time.Now().UTC()
 	if startedAt != nil {
 		now = *startedAt
 	}
 	minute := now.Unix() / 60
 	if triggerID == "" {
-		return fmt.Sprintf("routine:%s:%d", routineID, minute)
+		return fmt.Sprintf("routine:%s:%s:%d", routineID, source, minute)
 	}
 	return fmt.Sprintf("routine:%s:%s:%d", routineID, triggerID, minute)
 }
@@ -738,17 +773,6 @@ func marshalRoutinePayload(routineID string, vars map[string]string, missedTicks
 	return string(b), nil
 }
 
-// activeRunMaxAge bounds how long a heavy routine run can gate its
-// fingerprint's next fire while sitting in RoutineRunStatusTaskCreated.
-// SyncRunStatus is the normal way out of that status (the linked task
-// reaches a terminal step); this is the crash-recovery backstop for the
-// case that never fires — e.g. a process crash between task creation
-// and the task reaching Done/Cancelled. Long enough that no realistic
-// in-progress task gets force-cleared out from under it, short enough
-// that a genuinely stranded row self-heals within about a week instead
-// of gating the routine forever.
-const activeRunMaxAge = 7 * 24 * time.Hour
-
 // selfHealIfTaskTerminal is the pull-based counterpart to SyncRunStatus:
 // SyncRunStatus is driven by the TaskMoved event, but nothing in
 // production populates the step names that event needs
@@ -757,10 +781,9 @@ const activeRunMaxAge = 7 * 24 * time.Hour
 // heavy run's gate self-heals at the next fire even when that event
 // never arrives. Returns active unchanged when it is still genuinely
 // active, still lightweight (no linked task), or its state can't be
-// determined — a lookup or close-out failure fails closed, leaving the
-// existing 7-day backstop as the escape hatch, same as before this check
-// existed. Returns nil once the linked task is confirmed terminal and
-// closed out, meaning the caller should treat the gate as clear.
+// determined. A lookup or close-out failure fails closed, leaving the task
+// active until a later fire can retry reconciliation. Returns nil once the
+// linked task is confirmed terminal, archived, or missing and the run closes.
 func (s *RoutineService) selfHealIfTaskTerminal(
 	ctx context.Context, routine *Routine, active *RoutineRun,
 ) *RoutineRun {
@@ -793,29 +816,31 @@ func (s *RoutineService) applyConcurrencyPolicy(
 	if routine.ConcurrencyPolicy == models.ConcurrencyPolicyAlwaysCreate {
 		return "", nil
 	}
-	notBefore := time.Now().UTC().Add(-activeRunMaxAge)
-	active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint, notBefore)
-	if err != nil {
-		return "", fmt.Errorf("check active run: %w", err)
+	for {
+		active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint)
+		if err != nil {
+			return "", fmt.Errorf("check active run: %w", err)
+		}
+		if active == nil {
+			return "", nil
+		}
+		if repaired := s.selfHealIfTaskTerminal(ctx, routine, active); repaired == nil {
+			continue
+		} else {
+			active = repaired
+		}
+		switch routine.ConcurrencyPolicy {
+		case models.ConcurrencyPolicySkipIfActive:
+			_ = s.repo.UpdateRunStatus(ctx, run.ID, models.RoutineRunStatusSkipped, "")
+			run.Status = models.RoutineRunStatusSkipped
+			return models.RoutineRunStatusSkipped, nil
+		case models.ConcurrencyPolicyCoalesceIfActive:
+			_ = s.repo.UpdateRunCoalesced(ctx, run.ID, active.ID)
+			run.Status = models.RoutineRunStatusCoalesced
+			run.CoalescedIntoRunID = active.ID
+			return models.RoutineRunStatusCoalesced, nil
+		}
 	}
-	if active != nil {
-		active = s.selfHealIfTaskTerminal(ctx, routine, active)
-	}
-	if active == nil {
-		return "", nil
-	}
-	switch routine.ConcurrencyPolicy {
-	case models.ConcurrencyPolicySkipIfActive:
-		_ = s.repo.UpdateRunStatus(ctx, run.ID, models.RoutineRunStatusSkipped, "")
-		run.Status = models.RoutineRunStatusSkipped
-		return models.RoutineRunStatusSkipped, nil
-	case models.ConcurrencyPolicyCoalesceIfActive:
-		_ = s.repo.UpdateRunCoalesced(ctx, run.ID, active.ID)
-		run.Status = models.RoutineRunStatusCoalesced
-		run.CoalescedIntoRunID = active.ID
-		return models.RoutineRunStatusCoalesced, nil
-	}
-	return "", nil
 }
 
 // FireManual dispatches a routine run from a manual trigger.
@@ -834,12 +859,12 @@ func (s *RoutineService) FireManual(
 // terminal side of D2 in the office-routine-runs triage: heavy runs
 // stay in RoutineRunStatusTaskCreated (an active gate) until their task
 // finishes, and this is what clears the gate. terminalStatus is
-// "cancelled", "failed", or "done" — see GetTaskTerminalStatus and
-// closeOutRun. A taskID with no linked run is not an error — most tasks
-// aren't routine-created. An empty taskID is rejected outright:
-// linked_task_id defaults to "" for every lightweight run, so an
-// unguarded lookup would match (and rewrite) an arbitrary lightweight
-// run instead of finding nothing.
+// "cancelled" for a task moved to the Cancelled step, "failed" for
+// a failed task, and "done" for a completed task. A taskID with no
+// linked run is not an error — most tasks aren't routine-created. An
+// empty taskID is rejected outright: linked_task_id defaults to "" for
+// every lightweight run, so an unguarded lookup would match (and
+// rewrite) an arbitrary lightweight run instead of finding nothing.
 func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error {
 	if taskID == "" {
 		return nil
@@ -858,17 +883,15 @@ func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStat
 // closeOutRun writes a run's terminal status, but only while it is still
 // task_created (see Repository.UpdateRunStatusIfTaskCreated) — a replayed
 // or racing terminal signal for an already-closed run must not move
-// completed_at or flip a "done" back to "cancelled". terminalStatus is
-// "cancelled" or "failed" for those two task outcomes, and anything else
-// (including "done") counts as RoutineRunStatusDone, matching
-// SyncRunStatus's contract. Returns whether this call was the one that
-// closed the run.
+// completed_at or flip a terminal result. terminalStatus maps to the
+// matching routine-run terminal state. Returns whether this call was the
+// one that closed the run.
 func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, terminalStatus string) (bool, error) {
 	status := models.RoutineRunStatusDone
 	switch terminalStatus {
 	case "cancelled":
 		status = models.RoutineRunStatusCancelled
-	case "failed":
+	case "failed", "missing":
 		status = models.RoutineRunStatusFailed
 	}
 	closed, err := s.repo.UpdateRunStatusIfTaskCreated(ctx, run.ID, status, run.LinkedTaskID)

@@ -321,22 +321,21 @@ func (r *Repository) ListAllRuns(ctx context.Context, workspaceID string, limit 
 	return runs, nil
 }
 
-// GetActiveRunForFingerprint returns an active run matching the
+// GetActiveRunForFingerprint returns the newest active run matching the
 // fingerprint, if any. "Active" means status = task_created (the only
-// status a run can be gating another fire from — see
-// routines.RoutineService's materialise* methods) and created_at is no
-// older than notBefore, so a run stranded in task_created by a crash
-// cannot gate its routine forever (routines.activeRunMaxAge).
+// status a run can gate another fire from — see
+// routines.RoutineService's materialise* methods). The caller repairs
+// terminal, archived, or missing linked tasks before it applies policy.
 func (r *Repository) GetActiveRunForFingerprint(
-	ctx context.Context, routineID, fingerprint string, notBefore time.Time,
+	ctx context.Context, routineID, fingerprint string,
 ) (*models.RoutineRun, error) {
 	var run models.RoutineRun
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM office_routine_runs
 		WHERE routine_id = ? AND dispatch_fingerprint = ?
-		  AND status = 'task_created' AND created_at >= ?
+		  AND status = 'task_created'
 		ORDER BY created_at DESC LIMIT 1
-	`), routineID, fingerprint, notBefore).StructScan(&run)
+	`), routineID, fingerprint).StructScan(&run)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -374,34 +373,32 @@ func (r *Repository) GetRoutineRunByLinkedTaskID(
 	return &run, nil
 }
 
-// GetTaskTerminalStatus reports whether taskID's task has reached a
-// terminal state and, if so, which outcome: "done" for COMPLETED,
-// "cancelled" for CANCELLED, "failed" for FAILED, "" otherwise —
-// including when the task row itself is missing (already deleted), so
-// callers fail closed rather than releasing a gate they cannot actually
-// confirm is clear. Reads the same `tasks` table IsTaskInTerminalStep
-// does, but that helper's boolean cannot distinguish the three terminal
-// outcomes (and does not itself treat FAILED as terminal), so this is a
-// separate query rather than a shared one — it lives in the routines
-// repo file because it is the routines gate's own use of that state (see
-// RoutineService.applyConcurrencyPolicy).
+// GetTaskTerminalStatus reports the linked task outcome: "done" for
+// COMPLETED, "failed" for FAILED, "cancelled" for CANCELLED or archived
+// tasks, "missing" when the task row was deleted, and "" otherwise.
+// Reads the shared tasks table directly because the routines gate must
+// distinguish an active task from a terminal, archived, or missing task.
 func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error) {
 	var state string
+	var archivedAt sql.NullTime
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+		`SELECT COALESCE(state, ''), archived_at FROM tasks WHERE id = ?`), taskID).Scan(&state, &archivedAt)
 	if err == sql.ErrNoRows {
-		return "", nil
+		return "missing", nil
 	}
 	if err != nil {
 		return "", err
 	}
+	if archivedAt.Valid {
+		return "cancelled", nil
+	}
 	switch state {
 	case taskStateCompleted:
 		return "done", nil
-	case taskStateCancelled:
-		return "cancelled", nil
 	case taskStateFailed:
 		return "failed", nil
+	case taskStateCancelled:
+		return "cancelled", nil
 	default:
 		return "", nil
 	}

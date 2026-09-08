@@ -182,8 +182,7 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	longAgo := time.Now().UTC().Add(-time.Hour)
-	active, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123", longAgo)
+	active, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123")
 	if err != nil {
 		t.Fatalf("get active: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 	}
 
 	// Non-matching fingerprint should return nil.
-	none, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-999", longAgo)
+	none, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-999")
 	if err != nil {
 		t.Fatalf("get none: %v", err)
 	}
@@ -200,15 +199,6 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 		t.Error("expected nil for non-matching fingerprint")
 	}
 
-	// A notBefore after the run's created_at excludes it (TTL floor).
-	future := time.Now().UTC().Add(time.Hour)
-	tooOld, err := repo.GetActiveRunForFingerprint(ctx, routine.ID, "fp-123", future)
-	if err != nil {
-		t.Fatalf("get too-old: %v", err)
-	}
-	if tooOld != nil {
-		t.Error("expected nil for a run older than notBefore")
-	}
 }
 
 func TestRoutineRun_Create(t *testing.T) {
@@ -251,11 +241,11 @@ func TestGetTaskTerminalStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	if _, err := repo.ExecRaw(ctx, `CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+	if _, err := repo.ExecRaw(ctx, `CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT, archived_at TIMESTAMP)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
-	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, state) VALUES (?, ?), (?, ?), (?, ?), (?, ?)`,
-		"task-done", "COMPLETED", "task-cancelled", "CANCELLED", "task-failed", "FAILED", "task-open", "IN_PROGRESS"); err != nil {
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, state, archived_at) VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, NULL), (?, ?, NULL), (?, ?, ?)`,
+		"task-done", "COMPLETED", "task-cancelled", "CANCELLED", "task-failed", "FAILED", "task-open", "IN_PROGRESS", "task-archived", "IN_PROGRESS", time.Now().UTC()); err != nil {
 		t.Fatalf("seed tasks: %v", err)
 	}
 
@@ -267,7 +257,8 @@ func TestGetTaskTerminalStatus(t *testing.T) {
 		{"task-cancelled", "cancelled"},
 		{"task-failed", "failed"},
 		{"task-open", ""},
-		{"task-missing", ""},
+		{"task-archived", "cancelled"},
+		{"task-missing", "missing"},
 	}
 	for _, c := range cases {
 		got, err := repo.GetTaskTerminalStatus(ctx, c.taskID)

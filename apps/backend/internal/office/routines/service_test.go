@@ -2,10 +2,8 @@ package routines_test
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -33,8 +31,7 @@ func newTestRoutineService(t *testing.T) *routines.RoutineService {
 }
 
 // newTestRoutineServiceWithDB is newTestRoutineService plus the backing
-// *sqlx.DB, for tests that need to reach into office_routine_runs
-// directly (e.g. backdating created_at to exercise the TTL floor).
+// *sqlx.DB, for tests that need to reach into shared task or routine tables.
 func newTestRoutineServiceWithDB(t *testing.T) (*routines.RoutineService, *sqlx.DB) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -256,6 +253,7 @@ func TestDispatch_DifferentVarsNotSkipped(t *testing.T) {
 type fakeWakeupEnqueuer struct {
 	created    []*routines.WakeupRequest
 	dispatched []string
+	failed     []string
 }
 
 func (f *fakeWakeupEnqueuer) CreateWakeupRequest(_ context.Context, req *routines.WakeupRequest) error {
@@ -265,6 +263,11 @@ func (f *fakeWakeupEnqueuer) CreateWakeupRequest(_ context.Context, req *routine
 
 func (f *fakeWakeupEnqueuer) Dispatch(_ context.Context, requestID string) error {
 	f.dispatched = append(f.dispatched, requestID)
+	return nil
+}
+
+func (f *fakeWakeupEnqueuer) FailWakeupRequest(_ context.Context, requestID, _ string) error {
+	f.failed = append(f.failed, requestID)
 	return nil
 }
 
@@ -359,10 +362,8 @@ func TestDispatch_LightweightRoutine_EnqueuesWakeup(t *testing.T) {
 	}
 }
 
-// idempotencyConflictWakeupEnqueuer simulates the dedup race R2 covers:
-// a second fire's wakeup request lands on the same per-minute
-// idempotency key as one already enqueued by another fire (e.g. a cron
-// tick and a manual fire in the same bucket).
+// idempotencyConflictWakeupEnqueuer simulates a duplicate request identity
+// already persisted by another caller.
 type idempotencyConflictWakeupEnqueuer struct{}
 
 func (idempotencyConflictWakeupEnqueuer) CreateWakeupRequest(context.Context, *routines.WakeupRequest) error {
@@ -371,11 +372,12 @@ func (idempotencyConflictWakeupEnqueuer) CreateWakeupRequest(context.Context, *r
 
 func (idempotencyConflictWakeupEnqueuer) Dispatch(context.Context, string) error { return nil }
 
-// TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed is the
-// R2 regression test: CreateWakeupRequest losing an idempotency race
-// means a request for this fire already exists (success by another
-// fire), not a failure. Pre-fix this was recorded as "failed" — the same
-// class of untruthful terminal status the card exists to remove.
+func (idempotencyConflictWakeupEnqueuer) FailWakeupRequest(context.Context, string, string) error {
+	return nil
+}
+
+// TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed verifies
+// that a duplicate request identity is recorded as done, not failed.
 func TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
@@ -399,52 +401,6 @@ func TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed(t *testing.T
 	}
 	if run.Status != "done" {
 		t.Errorf("status = %q, want done (idempotency conflict is success by another fire, not a failure)", run.Status)
-	}
-}
-
-// dispatchFailsWakeupEnqueuer simulates a wakeup-request that enqueues
-// successfully but whose synchronous Dispatch call errors — e.g. the
-// dispatcher's own DB write fails. Nothing polls a request stuck in
-// "queued" (Dispatch is the only caller that ever processes one), so
-// this fire produced no agent run despite the request existing.
-type dispatchFailsWakeupEnqueuer struct{}
-
-func (dispatchFailsWakeupEnqueuer) CreateWakeupRequest(context.Context, *routines.WakeupRequest) error {
-	return nil
-}
-
-func (dispatchFailsWakeupEnqueuer) Dispatch(context.Context, string) error {
-	return errors.New("dispatch boom")
-}
-
-// TestDispatch_LightweightRoutine_DispatchFailureIsFailed is the
-// review-round regression test: a Dispatch error must not be recorded as
-// "done" — nothing else ever picks the stuck wakeup-request back up, so
-// reporting "done" would silently claim success for a fire that never
-// produced an agent run.
-func TestDispatch_LightweightRoutine_DispatchFailureIsFailed(t *testing.T) {
-	svc := newTestRoutineService(t)
-	ctx := context.Background()
-
-	routine := &models.Routine{
-		WorkspaceID:            "ws-1",
-		Name:                   "Dispatch Failure",
-		TaskTemplate:           "",
-		AssigneeAgentProfileID: "agent-1",
-		Status:                 "active",
-		ConcurrencyPolicy:      "always_create",
-	}
-	if err := svc.CreateRoutine(ctx, routine); err != nil {
-		t.Fatalf("create routine: %v", err)
-	}
-	svc.SetWakeupEnqueuer(dispatchFailsWakeupEnqueuer{})
-
-	run, err := svc.FireManual(ctx, routine.ID, nil)
-	if err != nil {
-		t.Fatalf("fire manual: %v", err)
-	}
-	if run.Status != "failed" {
-		t.Errorf("status = %q, want failed (a Dispatch error must not be reported as done)", run.Status)
 	}
 }
 
@@ -620,44 +576,6 @@ func TestDispatch_LightweightRoutine_SubsequentFiresMaterialise(t *testing.T) {
 	}
 }
 
-// TestDispatch_HeavyRoutine_StaleTaskCreatedDoesNotGate proves the TTL
-// floor (office-routine-runs D3): a task_created row old enough to be a
-// crashed/stranded dispatch — no SyncRunStatus call will ever arrive
-// for it — must not gate the routine forever.
-func TestDispatch_HeavyRoutine_StaleTaskCreatedDoesNotGate(t *testing.T) {
-	svc, db := newTestRoutineServiceWithDB(t)
-	ctx := context.Background()
-	svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
-	svc.SetTaskCreator(&fakeTaskCreator{})
-
-	routine := createTestRoutine(t, svc, "Stale Gate", "skip_if_active")
-
-	run1, err := svc.FireManual(ctx, routine.ID, nil)
-	if err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	if run1.Status != "task_created" {
-		t.Fatalf("first run status = %q, want task_created", run1.Status)
-	}
-
-	// Backdate the row well past any sane TTL, simulating a dispatch
-	// that crashed before its task ever reached a terminal step.
-	longAgo := time.Now().UTC().AddDate(0, -1, 0)
-	if _, err := db.ExecContext(ctx,
-		`UPDATE office_routine_runs SET created_at = ? WHERE id = ?`, longAgo, run1.ID,
-	); err != nil {
-		t.Fatalf("backdate run: %v", err)
-	}
-
-	run2, err := svc.FireManual(ctx, routine.ID, nil)
-	if err != nil {
-		t.Fatalf("second run: %v", err)
-	}
-	if run2.Status != "task_created" {
-		t.Errorf("second run status = %q, want task_created (stale row must not gate)", run2.Status)
-	}
-}
-
 // TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent is
 // the R1 regression test: no production publisher of events.TaskMoved
 // ever sets to_step_name (office-routine-runs review round 1), so
@@ -694,7 +612,7 @@ func TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent(t *te
 			// SyncRunStatus call. This is what the row looks like after a
 			// real task-service move in production.
 			if _, err := db.ExecContext(ctx,
-				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT, archived_at TIMESTAMP)`); err != nil {
 				t.Fatalf("create tasks table: %v", err)
 			}
 			if _, err := db.ExecContext(ctx,
@@ -740,7 +658,7 @@ func TestDispatch_HeavyRoutine_GateSelfHealsOnFailedTask(t *testing.T) {
 			}
 
 			if _, err := db.ExecContext(ctx,
-				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT, archived_at TIMESTAMP)`); err != nil {
 				t.Fatalf("create tasks table: %v", err)
 			}
 			if _, err := db.ExecContext(ctx,
