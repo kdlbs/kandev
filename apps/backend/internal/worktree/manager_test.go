@@ -666,6 +666,55 @@ func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T)
 	}
 }
 
+func TestManager_RecoverWorktreeRebuildsPartialSnapshotAfterCrash(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree-partial-snapshot")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/recover-partial-snapshot", worktreePath, "main")
+	uniqueFile := filepath.Join(worktreePath, "preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("preserved\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+	removeRecoveryAdminDirectory(t, worktreePath)
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover-partial-snapshot", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/recover-partial-snapshot", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	snapshotPath := worktreePath + ".kandev-recovery-partial"
+	if err := os.Mkdir(snapshotPath, 0700); err != nil {
+		t.Fatalf("create partial snapshot: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotPath, "partial-copy.txt"), []byte("incomplete\n"), 0600); err != nil {
+		t.Fatalf("write partial snapshot: %v", err)
+	}
+	record := recoveryRecord{
+		OperationID: "partial-snapshot-operation", TaskID: original.TaskID, WorktreeID: original.ID,
+		Original: original.Path, Snapshot: snapshotPath, State: RecoveryStateSnapshotting,
+	}
+	if err := createRecoveryRecord(worktreePath+".kandev-recovery.json", record); err != nil {
+		t.Fatalf("create recovery record: %v", err)
+	}
+
+	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+	if err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(replacement.Path, "preserve-me.txt"))
+	if err != nil || string(content) != "preserved\n" {
+		t.Fatalf("recovered content = %q, err=%v; want preserved original checkout content", content, err)
+	}
+	if _, err := os.Lstat(filepath.Join(replacement.Path, "partial-copy.txt")); !os.IsNotExist(err) {
+		t.Fatalf("partial snapshot entry survived recovery, stat error = %v", err)
+	}
+}
+
 func TestManager_RecoverWorktreePreservesEmptyDirectories(t *testing.T) {
 	ctx := context.Background()
 	cfg := newTestConfig(t)

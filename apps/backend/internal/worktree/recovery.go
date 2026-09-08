@@ -239,36 +239,67 @@ func recoveryAlreadyClaimedError(wt *Worktree, reason string) error {
 	}
 }
 
-//nolint:nestif // Snapshot preparation must fail closed across each validation stage.
 func prepareRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
-	var sourceBefore string
-	if _, err := os.Stat(snapshot); os.IsNotExist(err) {
-		var manifestErr error
-		sourceBefore, manifestErr = checkoutManifest(source)
-		if manifestErr != nil {
-			return "", blockRecovery(recordPath, record, manifestErr)
+	switch record.State {
+	case RecoveryStateSnapshotting:
+		return rebuildRecoverySnapshot(source, snapshot, recordPath, record)
+	case RecoveryStateRematerializing:
+		manifest, err := checkoutManifest(snapshot)
+		if err != nil {
+			return "", blockRecovery(recordPath, record, err)
 		}
-		if snapshotErr := snapshotCheckout(source, snapshot); snapshotErr != nil {
-			record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, snapshotErr.Error(), time.Now().UTC()
-			_ = writeRecoveryRecord(recordPath, record)
-			return "", snapshotErr
+		if record.Manifest == "" || manifest != record.Manifest {
+			return "", blockRecovery(recordPath, record, fmt.Errorf("recovery snapshot does not match completed snapshot record"))
 		}
-		sourceAfter, manifestErr := checkoutManifest(source)
-		if manifestErr != nil || sourceBefore != sourceAfter {
-			if manifestErr == nil {
-				manifestErr = fmt.Errorf("original checkout changed during snapshot")
-			}
-			return "", blockRecovery(recordPath, record, manifestErr)
+		return manifest, nil
+	default:
+		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery record has invalid snapshot state %q", record.State))
+	}
+}
+
+// rebuildRecoverySnapshot discards a snapshot only while its record has not
+// committed a manifest. A crash in snapshotting can leave a partial copy.
+func rebuildRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
+	if err := validateRecoverySnapshotPath(source, snapshot); err != nil {
+		return "", blockRecovery(recordPath, record, err)
+	}
+	if err := os.RemoveAll(snapshot); err != nil {
+		return "", blockRecovery(recordPath, record, fmt.Errorf("discard incomplete recovery snapshot: %w", err))
+	}
+	sourceBefore, err := checkoutManifest(source)
+	if err != nil {
+		return "", blockRecovery(recordPath, record, err)
+	}
+	if err := snapshotCheckout(source, snapshot); err != nil {
+		record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, err.Error(), time.Now().UTC()
+		_ = writeRecoveryRecord(recordPath, record)
+		return "", err
+	}
+	sourceAfter, err := checkoutManifest(source)
+	if err != nil || sourceBefore != sourceAfter {
+		if err == nil {
+			err = fmt.Errorf("original checkout changed during snapshot")
 		}
+		return "", blockRecovery(recordPath, record, err)
 	}
 	manifest, err := checkoutManifest(snapshot)
 	if err != nil {
 		return "", blockRecovery(recordPath, record, err)
 	}
-	if sourceBefore != "" && sourceBefore != manifest {
+	if sourceBefore != manifest {
 		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery snapshot does not match original checkout"))
 	}
 	return manifest, nil
+}
+
+func validateRecoverySnapshotPath(source, snapshot string) error {
+	cleanSource := filepath.Clean(source)
+	cleanSnapshot := filepath.Clean(snapshot)
+	prefix := cleanSource + ".kandev-recovery-"
+	if !strings.HasPrefix(cleanSnapshot, prefix) {
+		return fmt.Errorf("recovery snapshot path is outside the task-owned snapshot namespace")
+	}
+	return nil
 }
 
 func blockRecovery(path string, record recoveryRecord, err error) error {
