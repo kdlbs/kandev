@@ -78,10 +78,15 @@ type RoutineWorkflowEnsurer interface {
 // (the routine workflow). Mirrors the office adapter's
 // CreateOfficeTaskInWorkflow signature so the binary's existing adapter
 // satisfies it for free.
+//
+// routineID is passed through so the created task carries the
+// AC-OFFICE-RUN-CAUSATION-001.24 routine-fire carrier: no creating run,
+// so the lineage roots, but the routine attribution still applies to
+// whatever run a later task-assigned wake queues off this task.
 type RoutineTaskCreator interface {
 	CreateOfficeTaskInWorkflow(
 		ctx context.Context,
-		workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
+		workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 	) (string, error)
 }
 
@@ -580,7 +585,7 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	}
 	taskID, err := s.taskCreator.CreateOfficeTaskInWorkflow(
 		ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID,
-		workflowID, title, description,
+		workflowID, title, description, routine.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)

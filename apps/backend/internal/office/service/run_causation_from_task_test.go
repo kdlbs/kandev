@@ -234,3 +234,53 @@ func TestQueueTaskAssignedRun_NoCarrierRootsAsSystemActor(t *testing.T) {
 		t.Error("human_rooted = true, want false with no carrier")
 	}
 }
+
+// TestQueueTaskAssignedRun_InheritsRoutineFireCarrier pins
+// AC-OFFICE-RUN-CAUSATION-001.14/.24: a task created by a routine fire
+// (taskCreatorAdapter.CreateOfficeTaskInWorkflow's carrier shape — no
+// creating run, but a routine id and a system actor) roots the
+// task-assigned run's lineage while still carrying the routine
+// attribution and actor kind through, exactly like a live routine-fired
+// run would.
+func TestQueueTaskAssignedRun_InheritsRoutineFireCarrier(t *testing.T) {
+	svc, repo := newRunCausationFromTaskTestService(t)
+	ctx := context.Background()
+
+	assignee := runCausationTestAgent("assignee-agent", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, assignee); err != nil {
+		t.Fatalf("create assignee agent: %v", err)
+	}
+
+	seedOfficeTaskWithMetadata(t, repo, "task-routine-fire-1", map[string]interface{}{
+		taskmodels.MetaKeyOfficeCarrierCausationID:    "",
+		taskmodels.MetaKeyOfficeCarrierCausationDepth: 0,
+		taskmodels.MetaKeyOfficeCarrierCreatingRunID:  "",
+		taskmodels.MetaKeyOfficeCarrierHumanRooted:    false,
+		taskmodels.MetaKeyOfficeCarrierRoutineID:      "routine-fire-1",
+		taskmodels.MetaKeyOfficeCarrierActorKind:      string(models.ActorKindSystem),
+		taskmodels.MetaKeyOfficeCarrierActorID:        "",
+	})
+
+	if err := svc.queueTaskAssignedRun(ctx, "task-routine-fire-1", assignee.ID, false); err != nil {
+		t.Fatalf("queueTaskAssignedRun: %v", err)
+	}
+
+	runs, err := repo.ListRuns(ctx, "ws-1")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list runs: %v (got %d)", err, len(runs))
+	}
+	run := runs[0]
+	if run.CausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
+		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root (AC.24)",
+			run.CausationID, run.ParentRunID, run.CausationDepth)
+	}
+	if run.RoutineID != "routine-fire-1" {
+		t.Errorf("routine_id = %q, want carried %q", run.RoutineID, "routine-fire-1")
+	}
+	if run.ActorKind != models.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want carried %q", run.ActorKind, models.ActorKindSystem)
+	}
+	if run.HumanRooted {
+		t.Error("human_rooted = true, want false (carried)")
+	}
+}

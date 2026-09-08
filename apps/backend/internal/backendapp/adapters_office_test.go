@@ -209,7 +209,7 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	workflowID := workflows[0].ID
 
 	taskID, err := adapter.CreateOfficeTaskInWorkflow(
-		ctx, "ws-1", "", "routine-assignee", workflowID, "Routine run", "Materialized run",
+		ctx, "ws-1", "", "routine-assignee", workflowID, "Routine run", "Materialized run", "routine-1",
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskInWorkflow: %v", err)
@@ -224,9 +224,10 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
 		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set, want true")
 	}
+	assertRoutineFireCarrier(t, task.Metadata, "routine-1")
 
 	noAssigneeTaskID, err := adapter.CreateOfficeTaskInWorkflow(
-		ctx, "ws-1", "", "", workflowID, "Unassigned run", "Materialized run",
+		ctx, "ws-1", "", "", workflowID, "Unassigned run", "Materialized run", "routine-2",
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskInWorkflow (no assignee): %v", err)
@@ -240,6 +241,37 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	}
 	if !models.HasAutoStartOnCreateIntent(noAssigneeTask.Metadata) {
 		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set for an unassigned routine, want true")
+	}
+	assertRoutineFireCarrier(t, noAssigneeTask.Metadata, "routine-2")
+}
+
+// assertRoutineFireCarrier pins AC-OFFICE-RUN-CAUSATION-001.14/.24: a
+// routine-fire task carries the full task-boundary causation carrier with
+// the AC.24 root values for the lineage triple (a routine fire has no
+// creating run), a system actor, human_rooted=false, and the firing
+// routine's id as routine attribution.
+func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wantRoutineID string) {
+	t.Helper()
+	if got, _ := metadata[models.MetaKeyOfficeCarrierCausationID].(string); got != "" {
+		t.Errorf("carrier causation_id = %q, want empty (root)", got)
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierCausationDepth].(int); got != 0 {
+		t.Errorf("carrier causation_depth = %v, want 0 (root)", metadata[models.MetaKeyOfficeCarrierCausationDepth])
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierCreatingRunID].(string); got != "" {
+		t.Errorf("carrier creating_run_id = %q, want empty (root)", got)
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierHumanRooted].(bool); got {
+		t.Error("carrier human_rooted = true, want false")
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierRoutineID].(string); got != wantRoutineID {
+		t.Errorf("carrier routine_id = %q, want %q", got, wantRoutineID)
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierActorKind].(string); got != string(officemodels.ActorKindSystem) {
+		t.Errorf("carrier actor_kind = %q, want %q", got, officemodels.ActorKindSystem)
+	}
+	if got, _ := metadata[models.MetaKeyOfficeCarrierActorID].(string); got != "" {
+		t.Errorf("carrier actor_id = %q, want empty", got)
 	}
 }
 

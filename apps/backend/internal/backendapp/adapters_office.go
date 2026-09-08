@@ -194,8 +194,16 @@ func (a *taskCreatorAdapter) createOfficeTask(
 // workflow id, bypassing the workspace's default office_workflow_id. Its
 // only production caller (as of WO-36) is the routines dispatcher, which
 // pins a materialized heavy-routine run to the dedicated Routine workflow.
+//
+// routineID is the firing routine's id, persisted as the task-boundary
+// causation carrier's routine attribution (AC-OFFICE-RUN-CAUSATION-001.14/.24):
+// a routine fire has no creating run, so the carrier's creating run
+// identifier, causation identifier, and depth are the AC.24 root values
+// (empty/empty/0), while the routine attribution, actor kind `system`,
+// and human-rooted `false` still apply, keeping the routine chargeable
+// for every run a later task-assigned wake queues off this task.
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
-	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 ) (string, error) {
 	metadata := map[string]interface{}{
 		// The Routine workflow's start step carries on_enter:
@@ -204,6 +212,19 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		// otherwise evaluate on_enter for it. This opts the task into
 		// handleTaskCreated's create-time on_enter evaluation.
 		models.MetaKeyAutoStartOnCreate: true,
+
+		// The full carrier set is written explicitly, including the
+		// empty/zero root values, so the read side's carrierPresent can
+		// tell this task apart from one that never carried a carrier at
+		// all — an omitted key reads as a defect (AC-OFFICE-RUN-CAUSATION-001.10
+		// "absent"), not as this deliberate root.
+		models.MetaKeyOfficeCarrierCausationID:    "",
+		models.MetaKeyOfficeCarrierCausationDepth: 0,
+		models.MetaKeyOfficeCarrierCreatingRunID:  "",
+		models.MetaKeyOfficeCarrierHumanRooted:    false,
+		models.MetaKeyOfficeCarrierRoutineID:      routineID,
+		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorID:        "",
 	}
 	if assigneeAgentID != "" {
 		// The Routine workflow's start step pins no agent (routine.yml), so
