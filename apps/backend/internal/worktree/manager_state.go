@@ -297,8 +297,14 @@ func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "checkout git pointer has an invalid gitdir target"}
 	}
 	adminInfo, err := os.Lstat(adminPath)
-	if err != nil || !adminInfo.IsDir() || adminInfo.Mode()&os.ModeSymlink != 0 {
+	if os.IsNotExist(err) {
 		return linkedWorktreeInspection{class: linkedWorktreeMissingAdmin, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)}
+	}
+	if err != nil {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: fmt.Sprintf("cannot inspect linked-worktree admin target %q", adminPath)}
+	}
+	if !adminInfo.IsDir() || adminInfo.Mode()&os.ModeSymlink != 0 {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree admin target %q is not a directory", adminPath)}
 	}
 	commonDir, err := linkedWorktreeCommonDir(adminPath)
 	if err != nil {
@@ -374,8 +380,8 @@ func isAdminDirectoryMissing(worktreePath string) bool {
 	if !found {
 		return false
 	}
-	info, statErr := os.Lstat(strings.TrimSpace(adminPath))
-	return statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0
+	_, statErr := os.Lstat(strings.TrimSpace(adminPath))
+	return os.IsNotExist(statErr)
 }
 
 // linkedWorktreeRecoveryReason distinguishes a recoverable missing admin entry

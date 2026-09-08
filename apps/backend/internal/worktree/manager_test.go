@@ -288,6 +288,83 @@ func TestManager_IsValid_RejectsSymlinkedLinkedWorktreeAdminDirectory(t *testing
 	}
 }
 
+func TestManager_AdmitTaskRecoveryRefusesPresentInvalidAdminTargetWithoutMutation(t *testing.T) {
+	for _, fixture := range []struct {
+		name    string
+		replace func(t *testing.T, adminPath string)
+	}{
+		{
+			name: "symlink",
+			replace: func(t *testing.T, adminPath string) {
+				t.Helper()
+				movedAdminPath := filepath.Join(t.TempDir(), "admin-target")
+				if err := os.Rename(adminPath, movedAdminPath); err != nil {
+					t.Fatalf("move admin directory: %v", err)
+				}
+				if err := os.Symlink(movedAdminPath, adminPath); err != nil {
+					t.Fatalf("symlink admin directory: %v", err)
+				}
+			},
+		},
+		{
+			name: "regular file",
+			replace: func(t *testing.T, adminPath string) {
+				t.Helper()
+				if err := os.RemoveAll(adminPath); err != nil {
+					t.Fatalf("remove admin directory: %v", err)
+				}
+				if err := os.WriteFile(adminPath, []byte("not an admin directory\n"), 0600); err != nil {
+					t.Fatalf("write invalid admin target: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx := context.Background()
+			cfg := newTestConfig(t)
+			repoPath := initGitRepoForWorktreeTest(t)
+			worktreePath := filepath.Join(cfg.TasksBasePath, "present-invalid-admin")
+			runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+			gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+			if err != nil {
+				t.Fatalf("read linked worktree pointer: %v", err)
+			}
+			adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+			fixture.replace(t, adminPath)
+
+			store := newMockStore()
+			original := &Worktree{ID: "wt-1", TaskID: "task-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+				Path: worktreePath, Branch: "feature/pr-branch", BaseBranch: "main", Status: StatusActive}
+			store.worktrees[original.ID] = original
+			mgr, err := NewManager(cfg, store, newTestLogger())
+			if err != nil {
+				t.Fatalf("NewManager failed: %v", err)
+			}
+
+			err = mgr.AdmitTaskRecovery(ctx, original.TaskID)
+			if !errors.Is(err, ErrWorktreeCorrupted) {
+				t.Fatalf("AdmitTaskRecovery() error = %v, want ErrWorktreeCorrupted", err)
+			}
+			var recoveryErr *WorktreeRecoveryError
+			if !errors.As(err, &recoveryErr) || recoveryErr.State != string(linkedWorktreeAmbiguous) {
+				t.Fatalf("AdmitTaskRecovery() error = %+v, want ambiguous recovery refusal", err)
+			}
+			if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); !os.IsNotExist(err) {
+				t.Fatalf("recovery record exists after invalid admin refusal: %v", err)
+			}
+			if matches, err := filepath.Glob(worktreePath + ".kandev-recovery-*"); err != nil || len(matches) != 0 {
+				t.Fatalf("snapshot paths = %v, err = %v, want none", matches, err)
+			}
+			if matches, err := filepath.Glob(worktreePath + ".recovered-*"); err != nil || len(matches) != 0 {
+				t.Fatalf("replacement paths = %v, err = %v, want none", matches, err)
+			}
+			if got := store.worktrees[original.ID]; got != original || got.Path != worktreePath {
+				t.Fatalf("durable worktree changed after refusal: %+v", got)
+			}
+		})
+	}
+}
+
 func TestManager_AdmitTaskRecoveryRejectsPresentInvalidCheckout(t *testing.T) {
 	cfg := newTestConfig(t)
 	path := filepath.Join(cfg.TasksBasePath, "invalid-checkout")
