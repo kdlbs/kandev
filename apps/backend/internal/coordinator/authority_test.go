@@ -17,6 +17,17 @@ type memoryStore struct {
 	designatedTaskID string
 }
 
+func taskPrincipal(id, workspaceID, taskID, sessionID string) *models.WorkspaceAgentPrincipal {
+	return &models.WorkspaceAgentPrincipal{
+		ID:                   id,
+		WorkspaceID:          workspaceID,
+		PluginInstallationID: TaskPrincipalInstallationID,
+		LogicalKey:           TaskPrincipalLogicalKey(taskID),
+		BackingTaskID:        taskID,
+		BackingSessionID:     sessionID,
+	}
+}
+
 func (s *memoryStore) GetWorkspaceCoordinatorTaskID(_ context.Context, _ string) (string, error) {
 	return s.designatedTaskID, nil
 }
@@ -54,7 +65,7 @@ func (s *memoryStore) FinishCoordinatorAuditEvent(_ context.Context, id, result,
 
 // @covers AC-COORDINATOR-AUTHORITY-003
 func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
-	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: taskPrincipal("principal-1", "workspace", "actor", "actor-session"), grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "inspect,orchestrate",
 	}}}
@@ -86,11 +97,31 @@ func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
 	}
 }
 
+func TestAuthorityDeniesCustomPrincipalDespiteDesignationAndGrant(t *testing.T) {
+	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "custom-plugin",
+		LogicalKey: "custom-key", BackingTaskID: "actor", BackingSessionID: "actor-session",
+	}, grants: []*models.CoordinatorGrant{{
+		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
+		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
+	}}}
+
+	decision, err := New(store, func() bool { return true }).Authorize(context.Background(), Request{
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace"},
+		ActorSessionID: "actor-session", Action: "stop", Capability: CapabilityOrchestrate,
+	})
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allowed || len(store.audits) != 0 {
+		t.Fatalf("decision/audits = %#v / %#v, want custom principal denial without audit", decision, store.audits)
+	}
+}
+
 // @covers AC-COORDINATOR-AUTHORITY-002
 func TestAuthorityRequiresWorkspaceCoordinatorDesignation(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session",
-	}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{principal: taskPrincipal("principal-1", "workspace", "actor", "actor-session"), grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
 	}}}
@@ -111,9 +142,7 @@ func TestAuthorityRequiresWorkspaceCoordinatorDesignation(t *testing.T) {
 }
 
 func TestAuthorityRejectsStaleBackingSession(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "current-session",
-	}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: taskPrincipal("principal-1", "workspace", "actor", "current-session"), grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
 	}}}
@@ -136,7 +165,7 @@ func TestAuthorityRejectsStaleBackingSession(t *testing.T) {
 }
 
 func TestAuthorityDeniesCrossWorkspaceWithoutExposingReason(t *testing.T) {
-	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace-a", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: taskPrincipal("principal-1", "workspace-a", "actor", "actor-session"), grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace-a",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace-a", Capabilities: "orchestrate", GrantedAt: time.Now(),
 	}}}
@@ -266,11 +295,8 @@ func TestAuthorityDoesNotAuditMaterializationFailureWithoutAnActiveGrant(t *test
 
 func TestAuthorityAuditsMaterializationFailureWithTheActivePrincipal(t *testing.T) {
 	store := &memoryStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
-			BackingTaskID: "actor", BackingSessionID: "session",
-		},
-		grants: []*models.CoordinatorGrant{{ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace"}},
+		principal: taskPrincipal("principal-1", "workspace", "actor", "session"),
+		grants:    []*models.CoordinatorGrant{{ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace"}},
 	}
 	authority := New(store, func() bool { return true })
 
@@ -282,6 +308,23 @@ func TestAuthorityAuditsMaterializationFailureWithTheActivePrincipal(t *testing.
 	}
 	if decision.AuditID == "" || len(store.audits) != 1 || store.audits[0].PrincipalID != "principal-1" {
 		t.Fatalf("decision/audits = %#v / %#v, want principal-attributed audit", decision, store.audits)
+	}
+}
+
+func TestAuthorityDoesNotAuditMaterializationFailureForCustomPrincipal(t *testing.T) {
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "custom-plugin",
+		LogicalKey: "custom-key", BackingTaskID: "actor", BackingSessionID: "session",
+	}, grants: []*models.CoordinatorGrant{{ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace"}}}
+
+	decision, err := New(store, func() bool { return true }).AuditMaterializationDenied(
+		context.Background(), "actor", "session", "missing-target", "workspace", "inspect_task_documents", CapabilityInspect,
+	)
+	if err != nil {
+		t.Fatalf("AuditMaterializationDenied: %v", err)
+	}
+	if decision.AuditID != "" || len(store.audits) != 0 {
+		t.Fatalf("decision/audits = %#v / %#v, want no audit for a custom principal", decision, store.audits)
 	}
 }
 
@@ -302,7 +345,7 @@ func TestAuthorityFailsClosedOnStoreError(t *testing.T) {
 }
 
 func TestAuthorityAllowsWorkflowScopedGrant(t *testing.T) {
-	store := &memoryStore{designatedTaskID: "actor", principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{designatedTaskID: "actor", principal: taskPrincipal("principal-1", "workspace", "actor", "actor-session"), grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkflow, ScopeID: "workflow-1", Capabilities: "inspect",
 	}}}

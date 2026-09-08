@@ -87,7 +87,7 @@ func TestHandleAddWorkspaceSourcesCoordinatorGrantAuthorizesUnrelatedTargetAndRe
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "caller-session", TaskID: caller.ID}))
 	now := time.Now().UTC()
 	principal := &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: caller.WorkspaceID, PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		ID: "principal-1", WorkspaceID: caller.WorkspaceID, PluginInstallationID: coordinator.TaskPrincipalInstallationID, LogicalKey: coordinator.TaskPrincipalLogicalKey(caller.ID),
 		BackingTaskID: caller.ID, BackingSessionID: "caller-session", CreatedAt: now,
 	}
 	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, principal))

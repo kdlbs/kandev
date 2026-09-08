@@ -837,7 +837,7 @@ func TestHandleMessageTask_CoordinatorGrantInterruptsAndResolvesAudit(t *testing
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 	now := time.Now().UTC()
 	principal := &models.WorkspaceAgentPrincipal{
-		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: coordinator.TaskPrincipalInstallationID, LogicalKey: coordinator.TaskPrincipalLogicalKey(sender.ID),
 		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
 	}
 	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(context.Background(), principal))

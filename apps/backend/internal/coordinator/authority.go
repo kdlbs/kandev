@@ -99,7 +99,7 @@ func (a *Authority) authorizePrincipalGrant(ctx context.Context, request Request
 	if err != nil {
 		return Decision{Basis: BasisDenied}, err
 	}
-	if principal == nil || principal.RevokedAt != nil || principal.PluginInstallationID == "" || principal.LogicalKey == "" {
+	if !IsTaskPrincipal(principal, request.ActorTask.WorkspaceID, request.ActorTask.ID) || principal.RevokedAt != nil {
 		return Decision{Basis: BasisDenied}, nil
 	}
 	if principal.BackingSessionID == "" || request.ActorSessionID != principal.BackingSessionID {
@@ -218,8 +218,8 @@ func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID,
 
 func (a *Authority) activePrincipalForMaterializationAudit(ctx context.Context, workspaceID, actorTaskID, callerSessionID string) (*models.WorkspaceAgentPrincipal, error) {
 	principal, err := a.store.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, actorTaskID)
-	if err != nil || principal == nil || principal.RevokedAt != nil || principal.PluginInstallationID == "" || principal.LogicalKey == "" || principal.BackingSessionID == "" || principal.BackingSessionID != callerSessionID {
-		return principal, err
+	if err != nil || !IsTaskPrincipal(principal, workspaceID, actorTaskID) || principal.RevokedAt != nil || principal.BackingSessionID == "" || principal.BackingSessionID != callerSessionID {
+		return nil, err
 	}
 	grants, err := a.store.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, workspaceID)
 	if err != nil || len(grants) == 0 {

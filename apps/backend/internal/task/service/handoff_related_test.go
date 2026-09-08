@@ -18,6 +18,17 @@ type handoffCoordinatorStore struct {
 	finishErr error
 }
 
+func taskPrincipalForHandoff(id, workspaceID, taskID, sessionID string) *models.WorkspaceAgentPrincipal {
+	return &models.WorkspaceAgentPrincipal{
+		ID:                   id,
+		WorkspaceID:          workspaceID,
+		PluginInstallationID: coordinator.TaskPrincipalInstallationID,
+		LogicalKey:           coordinator.TaskPrincipalLogicalKey(taskID),
+		BackingTaskID:        taskID,
+		BackingSessionID:     sessionID,
+	}
+}
+
 func (s *handoffCoordinatorStore) GetWorkspaceCoordinatorTaskID(_ context.Context, _ string) (string, error) {
 	if s.principal == nil {
 		return "", nil
@@ -212,9 +223,7 @@ func TestListRelatedForCallerSession_InspectGrantUsesCurrentBindingAndResolvesAu
 	tasks.addTask("caller", "", "ws-1")
 	tasks.addTask("unrelated", "", "ws-1")
 	store := &handoffCoordinatorStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
-		},
+		principal: taskPrincipalForHandoff("principal-1", "ws-1", "caller", "caller-session"),
 		grants: []*models.CoordinatorGrant{{
 			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
 			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
@@ -264,10 +273,7 @@ func TestListRelatedForCallerSession_TargetMaterializationFailure_AuditsDeniedNo
 	tasks.addTask("caller", "", "ws-1")
 	// Do NOT add the target task — it doesn't exist in the DB.
 	store := &handoffCoordinatorStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
-			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
-		},
+		principal: taskPrincipalForHandoff("principal-1", "ws-1", "caller", "caller-session"),
 		grants: []*models.CoordinatorGrant{{
 			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
 			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
@@ -312,10 +318,7 @@ func TestGetDocumentForCallerSession_TargetMaterializationFailure_AuditsDeniedNo
 	tasks := newFakeTaskRepo()
 	tasks.addTask("caller", "", "ws-1")
 	store := &handoffCoordinatorStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
-			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
-		},
+		principal: taskPrincipalForHandoff("principal-1", "ws-1", "caller", "caller-session"),
 		grants: []*models.CoordinatorGrant{{
 			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
 			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
@@ -353,10 +356,7 @@ func TestListDocumentsForCallerSession_TargetMaterializationFailure_AuditsDenied
 	tasks := newFakeTaskRepo()
 	tasks.addTask("caller", "", "ws-1")
 	store := &handoffCoordinatorStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
-			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
-		},
+		principal: taskPrincipalForHandoff("principal-1", "ws-1", "caller", "caller-session"),
 		grants: []*models.CoordinatorGrant{{
 			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
 			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
@@ -395,10 +395,7 @@ func TestListDocumentsForCallerSession_ListFailureReturnsAuditFinalizationError(
 	finishErr := errors.New("audit finalization unavailable")
 	docsRepo := &stubDocRepo{docRepo: repo, listErr: listErr}
 	store := &handoffCoordinatorStore{
-		principal: &models.WorkspaceAgentPrincipal{
-			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
-			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
-		},
+		principal: taskPrincipalForHandoff("principal-1", "ws-1", "caller", "caller-session"),
 		grants: []*models.CoordinatorGrant{{
 			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
 			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
