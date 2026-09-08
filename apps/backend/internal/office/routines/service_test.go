@@ -2,6 +2,7 @@ package routines_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -401,6 +402,52 @@ func TestDispatch_LightweightRoutine_IdempotencyConflictIsNotFailed(t *testing.T
 	}
 }
 
+// dispatchFailsWakeupEnqueuer simulates a wakeup-request that enqueues
+// successfully but whose synchronous Dispatch call errors — e.g. the
+// dispatcher's own DB write fails. Nothing polls a request stuck in
+// "queued" (Dispatch is the only caller that ever processes one), so
+// this fire produced no agent run despite the request existing.
+type dispatchFailsWakeupEnqueuer struct{}
+
+func (dispatchFailsWakeupEnqueuer) CreateWakeupRequest(context.Context, *routines.WakeupRequest) error {
+	return nil
+}
+
+func (dispatchFailsWakeupEnqueuer) Dispatch(context.Context, string) error {
+	return errors.New("dispatch boom")
+}
+
+// TestDispatch_LightweightRoutine_DispatchFailureIsFailed is the
+// review-round regression test: a Dispatch error must not be recorded as
+// "done" — nothing else ever picks the stuck wakeup-request back up, so
+// reporting "done" would silently claim success for a fire that never
+// produced an agent run.
+func TestDispatch_LightweightRoutine_DispatchFailureIsFailed(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:            "ws-1",
+		Name:                   "Dispatch Failure",
+		TaskTemplate:           "",
+		AssigneeAgentProfileID: "agent-1",
+		Status:                 "active",
+		ConcurrencyPolicy:      "always_create",
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	svc.SetWakeupEnqueuer(dispatchFailsWakeupEnqueuer{})
+
+	run, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("fire manual: %v", err)
+	}
+	if run.Status != "failed" {
+		t.Errorf("status = %q, want failed (a Dispatch error must not be reported as done)", run.Status)
+	}
+}
+
 // TestDispatch_HeavyRoutine_CreatesTaskInRoutineWorkflow verifies a
 // routine with a task_template materialises a real task pinned to the
 // routine workflow id.
@@ -661,6 +708,61 @@ func TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent(t *te
 			}
 			if run2.Status != "task_created" {
 				t.Fatalf("second run status = %q, want task_created (gate must self-heal once the linked task is terminal)", run2.Status)
+			}
+		})
+	}
+}
+
+// TestDispatch_HeavyRoutine_GateSelfHealsOnFailedTask covers the third
+// terminal outcome GetTaskTerminalStatus recognizes: a linked task that
+// reaches FAILED (not just COMPLETED/CANCELLED) must also release the
+// gate, and the stale run must be closed out as "failed" rather than
+// "done" so routine history reflects what actually happened.
+func TestDispatch_HeavyRoutine_GateSelfHealsOnFailedTask(t *testing.T) {
+	for _, policy := range []string{"skip_if_active", "coalesce_if_active"} {
+		t.Run(policy, func(t *testing.T) {
+			svc, db := newTestRoutineServiceWithDB(t)
+			ctx := context.Background()
+			svc.SetWorkflowEnsurer(&fakeWorkflowEnsurer{})
+			svc.SetTaskCreator(&fakeTaskCreator{})
+
+			routine := createTestRoutine(t, svc, "Self Heal Failed "+policy, policy)
+
+			run1, err := svc.FireManual(ctx, routine.ID, nil)
+			if err != nil {
+				t.Fatalf("first run: %v", err)
+			}
+			if run1.Status != "task_created" {
+				t.Fatalf("first run status = %q, want task_created", run1.Status)
+			}
+			if run1.LinkedTaskID == "" {
+				t.Fatalf("expected a linked task")
+			}
+
+			if _, err := db.ExecContext(ctx,
+				`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
+				t.Fatalf("create tasks table: %v", err)
+			}
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO tasks (id, state) VALUES (?, ?)`, run1.LinkedTaskID, "FAILED"); err != nil {
+				t.Fatalf("seed linked task: %v", err)
+			}
+
+			run2, err := svc.FireManual(ctx, routine.ID, nil)
+			if err != nil {
+				t.Fatalf("second run: %v", err)
+			}
+			if run2.Status != "task_created" {
+				t.Fatalf("second run status = %q, want task_created (gate must self-heal once the linked task fails)", run2.Status)
+			}
+
+			var closedStatus string
+			if err := db.GetContext(ctx, &closedStatus,
+				`SELECT status FROM office_routine_runs WHERE id = ?`, run1.ID); err != nil {
+				t.Fatalf("read closed-out run status: %v", err)
+			}
+			if closedStatus != "failed" {
+				t.Errorf("run1 status after self-heal = %q, want failed", closedStatus)
 			}
 		})
 	}

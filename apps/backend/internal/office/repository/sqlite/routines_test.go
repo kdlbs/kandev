@@ -254,8 +254,8 @@ func TestGetTaskTerminalStatus(t *testing.T) {
 	if _, err := repo.ExecRaw(ctx, `CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
-	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, state) VALUES (?, ?), (?, ?), (?, ?)`,
-		"task-done", "COMPLETED", "task-cancelled", "CANCELLED", "task-open", "IN_PROGRESS"); err != nil {
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, state) VALUES (?, ?), (?, ?), (?, ?), (?, ?)`,
+		"task-done", "COMPLETED", "task-cancelled", "CANCELLED", "task-failed", "FAILED", "task-open", "IN_PROGRESS"); err != nil {
 		t.Fatalf("seed tasks: %v", err)
 	}
 
@@ -265,6 +265,7 @@ func TestGetTaskTerminalStatus(t *testing.T) {
 	}{
 		{"task-done", "done"},
 		{"task-cancelled", "cancelled"},
+		{"task-failed", "failed"},
 		{"task-open", ""},
 		{"task-missing", ""},
 	}

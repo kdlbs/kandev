@@ -350,7 +350,7 @@ func (r *Repository) GetActiveRunForFingerprint(
 // taskID, or nil if no run is linked to it (most tasks aren't
 // routine-created). Used by SyncRunStatus to find the run to close out
 // when its task reaches a terminal step. taskID must be non-empty:
-// linked_task_id defaults to ” for every lightweight run, so an empty
+// linked_task_id defaults to "" for every lightweight run, so an empty
 // taskID would match (and let a caller rewrite) an arbitrary lightweight
 // run instead of correctly finding nothing.
 func (r *Repository) GetRoutineRunByLinkedTaskID(
@@ -375,15 +375,16 @@ func (r *Repository) GetRoutineRunByLinkedTaskID(
 }
 
 // GetTaskTerminalStatus reports whether taskID's task has reached a
-// terminal step and, if so, which outcome: "done" for COMPLETED,
-// "cancelled" for CANCELLED, "" otherwise — including when the task row
-// itself is missing (already deleted), so callers fail closed rather
-// than releasing a gate they cannot actually confirm is clear. Reads the
-// same `tasks` table and column IsTaskInTerminalStep does; this is the
-// routines gate's own use of that state (see
-// RoutineService.applyConcurrencyPolicy), so it lives in the routines
-// repo file rather than sharing IsTaskInTerminalStep's boolean, which
-// cannot distinguish the two terminal outcomes.
+// terminal state and, if so, which outcome: "done" for COMPLETED,
+// "cancelled" for CANCELLED, "failed" for FAILED, "" otherwise —
+// including when the task row itself is missing (already deleted), so
+// callers fail closed rather than releasing a gate they cannot actually
+// confirm is clear. Reads the same `tasks` table IsTaskInTerminalStep
+// does, but that helper's boolean cannot distinguish the three terminal
+// outcomes (and does not itself treat FAILED as terminal), so this is a
+// separate query rather than a shared one — it lives in the routines
+// repo file because it is the routines gate's own use of that state (see
+// RoutineService.applyConcurrencyPolicy).
 func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error) {
 	var state string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
@@ -399,6 +400,8 @@ func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (
 		return "done", nil
 	case taskStateCancelled:
 		return "cancelled", nil
+	case taskStateFailed:
+		return "failed", nil
 	default:
 		return "", nil
 	}

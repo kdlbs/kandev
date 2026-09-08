@@ -203,6 +203,7 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 const (
 	taskStateCompleted = "COMPLETED"
 	taskStateCancelled = "CANCELLED"
+	taskStateFailed    = "FAILED"
 )
 
 func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {

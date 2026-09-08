@@ -637,11 +637,12 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 // it permanently blocks the routine's next fire under skip_if_active /
 // coalesce_if_active (see the office-routine-runs triage).
 //
-// Terminal status: `done` once the request is enqueued, regardless of
-// whether Dispatch itself succeeds (a dispatch failure is the wakeup
-// layer's problem, logged there); `failed` only when the enqueue call
-// itself errors, since that means no request exists for the dispatcher
-// to ever pick up. LinkedTaskID stays empty for lightweight.
+// Terminal status: `done` once the request is enqueued AND handed to
+// the dispatcher successfully. `failed` when either step errors —
+// nothing else polls a wakeup-request stuck in "queued", so a Dispatch
+// error left this recorded as `done` would silently report success for
+// a fire that produced no agent run. LinkedTaskID stays empty for
+// lightweight.
 //
 // missedTicks > 0 surfaces in the wakeup payload when the cron tick
 // collapsed N missed fires into one (catch-up cap policy
@@ -683,6 +684,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 			zap.String("routine", routine.Name),
 			zap.String("wakeup_id", req.ID),
 			zap.Error(err))
+		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
 	}
 	return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 }
@@ -832,12 +834,12 @@ func (s *RoutineService) FireManual(
 // terminal side of D2 in the office-routine-runs triage: heavy runs
 // stay in RoutineRunStatusTaskCreated (an active gate) until their task
 // finishes, and this is what clears the gate. terminalStatus is
-// "cancelled" for a task moved to the Cancelled step, "done" for
-// anything else terminal (currently only Done). A taskID with no
-// linked run is not an error — most tasks aren't routine-created. An
-// empty taskID is rejected outright: linked_task_id defaults to ” for
-// every lightweight run, so an unguarded lookup would match (and
-// rewrite) an arbitrary lightweight run instead of finding nothing.
+// "cancelled", "failed", or "done" — see GetTaskTerminalStatus and
+// closeOutRun. A taskID with no linked run is not an error — most tasks
+// aren't routine-created. An empty taskID is rejected outright:
+// linked_task_id defaults to "" for every lightweight run, so an
+// unguarded lookup would match (and rewrite) an arbitrary lightweight
+// run instead of finding nothing.
 func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error {
 	if taskID == "" {
 		return nil
@@ -857,12 +859,17 @@ func (s *RoutineService) SyncRunStatus(ctx context.Context, taskID, terminalStat
 // task_created (see Repository.UpdateRunStatusIfTaskCreated) — a replayed
 // or racing terminal signal for an already-closed run must not move
 // completed_at or flip a "done" back to "cancelled". terminalStatus is
-// "cancelled" or anything else counts as "done", matching SyncRunStatus's
-// contract. Returns whether this call was the one that closed the run.
+// "cancelled" or "failed" for those two task outcomes, and anything else
+// (including "done") counts as RoutineRunStatusDone, matching
+// SyncRunStatus's contract. Returns whether this call was the one that
+// closed the run.
 func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, terminalStatus string) (bool, error) {
 	status := models.RoutineRunStatusDone
-	if terminalStatus == "cancelled" {
+	switch terminalStatus {
+	case "cancelled":
 		status = models.RoutineRunStatusCancelled
+	case "failed":
+		status = models.RoutineRunStatusFailed
 	}
 	closed, err := s.repo.UpdateRunStatusIfTaskCreated(ctx, run.ID, status, run.LinkedTaskID)
 	if err != nil {
