@@ -264,7 +264,7 @@ func (m *Manager) persistRecoveryAndDeleteBranch(
 	}
 	reason = m.deleteExpectedBranchRef(ctx, metadataStore, wt, branchHead)
 	if reason == "" {
-		m.recordBranchCompactionComplete(ctx, metadataStore, wt, branchHead, requireArchived)
+		reason = m.recordBranchCompactionComplete(ctx, metadataStore, wt, branchHead, requireArchived)
 	}
 	return reason
 }
@@ -406,7 +406,7 @@ func (m *Manager) recordBranchCompactionComplete(
 	wt *Worktree,
 	branchHead string,
 	requireArchived bool,
-) {
+) BranchRetentionReason {
 	var persisted bool
 	var err error
 	if requireArchived {
@@ -419,10 +419,19 @@ func (m *Manager) recordBranchCompactionComplete(
 	}
 	if err != nil || !persisted {
 		m.logger.Warn("managed branch deletion completion was not persisted", zap.Error(err))
-		return
+		if requireArchived && err == nil {
+			branchRef := "refs/heads/" + wt.Branch
+			if reason := m.restoreDeletedBranchRef(ctx, wt, branchRef, branchHead); reason != "" {
+				return reason
+			}
+			m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+			return RetainedArchiveStateChanged
+		}
+		return ""
 	}
 	now := time.Now().UTC()
 	wt.BranchCompactedAt = &now
+	return ""
 }
 
 func (m *Manager) reconcileInterruptedArchivedCompaction(

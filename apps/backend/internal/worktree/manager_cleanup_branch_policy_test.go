@@ -29,6 +29,12 @@ type activatingSessionMaintenanceStore struct {
 	checks    int
 }
 
+type activateAfterCandidateCheckStore struct {
+	*SQLiteStore
+	sessionID string
+	checks    int
+}
+
 func (s *activatingSessionMaintenanceStore) IsArchivedBranchCandidate(
 	ctx context.Context, worktreeID string,
 ) (bool, error) {
@@ -40,6 +46,19 @@ func (s *activatingSessionMaintenanceStore) IsArchivedBranchCandidate(
 		}
 	}
 	return s.SQLiteStore.IsArchivedBranchCandidate(ctx, worktreeID)
+}
+
+func (s *activateAfterCandidateCheckStore) IsArchivedBranchCandidate(
+	ctx context.Context, worktreeID string,
+) (bool, error) {
+	s.checks++
+	eligible, err := s.SQLiteStore.IsArchivedBranchCandidate(ctx, worktreeID)
+	if err != nil || !eligible || s.checks != 2 {
+		return eligible, err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE task_sessions SET state = ? WHERE id = ?`,
+		models.TaskSessionStateRunning, s.sessionID)
+	return eligible, err
 }
 
 func (s *unarchivingMaintenanceStore) IsArchivedBranchCandidate(
@@ -537,6 +556,26 @@ func TestMaintainArchivedBranches_ActiveSessionAfterSelectionRetainsBranch(t *te
 	}
 	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
 		t.Fatalf("branch head after session activation = %q, want %q", got, wantHead)
+	}
+}
+
+func TestMaintainArchivedBranches_ActiveSessionBeforeDeleteRetainsBranch(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "session-delete-race")
+	branchRef := "refs/heads/" + wt.Branch
+	mgr.store = &activateAfterCandidateCheckStore{
+		SQLiteStore: store,
+		sessionID:   wt.SessionID,
+	}
+
+	receipt, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("maintenance during delete race: %v", err)
+	}
+	if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedArchiveStateChanged] != 1 {
+		t.Fatalf("maintenance receipt = %+v, want archive-state retention", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", branchRef)); got != wantHead {
+		t.Fatalf("branch head after session activation before delete = %q, want %q", got, wantHead)
 	}
 }
 
