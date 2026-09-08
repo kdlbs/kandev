@@ -335,7 +335,8 @@ func TestListE2ETaskIDsIncludesAutomationOwnedTasks(t *testing.T) {
 func assertWorkspaceRows(t *testing.T, database *sqlx.DB, table, workspaceID string, want int) {
 	t.Helper()
 	var got int
-	if err := database.Get(&got, `SELECT COUNT(*) FROM `+table+` WHERE workspace_id = ?`, workspaceID); err != nil {
+	query := database.Rebind(`SELECT COUNT(*) FROM ` + table + ` WHERE workspace_id = ?`)
+	if err := database.Get(&got, query, workspaceID); err != nil {
 		t.Fatalf("count %s rows: %v", table, err)
 	}
 	if got != want {
