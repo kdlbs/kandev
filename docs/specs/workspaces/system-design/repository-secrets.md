@@ -50,7 +50,7 @@ Existing scope-transfer operations remain unchanged in this repair.
 
 Opening a secret-delete confirmation starts the read-only reference request. While it is pending, the row-local desktop popover or mobile inline confirmation remains visible with its destructive action disabled.
 An unreferenced secret keeps that local confirmation and requires a separate Delete action.
-Existing references replace it with the same contained, internally scrolling conflict-dialog pattern used by agent-profile deletion. The dialog lists localized agent-profile, executor-profile, and repository labels and offers only Close.
+Existing references replace it with the same contained conflict-dialog pattern used by agent-profile deletion. The dialog presents each visible reference as a resource card with an icon, localized type badge, name, and environment key, and offers only Close. Only the resource list scrolls when it is long; the explanation and footer remain visible.
 The dialog uses full-width touch actions below the small-screen breakpoint, remains within the dynamic viewport, and never exposes secret values or inaccessible resource metadata.
 The final Delete request repeats the service reference check. A reference created after preflight reopens the conflict dialog from the structured `409`; unknown failures retain the generic localized toast.
 Desktop and mobile Playwright coverage proves both the safe delete and preflight-conflict paths.

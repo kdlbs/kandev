@@ -35,7 +35,7 @@ Handler tests provide end-to-end API evidence, while the desktop and mobile brow
 
 All work-order checks passed. The backend tests reported 157 passing secrets/environment tests, nine reference-checker tests, and three lifecycle tests.
 The focused UI tests reported 24 passes, including preflight cancellation, conflicts, and a reference race during final deletion. TypeScript, targeted Go/frontend lint, localization, specification, and public-documentation checks passed.
-The managed Chromium and Pixel 5 E2E runs passed two tests each and verified contained conflict dialogs that disclose reference labels without exposing secret values.
+The managed Chromium and Pixel 5 E2E runs passed two tests each and verified contained conflict dialogs with resource cards, list-only scrolling for long conflict sets, fixed Close actions, and no secret-value disclosure.
 The first regression runs reproduced unsafe deletion and missing repair/profile information before the corresponding fixes.
 Issue #3500 is assigned to `carlosflorencio`. The implementation is committed in PR #3503.
 

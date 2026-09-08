@@ -3,9 +3,18 @@ import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 
 const SECRET_VALUE = "e2e-secret-delete-redaction-value";
+const REFERENCE_KINDS = ["agent_profile", "executor_profile", "repository"] as const;
 
 function runToken() {
   return `${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
+function conflictReferences() {
+  return Array.from({ length: 18 }, (_, index) => ({
+    kind: REFERENCE_KINDS[index % REFERENCE_KINDS.length],
+    name: index === 0 ? "E2E review profile" : `E2E resource ${index + 1}`,
+    key: index === 0 ? "E2E_TOKEN" : `E2E_TOKEN_${index + 1}`,
+  }));
 }
 
 test.describe("Secret deletion", () => {
@@ -76,13 +85,7 @@ test.describe("Secret deletion", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            references: [
-              {
-                kind: "agent_profile",
-                name: "E2E review profile",
-                key: "E2E_TOKEN",
-              },
-            ],
+            references: conflictReferences(),
           }),
         });
       });
@@ -90,12 +93,24 @@ test.describe("Secret deletion", () => {
       const conflictDialog = testPage.getByTestId("secret-delete-conflict-dialog");
       await expect(conflictDialog).toBeVisible();
       await expect(testPage.getByTestId("secret-delete-confirm-popover")).toHaveCount(0);
-      await expect(conflictDialog).toContainText('Agent profile "E2E review profile"');
-      await expect(conflictDialog).toContainText("E2E_TOKEN");
+      const referenceList = conflictDialog.getByTestId("secret-delete-reference-list");
+      const referenceCards = referenceList.getByTestId("secret-delete-reference");
+      await expect(referenceCards).toHaveCount(18);
+      await expect(referenceCards.first()).toContainText("E2E review profile");
+      await expect(referenceCards.first()).toContainText("Agent profile");
+      await expect(referenceCards.first()).toContainText("E2E_TOKEN");
       await expect(conflictDialog.getByTestId("secret-delete-confirm")).toHaveCount(0);
+      const listDimensions = await referenceList.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      }));
+      expect(listDimensions.scrollHeight).toBeGreaterThan(listDimensions.clientHeight);
       await prCapture.screenshot("desktop-secrets-delete-conflict", {
         caption: "Desktop secret deletion conflict dialog",
       });
+      await referenceList.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+      await expect(referenceCards.last()).toBeInViewport();
+      await expect(conflictDialog.getByRole("button", { name: "Close" })).toBeVisible();
       await expect(row).toBeVisible();
       await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
       await expect(testPage.locator("body")).not.toContainText("secret_in_use");

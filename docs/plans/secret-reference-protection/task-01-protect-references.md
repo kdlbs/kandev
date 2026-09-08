@@ -99,9 +99,9 @@ Cross-owner reference reads must fail closed. Internal store deletion remains av
 - `go test ./internal/backendapp -run TestSecretReference -count=1`: passed, nine tests. The integration test uses real encrypted SQLite storage and all three reference owners.
 - `go test ./internal/agent/runtime/lifecycle -run 'TestSecretRecovery|TestResolveStrict' -count=1`: passed, three tests.
 - The listed Vitest command passed all 24 tests. TypeScript, ESLint, and `i18n:check` passed.
-- The managed Chromium and Pixel 5 E2E runs passed two tests each and produced validated desktop/mobile conflict-dialog captures.
+- The managed Chromium and Pixel 5 E2E runs passed two tests each and produced validated desktop/mobile conflict-dialog captures. Long mixed-resource lists scroll independently while the explanation and Close action remain visible.
 - `golangci-lint run ./... --new-from-rev=<PR-base> --timeout=5m` passed with no issues.
 - Specification lint, public-documentation validation, and `git diff --check` passed.
-- The existing desktop and mobile secret-deletion E2E specs now cover the preflight conflict dialog, verify that no destructive action remains, and retain the secret row.
+- The existing desktop and mobile secret-deletion E2E specs now cover the preflight conflict dialog, verify its resource-card presentation and long-list scrolling, confirm that no destructive action remains, and retain the secret row.
 - No live instance was changed or started. Temporary databases use test cleanup. Unrelated generated translation changes were removed.
 - No agents were delegated. The issue assignment was verified. The implementation is committed in PR #3503.
