@@ -103,15 +103,19 @@ func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.
 	_ = eventBus.Publish(ctx, events.TaskUpdated,
 		bus.NewEvent(events.TaskUpdated, "test", payload))
 
-	message := <-hub.broadcast
-	if message.Action != ws.ActionTaskUpdated {
-		t.Fatalf("transfer action = %q, want task.updated", message.Action)
+	destination := <-hub.broadcast
+	if destination.Action != ws.ActionTaskUpdated {
+		t.Fatalf("destination transfer action = %q, want task.updated", destination.Action)
 	}
-	select {
-	case duplicate := <-hub.broadcast:
-		t.Fatalf("duplicate transfer action = %q", duplicate.Action)
-	default:
+	source := <-hub.broadcast
+	if source.Action != ws.ActionTaskDeleted {
+		t.Fatalf("source transfer action = %q, want task.deleted", source.Action)
 	}
+	var sourcePayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(source.Payload, &sourcePayload))
+	require.Equal(t, "task-transfer", sourcePayload["task_id"])
+	require.Equal(t, "ws-source", sourcePayload["workspace_id"])
+	require.NotContains(t, sourcePayload, "description")
 }
 
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that

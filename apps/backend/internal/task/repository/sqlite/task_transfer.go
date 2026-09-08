@@ -50,6 +50,7 @@ var transferWorkspaceProjections = []transferWorkspaceProjection{
 	{table: "storage_quarantine_entries", taskColumn: "task_id"},
 	{table: "office_channels", taskColumn: "task_id"},
 	{table: "task_workspace_groups", taskColumn: "owner_task_id"},
+	{table: "plugin_instances", taskColumn: "task_id"},
 }
 
 var transferPreservationTables = []transferWorkspaceProjection{
@@ -83,6 +84,7 @@ var transferPreservationTables = []transferWorkspaceProjection{
 	{table: "task_workspace_group_members", taskColumn: "task_id", identityColumn: "workspace_group_id"},
 	{table: "task_blockers", taskColumn: "task_id", identityColumn: "blocker_task_id"},
 	{table: "task_blockers", taskColumn: "blocker_task_id", identityColumn: "task_id", receiptKey: "task_blockers_as_blocker"},
+	{table: "plugin_instances", taskColumn: "task_id", identityColumn: "id"},
 }
 
 type persistedTaskTransfer struct {
