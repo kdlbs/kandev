@@ -85,6 +85,76 @@ func TestUpdateSkillHandler_RejectsNotWellFormedSlug(t *testing.T) {
 	}
 }
 
+func TestUpdateSkillHandler_ContentOnlyPatchHealsStoredEmptySlug(t *testing.T) {
+	router, svc := newTestSkillRouter(t)
+	ctx := context.Background()
+
+	// Bypasses ValidateAndPrepareSkill, mirroring config-import's CreateSkill
+	// call, to reproduce a durable row with an empty stored slug.
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing Skill", Slug: "", SourceType: "inline"}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rec := doSkillRequest(t, router, http.MethodPatch, "/api/v1/skills/"+skill.ID, `{"content":"new content"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp skills.SkillResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body %q: %v", rec.Body.String(), err)
+	}
+	if resp.Skill.Slug == "" {
+		t.Errorf("response slug still empty after content-only PATCH")
+	}
+
+	reloaded, err := svc.GetSkillFromConfig(ctx, skill.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Slug == "" {
+		t.Errorf("stored slug still empty after content-only PATCH")
+	}
+}
+
+func TestUpdateSkillHandler_ContentOnlyPatchDoesNotFailOnSlugCollision(t *testing.T) {
+	router, svc := newTestSkillRouter(t)
+	ctx := context.Background()
+
+	occupant := &models.Skill{WorkspaceID: "ws-1", Name: "Existing Skill", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, occupant); err != nil {
+		t.Fatalf("validate occupant: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, occupant); err != nil {
+		t.Fatalf("create occupant: %v", err)
+	}
+
+	// Bypasses ValidateAndPrepareSkill, mirroring config-import's CreateSkill
+	// call, to reproduce a durable row with an empty stored slug whose
+	// name-derived candidate collides with occupant's slug.
+	broken := &models.Skill{WorkspaceID: "ws-1", Name: "Existing Skill", Slug: "", SourceType: "inline"}
+	if err := svc.CreateSkill(ctx, broken); err != nil {
+		t.Fatalf("create broken: %v", err)
+	}
+
+	rec := doSkillRequest(t, router, http.MethodPatch, "/api/v1/skills/"+broken.ID, `{"content":"new content"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	reloaded, err := svc.GetSkillFromConfig(ctx, broken.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Slug != "" {
+		t.Errorf("stored slug = %q, want left empty on collision", reloaded.Slug)
+	}
+	if reloaded.Content != "new content" {
+		t.Errorf("content = %q, want %q", reloaded.Content, "new content")
+	}
+}
+
 func TestUpdateSkillHandler_OmittedSlugLeavesItUnchanged(t *testing.T) {
 	router, svc := newTestSkillRouter(t)
 	ctx := context.Background()

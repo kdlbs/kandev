@@ -98,6 +98,12 @@ func (h *Handler) updateSkill(c *gin.Context) {
 		return
 	}
 	applySkillUpdates(skill, &req)
+	if req.Slug == nil && skill.Slug == "" {
+		// A caller-supplied slug is validated strictly; an unrequested slug
+		// change repairs a pre-existing empty stored slug instead of
+		// rejecting a request that never mentioned the slug field.
+		skill.Slug = GenerateSlug(skill.Name)
+	}
 	if err := h.svc.ValidateSkillUpdate(ctx, skill); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
