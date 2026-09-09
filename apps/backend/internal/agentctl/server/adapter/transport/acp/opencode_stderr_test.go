@@ -40,7 +40,7 @@ func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 		"https://opencode.ai/workspace/wrk_123/go#fragment",
 		"https://opencode.ai/workspace/wrk_123/go#",
 		"https://opencode.ai/workspace/wrk_123/go?#",
-		"https://user:pass@opencode.ai/workspace/wrk_123/go",
+		"https://user:PASSWORD@opencode.ai/workspace/wrk_123/go",
 		"https://opencode.ai:443/workspace/wrk_123/go",
 		"https://opencode.ai/workspace/wrk_123%2F..%2Fgo",
 		"https://opencode.ai/workspace/%77rk_123/go",

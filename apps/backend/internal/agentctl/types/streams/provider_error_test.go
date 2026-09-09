@@ -46,8 +46,8 @@ func TestSanitizeProviderMessageRedactsCredentials(t *testing.T) {
 		message        string
 		forbiddenLower string
 	}{
-		{"bearer token", "Request failed: Bearer sk-abcdEFGH12345678ijklMNOPqrstUVWX rejected.", "sk-abcdEFGH12345678ijklMNOPqrstUVWX"},
-		{"api key literal", "sk-ABCDEFGHIJKL invalid", "sk-ABCDEFGHIJKL"},
+		{"bearer token", "Request failed: Bearer zzzzzzzzzzzzzzzzzzzzzzzz rejected.", "zzzzzzzzzzzzzzzzzzzzzzzz"},
+		{"api key literal", "--api-key zzzzzzzzzzzzzzzzzzzzzzzz invalid", "zzzzzzzzzzzzzzzzzzzzzzzz"},
 		{"token key value", "auth failed token: supersecrettokenvalue", "supersecrettokenvalue"},
 		{"password key value", "login rejected password=hunter2verylong", "hunter2verylong"},
 	}
