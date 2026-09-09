@@ -98,6 +98,23 @@ func seedWakeRunAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, r
 	}
 }
 
+// seedWakeRunWithWave is seedWakeRunAt plus the two wave-identity columns,
+// so tests can simulate a run recorded by a wave-identity-aware producer
+// (Tasks 03-05) rather than a pre-upgrade run (wake_wave_key/wake_wave_string
+// left at their '' default).
+func seedWakeRunWithWave(
+	t *testing.T, repo *sqlite.Repository, ctx context.Context,
+	runID, parentID, reason, status, requestedAtExpr, waveKey, waveString string,
+) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, fmt.Sprintf(`
+		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at, wake_wave_key, wake_wave_string)
+		VALUES (?, 'agent-x', ?, ?, ?, %s, ?, ?)
+	`, requestedAtExpr), runID, reason, fmt.Sprintf(`{"task_id":%q}`, parentID), status, waveKey, waveString); err != nil {
+		t.Fatalf("seed wave run: %v", err)
+	}
+}
+
 // insertTaskAt is insertTask with an explicit created_at/updated_at
 // timestamp, so tests can control a child's ordering relative to a run's
 // requested_at without relying on wall-clock delay between statements.
