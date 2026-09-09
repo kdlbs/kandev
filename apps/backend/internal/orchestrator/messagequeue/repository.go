@@ -63,11 +63,15 @@ type Repository interface {
 
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
+	// ValidateSessionIdentity rejects a mutation that was authorized by an older
+	// execution of the same durable session.
+	ValidateSessionIdentity(ctx context.Context, identity QueueSessionIdentity) error
 
 	// DisposeExact removes only entries whose immutable ID and opaque snapshot
 	// claim still match. It returns one outcome per requested claim plus visible
 	// queue counts from the same atomic session mutation.
 	DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error)
+	DisposeExactForSession(ctx context.Context, identity QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error)
 
 	// ListDurableLifecycleEntries returns every durable lifecycle entry across
 	// sessions. It is used by startup recovery to remove rows whose owning

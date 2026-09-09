@@ -113,6 +113,16 @@ func (s *Service) Census(ctx context.Context, sessionID string) (*QueueCensus, e
 	return result, nil
 }
 
+// CensusForSession returns a census only while the supplied session execution
+// remains current. The separate validation closes the authorization-to-read
+// race for MCP callers; disposition validates again in its mutation transaction.
+func (s *Service) CensusForSession(ctx context.Context, identity QueueSessionIdentity) (*QueueCensus, error) {
+	if err := s.repo.ValidateSessionIdentity(ctx, identity); err != nil {
+		return nil, err
+	}
+	return s.Census(ctx, identity.SessionID)
+}
+
 func metadataBool(metadata map[string]interface{}, key string) bool {
 	value, _ := metadata[key].(bool)
 	return value
@@ -121,6 +131,14 @@ func metadataBool(metadata map[string]interface{}, key string) bool {
 // DisposeExact atomically removes only unchanged exact entries. Empty,
 // duplicate, or malformed claims are rejected before repository mutation.
 func (s *Service) DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	return s.disposeExact(ctx, sessionID, nil, claims)
+}
+
+func (s *Service) DisposeExactForSession(ctx context.Context, identity QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	return s.disposeExact(ctx, identity.SessionID, &identity, claims)
+}
+
+func (s *Service) disposeExact(ctx context.Context, sessionID string, identity *QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: session id is required", ErrInvalidQueueDisposition)
 	}
@@ -137,7 +155,13 @@ func (s *Service) DisposeExact(ctx context.Context, sessionID string, claims []Q
 		}
 		seen[claim.ID] = struct{}{}
 	}
-	result, err := s.repo.DisposeExact(ctx, sessionID, claims)
+	var result *QueueDispositionResult
+	var err error
+	if identity == nil {
+		result, err = s.repo.DisposeExact(ctx, sessionID, claims)
+	} else {
+		result, err = s.repo.DisposeExactForSession(ctx, *identity, claims)
+	}
 	if err != nil {
 		return nil, err
 	}

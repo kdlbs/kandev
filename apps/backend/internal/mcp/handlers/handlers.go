@@ -231,8 +231,8 @@ type MessageQueuer interface {
 // CoordinatorQueueManager is the narrow, content-free self-session queue
 // management boundary used by the guarded census and exact disposition tools.
 type CoordinatorQueueManager interface {
-	Census(ctx context.Context, sessionID string) (*messagequeue.QueueCensus, error)
-	DisposeExact(ctx context.Context, sessionID string, claims []messagequeue.QueueEntryClaim) (*messagequeue.QueueDispositionResult, error)
+	CensusForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity) (*messagequeue.QueueCensus, error)
+	DisposeExactForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, claims []messagequeue.QueueEntryClaim) (*messagequeue.QueueDispositionResult, error)
 }
 
 // messageMetadataQueuer is an optional extension implemented by the

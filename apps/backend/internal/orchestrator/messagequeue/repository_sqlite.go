@@ -127,6 +127,23 @@ func (r *sqliteRepository) validateSessionIdentityTx(ctx context.Context, tx *sq
 	return nil
 }
 
+func (r *sqliteRepository) ValidateSessionIdentity(ctx context.Context, identity QueueSessionIdentity) error {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin validate queue session identity: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, &identity); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // lockSessionTxIn takes the per-session cross-process lock inside an existing
 // transaction (see lockSessionTx). It is the shared core used by the
 // repository methods and by PurgeTaskInTransaction, which runs inside the task
@@ -1031,6 +1048,14 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 
 // DisposeExact removes only unchanged exact entries in one locked transaction.
 func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	return r.disposeExact(ctx, sessionID, nil, claims)
+}
+
+func (r *sqliteRepository) DisposeExactForSession(ctx context.Context, identity QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	return r.disposeExact(ctx, identity.SessionID, &identity, claims)
+}
+
+func (r *sqliteRepository) disposeExact(ctx context.Context, sessionID string, identity *QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -1039,6 +1064,9 @@ func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, c
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
 	}
 	ordered, byID, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)

@@ -398,6 +398,15 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	return out, nil
 }
 
+// ValidateSessionIdentity is a shape check for the ephemeral test repository.
+// Durable implementations validate against the task session row atomically.
+func (r *memoryRepository) ValidateSessionIdentity(_ context.Context, identity QueueSessionIdentity) error {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return ErrEntryNotFound
+	}
+	return nil
+}
+
 // DisposeExact removes only unchanged exact entries under the session's memory lock.
 func (r *memoryRepository) DisposeExact(_ context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
 	r.mu.Lock()
@@ -439,6 +448,13 @@ func (r *memoryRepository) DisposeExact(_ context.Context, sessionID string, cla
 	}
 	result.AfterCount = visibleQueueCount(r.entries[sessionID])
 	return result, nil
+}
+
+func (r *memoryRepository) DisposeExactForSession(ctx context.Context, identity QueueSessionIdentity, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	if err := r.ValidateSessionIdentity(ctx, identity); err != nil {
+		return nil, err
+	}
+	return r.DisposeExact(ctx, identity.SessionID, claims)
 }
 
 // ListDurableLifecycleEntries returns durable lifecycle rows in stable FIFO

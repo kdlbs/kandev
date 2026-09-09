@@ -113,7 +113,25 @@ func TestSQLiteRepository_SessionIdentityRejectsReplacedExecution(t *testing.T) 
 	if err := repo.Insert(ctx, entry, 0); err != nil {
 		t.Fatalf("insert queue entry: %v", err)
 	}
+	disposition := &QueuedMessage{SessionID: "session-1", TaskID: "task-1", Content: "dispose", QueuedBy: QueuedByUser}
+	if err := repo.Insert(ctx, disposition, 0); err != nil {
+		t.Fatalf("insert disposition entry: %v", err)
+	}
 	identity := QueueSessionIdentity{TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "run-1"}
+	svc := censusTestService(t, repo)
+	census, err := svc.CensusForSession(ctx, identity)
+	if err != nil || len(census.Entries) != 2 {
+		t.Fatalf("census before replacement = %#v, %v", census, err)
+	}
+	var dispositionClaim string
+	for _, candidate := range census.Entries {
+		if candidate.ID == disposition.ID {
+			dispositionClaim = candidate.Claim
+		}
+	}
+	if dispositionClaim == "" {
+		t.Fatal("missing disposition claim")
+	}
 	reserved, err := repo.ReserveHeadForSession(ctx, identity)
 	if err != nil || reserved == nil {
 		t.Fatalf("reserve: %#v, %v", reserved, err)
@@ -124,8 +142,11 @@ func TestSQLiteRepository_SessionIdentityRejectsReplacedExecution(t *testing.T) 
 	if err := repo.AcknowledgeByIDForSession(ctx, identity, reserved.ID); !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("stale acknowledgement = %v, want ErrEntryNotFound", err)
 	}
+	if _, err := svc.DisposeExactForSession(ctx, identity, []QueueEntryClaim{{ID: disposition.ID, Claim: dispositionClaim}}); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("stale exact disposition = %v, want ErrEntryNotFound", err)
+	}
 	remaining, err := repo.ListBySession(ctx, "session-1")
-	if err != nil || len(remaining) != 1 || !remaining[0].IsReservedInFlight() {
+	if err != nil || len(remaining) != 2 || !remaining[0].IsReservedInFlight() || remaining[1].ID != disposition.ID {
 		t.Fatalf("reserved entry after stale acknowledgement = %#v, %v", remaining, err)
 	}
 }
