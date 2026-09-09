@@ -150,9 +150,10 @@ func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) 
 	require.False(t, hasSessionID)
 	_, hasDuration := fields["duration"]
 	require.False(t, hasDuration)
-	for _, field := range entries[0].Context {
-		require.NotContains(t, field.Key, "argument")
-	}
+
+	logJSON, err := json.Marshal(fields)
+	require.NoError(t, err)
+	require.NotContains(t, string(logJSON), "secret")
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3
@@ -190,7 +191,7 @@ func TestDispatcherBackendClient_EmptyObjectPayloadDecodesToNonNilEmptyMap(t *te
 	d := &fakeDispatcher{resp: respMsg}
 	client := NewDispatcherBackendClient(d, log)
 
-	result := make(map[string]interface{})
+	var result map[string]interface{}
 	err = client.RequestPayload(context.Background(), "test.action", nil, &result)
 	require.NoError(t, err)
 	require.NotNil(t, result)

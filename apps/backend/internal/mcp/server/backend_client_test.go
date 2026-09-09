@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -128,6 +129,7 @@ func TestChannelBackendClientTerminalFailureLogIncludesConfiguredSession(t *test
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.1
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.2
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.9
 func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
 	core, observed := observer.New(zap.WarnLevel)
 	log, err := logger.NewFromZap(zap.New(core))
@@ -160,6 +162,10 @@ func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
 	require.Equal(t, "test.action", fields["action"])
 	require.Contains(t, fields, "session_id")
 	require.Contains(t, fields, "duration")
+
+	logJSON, err := json.Marshal(fields)
+	require.NoError(t, err)
+	require.NotContains(t, string(logJSON), "secret")
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3
@@ -208,7 +214,7 @@ func TestChannelBackendClientEmptyObjectPayloadDecodesToNonNilEmptyMap(t *testin
 	client := NewChannelBackendClient(nil)
 	t.Cleanup(client.Close)
 
-	result := make(map[string]interface{})
+	var result map[string]interface{}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- client.RequestPayload(context.Background(), "test.action", nil, &result)
