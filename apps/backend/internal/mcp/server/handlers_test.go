@@ -102,6 +102,8 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, agentProfileDesc, "effective model, mode, and dynamic options")
 	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
 	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 
 	workflowProp, ok := props["workflow_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_id schema should be an object")
@@ -401,6 +403,7 @@ func TestCreateTask_ExternalMode_AgentProfileDescNotesOfficeAssigneeLimitation(t
 	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
 	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
 	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 }
 
 func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
