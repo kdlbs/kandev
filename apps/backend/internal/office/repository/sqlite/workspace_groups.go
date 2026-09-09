@@ -14,6 +14,33 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 )
 
+// workspaceGroupMaxHostParams bounds a single IN-clause query's bind
+// parameters, well below SQLite's 999/32766 and PostgreSQL's 65535 limits,
+// so a batched read stays portable across builds. Mirrors
+// internal/task/repository/sqlite's sqliteMaxHostParams; kept local here
+// because these helpers are unexported and this package cannot import them.
+const workspaceGroupMaxHostParams = 500
+
+// chunkTaskIDs splits ids into sub-slices of at most workspaceGroupMaxHostParams
+// entries, so callers can keep IN-clause queries below the host-parameter limit.
+func chunkTaskIDs(ids []string) [][]string {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) <= workspaceGroupMaxHostParams {
+		return [][]string{ids}
+	}
+	chunks := make([][]string, 0, (len(ids)+workspaceGroupMaxHostParams-1)/workspaceGroupMaxHostParams)
+	for i := 0; i < len(ids); i += workspaceGroupMaxHostParams {
+		end := i + workspaceGroupMaxHostParams
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[i:end])
+	}
+	return chunks
+}
+
 // createWorkspaceGroupTables creates the task_workspace_groups and
 // task_workspace_group_members tables used by office task handoffs.
 //
@@ -467,25 +494,32 @@ func (r *Repository) GetActiveWorkspaceGroupTaskIDs(ctx context.Context, taskIDs
 	if len(taskIDs) == 0 {
 		return result, nil
 	}
-	placeholders := make([]string, len(taskIDs))
-	args := make([]interface{}, len(taskIDs))
-	for i, id := range taskIDs {
-		placeholders[i], args[i] = "?", id
-	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(
-		`SELECT DISTINCT task_id FROM task_workspace_group_members WHERE released_at IS NULL AND task_id IN (%s)`,
-		strings.Join(placeholders, ","),
-	)), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var taskID string
-		if err := rows.Scan(&taskID); err != nil {
+	for _, chunk := range chunkTaskIDs(taskIDs) {
+		placeholders := make([]string, len(chunk))
+		args := make([]interface{}, len(chunk))
+		for i, id := range chunk {
+			placeholders[i], args[i] = "?", id
+		}
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(
+			`SELECT DISTINCT task_id FROM task_workspace_group_members WHERE released_at IS NULL AND task_id IN (%s)`,
+			strings.Join(placeholders, ","),
+		)), args...)
+		if err != nil {
 			return nil, err
 		}
-		result[taskID] = true
+		for rows.Next() {
+			var taskID string
+			if err := rows.Scan(&taskID); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			result[taskID] = true
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return result, rows.Err()
+	return result, nil
 }

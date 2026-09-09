@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -88,5 +89,40 @@ func TestGetExecutorRunningExistenceByTaskIDsEmptyInput(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty map for empty input, got %#v", got)
+	}
+}
+
+// TestGetExecutorRunningExistenceByTaskIDsChunksAcrossHostParamLimit proves
+// batchedTaskIDExistence's chunking merges results correctly when the
+// caller-supplied task ID count exceeds sqliteMaxHostParams: a boot or board
+// load for a large workflow must not error the whole read, and a hit must
+// still be found regardless of which chunk it falls into.
+func TestGetExecutorRunningExistenceByTaskIDsChunksAcrossHostParamLimit(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	taskA, _ := seedRunnerBatchTasks(t, repo, "ws-exec-running-chunked")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "exec-running-chunked-a", SessionID: "sess-exec-running-chunked-a", TaskID: taskA, ExecutorID: models.ExecutorIDLocal,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	// Pad well past sqliteMaxHostParams (500) so the read spans at least two
+	// chunks, with the real hit placed last so it lands in the final chunk.
+	taskIDs := make([]string, 0, sqliteMaxHostParams*2+1)
+	for i := 0; i < sqliteMaxHostParams*2; i++ {
+		taskIDs = append(taskIDs, fmt.Sprintf("padding-task-%d", i))
+	}
+	taskIDs = append(taskIDs, taskA)
+
+	got, err := repo.GetExecutorRunningExistenceByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		t.Fatalf("GetExecutorRunningExistenceByTaskIDs with %d IDs: %v", len(taskIDs), err)
+	}
+	if !got[taskA] {
+		t.Errorf("task with a running executor reported false across chunked read")
+	}
+	if len(got) != 1 {
+		t.Errorf("expected exactly one hit across chunked read, got %d: %#v", len(got), got)
 	}
 }
