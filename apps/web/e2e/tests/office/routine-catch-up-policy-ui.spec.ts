@@ -32,9 +32,14 @@ function catchUpPolicyCombobox(page: Page) {
   return page.getByText("Catch-up policy", { exact: true }).locator("..").getByRole("combobox");
 }
 
+// AC-OFFICE-ROUTINE-CATCHUP-003.6: the summarizing policy's own label
+// states a single summarized wake, distinct from catch_up_max's label
+// (which states the bound is on ticks counted, not runs created).
+const SUMMARIZE_MISSED_LABEL = /Summarize missed.*(once|single)/i;
+
 async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Promise<void> | void) {
   // Default: summarize_missed, catch-up max visible.
-  await expect(catchUpPolicyCombobox(page)).toHaveText("Summarize missed");
+  await expect(catchUpPolicyCombobox(page)).toHaveText(SUMMARIZE_MISSED_LABEL);
   await catchUpMaxInput();
 
   await catchUpPolicyCombobox(page).click();
@@ -42,7 +47,7 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
   await expect(page.getByText("Catch-up max", { exact: true })).toHaveCount(0);
 
   await catchUpPolicyCombobox(page).click();
-  await page.getByRole("option", { name: "Summarize missed" }).click();
+  await page.getByRole("option", { name: SUMMARIZE_MISSED_LABEL }).click();
   await catchUpMaxInput();
 
   await expect(page.getByText(RETIRED_LABEL)).toHaveCount(0);

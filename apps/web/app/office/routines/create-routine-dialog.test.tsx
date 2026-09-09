@@ -84,3 +84,22 @@ describe("CreateRoutineDialog catch-up max control (AC-003.8)", () => {
     );
   });
 });
+
+// AC-OFFICE-ROUTINE-CATCHUP-003.6: the summarizing policy's own label must
+// state a single summarized wake, separately from catch_up_max's label
+// (which already states the bound is on ticks counted, not runs created).
+// A learner who only reads the policy dropdown — never expanding the
+// conditional catch_up_max input under it — must still see this.
+describe("CreateRoutineDialog catch-up policy labeling (AC-003.6)", () => {
+  it("labels the summarizing policy option as a single wake", () => {
+    renderDialog();
+    goToScheduleStep();
+
+    const catchUpPolicyCombobox = screen.getAllByRole("combobox")[2];
+    fireEvent.click(catchUpPolicyCombobox);
+    const option = within(screen.getByRole("listbox")).getByRole("option", {
+      name: /summarize missed/i,
+    });
+    expect(option.textContent).toMatch(/once|single/i);
+  });
+});

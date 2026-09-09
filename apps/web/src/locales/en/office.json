@@ -842,7 +842,7 @@
   "subscriptionQuota": "Subscription Quota",
   "succeeded": "Succeeded",
   "successRate": "Success Rate",
-  "summarizeMissed": "Summarize missed",
+  "summarizeMissed": "Summarize missed (wakes once)",
   "sync": "Sync",
   "syncTheWorkspaceDatabaseWithOn": "Sync the workspace database with on-disk YAML files, or download a portable export bundle.",
   "system": "System",

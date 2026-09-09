@@ -842,7 +842,7 @@
   "subscriptionQuota": "Quota da subscrição",
   "succeeded": "Bem-sucedidas",
   "successRate": "Taxa de sucesso",
-  "summarizeMissed": "Resumir os perdidos",
+  "summarizeMissed": "Resumir os perdidos (acorda uma vez)",
   "sync": "Sincronizar",
   "syncTheWorkspaceDatabaseWithOn": "Sincronize a base de dados da área de trabalho com os ficheiros YAML em disco ou transfira um pacote de exportação portátil.",
   "system": "Sistema",

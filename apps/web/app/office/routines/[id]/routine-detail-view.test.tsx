@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 
 vi.mock("@/lib/routing/client-router", () => ({
@@ -84,5 +84,26 @@ describe("RoutineDetailView catch-up max control (AC-003.8)", () => {
     render(<RoutineDetailView initialRoutine={withoutPolicy} initialTriggers={NO_TRIGGERS} />);
     expect(screen.getByText(/catch-up max/i)).toBeTruthy();
     expect(screen.getByRole("spinbutton")).toBeTruthy();
+  });
+});
+
+// AC-OFFICE-ROUTINE-CATCHUP-003.6: the summarizing policy's own label must
+// state a single summarized wake, matching the create dialog.
+describe("RoutineDetailView catch-up policy labeling (AC-003.6)", () => {
+  it("labels the summarizing policy option as a single wake", () => {
+    render(
+      <RoutineDetailView
+        initialRoutine={{ ...BASE_ROUTINE, catchUpPolicy: "summarize_missed", catchUpMax: 25 }}
+        initialTriggers={NO_TRIGGERS}
+      />,
+    );
+    // Comboboxes in DOM order: status, assignee, concurrency policy,
+    // catch-up policy, then the trigger card's kind select.
+    const catchUpPolicyCombobox = screen.getAllByRole("combobox")[3];
+    fireEvent.click(catchUpPolicyCombobox);
+    const option = within(screen.getByRole("listbox")).getByRole("option", {
+      name: /summarize missed/i,
+    });
+    expect(option.textContent).toMatch(/once|single/i);
   });
 });

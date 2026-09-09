@@ -842,7 +842,7 @@
   "subscriptionQuota": "訂閱配額",
   "succeeded": "成功",
   "successRate": "成功率",
-  "summarizeMissed": "彙總錯過的",
+  "summarizeMissed": "彙總錯過的（只喚醒一次）",
   "sync": "同步",
   "syncTheWorkspaceDatabaseWithOn": "將工作區資料庫與磁碟上的 YAML 同步，或下載可移植匯出包。",
   "system": "系統",
