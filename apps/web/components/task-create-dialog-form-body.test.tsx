@@ -507,8 +507,12 @@ describe("CreateEditSelectors — runner editability (REQ-TASKS-RUNNER-SWITCH-00
     expect(unrecognized).toBe(known);
   });
 
-  it("renders nothing when both the agent column and the runner column have nothing to show", () => {
-    const { container } = render(
+  // AC-TASKS-RUNNER-SWITCH-004.2: the reason is presented unconditionally
+  // whenever runner_editable is false — a started task is not a carve-out.
+  // session_exists is itself one of the ineligibility reasons, so this is
+  // the common shape for any task with a primary session, not an edge case.
+  it("shows the ineligible reason for a started, runner-ineligible task instead of rendering nothing", () => {
+    render(
       <CreateEditSelectors
         {...baseProps}
         agentCompatState="compatible"
@@ -518,6 +522,8 @@ describe("CreateEditSelectors — runner editability (REQ-TASKS-RUNNER-SWITCH-00
       />,
     );
 
-    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent).toBeTruthy();
   });
 });

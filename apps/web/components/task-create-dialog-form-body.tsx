@@ -290,10 +290,6 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
   const { executorProfileOptions, executorProfileId, onExecutorProfileChange, executorsLoading } =
     props;
   const { ExecutorProfileSelectorComponent, runnerEditable, runnerIneligibleReason } = props;
-  // The row disappears only when there is nothing left to show in either
-  // column — a started task that is still runner-editable (nothing has
-  // materialized yet) keeps the executor column visible on its own.
-  if (!showAgentColumn && !runnerEditable) return null;
 
   // Branch + repo selection (and the FreshBranchToggle, which is per-task
   // branch strategy) live in the chip row above the description; this row
