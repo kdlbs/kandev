@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -217,12 +218,26 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 // outcome from a different transition. outcome is nil for the failed path
 // and for callers with no established semantic label (docs/specs/
 // task-delivery-ledger/spec.md, "Office run outcome").
-func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) error {
+// FinishRun writes the terminal status/outcome and returns the row as it
+// stands immediately after that write, via the same statement (RETURNING),
+// so a caller classifying the transition (office_loop_terminal_total) never
+// depends on a separate read succeeding independently of the write that
+// persisted it. Returns (nil, nil) for an unknown id: zero rows changed, so
+// there is nothing to classify.
+func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) (*models.Run, error) {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var run models.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
 		UPDATE runs SET status = ?, outcome = ?, finished_at = ? WHERE id = ?
-	`), status, outcome, now, id)
-	return err
+		RETURNING *
+	`), status, outcome, now, id).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 // GetRunByID returns the run row for a given ID. Returns sql.ErrNoRows when unknown.

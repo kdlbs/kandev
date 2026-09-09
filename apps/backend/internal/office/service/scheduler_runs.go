@@ -58,10 +58,12 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 
 // transitionRunTerminal updates the run row to the given terminal status
 // and outcome (nil writes SQL NULL) and emits OfficeRunProcessed.
-// Pre-fetching the run keeps the published payload self-contained even
-// when the caller doesn't hold a reference to the model. Publish errors
-// are logged at debug and swallowed; persistence errors are returned to
-// the caller.
+// FinishRun returns the row as it stands right after that write (via
+// RETURNING), so the published payload and the terminal-shape
+// classification both read the same statement that persisted the change —
+// neither depends on a separate read succeeding independently of it.
+// Publish errors are logged at debug and swallowed; persistence errors are
+// returned to the caller.
 //
 // Deliberately does NOT release the task checkout: transitionRunTerminal
 // is reached by every terminal run, including ones that never held the
@@ -79,14 +81,8 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // (event_subscribers.go) for the launched-run completion path, and
 // HandleAgentFailure (failure.go) for the launched-run failure path.
 func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) error {
-	run, getErr := s.repo.GetRunByID(ctx, id)
-	if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
-		s.logger.Debug("get run for terminal transition failed",
-			zap.String("run_id", id),
-			zap.String("status", status),
-			zap.Error(getErr))
-	}
-	if err := s.repo.FinishRun(ctx, id, status, outcome); err != nil {
+	run, err := s.repo.FinishRun(ctx, id, status, outcome)
+	if err != nil {
 		return err
 	}
 	s.recordTerminalShape(ctx, run, status, outcome)

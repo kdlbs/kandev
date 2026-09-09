@@ -33,13 +33,15 @@ func (ss *SchedulerService) ClaimNextRun(ctx context.Context) (*models.Run, erro
 // happened, so it is not bucketed as processed (docs/specs/
 // task-delivery-ledger/spec.md, "Office run outcome").
 func (ss *SchedulerService) FinishRun(ctx context.Context, id string) error {
-	return ss.repo.FinishRun(ctx, id, RunStatusFinished, nil)
+	_, err := ss.repo.FinishRun(ctx, id, RunStatusFinished, nil)
+	return err
 }
 
 // FailRun marks a claimed run as failed. outcome is written as NULL, same
 // as the service-layer FailRun: a failed run is bucketed on status alone.
 func (ss *SchedulerService) FailRun(ctx context.Context, id string) error {
-	return ss.repo.FinishRun(ctx, id, RunStatusFailed, nil)
+	_, err := ss.repo.FinishRun(ctx, id, RunStatusFailed, nil)
+	return err
 }
 
 // ProcessRunGuard checks if the agent is still eligible to be woken.

@@ -38,63 +38,41 @@ type CancelledRun struct {
 // into it. selectorArgs bind those placeholders, in order.
 //
 // Returns the rows actually cancelled: an empty slice means every run the
-// selector matched had already reached a terminal state. The candidate
-// read and the write run in one transaction, so a row this call reports
-// cancelled is exactly the row that was queued or claimed at read time —
-// nothing the guard would have skipped can slip in between.
+// selector matched had already reached a terminal state. The guard and the
+// write are the same UPDATE statement (RETURNING reads the classification
+// columns off the rows it just changed), so there is no separate read a
+// row's status could change behind: a run that reaches a terminal state on
+// another connection is either fully visible to this statement or not, and
+// either way it cannot be cancelled by it.
 func (r *Repository) CancelRunsWhere(
 	ctx context.Context,
 	cancelReason string,
 	selector string,
 	selectorArgs ...interface{},
 ) ([]CancelledRun, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	selectQuery := fmt.Sprintf(`
-		SELECT id, agent_profile_id, session_id, requested_at FROM runs
+	query := fmt.Sprintf(`
+		UPDATE runs
+		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
 		WHERE %s
 		  AND (%s)
+		RETURNING id, agent_profile_id, session_id, requested_at
 	`, cancellableRunStatuses, selector)
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(selectQuery), selectorArgs...)
+	args := append([]interface{}{cancelReason, time.Now().UTC()}, selectorArgs...)
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close() //nolint:errcheck
+
 	var cancelled []CancelledRun
 	for rows.Next() {
 		var row CancelledRun
 		if err := rows.Scan(&row.ID, &row.AgentProfileID, &row.SessionID, &row.RequestedAt); err != nil {
-			rows.Close() //nolint:errcheck
 			return nil, err
 		}
 		cancelled = append(cancelled, row)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(cancelled) == 0 {
-		return nil, tx.Commit()
-	}
-
-	ids := make([]interface{}, len(cancelled))
-	placeholders := make([]string, len(cancelled))
-	for i, row := range cancelled {
-		ids[i] = row.ID
-		placeholders[i] = "?"
-	}
-	args := append([]interface{}{cancelReason, time.Now().UTC()}, ids...)
-	updateQuery := fmt.Sprintf(`
-		UPDATE runs
-		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
-		WHERE id IN (%s)
-	`, strings.Join(placeholders, ","))
-	if _, err := tx.ExecContext(ctx, tx.Rebind(updateQuery), args...); err != nil {
-		return nil, err
-	}
-	return cancelled, tx.Commit()
+	return cancelled, rows.Err()
 }
 
 // CancelRun marks a run as cancelled with an optional cancel reason.
