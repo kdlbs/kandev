@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -535,9 +536,39 @@ func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testin
 	response, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, response, ws.ErrorCodeInternalError)
+	_, found, err := svc.GetWorkflowRouteOperation(context.Background(), workflowRouteOperationID("mcp-move", msg.ID))
+	require.NoError(t, err)
+	assert.False(t, found, "a transient pending-move persistence error must remain retryable")
 	require.Equal(t, []string{"queued-2"}, queue.removedIDs)
 	require.Len(t, queue.calls, 1)
 	assert.Equal(t, "preexisting", queue.calls[0].ID)
+}
+
+func TestDeferMoveTask_RecordsConflictWhenPendingMoveGenerationChanged(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedRunningTask(
+		t, repo,
+		"ws-pending-conflict", "wf-pending-conflict", "task-pending-conflict",
+		"session-pending-conflict", "step-current",
+	)
+	queue := &pendingMoveFailingQueuer{pendingErr: messagequeue.ErrPendingMoveGenerationConflict}
+	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-pending-conflict",
+		"workflow_id":      "wf-pending-conflict",
+		"workflow_step_id": "step-target",
+		"prompt":           "handoff",
+	})
+
+	response, err := h.handleMoveTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeConflict)
+	operation, found, err := svc.GetWorkflowRouteOperation(context.Background(), workflowRouteOperationID("mcp-move", msg.ID))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeConflict, operation.Outcome)
+	require.Equal(t, []string{"queued-1"}, queue.removedIDs)
+	assert.Empty(t, queue.calls)
 }
 
 // TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)

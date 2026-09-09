@@ -255,24 +255,31 @@ func (h *Handlers) deferMoveTask(
 		ExpectedWorkflowStepID: task.WorkflowStepID, InitiatingTurnID: turnID, Position: req.Position,
 		Actor: string(wfmodels.StepTransitionActorAgent), SenderSessionID: req.SenderSessionID,
 	}
-	if err := h.messageQueue.SetPendingMove(ctx, session.ID, pending); err != nil {
-		_ = h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID, Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomeConflict})
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "another deferred move is already pending for this session", nil)
-	}
-	if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID, Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomePending}); err != nil {
-		deletePendingMoveIfMatch(ctx, h.messageQueue, messagequeue.PendingMoveRecord{SessionID: session.ID, Move: *pending})
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to persist deferred route identity", nil)
-	}
+	var handoff *queuedMoveTaskPrompt
 	if req.Prompt != "" {
 		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		_, err := h.queueMoveTaskPromptWithMoveID(ctx, queueIdentityForSession(session), wrapped, moveID)
+		handoff, err = h.queueMoveTaskPromptWithMoveID(ctx, queueIdentityForSession(session), wrapped, moveID)
 		if err != nil {
-			deletePendingMoveIfMatch(ctx, h.messageQueue, messagequeue.PendingMoveRecord{SessionID: session.ID, Move: *pending})
 			h.logger.Error("move_task: failed to queue hand-off prompt",
 				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to queue move_task hand-off prompt", nil)
 		}
+	}
+	if err := h.messageQueue.SetPendingMove(ctx, session.ID, pending); err != nil {
+		h.rollbackMoveTaskPrompt(ctx, handoff)
+		if errors.Is(err, messagequeue.ErrPendingMoveGenerationConflict) {
+			_ = h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID, Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomeConflict})
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "another deferred move is already pending for this session", nil)
+		}
+		h.logger.Error("move_task: failed to persist deferred move",
+			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to persist deferred move", nil)
+	}
+	if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{ID: moveID, TaskID: req.TaskID, WorkspaceID: task.WorkspaceID, Producer: producer, ExpectedStepID: task.WorkflowStepID, ObservedStepID: task.WorkflowStepID, TargetStepID: req.WorkflowStepID, SessionID: req.SenderSessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SenderSessionID, TurnID: turnID, ExternalCause: cause, ExternalCauseID: causeID, Outcome: routing.OutcomePending}); err != nil {
+		deletePendingMoveIfMatch(ctx, h.messageQueue, messagequeue.PendingMoveRecord{SessionID: session.ID, Move: *pending})
+		h.rollbackMoveTaskPrompt(ctx, handoff)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to persist deferred route identity", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
