@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -161,6 +162,9 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	msg, err := ws.NewRequest(id, action, payload)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+	if mcporigin.IsTrustedInternalCall(ctx) {
+		mcporigin.AttachTrustedInternalCall(msg)
 	}
 
 	// Create response channel

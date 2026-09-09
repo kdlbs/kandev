@@ -87,6 +87,37 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := NewHub(nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	payload := map[string]interface{}{
+		"task_id": "task-transfer", "workspace_id": "ws-destination",
+		"workflow_id": "wf-destination", "source_workspace_id": "ws-source",
+		"source_workflow_id": "wf-source", "old_workflow_id": "wf-source",
+	}
+	_ = eventBus.Publish(ctx, events.TaskUpdated,
+		bus.NewEvent(events.TaskUpdated, "test", payload))
+
+	destination := <-hub.broadcast
+	if destination.Action != ws.ActionTaskUpdated {
+		t.Fatalf("destination transfer action = %q, want task.updated", destination.Action)
+	}
+	source := <-hub.broadcast
+	if source.Action != ws.ActionTaskDeleted {
+		t.Fatalf("source transfer action = %q, want task.deleted", source.Action)
+	}
+	var sourcePayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(source.Payload, &sourcePayload))
+	require.Equal(t, "task-transfer", sourcePayload["task_id"])
+	require.Equal(t, "ws-source", sourcePayload["workspace_id"])
+	require.NotContains(t, sourcePayload, "description")
+}
+
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that
 // RegisterTaskNotifications creates one subscription per routed subject (with
 // lifecycle state events intentionally sharing one ordered wildcard).

@@ -190,7 +190,37 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 		b.logLifecycleBroadcast(action, data, sessionID)
 	}
 
-	return b.routeBroadcast(action, event.Data, sessionID, extractWorkspaceID(event.Data), msg)
+	destinationWorkspaceID := extractWorkspaceID(event.Data)
+	if err := b.routeBroadcast(action, event.Data, sessionID, destinationWorkspaceID, msg); err != nil {
+		return err
+	}
+	return b.broadcastTransferSourceRemoval(event.Data, action, destinationWorkspaceID)
+}
+
+// broadcastTransferSourceRemoval removes a transferred task from source-only
+// boards without sending those readers the destination task payload.
+func (b *TaskEventBroadcaster) broadcastTransferSourceRemoval(data interface{}, action, destinationWorkspaceID string) error {
+	if action != ws.ActionTaskUpdated {
+		return nil
+	}
+	sourceWorkspaceID := extractStringField(data, "source_workspace_id")
+	if sourceWorkspaceID == "" || sourceWorkspaceID == destinationWorkspaceID {
+		return nil
+	}
+	payload := map[string]interface{}{
+		"task_id":      extractStringField(data, "task_id"),
+		"workspace_id": sourceWorkspaceID,
+		"workflow_id":  extractStringField(data, "source_workflow_id"),
+	}
+	if operationID := extractStringField(data, "transfer_operation_id"); operationID != "" {
+		payload["transfer_operation_id"] = operationID
+	}
+	msg, err := ws.NewNotification(ws.ActionTaskDeleted, payload)
+	if err != nil {
+		return err
+	}
+	b.hub.BroadcastToWorkspace(sourceWorkspaceID, msg)
+	return nil
 }
 
 func (b *TaskEventBroadcaster) logSessionStateMetadata(action, sessionID string, data interface{}) {

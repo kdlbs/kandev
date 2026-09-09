@@ -1878,6 +1878,11 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
+	}
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.

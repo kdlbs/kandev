@@ -7,11 +7,27 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
+
+func TestChannelBackendClientCarriesTrustedInternalAuditAttestation(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(mcporigin.WithTrustedInternalCall(context.Background()), "mcp.audit_task_transfer_attempt", nil, nil)
+	}()
+	request := <-client.GetRequestChannel()
+	require.True(t, mcporigin.MessageCarriesTrustedInternalCall(request))
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	client.HandleResponse(response)
+	require.NoError(t, <-errCh)
+}
 
 func TestChannelBackendClientCloseBeforeRequestDoesNotPublish(t *testing.T) {
 	client := NewChannelBackendClient(nil)

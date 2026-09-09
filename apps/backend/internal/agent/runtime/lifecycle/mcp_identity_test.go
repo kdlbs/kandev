@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -17,6 +18,22 @@ import (
 type recordingMCPHandler struct {
 	gotCtx context.Context
 	calls  int
+}
+
+func TestMCPHandlerForRestoresTrustedInternalAuditAttestation(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	message := mcpRequest(t, nil)
+	mcporigin.AttachTrustedInternalCall(message)
+
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
+	_, err := handler.Dispatch(context.Background(), message)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if !mcporigin.IsTrustedInternalCall(inner.gotCtx) {
+		t.Fatal("trusted internal audit attestation was not restored")
+	}
 }
 
 func (h *recordingMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

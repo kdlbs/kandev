@@ -63,3 +63,7 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrTaskTransferConflict is the stable, non-leaking result for a stale,
+// ambiguous, incompatible, or idempotency-mismatched transfer request.
+var ErrTaskTransferConflict = errors.New("task transfer conflict")
