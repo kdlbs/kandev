@@ -105,7 +105,7 @@ coordinators, and other workspaces cannot use it.
 - Linked unchanged same-repository PR: rerun eligible; rerun-ineligible returns
   `dispatch_ref_unavailable` without provider dispatch.
 - Linked unchanged fork PR: rerun eligible; rerun-ineligible returns
-  `fork_dispatch_disallowed`.
+  `dispatch_ref_unavailable` without provider dispatch.
 - Empty Actions `pull_requests` association: exact base/head tuple succeeds.
 - Head drift, unlinked PR, stale source attempt, cross-workspace target,
   disallowed workflow/input, wrong step, and missing grant fail before a write.
