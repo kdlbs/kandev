@@ -1,7 +1,7 @@
 ---
 id: "01-correct-effective-task-tree-state"
 title: "Correct effective task-tree state"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -84,4 +84,15 @@ None.
 
 ## Results
 
-Pending.
+- TDD RED: `cd apps/web && pnpm exec vitest run lib/sidebar/apply-view-effective-state.test.ts`
+  failed with 9 of 24 tests before the resolver correction.
+- TDD GREEN: the same focused unit command passes with 26 tests. Coverage includes active
+  precedence over review, waiting, failed, cancelled, and completed parents; scheduling fallback;
+  recursive descendants; cycle protection; completion gating; filtering; shared sorting and
+  grouping; and row-object preservation.
+- `cd apps/web && pnpm e2e:run tests/task/sidebar-subtask-state-sort.spec.ts` passes with the
+  completed-parent regression rendered in the In progress group.
+- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-subtasks.spec.ts`
+  passes on the shared mobile task-tree renderer.
+- Related sidebar unit tests pass (8 files, 142 tests); TypeScript typecheck, targeted ESLint,
+  Prettier, and the E2E sleep ratchet pass.

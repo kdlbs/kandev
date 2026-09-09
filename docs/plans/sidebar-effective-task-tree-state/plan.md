@@ -1,6 +1,6 @@
 ---
 created: 2026-09-09
-status: draft
+status: implemented
 requirements:
   - REQ-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001
 system_design:
@@ -65,11 +65,17 @@ unchanged. Preserve the existing behavior that filters run before descendant map
 
 ## Work orders
 
-- [ ] [Task 01: Correct effective task-tree state](task-01-correct-effective-task-tree-state.md)
+- [x] [Task 01: Correct effective task-tree state](task-01-correct-effective-task-tree-state.md)
 
 ## Verification results
 
-Pending.
+- `cd apps/web && pnpm exec vitest run lib/sidebar/apply-view-effective-state.test.ts` passed
+  (26 tests).
+- `cd apps/web && pnpm e2e:run tests/task/sidebar-subtask-state-sort.spec.ts` passed (1 test).
+- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-subtasks.spec.ts`
+  passed (1 test), confirming the shared mobile rendering path.
+- Related sidebar unit tests passed (142 tests), TypeScript typecheck passed, targeted ESLint and
+  Prettier checks passed, and the E2E sleep ratchet passed.
 
 ## Risks
 

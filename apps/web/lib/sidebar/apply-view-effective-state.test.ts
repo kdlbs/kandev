@@ -11,6 +11,7 @@ function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
   };
 }
 
+// @covers AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.1, .4, .5
 describe("applySort — effective state bubbling (subtasks)", () => {
   const stateAsc = { key: "state" as const, direction: "asc" as const };
 
@@ -117,6 +118,7 @@ describe("applySort — effective state bubbling (subtasks)", () => {
   });
 });
 
+// @covers AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.1, .2, .3, .4
 describe("applyGroup — effective state grouping (subtasks)", () => {
   it("backlog parent with running subtask lands in IN_PROGRESS group", () => {
     const parent = task({ id: "p", state: "TODO" });
@@ -163,7 +165,7 @@ describe("applyGroup — effective state grouping (subtasks)", () => {
     expect(completedGroup?.tasks.map((t) => t.id)).toEqual(["p"]);
   });
 
-  it("parent with null-state running subtask stays in its own group", () => {
+  it("running session without task state bubbles parent to in-progress group", () => {
     const parent = task({ id: "p", state: "TODO" });
     const nullStateSub = task({
       id: "sub",
@@ -173,14 +175,101 @@ describe("applyGroup — effective state grouping (subtasks)", () => {
     });
     const subMap = new Map<string, TaskSwitcherItem[]>([["p", [nullStateSub]]]);
     const out = applyGroup([parent, nullStateSub], "state", subMap);
-    // Null-state subtask must not displace the parent from its own TODO group
-    const todoGroup = out.groups.find((g) => g.key === "TODO");
-    expect(todoGroup?.tasks.map((t) => t.id)).toContain("p");
-    // Should NOT appear under NOT_STARTED (the old bug) or IN_PROGRESS
-    expect(out.groups.find((g) => g.key === "__not_started__")).toBeUndefined();
+    // A live session is enough to recover an incomplete task-state projection.
+    const inProgressGroup = out.groups.find((g) => g.key === "IN_PROGRESS");
+    expect(inProgressGroup?.tasks.map((t) => t.id)).toContain("p");
+    expect(out.groups.find((g) => g.key === "TODO")).toBeUndefined();
   });
 });
 
+describe("applyGroup — effective state precedence (subtasks)", () => {
+  it.each([
+    ["REVIEW", "WAITING_FOR_INPUT"],
+    ["WAITING_FOR_INPUT", "WAITING_FOR_INPUT"],
+    ["FAILED", "FAILED"],
+    ["CANCELLED", "CANCELLED"],
+    ["COMPLETED", "COMPLETED"],
+  ] as const)("running child overrides a %s parent", (parentState, parentSessionState) => {
+    const parent = task({ id: "p", state: parentState, sessionState: parentSessionState });
+    const runningSub = task({
+      id: "sub",
+      parentTaskId: "p",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+    });
+    const subMap = new Map<string, TaskSwitcherItem[]>([["p", [runningSub]]]);
+
+    const out = applyGroup([parent, runningSub], "state", subMap);
+
+    expect(out.groups.find((group) => group.key === "IN_PROGRESS")?.tasks).toEqual([parent]);
+  });
+
+  it("uses scheduling when no included member is already in progress", () => {
+    const parent = task({ id: "p", state: "COMPLETED", sessionState: "COMPLETED" });
+    const schedulingSub = task({
+      id: "sub",
+      parentTaskId: "p",
+      state: "SCHEDULING",
+      sessionState: "STARTING",
+    });
+    const subMap = new Map<string, TaskSwitcherItem[]>([["p", [schedulingSub]]]);
+
+    const out = applyGroup([parent, schedulingSub], "state", subMap);
+
+    expect(out.groups.find((group) => group.key === "SCHEDULING")?.tasks).toEqual([parent]);
+    expect(out.groups.find((group) => group.key === "COMPLETED")).toBeUndefined();
+  });
+
+  it("does not use Completed while an included member is incomplete", () => {
+    const parent = task({ id: "p", state: "COMPLETED", sessionState: "COMPLETED" });
+    const todoSub = task({ id: "sub", parentTaskId: "p", state: "TODO" });
+    const subMap = new Map<string, TaskSwitcherItem[]>([["p", [todoSub]]]);
+
+    const out = applyGroup([parent, todoSub], "state", subMap);
+
+    expect(out.groups.find((group) => group.key === "TODO")?.tasks).toEqual([parent]);
+    expect(out.groups.find((group) => group.key === "COMPLETED")).toBeUndefined();
+  });
+
+  it("resolves a running nested descendant and survives a malformed cycle", () => {
+    const parent = task({ id: "p", state: "COMPLETED", sessionState: "COMPLETED" });
+    const child = task({ id: "c", parentTaskId: "p", state: "TODO" });
+    const grandchild = task({
+      id: "gc",
+      parentTaskId: "c",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+    });
+    const subMap = new Map<string, TaskSwitcherItem[]>([
+      ["p", [child]],
+      ["c", [grandchild]],
+      ["gc", [parent]],
+    ]);
+
+    const out = applyGroup([parent, child, grandchild], "state", subMap);
+
+    expect(out.groups.find((group) => group.key === "IN_PROGRESS")?.tasks).toEqual([parent]);
+  });
+
+  it("preserves each row object while changing only tree placement", () => {
+    const parent = task({ id: "p", state: "COMPLETED", sessionState: "COMPLETED" });
+    const runningSub = task({
+      id: "sub",
+      parentTaskId: "p",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+    });
+    const subMap = new Map<string, TaskSwitcherItem[]>([["p", [runningSub]]]);
+
+    const out = applyGroup([parent, runningSub], "state", subMap);
+
+    expect(out.groups.find((group) => group.key === "IN_PROGRESS")?.tasks[0]).toBe(parent);
+    expect(out.subTasksByParentId.get("p")?.[0]).toBe(runningSub);
+    expect(runningSub.state).toBe("IN_PROGRESS");
+  });
+});
+
+// @covers AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.5, .6
 describe("applyView — effective state bubbling (integration)", () => {
   const stateView: SidebarView = {
     id: "v",
@@ -248,5 +337,68 @@ describe("applyView — effective state bubbling (integration)", () => {
     expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["idle", "bk"]);
     // manual subtask order is preserved underneath the parent
     expect(out.subTasksByParentId.get("idle")?.map((t) => t.id)).toEqual(["s2", "s1"]);
+  });
+});
+
+// @covers AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.3, .7
+describe("applyView — effective state consistency (integration)", () => {
+  it("uses the same effective state for sorting and grouping", () => {
+    const parent = task({
+      id: "parent",
+      state: "COMPLETED",
+      sessionState: "COMPLETED",
+      createdAt: "2026-01-01",
+    });
+    const peer = task({
+      id: "peer",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      createdAt: "2026-02-01",
+    });
+    const runningSub = task({
+      id: "sub",
+      parentTaskId: "parent",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      createdAt: "2026-01-02",
+    });
+    const view: SidebarView = {
+      id: "state-view",
+      name: "State",
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "state",
+      collapsedGroups: [],
+    };
+
+    const out = applyView([parent, peer, runningSub], view);
+    const activeGroup = out.groups.find((group) => group.key === "IN_PROGRESS");
+
+    expect(activeGroup?.tasks.map((task) => task.id)).toEqual(["peer", "parent"]);
+    expect(out.groups.find((group) => group.key === "COMPLETED")).toBeUndefined();
+  });
+
+  it("ignores a filtered-out running descendant", () => {
+    const parent = task({ id: "parent", title: "Visible parent", state: "COMPLETED" });
+    const runningSub = task({
+      id: "sub",
+      parentTaskId: "parent",
+      title: "Hidden running child",
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+    });
+    const view: SidebarView = {
+      id: "filtered-view",
+      name: "Filtered",
+      filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "Visible" }],
+      sort: { key: "state", direction: "asc" },
+      group: "state",
+      collapsedGroups: [],
+    };
+
+    const out = applyView([parent, runningSub], view);
+
+    expect(out.groups.find((group) => group.key === "COMPLETED")?.tasks).toEqual([parent]);
+    expect(out.subTasksByParentId.get("parent")).toBeUndefined();
   });
 });

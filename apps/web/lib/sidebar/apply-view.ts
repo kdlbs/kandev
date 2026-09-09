@@ -3,6 +3,7 @@ import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { t } from "@/lib/i18n";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import type { TaskState } from "@/lib/types/http";
 import type {
   FilterClause,
   FilterDimension,
@@ -49,6 +50,12 @@ const STATE_BUCKET_ORDER: Record<TaskBucket, number> = {
 function getStateBucket(task: TaskSwitcherItem): TaskBucket {
   return classifyTask(task.sessionState, task.state);
 }
+
+type EffectiveTaskTreeState = {
+  groupKey: string;
+  label: string;
+  bucket: TaskBucket;
+};
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
@@ -162,19 +169,18 @@ export function applySort(
   spec: SortSpec,
   orderedTaskIds: string[] = [],
   subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): TaskSwitcherItem[] {
   let cmp: SortComparator;
   if (spec.key === "state" && subTasksByParentId) {
+    const resolvedStates =
+      effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, subTasksByParentId);
     const effectiveOrder = new Map<string, number>();
     for (const t of tasks) {
-      let order = STATE_BUCKET_ORDER[getStateBucket(t)];
-      const subs = subTasksByParentId.get(t.id);
-      if (subs) {
-        for (const sub of subs) {
-          order = Math.min(order, STATE_BUCKET_ORDER[getStateBucket(sub)]);
-        }
-      }
-      effectiveOrder.set(t.id, order);
+      effectiveOrder.set(
+        t.id,
+        STATE_BUCKET_ORDER[resolvedStates.get(t.id)?.bucket ?? getStateBucket(t)],
+      );
     }
     cmp = (a, b) => {
       const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
@@ -259,49 +265,78 @@ function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string
   return { key: task.state, label: formatTaskStateLabel(task.state) };
 }
 
-/**
- * Computes the effective state group for a parent task, considering its direct
- * subtasks. The task (or its "best" subtask) with the highest-priority bucket
- * (lowest STATE_BUCKET_ORDER) determines the group. This makes a parent with an
- * active subtask bubble up to the same section as genuinely-running top-level
- * tasks.
- *
- * Tie-break: when multiple candidates share the same bucket, prefer the one
- * with the lowest STATE_GROUP_ORDER (i.e. the earlier/more-active lifecycle
- * state). This is consistent with the existing top-level sort where review
- * (which includes COMPLETED/FAILED/CANCELLED) sorts above in_progress.
- */
-function getEffectiveStateGroup(
+function collectTaskTree(
   task: TaskSwitcherItem,
   subMap: Map<string, TaskSwitcherItem[]>,
-): { key: string; label: string } {
-  let bestTask = task;
-  let bestBucketOrder = STATE_BUCKET_ORDER[getStateBucket(task)];
-  let bestStateOrder = STATE_GROUP_ORDER[task.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+  visited: Set<string>,
+  members: TaskSwitcherItem[],
+): void {
+  if (visited.has(task.id)) return;
+  visited.add(task.id);
+  members.push(task);
+  for (const subtask of subMap.get(task.id) ?? []) {
+    collectTaskTree(subtask, subMap, visited, members);
+  }
+}
 
-  const subs = subMap.get(task.id);
-  if (subs) {
-    for (const sub of subs) {
-      // Subtasks without an explicit persisted state can't provide a meaningful
-      // group heading (getTaskStateGroup would return "not started"), so skip
-      // them entirely. The parent still bubbles in applySort via bucket numbers.
-      if (!sub.state) continue;
-      const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
-      if (subBucketOrder < bestBucketOrder) {
-        bestTask = sub;
-        bestBucketOrder = subBucketOrder;
-        bestStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-      } else if (subBucketOrder === bestBucketOrder) {
-        const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-        if (subStateOrder < bestStateOrder) {
-          bestTask = sub;
-          bestStateOrder = subStateOrder;
-        }
-      }
-    }
+function getStateGroupForKey(key: TaskState): { key: string; label: string } {
+  return { key, label: formatTaskStateLabel(key) };
+}
+
+function compareStateCandidates(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
+  const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
+  if (bucket !== 0) return bucket;
+  return (
+    (STATE_GROUP_ORDER[a.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99) -
+    (STATE_GROUP_ORDER[b.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99)
+  );
+}
+
+/**
+ * Resolve the placement state for one included task tree. Active work has
+ * precedence over review and terminal states, while non-active states retain
+ * the previous bucket and lifecycle ordering.
+ */
+function resolveEffectiveTaskTreeState(
+  task: TaskSwitcherItem,
+  subMap: Map<string, TaskSwitcherItem[]>,
+): EffectiveTaskTreeState {
+  const members: TaskSwitcherItem[] = [];
+  collectTaskTree(task, subMap, new Set<string>(), members);
+
+  if (
+    members.some((member) => member.state === "IN_PROGRESS" || member.sessionState === "RUNNING")
+  ) {
+    const stateGroup = getStateGroupForKey("IN_PROGRESS");
+    return { groupKey: stateGroup.key, label: stateGroup.label, bucket: "in_progress" };
+  }
+  if (members.some((member) => member.state === "SCHEDULING")) {
+    const stateGroup = getStateGroupForKey("SCHEDULING");
+    return { groupKey: stateGroup.key, label: stateGroup.label, bucket: "in_progress" };
   }
 
-  return getTaskStateGroup(bestTask);
+  const allCompleted = members.every((member) => member.state === "COMPLETED");
+  const candidates = members.filter(
+    (member, index) =>
+      (index === 0 || member.state !== undefined) && (allCompleted || member.state !== "COMPLETED"),
+  );
+  const bestTask = candidates.reduce(
+    (best, candidate) => (compareStateCandidates(candidate, best) < 0 ? candidate : best),
+    candidates[0] ?? members.find((member) => member.state !== "COMPLETED") ?? task,
+  );
+  const stateGroup = getTaskStateGroup(bestTask);
+  return { groupKey: stateGroup.key, label: stateGroup.label, bucket: getStateBucket(bestTask) };
+}
+
+function resolveEffectiveStateMap(
+  tasks: TaskSwitcherItem[],
+  subMap: Map<string, TaskSwitcherItem[]>,
+): Map<string, EffectiveTaskTreeState> {
+  const resolved = new Map<string, EffectiveTaskTreeState>();
+  for (const task of tasks) {
+    resolved.set(task.id, resolveEffectiveTaskTreeState(task, subMap));
+  }
+  return resolved;
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
@@ -367,6 +402,7 @@ export function applyGroup(
   tasks: TaskSwitcherItem[],
   groupKey: GroupKey,
   effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): GroupedSidebarList {
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
@@ -379,12 +415,16 @@ export function applyGroup(
   }
 
   const extract = groupExtractors[groupKey];
+  const resolvedStates =
+    groupKey === "state" && effectiveStateSubMap
+      ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, effectiveStateSubMap))
+      : undefined;
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
-    const { key, label } =
-      groupKey === "state" && effectiveStateSubMap
-        ? getEffectiveStateGroup(task, effectiveStateSubMap)
-        : extract(task);
+    const resolved = resolvedStates?.get(task.id);
+    const { key, label } = resolved
+      ? { key: resolved.groupKey, label: resolved.label }
+      : extract(task);
     let group = buckets.get(key);
     if (!group) {
       group = { key, label, tasks: [] };
@@ -618,8 +658,18 @@ export function applyView(
 ): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
   const { subTasksByParentId } = separateSubtasks(filtered);
-  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds, subTasksByParentId);
-  const grouped = applyGroup(sorted, view.group, subTasksByParentId);
+  const effectiveStateByTaskId =
+    view.sort.key === "state" || view.group === "state"
+      ? resolveEffectiveStateMap(filtered, subTasksByParentId)
+      : undefined;
+  const sorted = applySort(
+    filtered,
+    view.sort,
+    prefs?.orderedTaskIds,
+    subTasksByParentId,
+    effectiveStateByTaskId,
+  );
+  const grouped = applyGroup(sorted, view.group, subTasksByParentId, effectiveStateByTaskId);
   const subOrderMap = prefs?.subtaskOrderByParentId;
   if (subOrderMap) {
     for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {
