@@ -10,10 +10,9 @@ vi.mock("@/lib/routing/client-router", () => ({
 }));
 
 vi.mock("@/lib/api/domains/office-api", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
-      "@/lib/api/domains/office-api",
-    );
+  const actual = await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
+    "@/lib/api/domains/office-api",
+  );
   return {
     ...actual,
     updateRoutine: vi.fn().mockResolvedValue({}),
