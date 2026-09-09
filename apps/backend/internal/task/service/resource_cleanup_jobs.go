@@ -54,6 +54,19 @@ type taskResourceCleanupSnapshot struct {
 	// Additive and absent-tolerant: a job row written by an older backend
 	// decodes with an empty list and reclaims nothing.
 	SSHTaskDirs []sshReclaimTarget `json:"ssh_task_dirs,omitempty"`
+	// OrphanReapRoots is the durable, only-growing list of resolved local
+	// paths this job has removed and confirmed absent (REQ-TASKS-ORPHAN-REAP-001).
+	// A root persists for the life of the job; it is never removed from this
+	// list once added.
+	OrphanReapRoots []string `json:"orphan_reap_roots,omitempty"`
+	// OrphanReapRecords carries one outcome per candidate process this job has
+	// reaped or deliberately skipped, keyed by PID (REQ-TASKS-ORPHAN-REAP-005/006).
+	// A re-detected PID's record is replaced by the current attempt's outcome; a
+	// PID not re-detected keeps its existing record.
+	OrphanReapRecords []orphanReapCandidateRecord `json:"orphan_reap_records,omitempty"`
+	// OrphanReapSkips carries a root-level or phase-level skip that has no
+	// per-candidate record to attach its reason to (AC-TASKS-ORPHAN-REAP-005.7).
+	OrphanReapSkips []orphanReapSkipRecord `json:"orphan_reap_skips,omitempty"`
 }
 
 type taskResourceCleanupRun struct {
@@ -410,6 +423,7 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 	defer s.signalCleanupDoneForTest()
 	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, &snapshot)
 	if cleanupErr != nil {
+		s.persistOrphanReapProgressBestEffort(runCtx, job, &snapshot)
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -504,6 +518,11 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
+	// Resolve every path this attempt might remove WHILE IT STILL EXISTS
+	// (AC-TASKS-ORPHAN-REAP-001.1), before performTaskCleanup can remove it.
+	reapRootCandidates := s.gatherOrphanReapRootCandidates(
+		snapshot, cleanupSessionIDs(snapshot.Sessions, targets),
+	)
 	errs := s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
 		taskEnvironmentCleanup{
 			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
@@ -521,6 +540,18 @@ func (s *Service) executeTaskResourceCleanupJob(
 	}
 	if len(failedStops) == 0 {
 		errs = append(errs, s.reclaimSSHTaskDirs(ctx, job, snapshot)...)
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return errors.Join(append(errs, cause)...)
+	}
+	// Reap phase: REQ-TASKS-ORPHAN-REAP-001..007. Last phase in the job
+	// (AC-TASKS-ORPHAN-REAP-006.1), gated on a clean stop
+	// (AC-TASKS-ORPHAN-REAP-006.2) exactly like remote reclamation above, and
+	// on the context.Cause checks already run above
+	// (AC-TASKS-ORPHAN-REAP-006.3's pre-start clause).
+	if len(failedStops) == 0 {
+		newlyRemoved := confirmOrphanReapRootsRemoved(reapRootCandidates)
+		errs = append(errs, s.runOrphanReapPhase(ctx, job, snapshot, newlyRemoved)...)
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
