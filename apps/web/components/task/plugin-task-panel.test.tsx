@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 
 let mockActiveTaskId: string | null = "task_1";
 let mockActiveSessionId: string | null = "session_1";
@@ -86,6 +86,42 @@ describe("PluginTaskPanel", () => {
     );
 
     expect(screen.getByText("This plugin panel failed to load.")).not.toBeNull();
+    console.error = originalConsoleError;
+  });
+
+  it("recovers a failed panel when a replacement plugin generation registers it", () => {
+    function Throws(): never {
+      throw new Error("first generation failed");
+    }
+    function Reloaded() {
+      return <div data-testid="reloaded-panel">Reloaded</div>;
+    }
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerTaskPanel({ id: "notes", title: "Notes", Component: Throws });
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    render(
+      <PluginTaskPanel
+        pluginId="plugin-a"
+        panelKey="notes"
+        panelId="plugin:plugin-a:notes"
+        presentation="desktop"
+      />,
+    );
+    expect(screen.getByText("This plugin panel failed to load.")).not.toBeNull();
+
+    act(() => {
+      pluginRegistry.markPluginLoading("plugin-a", 2);
+      pluginRegistry.unregisterPlugin("plugin-a");
+      pluginRegistry
+        .forPlugin("plugin-a")
+        .registerTaskPanel({ id: "notes", title: "Notes", Component: Reloaded });
+      pluginRegistry.markPluginReady("plugin-a", 2);
+    });
+
+    expect(screen.getByTestId("reloaded-panel")).not.toBeNull();
     console.error = originalConsoleError;
   });
 });

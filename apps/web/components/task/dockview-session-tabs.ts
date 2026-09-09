@@ -24,6 +24,60 @@ import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
+const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
+
+function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  let hiddenSessionIdsByEnv = hiddenSessionIdsByApi.get(api);
+  if (!hiddenSessionIdsByEnv) {
+    hiddenSessionIdsByEnv = new Map();
+    hiddenSessionIdsByApi.set(api, hiddenSessionIdsByEnv);
+  }
+  const existing = hiddenSessionIdsByEnv.get(envId);
+  if (existing) return existing;
+  const hiddenSessionIds = new Set<string>();
+  hiddenSessionIdsByEnv.set(envId, hiddenSessionIds);
+  return hiddenSessionIds;
+}
+
+function allKnownSessionIds(appStore: ReturnType<typeof useAppStoreApi>): Set<string> {
+  const sessionsByTask = appStore.getState().taskSessionsByTask.itemsByTaskId;
+  return new Set(Object.values(sessionsByTask).flatMap((sessions) => sessions.map((s) => s.id)));
+}
+
+function shouldSkipHiddenEffectiveSession(
+  effectiveSessionId: string,
+  hiddenSessionIds: Set<string>,
+): boolean {
+  if (!hiddenSessionIds.has(effectiveSessionId)) return false;
+  if (isDebug()) {
+    debug("useAutoSessionTab: skip ensure (effective session explicitly hidden)", {
+      effectiveSessionId,
+    });
+  }
+  return true;
+}
+
+function pruneHiddenSessionIds(hiddenSessionIds: Set<string>, knownSessionIds: Set<string>): void {
+  for (const hiddenSessionId of hiddenSessionIds) {
+    if (!knownSessionIds.has(hiddenSessionId)) hiddenSessionIds.delete(hiddenSessionId);
+  }
+}
+
+/** Hide a session tab without changing its persisted session lifecycle. */
+export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
+  const hiddenSessionIds = hiddenSessionIdsFor(api);
+  hiddenSessionIds.add(sessionId);
+  const panel = api.getPanel(`session:${sessionId}`);
+  if (panel) api.removePanel(panel);
+}
+
+/** Forget a prior hide when a session is reopened or deleted. */
+export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
+  const hiddenSessionIds = hiddenSessionIdsFor(api);
+  hiddenSessionIds.delete(sessionId);
+}
+
 /**
  * Decide whether `onDidActivePanelChange` should write `setActiveSession`.
  *
@@ -100,6 +154,16 @@ export function setupChatPanelSafetyNet(
         // can create a new session via the "+" menu.
         if (!activeSessionId) {
           if (isDebug()) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
+          return;
+        }
+        // An explicit Hide is also valid when it removes the last visible
+        // session panel. Do not undo that user intent from the safety net.
+        if (hiddenSessionIdsFor(api).has(activeSessionId)) {
+          if (isDebug()) {
+            debug("setupChatPanelSafetyNet: skip recreate (session explicitly hidden)", {
+              activeSessionId,
+            });
+          }
           return;
         }
         // Don't recreate a panel for a session that no longer exists in the
@@ -289,8 +353,16 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
 
 type AutoSessionTabRefs = {
   sessionTabCreatedRef: MutableRefObject<Set<string>>;
+  hiddenSessionIdsRef: MutableRefObject<Set<string>>;
+  hiddenSessionApiRef: MutableRefObject<DockviewApi | null>;
+  hiddenSessionEnvIdRef: MutableRefObject<string | null>;
   prevTaskIdRef: MutableRefObject<string | null>;
   prevSessionIdRef: MutableRefObject<string | null>;
+};
+
+type SessionPanelVisibility = {
+  createdSet: Set<string>;
+  hiddenSessionIds: Set<string>;
 };
 
 /**
@@ -351,12 +423,19 @@ function ensureSiblingPanels(
   currentSessionIds: string[],
   effectiveSessionId: string,
   siblingAnchor: AddPanelOptions["position"],
-  createdSet: Set<string>,
+  visibility: SessionPanelVisibility,
 ): string[] {
+  const { createdSet, hiddenSessionIds } = visibility;
   const created: string[] = [];
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
-    if (isDebug() && !api.getPanel(`session:${sid}`)) created.push(sid);
+    const existingPanel = api.getPanel(`session:${sid}`);
+    if (existingPanel) {
+      createdSet.add(sid);
+      continue;
+    }
+    if (hiddenSessionIds.has(sid)) continue;
+    if (isDebug()) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
   return created;
@@ -498,6 +577,20 @@ export function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
+  // Keep hidden tabs in memory for the mounted Dockview API and scope them by
+  // environment so switching A -> B -> A restores each environment's choice.
+  // A fresh API after reload intentionally starts with no hidden-session state;
+  // saved Dockview layouts remain responsible for persisted panel geometry.
+  const currentEnvId = useDockviewStore.getState().currentLayoutEnvId;
+  if (
+    refs.hiddenSessionApiRef.current !== api ||
+    refs.hiddenSessionEnvIdRef.current !== currentEnvId
+  ) {
+    refs.hiddenSessionIdsRef.current = hiddenSessionIdsFor(api);
+    refs.hiddenSessionApiRef.current = api;
+    refs.hiddenSessionEnvIdRef.current = currentEnvId;
+  }
+
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
   if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
@@ -514,6 +607,11 @@ export function runAutoSessionTabEffect(
     effectiveSessionId ?? "",
   );
 
+  // Keep hide intent for sessions belonging to inactive tasks that share this
+  // environment. Prune only sessions that are gone from the whole store, not
+  // merely absent from the currently selected task.
+  pruneHiddenSessionIds(refs.hiddenSessionIdsRef.current, allKnownSessionIds(appStore));
+
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
@@ -528,6 +626,12 @@ export function runAutoSessionTabEffect(
       refs.sessionTabCreatedRef.current,
     )
   ) {
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  // Explicit reopen clears the marker before this effect runs.
+  if (shouldSkipHiddenEffectiveSession(effectiveSessionId, refs.hiddenSessionIdsRef.current)) {
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
@@ -586,7 +690,10 @@ export function runAutoSessionTabEffect(
     currentSessionIds,
     effectiveSessionId,
     siblingAnchor,
-    refs.sessionTabCreatedRef.current,
+    {
+      createdSet: refs.sessionTabCreatedRef.current,
+      hiddenSessionIds: refs.hiddenSessionIdsRef.current,
+    },
   );
 
   logAutoSessionTabEffectExit(api, effectiveSessionId, siblingsCreated, activePanel);
@@ -608,10 +715,20 @@ export function runAutoSessionTabEffect(
  */
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
+  const hiddenSessionIdsRef = useRef<Set<string>>(new Set());
+  const hiddenSessionApiRef = useRef<DockviewApi | null>(null);
+  const hiddenSessionEnvIdRef = useRef<string | null>(null);
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
   const dockviewApi = useDockviewStore((state) => state.api);
+
+  useEffect(() => {
+    if (!dockviewApi) return;
+    hiddenSessionIdsRef.current = hiddenSessionIdsFor(dockviewApi);
+    hiddenSessionApiRef.current = dockviewApi;
+    hiddenSessionEnvIdRef.current = useDockviewStore.getState().currentLayoutEnvId;
+  }, [dockviewApi]);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -627,6 +744,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   useEffect(() => {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
       sessionTabCreatedRef,
+      hiddenSessionIdsRef,
+      hiddenSessionApiRef,
+      hiddenSessionEnvIdRef,
       prevTaskIdRef,
       prevSessionIdRef,
     });

@@ -1,0 +1,157 @@
+import { describe, expect, it } from "vitest";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { hideSessionPanel, runAutoSessionTabEffect } from "./dockview-session-tabs";
+import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils";
+
+const TASK_ID = "task-A";
+const ACTIVE_SESSION_ID = "session-active";
+const HIDDEN_SESSION_ID = "session-hidden";
+
+function makeAppStore() {
+  return {
+    getState: () => ({
+      tasks: { activeTaskId: TASK_ID },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          [TASK_ID]: [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
+        },
+      },
+    }),
+  };
+}
+
+function makeRefs() {
+  return {
+    sessionTabCreatedRef: { current: new Set<string>() },
+    hiddenSessionIdsRef: { current: new Set<string>() },
+    hiddenSessionApiRef: { current: null },
+    hiddenSessionEnvIdRef: { current: null as string | null },
+    prevTaskIdRef: { current: "task-old" as string | null },
+    prevSessionIdRef: { current: "session-old" as string | null },
+  };
+}
+
+function runInEnvironment(
+  api: ReturnType<typeof makeReorderingAutoSessionApi>["api"],
+  envId: string,
+  run: () => void,
+) {
+  const previous = useDockviewStore.getState();
+  useDockviewStore.setState({ api, currentLayoutEnvId: envId, preMaximizeLayout: null });
+  try {
+    run();
+  } finally {
+    useDockviewStore.setState({
+      api: previous.api,
+      currentLayoutEnvId: previous.currentLayoutEnvId,
+      preMaximizeLayout: previous.preMaximizeLayout,
+    });
+  }
+}
+
+describe("hidden session tab state", () => {
+  it("keeps hidden tabs scoped when switching environments in one Dockview API", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAppStore();
+    const refs = makeRefs();
+
+    runInEnvironment(api, "env-cache-a", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(api, HIDDEN_SESSION_ID);
+    });
+    runInEnvironment(api, "env-cache-b", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).not.toBeNull();
+
+    const visiblePanel = api.getPanel(`session:${HIDDEN_SESSION_ID}`);
+    if (visiblePanel) api.removePanel(visiblePanel);
+
+    runInEnvironment(api, "env-cache-a", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+  });
+
+  it("refreshes hidden state when the Dockview API is replaced in the same environment", () => {
+    const firstLoad = makeReorderingAutoSessionApi();
+    const refs = makeRefs();
+    const appStore = makeAppStore();
+
+    runInEnvironment(firstLoad.api, "env-reload", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+    });
+
+    const reloaded = makeReorderingAutoSessionApi();
+    runInEnvironment(reloaded.api, "env-reload", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(reloaded.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).not.toBeNull();
+  });
+
+  it("keeps a closed panel absent during layout-only reconciliation", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const refs = makeRefs();
+    const appStore = makeAppStore();
+
+    runInEnvironment(api, "env-layout", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(api, HIDDEN_SESSION_ID);
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+  });
+
+  it("preserves hidden markers when switching tasks in one environment", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    let activeTaskId = "task-A";
+    const appStore = {
+      getState: () => ({
+        tasks: { activeTaskId },
+        taskSessionsByTask: {
+          itemsByTaskId: {
+            "task-A": [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
+            "task-B": [{ id: "session-task-b" }],
+          },
+        },
+      }),
+    };
+    const refs = makeRefs();
+
+    runInEnvironment(api, "env-shared", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(api, HIDDEN_SESSION_ID);
+      activeTaskId = "task-B";
+      runAutoSessionTabEffect("session-task-b", appStore as never, refs as never);
+      activeTaskId = "task-A";
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    expect(refs.hiddenSessionIdsRef.current.has(HIDDEN_SESSION_ID)).toBe(true);
+  });
+
+  it("keeps an automatically selected hidden fallback closed", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAppStore();
+    const refs = makeRefs();
+
+    runInEnvironment(api, "env-fallback", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      const hiddenPanel = api.getPanel(`session:${HIDDEN_SESSION_ID}`);
+      expect(hiddenPanel).not.toBeNull();
+      if (hiddenPanel) api.removePanel(hiddenPanel);
+      refs.hiddenSessionIdsRef.current.add(HIDDEN_SESSION_ID);
+
+      runAutoSessionTabEffect(HIDDEN_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    expect(refs.hiddenSessionIdsRef.current.has(HIDDEN_SESSION_ID)).toBe(true);
+  });
+});
