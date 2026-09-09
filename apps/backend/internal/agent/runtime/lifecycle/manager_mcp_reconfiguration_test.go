@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -199,6 +201,57 @@ func TestApplyPendingSessionMCPFallsBackToLoad(t *testing.T) {
 	}
 }
 
+func TestApplyPendingSessionMCPRestoresRuntimeConfigAfterLoad(t *testing.T) {
+	client, actions, cleanup := newSessionMCPClient(t, false, false, true)
+	defer cleanup()
+	mgr := newTestManager(t)
+	mgr.mcpResolver = &sessionMCPResolverFake{}
+	stateRepo := newSessionMCPStateFake()
+	stateRepo.state["session-1"] = mcpconfig.SessionMCPSelectionState{
+		DesiredRevision: 1, AppliedRevision: 0, ApplyState: mcpconfig.SessionMCPApplyStatePendingIdle,
+	}
+	mgr.SetMCPSelectionStateRepository(stateRepo)
+	execution := newSessionMCPExecution(client)
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "mock-smart",
+		Models:         []streams.SessionModelInfo{{ModelID: "mock-smart"}},
+		ConfigOptions: []streams.ConfigOption{{
+			ID: "effort", Category: "thought_level", CurrentValue: "max",
+		}},
+		ConfigOptionsSettled: true,
+	})
+	execution.SetModeState(&CachedModeState{CurrentModeID: "plan-mock"})
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	if got := <-actions; got != "agent.initialize" {
+		t.Fatalf("first action = %q, want initialize", got)
+	}
+	if err := mgr.applyPendingSessionMCP(context.Background(), execution.SessionID); err != nil {
+		t.Fatalf("applyPendingSessionMCP: %v", err)
+	}
+
+	got := make([]string, 0, 4)
+	for {
+		select {
+		case action := <-actions:
+			got = append(got, action)
+		default:
+			want := []string{
+				"agent.session.load",
+				"agent.session.set_model",
+				"agent.session.set_mode",
+				"agent.session.set_config_option",
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("actions = %v, want %v", got, want)
+			}
+			return
+		}
+	}
+}
+
 func TestApplyPendingSessionMCPFailurePreservesAppliedRevision(t *testing.T) {
 	client, actions, cleanup := newSessionMCPClient(t, true, true, false)
 	defer cleanup()
@@ -269,6 +322,8 @@ func newSessionMCPClient(t *testing.T, failResume, supportsResume, supportsLoad 
 				response, _ = ws.NewResponse(msg.ID, msg.Action, map[string]any{
 					"success": true, "attachment_attempt_id": "attempt-load",
 				})
+			case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
+				response, _ = ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 			}
 			if response != nil {
 				encoded, _ := json.Marshal(response)

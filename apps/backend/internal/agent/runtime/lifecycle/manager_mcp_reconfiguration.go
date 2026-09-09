@@ -72,8 +72,16 @@ func (m *Manager) applyPendingSessionMCP(ctx context.Context, sessionID string) 
 		return m.saveDeferredSessionMCP(ctx, sessionID)
 	}
 
+	// session/load and session/resume can reset provider-owned runtime settings.
+	// Capture the effective Kandev runtime configuration before reconnecting so
+	// MCP selection changes do not silently replace a user's model, mode, or
+	// config options with provider defaults.
+	runtimeConfig := m.captureSessionRuntimeConfigForReset(ctx, execution)
 	if mcpErr := m.applySessionMCPWithAgent(ctx, execution); mcpErr != nil {
 		return m.saveFailedSessionMCP(ctx, sessionID, state.DesiredRevision, mcpErr)
+	}
+	if err := m.restoreSessionRuntimeConfig(ctx, execution, execution.ACPSessionID, runtimeConfig); err != nil {
+		return m.saveFailedSessionMCP(ctx, sessionID, state.DesiredRevision, err)
 	}
 	return m.saveAppliedSessionMCP(ctx, sessionID, state.DesiredRevision, execution.agentctl.GetLastAttachmentAttemptID())
 }
