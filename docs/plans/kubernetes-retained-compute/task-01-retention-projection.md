@@ -101,3 +101,7 @@ Passed:
 - `rtk go test ./internal/kubernetes -count=1`
   (131 tests)
 - `rtk git diff --check`
+
+The projection table explicitly covers Created, Starting, Running,
+WaitingForInput, Idle, Completed, Failed, and Cancelled session states,
+including ordinary active Pods and retained sessions.

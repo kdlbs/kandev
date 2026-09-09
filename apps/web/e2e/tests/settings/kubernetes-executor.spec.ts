@@ -375,6 +375,9 @@ test("desktop session table shows retained state, requests, guidance, and task n
     await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
       "Stop preserves Kubernetes resources",
     );
+    await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
+      "Existing claims are not deleted by Kandev",
+    );
     const taskLink = table.getByTestId("kubernetes-session-task-link");
     await expect(taskLink).toHaveAttribute("href", "/t/" + taskId);
     await table.scrollIntoViewIfNeeded();

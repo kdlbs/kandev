@@ -57,7 +57,7 @@ if [[ "$BASE_IMAGE" == *":latest"* ]]; then die "BASE_IMAGE must not use latest"
 if [[ -z "${PNPM_VERSION:-}" || ! "$PNPM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   die "PNPM_VERSION must be a pinned semantic version"
 fi
-if [[ "$platform" != linux/amd64 ]]; then
+if [[ "$mode" == smoke && "$platform" != linux/amd64 ]]; then
   die "this validation currently supports linux/amd64 only"
 fi
 
@@ -84,7 +84,8 @@ for target in "${targets[@]}"; do
   assert_file_contains "$template" "cpu: 250m"
   assert_file_contains "$template" "memory: 512Mi"
   assert_file_contains "$template" "memory: 2Gi"
-  if grep -nE '^[[:space:]]+(command|args|restartPolicy|volumeMounts|ports|HOME|KANDEV_)' "$template"; then
+  if grep -nE '^[[:space:]]+(-[[:space:]]+)?(command|args|workingDir|restartPolicy|volumeMounts|ports):' "$template" \
+    || grep -nE '^[[:space:]]+-[[:space:]]+name:[[:space:]]*(HOME|KANDEV_[^[:space:]]*)($|[[:space:]])' "$template"; then
     die "$template contains a Kandev-owned field"
   fi
 done

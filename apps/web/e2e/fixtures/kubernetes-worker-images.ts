@@ -20,7 +20,11 @@ export type KubernetesWorkerImages = {
   dispose: () => Promise<void>;
 };
 
-type BuiltImage = { tag: string; target: KubernetesWorkerTarget };
+type BuiltImage = {
+  tag: string;
+  target: KubernetesWorkerTarget;
+  kind: "recipe" | "harness";
+};
 
 export async function buildKubernetesWorkerImages(
   cluster: KubernetesCluster,
@@ -33,7 +37,10 @@ export async function buildKubernetesWorkerImages(
     for (const target of TARGETS) {
       const recipeTag = `kandev-worker-e2e:${suffix}-${target}`;
       const harnessTag = `kandev-worker-e2e:${suffix}-${target}-harness`;
-      built.push({ tag: recipeTag, target }, { tag: harnessTag, target });
+      built.push(
+        { tag: recipeTag, target, kind: "recipe" },
+        { tag: harnessTag, target, kind: "harness" },
+      );
       buildImage(target, recipeTag, pins.baseImage, pins.pnpmVersion);
       loadImage(cluster, recipeTag);
       buildHarnessImage(recipeTag, harnessTag);
@@ -143,7 +150,7 @@ function loadImage(cluster: KubernetesCluster, tag: string): void {
 }
 
 function imageFor(built: BuiltImage[], target: KubernetesWorkerTarget): string {
-  const image = built.filter((entry) => entry.target === target).at(-1)?.tag;
+  const image = built.find((entry) => entry.target === target && entry.kind === "harness")?.tag;
   if (!image) throw new Error(`worker image target was not built: ${target}`);
   return image;
 }

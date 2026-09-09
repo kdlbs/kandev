@@ -180,6 +180,10 @@ type BackendFixtureLifecycle = {
   removeTempRoot?: (tmpDir: string) => void;
 };
 
+type BackendProcess = ChildProcess & {
+  waitForLogFile?: () => Promise<void>;
+};
+
 function removeOwnedTempRoot(tmpDir: string): void {
   fs.rmSync(tmpDir, {
     recursive: true,
@@ -191,18 +195,20 @@ function removeOwnedTempRoot(tmpDir: string): void {
 
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
-  run: (registerProcess: (proc: ChildProcess) => void) => Promise<T>,
+  run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
   lifecycle: BackendFixtureLifecycle = {},
 ): Promise<T> {
   const stopProcess = lifecycle.stopProcess ?? killProcessGroup;
   const removeTempRoot = lifecycle.removeTempRoot ?? removeOwnedTempRoot;
-  let backendProc: ChildProcess | undefined;
+  let backendProc: BackendProcess | undefined;
+  const backendProcesses: BackendProcess[] = [];
   let result: T | undefined;
   const failures: unknown[] = [];
 
   try {
     result = await run((proc) => {
       backendProc = proc;
+      backendProcesses.push(proc);
     });
   } catch (error) {
     failures.push(error);
@@ -211,6 +217,15 @@ export async function runOwnedBackendFixture<T>(
   if (backendProc) {
     try {
       await stopProcess(backendProc);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  for (const proc of backendProcesses) {
+    if (!proc.waitForLogFile) continue;
+    try {
+      await proc.waitForLogFile();
     } catch (error) {
       failures.push(error);
     }
@@ -239,7 +254,7 @@ function spawnBackendProcess(
   debug: boolean,
   port: number,
   logPath: string,
-): ChildProcess {
+): BackendProcess {
   const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
@@ -247,9 +262,18 @@ function spawnBackendProcess(
   });
 
   const logFile = fs.createWriteStream(logPath, { flags: "a" });
-  proc.once("exit", () => {
-    logFile.end();
+  const logFileClosed = new Promise<void>((resolve, reject) => {
+    logFile.once("close", resolve);
+    logFile.once("error", reject);
   });
+  // A child can emit an error after its exit event. Keep the stream error
+  // handled so late writes cannot terminate the Playwright worker.
+  logFile.on("error", () => undefined);
+  const closeLogFile = () => {
+    if (!logFile.writableEnded) logFile.end();
+  };
+  proc.once("close", closeLogFile);
+  proc.once("error", closeLogFile);
   proc.stderr?.on("data", (chunk: Buffer) => {
     logFile.write(chunk);
     if (debug) {
@@ -263,7 +287,9 @@ function spawnBackendProcess(
     }
   });
 
-  return proc;
+  return Object.assign(proc, {
+    waitForLogFile: () => logFileClosed,
+  });
 }
 
 /**
@@ -386,7 +412,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_WORKTREE_ENABLED: "true",
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
+          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and

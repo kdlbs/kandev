@@ -22,8 +22,13 @@ describe("KubernetesSessionsCard", () => {
     expect(screen.getByTestId("kubernetes-session-guidance").textContent).toContain(
       "Stop preserves Kubernetes resources",
     );
-    expect(screen.getByTestId("kubernetes-session-task-link").getAttribute("href")).toBe(
-      "/t/task-retained",
+    expect(screen.getByTestId("kubernetes-session-guidance").textContent).toContain(
+      "Existing claims are not deleted by Kandev",
+    );
+    const desktopLink = screen.getByTestId("kubernetes-session-task-link");
+    expect(desktopLink.getAttribute("href")).toBe("/t/task-retained");
+    expect(desktopLink.getAttribute("aria-label")).toBe(
+      "Open task task-retained, session session-retained",
     );
 
     responsive.isMobile = true;
@@ -32,7 +37,12 @@ describe("KubernetesSessionsCard", () => {
     expect(within(mobile).getByText("Retained")).toBeTruthy();
     expect(within(mobile).getByText("0 CPU")).toBeTruthy();
     expect(within(mobile).getByText("512Mi memory")).toBeTruthy();
-    expect(within(mobile).getByRole("link").getAttribute("href")).toBe("/t/task-retained");
+    const mobileLink = within(mobile).getByRole("link");
+    expect(mobileLink.getAttribute("href")).toBe("/t/task-retained");
+    expect(mobileLink.getAttribute("aria-label")).toBe(
+      "Open task task-retained, session session-retained",
+    );
+    expect(mobileLink.className).toContain("cursor-pointer");
   });
 });
 

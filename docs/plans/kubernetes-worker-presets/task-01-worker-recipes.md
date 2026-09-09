@@ -100,7 +100,8 @@ Passed:
 - `rtk bash scripts/test-kubernetes-worker-images.sh --smoke --platform linux/amd64`
   (minimal `sha256:bf9586f8c189a3186886f518b0d12665a5e65a71c85a26b5bb67fd4788565379`,
   node-pnpm `sha256:d3a36164c42c9dd90f2d46bc6d37fad59d8f28490566e9815a76cc2692227a92`,
-  Python reuses the immutable minimal layer)
+  Python `sha256:bf9586f8c189a3186886f518b0d12665a5e65a71c85a26b5bb67fd4788565379`
+  reuses the immutable minimal layer and passed the Python cache/venv smoke)
 - `rtk go test ./internal/agent/kubernetes -run 'TestKubernetesWorkerPresets' -count=1`
   (8 tests)
 - `rtk git diff --check`

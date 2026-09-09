@@ -390,6 +390,9 @@ test("active session cards expose task and session identities without a cluster"
     await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
       "Stop preserves Kubernetes resources",
     );
+    await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
+      "Existing claims are not deleted by Kandev",
+    );
     const taskLink = sessions.getByTestId("kubernetes-session-task-link");
     await expect(taskLink).toHaveAttribute("href", "/t/" + taskId);
     await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes active sessions");

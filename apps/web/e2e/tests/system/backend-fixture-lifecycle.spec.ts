@@ -68,7 +68,11 @@ test.describe("backend fixture lifecycle", () => {
 
   test("stops the registered process before cleanup after a health failure", async () => {
     const events: string[] = [];
-    const child = new EventEmitter() as unknown as ChildProcess;
+    const child = Object.assign(new EventEmitter(), {
+      waitForLogFile: async () => {
+        events.push("logs");
+      },
+    }) as unknown as ChildProcess;
 
     await assert.rejects(
       runOwnedBackendFixture(
@@ -92,7 +96,7 @@ test.describe("backend fixture lifecycle", () => {
       /health failed/,
     );
 
-    assert.deepEqual(events, ["run", "stop", "remove"]);
+    assert.deepEqual(events, ["run", "stop", "logs", "remove"]);
   });
 
   test("surfaces cleanup failure alongside the fixture failure", async () => {

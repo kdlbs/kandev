@@ -30,9 +30,12 @@ func TestKubernetesSessionRetentionProjectionTable(t *testing.T) {
 		retentionState string
 	}{
 		{name: "created pending", sessionState: models.TaskSessionStateCreated, podPhase: corev1.PodPending, retentionState: "active"},
+		{name: "starting running", sessionState: models.TaskSessionStateStarting, podPhase: corev1.PodRunning, retentionState: "active"},
+		{name: "running pod", sessionState: models.TaskSessionStateRunning, podPhase: corev1.PodRunning, retentionState: "active"},
 		{name: "waiting running", sessionState: models.TaskSessionStateWaitingForInput, podPhase: corev1.PodRunning, retentionState: "active"},
 		{name: "cancelled running", sessionState: models.TaskSessionStateCancelled, podPhase: corev1.PodRunning, retentionState: "retained"},
 		{name: "idle running", sessionState: models.TaskSessionStateIdle, podPhase: corev1.PodRunning, retentionState: "retained"},
+		{name: "completed running", sessionState: models.TaskSessionStateCompleted, podPhase: corev1.PodRunning, retentionState: "retained"},
 		{name: "deleting active", sessionState: models.TaskSessionStateRunning, podPhase: corev1.PodRunning, deleting: true, retentionState: "terminating"},
 		{name: "succeeded retained state", sessionState: models.TaskSessionStateCancelled, podPhase: corev1.PodSucceeded, retentionState: "terminal"},
 		{name: "failed retained state", sessionState: models.TaskSessionStateFailed, podPhase: corev1.PodFailed, retentionState: "terminal"},
