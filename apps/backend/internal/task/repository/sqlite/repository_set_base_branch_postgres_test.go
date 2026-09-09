@@ -64,7 +64,7 @@ func TestPostgresRepositorySetBaseBranchMigrationPreservesItems(t *testing.T) {
 		err := repo.db.Get(&count, repo.db.Rebind(`
 			SELECT COUNT(*)
 			FROM information_schema.columns
-			WHERE table_name = ? AND column_name = ?
+			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?
 		`), "repository_set_items", "base_branch")
 		if err != nil {
 			t.Fatalf("inspect base_branch column after %s migration: %v", stage, err)
