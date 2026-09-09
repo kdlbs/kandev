@@ -331,6 +331,11 @@ Stop, not only sessions whose agent process is currently running. The card
 shows separate session state, Pod state, retention state, workspace mode, and
 main-container CPU and memory requests.
 
+Desktop rows use two status lines. The first line shows session and retention
+badges. The second line shows Pod phase and main-container state. Use the row
+disclosure to see the full labeled details. Phone cards show the same facts in
+a compact group and keep the full card as the task link.
+
 `active` means the recorded session is in an active lifecycle state.
 `retained` means the verified Pending or Running Pod remains after a stopped,
 completed, failed, or idle session. `terminating`, `terminal`, `missing`, and

@@ -17,8 +17,9 @@ describe("KubernetesSessionsCard", () => {
     const rendered = render(<KubernetesSessionsCard state={state} />);
 
     expect(screen.getByTestId("kubernetes-sessions-table").textContent).toContain("Retained");
-    expect(screen.getByTestId("kubernetes-sessions-table").textContent).toContain("0 CPU");
-    expect(screen.getByTestId("kubernetes-sessions-table").textContent).toContain("512Mi memory");
+    expect(screen.getByTestId("kubernetes-session-request-summary").textContent).toContain(
+      "0 CPU · 512Mi memory",
+    );
     expect(screen.getByTestId("kubernetes-session-guidance").textContent).toContain(
       "Stop preserves Kubernetes resources",
     );
@@ -35,8 +36,9 @@ describe("KubernetesSessionsCard", () => {
     rendered.rerender(<KubernetesSessionsCard state={state} />);
     const mobile = screen.getByTestId("kubernetes-mobile-session-list");
     expect(within(mobile).getByText("Retained")).toBeTruthy();
-    expect(within(mobile).getByText("0 CPU")).toBeTruthy();
-    expect(within(mobile).getByText("512Mi memory")).toBeTruthy();
+    expect(within(mobile).getByTestId("kubernetes-session-request-summary").textContent).toContain(
+      "0 CPU · 512Mi memory",
+    );
     const mobileLink = within(mobile).getByRole("link");
     expect(mobileLink.getAttribute("href")).toBe("/t/task-retained");
     expect(mobileLink.getAttribute("aria-label")).toBe(
@@ -56,14 +58,14 @@ describe("KubernetesSessionsCard", () => {
 
     const rendered = render(<KubernetesSessionsCard state={state} />);
     const desktopStatus = screen.getByTestId("kubernetes-session-status");
-    expect(within(desktopStatus).getByText("Pod state: Pending")).toBeTruthy();
-    expect(within(desktopStatus).getByText("Main-container state: Waiting")).toBeTruthy();
+    expect(within(desktopStatus).getByText("Pod: Pending")).toBeTruthy();
+    expect(within(desktopStatus).getByText("Container: Waiting")).toBeTruthy();
 
     responsive.isMobile = true;
     rendered.rerender(<KubernetesSessionsCard state={state} />);
     const mobile = screen.getByTestId("kubernetes-mobile-session-list");
-    expect(within(mobile).getByText("Pod state: Pending")).toBeTruthy();
-    expect(within(mobile).getByText("Main-container state: Waiting")).toBeTruthy();
+    expect(within(mobile).getByText("Pod: Pending")).toBeTruthy();
+    expect(within(mobile).getByText("Container: Waiting")).toBeTruthy();
   });
 });
 

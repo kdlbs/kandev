@@ -87,13 +87,19 @@ The backend owns classification. Frontend helpers select translated labels and
 fallbacks, without recreating the state machine.
 
 `KubernetesSessionsCard` remains the only changed product surface.
-Desktop keeps the table, with separate session/Pod status lines and a compact
-main-container request summary. The task identity becomes a routing-adapter link
-to `/t/<encoded-task-id>`. It does not select or resume a session automatically.
+Desktop keeps the table. Each default row uses at most two status lines. The
+first line shows session and retention badges. The second line shows distinct
+Pod phase and main-container state values. The Pod cell also shows the workspace
+mode, and a separate column shows the main-container requests. A disclosure
+opens one labeled diagnostic row without changing another session row. The task
+identity becomes a routing-adapter link to `/t/<encoded-task-id>`. It does not
+select or resume a session automatically.
 
 Phone presentation reuses the shipped `MobileSessionList` cards in this file and
 the direct-navigation pattern from `components/kanban-with-preview.tsx`.
-Each card orders Pod identity, session/Pod state, requests, workspace, and task navigation.
+Each card groups Pod identity, task and session identity, compact status, requests,
+workspace mode, and creation time. The status uses the same two-line hierarchy as
+the desktop row. The phone card has no diagnostic disclosure.
 The card body navigates to its task because there are no competing inline actions.
 The whole card is a semantic link with at least a 44px touch height.
 The page remains the single vertical scroll owner. Long identifiers wrap.

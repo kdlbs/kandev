@@ -8,7 +8,6 @@ import {
   mainContainerStateValue,
   podPhaseValue,
   podStatusLabel,
-  podStatusValue,
   retentionLabel,
   sessionStateLabel,
   formatCreatedAt,
@@ -18,100 +17,132 @@ import {
 export function SessionIdentity({ session }: { session: KubernetesSession }) {
   const { t } = useTranslation();
   return (
-    <div className="min-w-0 space-y-2">
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{t("executors:kubernetesPod")}</p>
-        <p className="break-all font-mono text-sm">{session.pod_name || "-"}</p>
-      </div>
-      <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-        <SessionIdentityValue label={t("executors:task")} value={session.task_id} />
-        <SessionIdentityValue label={t("executors:session")} value={session.session_id} />
-      </div>
+    <div className="min-w-0 space-y-1.5">
+      <p className="break-all font-mono text-sm">{session.pod_name || "-"}</p>
+      <SessionIdentityValue label={t("executors:task")} value={session.task_id} />
+      <SessionIdentityValue label={t("executors:session")} value={session.session_id} />
     </div>
   );
 }
 
 function SessionIdentityValue({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="break-all font-mono text-xs">{value}</p>
-    </div>
+    <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
+      <span className="font-sans">{label}: </span>
+      {value}
+    </p>
   );
 }
 
-export function SessionStatus({ session }: { session: KubernetesSession }) {
+export function SessionStatusSummary({ session }: { session: KubernetesSession }) {
   const { t } = useTranslation();
-  const podStatus = podStatusValue(session);
+  const sessionState = normalizedState(session.session_state);
+  const retentionState = normalizedState(session.retention_state);
   const podPhase = podPhaseValue(session);
   const mainContainerState = mainContainerStateValue(session);
-  const retentionState = normalizedState(session.retention_state);
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="min-w-0 space-y-1.5" data-testid="kubernetes-session-status-summary">
+      <div className="flex flex-nowrap items-center gap-1.5">
+        <Badge variant={sessionState === "running" ? "default" : "secondary"}>
+          {sessionStateLabel(sessionState, t)}
+        </Badge>
         <Badge variant={retentionState === "retained" ? "outline" : "secondary"}>
           {retentionLabel(retentionState, t)}
         </Badge>
-        <Badge variant={podStatus.toLowerCase() === "running" ? "default" : "secondary"}>
-          {podStatusLabel(podStatus, t)}
-        </Badge>
-        {session.restarts > 0 && <RestartCount count={session.restarts} />}
       </div>
-      <div className="space-y-1 text-xs text-muted-foreground">
-        <p>
-          {t("executors:kubernetesSessionStateValue", {
-            value: sessionStateLabel(session.session_state, t),
-          })}
-        </p>
-        <p>{t("executors:kubernetesPodStateValue", { value: podStatusLabel(podPhase, t) })}</p>
-        <p>
-          {t("executors:kubernetesContainerStateValue", {
+      <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground md:flex-nowrap md:whitespace-nowrap">
+        <span>
+          {t("executors:kubernetesPodCompactValue", { value: podStatusLabel(podPhase, t) })}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          {t("executors:kubernetesContainerCompactValue", {
             value: podStatusLabel(mainContainerState, t),
           })}
-        </p>
-        <p>
-          {t("executors:kubernetesRetentionStateValue", {
-            value: retentionLabel(retentionState, t),
-          })}
-        </p>
+        </span>
+        {session.restarts > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <RestartCount count={session.restarts} />
+          </>
+        )}
       </div>
-      <RequestSummary session={session} />
     </div>
   );
 }
 
-function RequestSummary({ session }: { session: KubernetesSession }) {
+export function SessionRuntimeDetails({ session }: { session: KubernetesSession }) {
+  const { t } = useTranslation();
+  const retentionState = normalizedState(session.retention_state);
+  const podPhase = podPhaseValue(session);
+  const mainContainerState = mainContainerStateValue(session);
+  return (
+    <div
+      className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground md:grid-cols-2 xl:grid-cols-4"
+      data-testid="kubernetes-session-runtime-details"
+    >
+      <p>
+        {t("executors:kubernetesSessionStateValue", {
+          value: sessionStateLabel(session.session_state, t),
+        })}
+      </p>
+      <p>
+        {t("executors:kubernetesRetentionStateValue", {
+          value: retentionLabel(retentionState, t),
+        })}
+      </p>
+      <p>{t("executors:kubernetesPodStateValue", { value: podStatusLabel(podPhase, t) })}</p>
+      <p>
+        {t("executors:kubernetesContainerStateValue", {
+          value: podStatusLabel(mainContainerState, t),
+        })}
+      </p>
+      <p>{t("executors:kubernetesRestarts", { count: session.restarts })}</p>
+      <p>
+        {t("executors:kubernetesWorkspaceValue", {
+          value: workspaceLabel(session.workspace_kind, t),
+        })}
+      </p>
+      <p>{t("executors:kubernetesCreatedValue", { value: formatCreatedAt(session.created_at) })}</p>
+      <RequestSummary session={session} showLabel />
+      <SessionFailureReason session={session} />
+    </div>
+  );
+}
+
+export function RequestSummary({
+  session,
+  showLabel = false,
+}: {
+  session: KubernetesSession;
+  showLabel?: boolean;
+}) {
   const { t } = useTranslation();
   const requests = session.main_container_requests;
+  const values = [
+    requests?.cpu ? t("executors:kubernetesRequestCpu", { value: requests.cpu }) : null,
+    requests?.memory ? t("executors:kubernetesRequestMemory", { value: requests.memory }) : null,
+  ].filter((value): value is string => Boolean(value));
   return (
-    <div className="space-y-1 text-xs text-muted-foreground">
-      <p>{t("executors:kubernetesMainContainerRequests")}</p>
-      {requests?.cpu && (
-        <p className="break-all">{t("executors:kubernetesRequestCpu", { value: requests.cpu })}</p>
-      )}
-      {requests?.memory && (
-        <p className="break-all">
-          {t("executors:kubernetesRequestMemory", { value: requests.memory })}
-        </p>
-      )}
-      {!requests?.cpu && !requests?.memory && <p>{t("executors:kubernetesRequestsUnspecified")}</p>}
-    </div>
+    <p
+      className="min-w-0 text-xs text-muted-foreground"
+      data-testid="kubernetes-session-request-summary"
+    >
+      {showLabel && <span>{t("executors:kubernetesMainContainerRequests")}: </span>}
+      {values.length > 0 ? values.join(" · ") : t("executors:kubernetesRequestsUnspecifiedValue")}
+    </p>
   );
 }
 
 function RestartCount({ count }: { count: number }) {
   const { t } = useTranslation();
-  return (
-    <span className="text-xs text-muted-foreground">
-      {t("executors:kubernetesRestarts", { count })}
-    </span>
-  );
+  return <span>{t("executors:kubernetesRestarts", { count })}</span>;
 }
 
 export function SessionDetails({ session }: { session: KubernetesSession }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-1 text-xs text-muted-foreground">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
       <p>
         {t("executors:kubernetesWorkspaceValue", {
           value: workspaceLabel(session.workspace_kind, t),

@@ -83,6 +83,9 @@ Implemented. Backend projection, translated desktop/mobile presentation, and
 real managed-PVC Stop/Resume/terminal cleanup evidence passed with exact task
 and resource identities preserved.
 
+The final presentation uses two-line desktop rows with one optional diagnostic
+row. Phone cards use the same compact status hierarchy and remain task links.
+
 ## Risks
 
 - A Pending Pod is retained but not proof of allocated compute or charges.

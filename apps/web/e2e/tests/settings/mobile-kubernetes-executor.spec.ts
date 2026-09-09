@@ -387,6 +387,13 @@ test("active session cards expose task and session identities without a cluster"
     await expect(sessions).toContainText("Retained");
     await expect(sessions).toContainText("0 CPU");
     await expect(sessions).toContainText("512Mi memory");
+    const statusSummary = sessions.getByTestId("kubernetes-session-status-summary");
+    await expect(statusSummary).toContainText("Cancelled");
+    await expect(statusSummary).toContainText("Pod: Running");
+    await expect(statusSummary).toContainText("Container: Running");
+    const statusBox = await statusSummary.boundingBox();
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.height).toBeLessThanOrEqual(80);
     await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
       "Stop preserves Kubernetes resources",
     );

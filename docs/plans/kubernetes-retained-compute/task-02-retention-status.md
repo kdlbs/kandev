@@ -142,3 +142,12 @@ Passed:
 - `rtk node --test scripts/validate-public-docs.test.mjs`
 - `rtk node scripts/validate-public-docs.mjs`
 - `rtk git diff --check`
+
+Compact-row follow-up passed:
+
+- The focused component, API, and hook suite passed 32 tests.
+- The desktop E2E suite passed 4 tests. The session row remained at most 96 px
+  high, and the Created cell remained inside the table.
+- The phone E2E suite passed 3 tests. The status group remained at most 80 px
+  high with no document overflow.
+- Production-build screenshots confirmed the compact desktop row and phone card.

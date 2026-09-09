@@ -372,6 +372,35 @@ test("desktop session table shows retained state, requests, guidance, and task n
     await expect(table).toContainText("Retained");
     await expect(table).toContainText("0 CPU");
     await expect(table).toContainText("512Mi memory");
+    const sessionRow = table.getByTestId("kubernetes-session-row");
+    await expect(sessionRow).toHaveCount(1);
+    const rowBox = await sessionRow.boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(rowBox!.height).toBeLessThanOrEqual(96);
+    const statusSummary = sessionRow.getByTestId("kubernetes-session-status-summary");
+    await expect(statusSummary).toContainText("Cancelled");
+    await expect(statusSummary).toContainText("Pod: Running");
+    await expect(statusSummary).toContainText("Container: Running");
+    const tableContainer = table.locator("..");
+    const createdCell = sessionRow.locator("td").last();
+    const [tableContainerBox, createdCellBox] = await Promise.all([
+      tableContainer.boundingBox(),
+      createdCell.boundingBox(),
+    ]);
+    expect(tableContainerBox).not.toBeNull();
+    expect(createdCellBox).not.toBeNull();
+    expect(createdCellBox!.x + createdCellBox!.width).toBeLessThanOrEqual(
+      tableContainerBox!.x + tableContainerBox!.width,
+    );
+    await expect(table.getByTestId("kubernetes-session-runtime-details")).toHaveCount(0);
+    await sessionRow.getByRole("button", { name: "Show session details" }).click();
+    const runtimeDetails = table.getByTestId("kubernetes-session-runtime-details");
+    await expect(runtimeDetails).toContainText("Session state: Cancelled");
+    await expect(runtimeDetails).toContainText("Resource retention: Retained");
+    await expect(runtimeDetails).toContainText("Pod state: Running");
+    await expect(runtimeDetails).toContainText("Main-container state: Running");
+    await sessionRow.getByRole("button", { name: "Hide session details" }).click();
+    await expect(table.getByTestId("kubernetes-session-runtime-details")).toHaveCount(0);
     await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
       "Stop preserves Kubernetes resources",
     );
