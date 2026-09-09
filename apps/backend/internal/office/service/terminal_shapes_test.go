@@ -9,18 +9,23 @@ import (
 
 func strp(s string) *string { return &s }
 
-// AC-OFFICE-LOOP-LIVENESS-005.1/.2: classification is total over the
-// cross-product of every persisted status this codebase writes
-// (finished, failed, cancelled, timed_out, and an unknown status —
-// runs.status is not the closed RunStatus enum) against every observed
-// outcome (including the legacy no_agent_launched value and NULL),
-// crossed with session_id present/absent.
-func TestClassifyTerminalRun_CrossProduct(t *testing.T) {
-	activation := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	requestedAt := activation.Add(time.Hour)
+// crossProductCase pins one (status, outcome, session presence) cell of
+// the AC-005.2 cross-product to the exact shape the spec's predicate
+// table assigns it — a literal expectation, not a second computation of
+// ClassifyTerminalRun's own branching, so a misclassification (not just
+// an out-of-set value) fails the test.
+type crossProductCase struct {
+	status    string
+	outcome   *string
+	sessionID string
+	want      service.TerminalShape
+}
 
-	statuses := []string{"finished", "failed", "cancelled", "timed_out", "some_unknown_status"}
-	outcomes := []*string{
+// crossProductCases enumerates all 5 statuses x 7 outcomes x 2 session
+// states (70 cells) this codebase's runs.status/outcome/session_id can
+// hold, each mapped to its expected shape by hand from the spec table.
+func crossProductCases() []crossProductCase {
+	outcomeCases := []*string{
 		nil,
 		strp(service.RunOutcomeProcessed),
 		strp(service.RunOutcomeIdleSkipped),
@@ -29,35 +34,85 @@ func TestClassifyTerminalRun_CrossProduct(t *testing.T) {
 		strp(service.RunOutcomeTaskTreeHeld),
 		strp("no_agent_launched"), // legacy value; not in current code
 	}
-	sessionIDs := []string{"", "sess-1"}
 
-	// Closed-set membership, not just non-empty: an empty-string check
-	// passes vacuously here because ClassifyTerminalRun's own default
-	// branch always returns ShapeUnclassified rather than "" — a shape
-	// outside this set (a typo, a new constant not returned by any
-	// branch) would slip through an emptiness check silently (Review
-	// round 1, should-fix AC-005.2).
-	validShapes := map[service.TerminalShape]bool{
-		service.ShapePreActivation:     true,
-		service.ShapeLaunchedCompleted: true,
-		service.ShapeLaunchedFailed:    true,
-		service.ShapeSilentSuccess:     true,
-		service.ShapeUnlaunchedSkipped: true,
-		service.ShapeUnlaunchedFailed:  true,
-		service.ShapeUnclassified:      true,
+	cases := []crossProductCase{
+		// status=finished: processed+session decides launched_completed
+		// vs. silent_success; a skip outcome decides unlaunched_skipped
+		// only without a session; everything else is unclassified.
+		{"finished", nil, "", service.ShapeUnclassified},
+		{"finished", nil, "sess-1", service.ShapeUnclassified},
+		{"finished", strp(service.RunOutcomeProcessed), "", service.ShapeSilentSuccess},
+		{"finished", strp(service.RunOutcomeProcessed), "sess-1", service.ShapeLaunchedCompleted},
+		{"finished", strp(service.RunOutcomeIdleSkipped), "", service.ShapeUnlaunchedSkipped},
+		{"finished", strp(service.RunOutcomeIdleSkipped), "sess-1", service.ShapeUnclassified},
+		{"finished", strp(service.RunOutcomeBudgetBlocked), "", service.ShapeUnlaunchedSkipped},
+		{"finished", strp(service.RunOutcomeBudgetBlocked), "sess-1", service.ShapeUnclassified},
+		{"finished", strp(service.RunOutcomeAgentInactive), "", service.ShapeUnlaunchedSkipped},
+		{"finished", strp(service.RunOutcomeAgentInactive), "sess-1", service.ShapeUnclassified},
+		{"finished", strp(service.RunOutcomeTaskTreeHeld), "", service.ShapeUnlaunchedSkipped},
+		{"finished", strp(service.RunOutcomeTaskTreeHeld), "sess-1", service.ShapeUnclassified},
+		{"finished", strp("no_agent_launched"), "", service.ShapeUnclassified},
+		{"finished", strp("no_agent_launched"), "sess-1", service.ShapeUnclassified},
+
+		// status=some_unknown_status: never finished, never a recognized
+		// failure status, so always unclassified regardless of outcome
+		// or session.
+		{"some_unknown_status", nil, "", service.ShapeUnclassified},
+		{"some_unknown_status", nil, "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeProcessed), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeProcessed), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeIdleSkipped), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeIdleSkipped), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeBudgetBlocked), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeBudgetBlocked), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeAgentInactive), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeAgentInactive), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeTaskTreeHeld), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeTaskTreeHeld), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp("no_agent_launched"), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp("no_agent_launched"), "sess-1", service.ShapeUnclassified},
 	}
 
-	for _, status := range statuses {
-		for _, outcome := range outcomes {
-			for _, sessionID := range sessionIDs {
-				shape := service.ClassifyTerminalRun(
-					status, outcome, sessionID, requestedAt, activation, true,
-				)
-				if !validShapes[shape] {
-					t.Fatalf("shape %q not in the closed set for status=%q outcome=%v session=%q",
-						shape, status, outcome, sessionID)
-				}
-			}
+	// status IN (failed, cancelled, timed_out): the spec's predicate
+	// table names all three under one row and never reads outcome for
+	// them, so every outcome yields the same pair of shapes for each —
+	// unlaunched_failed without a session, launched_failed with one.
+	for _, status := range []string{"failed", "cancelled", "timed_out"} {
+		for _, outcome := range outcomeCases {
+			cases = append(cases,
+				crossProductCase{status, outcome, "", service.ShapeUnlaunchedFailed},
+				crossProductCase{status, outcome, "sess-1", service.ShapeLaunchedFailed},
+			)
+		}
+	}
+
+	return cases
+}
+
+// AC-OFFICE-LOOP-LIVENESS-005.1/.2: classification is total over the
+// cross-product of every persisted status this codebase writes
+// (finished, failed, cancelled, timed_out, and an unknown status —
+// runs.status is not the closed RunStatus enum) against every observed
+// outcome (including the legacy no_agent_launched value and NULL),
+// crossed with session_id present/absent — pinned to the exact shape
+// each of the 70 cells must produce, not just closed-set membership.
+func TestClassifyTerminalRun_CrossProduct(t *testing.T) {
+	activation := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	requestedAt := activation.Add(time.Hour)
+
+	cases := crossProductCases()
+	if len(cases) != 5*7*2 {
+		t.Fatalf("cross-product case count = %d, want %d (5 statuses x 7 outcomes x 2 session states)",
+			len(cases), 5*7*2)
+	}
+
+	for _, tc := range cases {
+		got := service.ClassifyTerminalRun(
+			tc.status, tc.outcome, tc.sessionID, requestedAt, activation, true,
+		)
+		if got != tc.want {
+			t.Errorf("ClassifyTerminalRun(status=%q, outcome=%v, session=%q) = %q, want %q",
+				tc.status, tc.outcome, tc.sessionID, got, tc.want)
 		}
 	}
 }

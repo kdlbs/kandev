@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,42 @@ func TestLoopLivenessMigration_AddsCausationIDColumns(t *testing.T) {
 		}
 		if !dflt.Valid || dflt.String != "''" {
 			t.Fatalf("%s.causation_id default = %v, want ''", table, dflt)
+		}
+	}
+}
+
+// TestLoopLivenessMigration_CausationIDIndexesArePartial covers
+// REQ-OFFICE-LOOP-LIVENESS-002's Persistence section: each
+// causation_id index exists and is partial (WHERE causation_id !=
+// ”), not a plain index over every row — a full index would defeat
+// the point of excluding the common empty-string case from the
+// lookup path. sqlite_master.sql is the only way to see the stored
+// WHERE predicate; PRAGMA index_list/index_info do not expose it.
+func TestLoopLivenessMigration_CausationIDIndexesArePartial(t *testing.T) {
+	_, db := newTestRepoWithDB(t)
+
+	cases := []struct {
+		table     string
+		indexName string
+	}{
+		{"office_routine_runs", "idx_office_routine_runs_causation_id"},
+		{"agent_wakeup_requests", "idx_agent_wakeup_requests_causation_id"},
+		{"runs", "idx_runs_causation_id"},
+	}
+	for _, tc := range cases {
+		var stored sql.NullString
+		err := db.QueryRow(
+			`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, tc.indexName,
+		).Scan(&stored)
+		if err != nil {
+			t.Fatalf("%s: look up index %s: %v", tc.table, tc.indexName, err)
+		}
+		if !stored.Valid || stored.String == "" {
+			t.Fatalf("%s: index %s missing or has no stored definition", tc.table, tc.indexName)
+		}
+		if !strings.Contains(stored.String, "WHERE") || !strings.Contains(stored.String, "causation_id != ''") {
+			t.Fatalf("%s: index %s definition = %q, want a WHERE causation_id != '' partial predicate",
+				tc.table, tc.indexName, stored.String)
 		}
 	}
 }

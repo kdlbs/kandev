@@ -278,6 +278,103 @@ func TestEvaluateLoopHealth_TerminalShapeReadFailureDegradesWithTerminalReason(t
 	assertDegradedReason(t, err, ReasonTerminalReadFailed)
 }
 
+// AC-004.2: unknown outranks dead. An unpublished activation must win
+// even when overdue-trigger evidence (the dead condition) is also
+// present in the same read.
+func TestEvaluateLoopHealth_UnknownOutranksDead(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	repo := baseFakeRepo(now)
+	repo.activationPublished = false
+	repo.triggerRows = []sqlite.TriggerHealthRow{{TriggerID: "t1", Condition: "overdue"}}
+	repo.triggerTotal = 1
+
+	resp, err := EvaluateLoopHealth(context.Background(), repo, "ws-a", now)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if resp.Verdict != VerdictUnknown {
+		t.Errorf("verdict = %q, want %q", resp.Verdict, VerdictUnknown)
+	}
+}
+
+// AC-004.2: degraded outranks not_armed. Zero eligible triggers (the
+// not_armed condition) must not suppress a stuck run already in
+// flight from before the workspace went unarmed.
+func TestEvaluateLoopHealth_DegradedOutranksNotArmed(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	repo := baseFakeRepo(now)
+	repo.eligibleCount = 0
+	repo.stuckRows = []sqlite.StuckRunRow{{RunID: "r1", Status: "claimed"}}
+	repo.stuckTotal = 1
+
+	resp, err := EvaluateLoopHealth(context.Background(), repo, "ws-a", now)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if resp.Verdict != VerdictDegraded {
+		t.Errorf("verdict = %q, want %q", resp.Verdict, VerdictDegraded)
+	}
+}
+
+// AC-004.7: evidence rows carry the offending row's identifying data,
+// not just a nonzero count that flips the verdict.
+func TestEvaluateLoopHealth_EvidenceRowsArePopulated(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	repo := baseFakeRepo(now)
+	nextRunAt := now.Add(time.Hour)
+	repo.triggerRows = []sqlite.TriggerHealthRow{{
+		TriggerID: "trig-1", RoutineID: "rout-1", RoutineName: "Nightly sync",
+		Condition: "overdue", NextRunAt: &nextRunAt,
+	}}
+	repo.triggerTotal = 1
+	stuckSince := now.Add(-20 * time.Minute)
+	repo.stuckRows = []sqlite.StuckRunRow{{
+		RunID: "run-1", AgentProfileID: "agent-1", Status: "claimed",
+		Condition: "claimed_stuck", StuckSince: &stuckSince,
+	}}
+	repo.stuckTotal = 1
+	repo.silentRows = []sqlite.SilentSuccessRow{{
+		RunID: "run-2", RequestedAt: now.Add(-time.Hour),
+	}}
+	repo.silentTotal = 1
+
+	resp, err := EvaluateLoopHealth(context.Background(), repo, "ws-a", now)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+
+	if len(resp.Triggers.Rows) != 1 {
+		t.Fatalf("trigger rows = %d, want 1", len(resp.Triggers.Rows))
+	}
+	gotTrigger := resp.Triggers.Rows[0]
+	if gotTrigger.TriggerID != "trig-1" || gotTrigger.RoutineID != "rout-1" ||
+		gotTrigger.RoutineName != "Nightly sync" || gotTrigger.Condition != "overdue" {
+		t.Errorf("trigger row = %+v, want trig-1/rout-1/Nightly sync/overdue", gotTrigger)
+	}
+	if gotTrigger.NextRunAt == nil || !gotTrigger.NextRunAt.Equal(nextRunAt) {
+		t.Errorf("trigger row next_run_at = %v, want %v", gotTrigger.NextRunAt, nextRunAt)
+	}
+
+	if len(resp.StuckRuns.Rows) != 1 {
+		t.Fatalf("stuck run rows = %d, want 1", len(resp.StuckRuns.Rows))
+	}
+	gotStuck := resp.StuckRuns.Rows[0]
+	if gotStuck.RunID != "run-1" || gotStuck.AgentProfileID != "agent-1" ||
+		gotStuck.Status != "claimed" || gotStuck.Condition != "claimed_stuck" {
+		t.Errorf("stuck run row = %+v, want run-1/agent-1/claimed/claimed_stuck", gotStuck)
+	}
+	if gotStuck.StuckSince == nil || !gotStuck.StuckSince.Equal(stuckSince) {
+		t.Errorf("stuck run row stuck_since = %v, want %v", gotStuck.StuckSince, stuckSince)
+	}
+
+	if len(resp.SilentSuccesses.Rows) != 1 {
+		t.Fatalf("silent success rows = %d, want 1", len(resp.SilentSuccesses.Rows))
+	}
+	if got := resp.SilentSuccesses.Rows[0]; got.RunID != "run-2" {
+		t.Errorf("silent success row = %+v, want run-2", got)
+	}
+}
+
 func assertDegradedReason(t *testing.T, err error, wantReason string) {
 	t.Helper()
 	if err == nil {
