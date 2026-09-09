@@ -171,7 +171,7 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptAndLaunch(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		"task-decision", "ws-1", "step-decision", "Decision task", "Review the change")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-decision"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

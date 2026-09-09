@@ -14,7 +14,7 @@ import (
 func TestBuildRoutineIdempotencyKey_Cron_UsesClaimedTick(t *testing.T) {
 	tick := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 
-	key := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", &tick, "run-ignored")
+	key := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "", &tick, "run-ignored")
 
 	want := fmt.Sprintf("routine:%s:%s:tick:%d", "routine-1", "trigger-1", tick.Unix())
 	if key != want {
@@ -22,7 +22,7 @@ func TestBuildRoutineIdempotencyKey_Cron_UsesClaimedTick(t *testing.T) {
 	}
 
 	// A second claim of the identical slot (redelivery) mints the same key.
-	repeat := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", &tick, "run-different")
+	repeat := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "", &tick, "run-different")
 	if repeat != key {
 		t.Fatalf("redelivery of the same slot produced %q, want %q (identical to the first)", repeat, key)
 	}
@@ -34,8 +34,8 @@ func TestBuildRoutineIdempotencyKey_Cron_DistinctTicksDiffer(t *testing.T) {
 	tickOne := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	tickTwo := tickOne.Add(time.Minute)
 
-	keyOne := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", &tickOne, "run-a")
-	keyTwo := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", &tickTwo, "run-b")
+	keyOne := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "", &tickOne, "run-a")
+	keyTwo := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "", &tickTwo, "run-b")
 
 	if keyOne == keyTwo {
 		t.Fatalf("distinct cron slots must mint distinct keys, both got %q", keyOne)
@@ -47,7 +47,7 @@ func TestBuildRoutineIdempotencyKey_Cron_DistinctTicksDiffer(t *testing.T) {
 // live processCronTrigger guard) has no occurrence identity and goes
 // keyless with cause=unresolved.
 func TestBuildRoutineIdempotencyKey_Cron_NoClaimedTickGoesKeyless(t *testing.T) {
-	key := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", nil, "run-1")
+	key := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "", nil, "run-1")
 	if key != "" {
 		t.Fatalf("key = %q, want empty (keyless) for a cron fire with no claimed tick", key)
 	}
@@ -57,7 +57,7 @@ func TestBuildRoutineIdempotencyKey_Cron_NoClaimedTickGoesKeyless(t *testing.T) 
 // two distinct occurrences by design: each RoutineRun.ID mints its own key.
 func TestBuildRoutineIdempotencyKey_ManualAndWebhook_UseRoutineRunID(t *testing.T) {
 	for _, source := range []string{"manual", "webhook"} {
-		key := buildRoutineIdempotencyKey(source, "routine-1", "", nil, "run-1")
+		key := buildRoutineIdempotencyKey(source, "routine-1", "", "", nil, "run-1")
 		want := "routine:routine-1:run:run-1"
 		if key != want {
 			t.Errorf("source=%q key = %q, want %q", source, key, want)
@@ -66,8 +66,8 @@ func TestBuildRoutineIdempotencyKey_ManualAndWebhook_UseRoutineRunID(t *testing.
 
 	// Two distinct manual fires -> two distinct keys (the collision the
 	// old unix-minute key format could reach).
-	first := buildRoutineIdempotencyKey("manual", "routine-1", "", nil, "run-a")
-	second := buildRoutineIdempotencyKey("manual", "routine-1", "", nil, "run-b")
+	first := buildRoutineIdempotencyKey("manual", "routine-1", "", "", nil, "run-a")
+	second := buildRoutineIdempotencyKey("manual", "routine-1", "", "", nil, "run-b")
 	if first == second {
 		t.Fatalf("two distinct manual fires must mint distinct keys, both got %q", first)
 	}
@@ -77,8 +77,28 @@ func TestBuildRoutineIdempotencyKey_ManualAndWebhook_UseRoutineRunID(t *testing.
 // and goes keyless with cause=unresolved, the same direction as a cron
 // fire with no claimed tick.
 func TestBuildRoutineIdempotencyKey_UnrecognisedSourceGoesKeyless(t *testing.T) {
-	key := buildRoutineIdempotencyKey("some_future_source", "routine-1", "", nil, "run-1")
+	key := buildRoutineIdempotencyKey("some_future_source", "routine-1", "", "", nil, "run-1")
 	if key != "" {
 		t.Fatalf("key = %q, want empty (keyless) for an unrecognised source", key)
+	}
+}
+
+// An explicit request key (a webhook delivery header, say) always wins,
+// even over a claimed cron tick, so a caller-supplied idempotency key never
+// collides with the source-derived identity scheme.
+func TestBuildRoutineIdempotencyKey_ExplicitKeyTakesPriority(t *testing.T) {
+	tick := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	key := buildRoutineIdempotencyKey(shared.RoutineSourceCron, "routine-1", "trigger-1", "delivery-abc", &tick, "run-1")
+	want := fmt.Sprintf("routine:%s:%s:%s", "routine-1", shared.RoutineSourceCron, "delivery-abc")
+	if key != want {
+		t.Fatalf("key = %q, want %q (explicit key must take priority over claimedTick)", key, want)
+	}
+
+	// Two webhook deliveries with distinct explicit keys mint distinct keys.
+	first := buildRoutineIdempotencyKey("webhook", "routine-1", "", "delivery-1", nil, "run-a")
+	second := buildRoutineIdempotencyKey("webhook", "routine-1", "", "delivery-2", nil, "run-a")
+	if first == second {
+		t.Fatalf("two distinct explicit keys must mint distinct keys, both got %q", first)
 	}
 }
