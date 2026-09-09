@@ -50,6 +50,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Active structured backend log for assertions that need Info records. */
+  logPath: string;
   /** Current backend PID, exposed for process-owned socket assertions. */
   pid: () => number | undefined;
   /**
@@ -236,6 +238,7 @@ function spawnBackendProcess(
   env: Record<string, string>,
   debug: boolean,
   port: number,
+  logPath: string,
 ): ChildProcess {
   const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
@@ -243,20 +246,20 @@ function spawnBackendProcess(
     detached: true,
   });
 
-  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
+  const logFile = fs.createWriteStream(logPath, { flags: "a" });
   proc.once("exit", () => {
-    logFile?.end();
+    logFile.end();
   });
   proc.stderr?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
   proc.stdout?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
 
@@ -278,6 +281,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
+      const processLogPath = path.join(tmpDir, "backend-process.log");
+      const backendLogPath = path.join(tmpDir, ".kandev", "logs", "backend-logs.log");
       let backendProc: ChildProcess | undefined;
 
       await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
@@ -411,7 +416,12 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const scopedEnv = new BackendFixtureEnvOverrides();
 
         // --- Spawn backend ---
-        backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
+        backendProc = spawnBackendProcess(
+          scopedEnv.apply(baselineEnv),
+          debug,
+          backendPort,
+          processLogPath,
+        );
         registerProcess(backendProc);
         // /ready (not /health) — /health flips green as soon as the listener
         // is bound, before routes are wired; tests that immediately issue API
@@ -438,7 +448,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
+          backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
           registerProcess(backendProc);
           // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
           // /ready, not /health — see the comment on the initial spawn above.
@@ -469,6 +479,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          logPath: backendLogPath,
           pid: () => backendProc?.pid,
           restart,
           ensureReady,

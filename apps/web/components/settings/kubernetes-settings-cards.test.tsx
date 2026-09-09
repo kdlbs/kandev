@@ -109,6 +109,26 @@ describe("Kubernetes settings cards", () => {
     expect(within(card).getByText("Task")).toBeTruthy();
     expect(within(card).getByText("Session")).toBeTruthy();
   });
+
+  it("shows retained requests, guidance, and task navigation on mobile", () => {
+    responsive.isMobile = true;
+    const state = sessionsState();
+    state.sessions[0] = {
+      ...state.sessions[0],
+      session_state: "CANCELLED",
+      retention_state: "retained",
+      main_container_requests: { cpu: "0", memory: "512Mi" },
+    };
+
+    render(<KubernetesSessionsCard state={state} />);
+
+    const card = screen.getByTestId("kubernetes-mobile-session-list");
+    expect(within(card).getByText("Retained")).toBeTruthy();
+    expect(within(card).getByText("0 CPU")).toBeTruthy();
+    expect(within(card).getByText("512Mi memory")).toBeTruthy();
+    expect(within(card).getByRole("link").getAttribute("href")).toBe("/t/task-123456789");
+    expect(screen.getByText(/Stop preserves Kubernetes resources/)).toBeTruthy();
+  });
 });
 
 describe("Kubernetes session status cards", () => {
@@ -154,6 +174,9 @@ function sessionsState(): KubernetesSessionsState {
         workspace_kind: "managed_pvc",
         created_at: "2026-08-24T10:00:00Z",
         failure_reason: "pods is forbidden: RBAC denied",
+        session_state: "RUNNING",
+        retention_state: "active",
+        main_container_requests: { cpu: "250m", memory: "1Gi" },
       },
     ],
     loading: false,

@@ -1,21 +1,22 @@
 "use client";
 
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconLoader2 } from "@tabler/icons-react";
+import AppLink from "@/components/routing/app-link";
+import { useKubernetesSessions } from "@/hooks/domains/settings/use-kubernetes-settings";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { formatDateTime } from "@/lib/i18n/formats";
+import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 import { SettingsCard } from "./settings-card";
 import { SettingsCardHeader } from "./settings-card-header";
 import { settingsActionClassName } from "./settings-control";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import type { useKubernetesSessions } from "@/hooks/domains/settings/use-kubernetes-settings";
-import { formatDateTime } from "@/lib/i18n/formats";
-import { i18n, t as translate } from "@/lib/i18n";
-import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 
-const STATUS_LABEL_KEYS: Record<string, string> = {
+const POD_STATUS_LABEL_KEYS: Record<string, string> = {
   running: "executors:kubernetesStatusRunning",
   waiting: "executors:kubernetesStatusWaiting",
   terminated: "executors:kubernetesStatusTerminated",
@@ -23,6 +24,27 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   pending: "executors:kubernetesStatusPending",
   succeeded: "executors:kubernetesStatusSucceeded",
   failed: "executors:kubernetesStatusFailed",
+};
+
+const RETENTION_LABEL_KEYS: Record<string, string> = {
+  active: "executors:kubernetesRetentionActive",
+  retained: "executors:kubernetesRetentionRetained",
+  terminating: "executors:kubernetesRetentionTerminating",
+  terminal: "executors:kubernetesRetentionTerminal",
+  missing: "executors:kubernetesRetentionMissing",
+  unknown: "executors:kubernetesRetentionUnknown",
+};
+
+const SESSION_STATE_LABEL_KEYS: Record<string, string> = {
+  created: "executors:kubernetesSessionCreated",
+  starting: "executors:kubernetesSessionStarting",
+  running: "executors:kubernetesSessionRunning",
+  idle: "executors:kubernetesSessionIdle",
+  waiting_for_input: "executors:kubernetesSessionWaitingForInput",
+  completed: "executors:kubernetesSessionCompleted",
+  failed: "executors:kubernetesSessionFailed",
+  cancelled: "executors:kubernetesSessionCancelled",
+  unknown: "executors:kubernetesStatusUnknown",
 };
 
 type KubernetesSessionsState = ReturnType<typeof useKubernetesSessions>;
@@ -54,6 +76,7 @@ export function KubernetesSessionsCard({ state }: { state: KubernetesSessionsSta
         }
       />
       <CardContent className="min-w-0">
+        {!state.error && <SessionGuidance />}
         {Boolean(state.error) && (
           <p className="break-words text-sm text-destructive">{errorMessage}</p>
         )}
@@ -65,7 +88,7 @@ export function KubernetesSessionsCard({ state }: { state: KubernetesSessionsSta
         {!state.error &&
           state.sessions.length > 0 &&
           (isMobile ? (
-            <MobileSessionList sessions={state.sessions} />
+            <MobileSessionList sessions={state.sessions} t={t} />
           ) : (
             <DesktopSessionTable sessions={state.sessions} />
           ))}
@@ -74,15 +97,33 @@ export function KubernetesSessionsCard({ state }: { state: KubernetesSessionsSta
   );
 }
 
-function MobileSessionList({ sessions }: { sessions: KubernetesSession[] }) {
+function SessionGuidance() {
+  const { t } = useTranslation();
+  return (
+    <p
+      className="mb-3 break-words text-xs text-muted-foreground"
+      data-testid="kubernetes-session-guidance"
+    >
+      {t("executors:kubernetesActiveSessionsGuidance")}
+    </p>
+  );
+}
+
+function MobileSessionList({ sessions, t }: { sessions: KubernetesSession[]; t: TFunction }) {
   return (
     <div className="space-y-3" data-testid="kubernetes-mobile-session-list">
       {sessions.map((session) => (
-        <div key={session.session_id} className="min-w-0 space-y-3 rounded-md border p-3">
+        <AppLink
+          key={session.session_id}
+          href={taskHref(session.task_id)}
+          aria-label={translateTaskLink(session, t)}
+          data-testid="kubernetes-session-task-link"
+          className="block min-h-11 min-w-0 space-y-3 rounded-md border p-3 text-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <SessionIdentity session={session} />
           <SessionStatus session={session} />
           <SessionDetails session={session} />
-        </div>
+        </AppLink>
       ))}
     </div>
   );
@@ -106,7 +147,16 @@ function DesktopSessionTable({ sessions }: { sessions: KubernetesSession[] }) {
         <TableBody>
           {sessions.map((session) => (
             <TableRow key={session.session_id}>
-              <TableCell className="font-mono text-xs">{shortId(session.task_id)}</TableCell>
+              <TableCell className="font-mono text-xs">
+                <AppLink
+                  href={taskHref(session.task_id)}
+                  aria-label={translateTaskLink(session, t)}
+                  data-testid="kubernetes-session-task-link"
+                  className="cursor-pointer break-all underline-offset-2 hover:underline"
+                >
+                  {shortId(session.task_id)}
+                </AppLink>
+              </TableCell>
               <TableCell className="font-mono text-xs">{shortId(session.session_id)}</TableCell>
               <TableCell className="max-w-56 break-all font-mono text-xs">
                 {session.pod_name || "-"}
@@ -120,7 +170,7 @@ function DesktopSessionTable({ sessions }: { sessions: KubernetesSession[] }) {
                   <SessionFailureReason session={session} />
                 </div>
               </TableCell>
-              <TableCell className="text-xs">{workspaceLabel(session.workspace_kind)}</TableCell>
+              <TableCell className="text-xs">{workspaceLabel(session.workspace_kind, t)}</TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {formatCreatedAt(session.created_at)}
               </TableCell>
@@ -158,16 +208,53 @@ function SessionIdentityValue({ label, value }: { label: string; value: string }
 }
 
 function SessionStatus({ session }: { session: KubernetesSession }) {
-  const status =
-    session.container_state?.toLowerCase() === "terminated" &&
-    session.pod_phase?.toLowerCase() === "succeeded"
-      ? session.pod_phase
-      : session.container_state || session.pod_phase || "unknown";
-  const running = status.toLowerCase() === "running";
+  const { t } = useTranslation();
+  const podStatus = podStatusValue(session);
+  const retentionState = normalizedState(session.retention_state);
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Badge variant={running ? "default" : "secondary"}>{statusLabel(status)}</Badge>
-      {session.restarts > 0 && <RestartCount count={session.restarts} />}
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={retentionState === "retained" ? "outline" : "secondary"}>
+          {retentionLabel(retentionState, t)}
+        </Badge>
+        <Badge variant={podStatus.toLowerCase() === "running" ? "default" : "secondary"}>
+          {podStatusLabel(podStatus, t)}
+        </Badge>
+        {session.restarts > 0 && <RestartCount count={session.restarts} />}
+      </div>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p>
+          {t("executors:kubernetesSessionStateValue", {
+            value: sessionStateLabel(session.session_state, t),
+          })}
+        </p>
+        <p>{t("executors:kubernetesPodStateValue", { value: podStatusLabel(podStatus, t) })}</p>
+        <p>
+          {t("executors:kubernetesRetentionStateValue", {
+            value: retentionLabel(retentionState, t),
+          })}
+        </p>
+      </div>
+      <RequestSummary session={session} />
+    </div>
+  );
+}
+
+function RequestSummary({ session }: { session: KubernetesSession }) {
+  const { t } = useTranslation();
+  const requests = session.main_container_requests;
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>{t("executors:kubernetesMainContainerRequests")}</p>
+      {requests?.cpu && (
+        <p className="break-all">{t("executors:kubernetesRequestCpu", { value: requests.cpu })}</p>
+      )}
+      {requests?.memory && (
+        <p className="break-all">
+          {t("executors:kubernetesRequestMemory", { value: requests.memory })}
+        </p>
+      )}
+      {!requests?.cpu && !requests?.memory && <p>{t("executors:kubernetesRequestsUnspecified")}</p>}
     </div>
   );
 }
@@ -187,7 +274,7 @@ function SessionDetails({ session }: { session: KubernetesSession }) {
     <div className="space-y-1 text-xs text-muted-foreground">
       <p>
         {t("executors:kubernetesWorkspaceValue", {
-          value: workspaceLabel(session.workspace_kind),
+          value: workspaceLabel(session.workspace_kind, t),
         })}
       </p>
       <p>{t("executors:kubernetesCreatedValue", { value: formatCreatedAt(session.created_at) })}</p>
@@ -202,22 +289,49 @@ function SessionFailureReason({ session }: { session: KubernetesSession }) {
   ) : null;
 }
 
-function workspaceLabel(value?: string): string {
+function workspaceLabel(value: string | undefined, t: TFunction): string {
   const keys: Record<string, string> = {
     managed_pvc: "executors:kubernetesWorkspaceManagedPvc",
     empty_dir: "executors:kubernetesWorkspaceEmptyDir",
     existing_claim: "executors:kubernetesWorkspaceExistingClaim",
   };
-  return value && keys[value] ? translationLabel(keys[value]) : value || "-";
+  return value && keys[value] ? t(keys[value]) : value || "-";
 }
 
-function statusLabel(value: string): string {
-  const key = STATUS_LABEL_KEYS[value.toLowerCase()];
-  return key ? translationLabel(key, value) : value;
+function podStatusLabel(value: string, t: TFunction): string {
+  const key = POD_STATUS_LABEL_KEYS[value.toLowerCase()];
+  return key ? t(key) : t("executors:kubernetesStatusUnknown");
 }
 
-function translationLabel(key: string, fallback?: string): string {
-  return i18n.exists(key) ? translate(key) : (fallback ?? key);
+function retentionLabel(value: string, t: TFunction): string {
+  return t(RETENTION_LABEL_KEYS[value] ?? RETENTION_LABEL_KEYS.unknown);
+}
+
+function sessionStateLabel(value: string | undefined, t: TFunction): string {
+  const state = normalizedState(value);
+  return t(SESSION_STATE_LABEL_KEYS[state] ?? SESSION_STATE_LABEL_KEYS.unknown);
+}
+
+function normalizedState(value?: string): string {
+  return value?.trim().toLowerCase() || "unknown";
+}
+
+function podStatusValue(session: KubernetesSession): string {
+  if (
+    session.container_state?.toLowerCase() === "terminated" &&
+    session.pod_phase?.toLowerCase() === "succeeded"
+  ) {
+    return session.pod_phase;
+  }
+  return session.container_state || session.pod_phase || "unknown";
+}
+
+function translateTaskLink(session: KubernetesSession, t: TFunction): string {
+  return t("executors:kubernetesOpenTask", { task: session.task_id });
+}
+
+function taskHref(taskId: string): string {
+  return `/t/${encodeURIComponent(taskId)}`;
 }
 
 function shortId(value: string): string {

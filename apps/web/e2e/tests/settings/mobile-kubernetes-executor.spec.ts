@@ -4,6 +4,7 @@ import { backendFixture as test, type BackendContext } from "../../fixtures/back
 import { ApiClient } from "../../helpers/api-client";
 import { acceptInvite, createInviteToken, setupAdmin } from "../../helpers/auth";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { expect } from "@playwright/test";
 
 const ADMIN = {
@@ -352,6 +353,10 @@ test("active session cards expose task and session identities without a cluster"
   const taskId = "task-mobile-123456789";
   const sessionId = "session-mobile-987654321";
   const { context, page } = await openMobileContext(browser, backend);
+  const prCapture = new PrAssetCapture(
+    page,
+    path.join(__dirname, "mobile-kubernetes-executor.spec.ts"),
+  );
   await page.route(`**/api/v1/kubernetes/executors/${executor.id}/sessions`, async (route) => {
     await route.fulfill({
       status: 200,
@@ -366,6 +371,9 @@ test("active session cards expose task and session identities without a cluster"
           restarts: 0,
           workspace_kind: "empty_dir",
           created_at: "2026-08-24T10:00:00Z",
+          session_state: "CANCELLED",
+          retention_state: "retained",
+          main_container_requests: { cpu: "0", memory: "512Mi" },
         },
       ]),
     });
@@ -376,8 +384,24 @@ test("active session cards expose task and session identities without a cluster"
     const sessions = page.getByTestId("kubernetes-mobile-session-list");
     await expect(sessions).toContainText(taskId);
     await expect(sessions).toContainText(sessionId);
+    await expect(sessions).toContainText("Retained");
+    await expect(sessions).toContainText("0 CPU");
+    await expect(sessions).toContainText("512Mi memory");
+    await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
+      "Stop preserves Kubernetes resources",
+    );
+    const taskLink = sessions.getByTestId("kubernetes-session-task-link");
+    await expect(taskLink).toHaveAttribute("href", "/t/" + taskId);
     await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes active sessions");
+    await sessions.scrollIntoViewIfNeeded();
+    await prCapture.screenshot("retained-kubernetes-session-mobile", {
+      caption: "Mobile retained Kubernetes session status",
+      page,
+    });
+    await taskLink.tap();
+    await expect(page).toHaveURL("/t/" + taskId);
   } finally {
+    prCapture.flush();
     await apiClient.deleteExecutor(executor.id).catch(() => undefined);
     await context.close();
   }
