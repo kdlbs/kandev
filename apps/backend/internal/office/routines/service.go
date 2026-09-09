@@ -462,7 +462,8 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	if result.Unknown {
 		s.logger.Warn("compute routine catch-up failed",
 			zap.String("trigger_id", trigger.ID),
-			zap.String("cron_expression", trigger.CronExpression))
+			zap.String("cron_expression", trigger.CronExpression),
+			zap.Error(result.Err))
 	}
 	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &result.NextRunAt); err != nil {
 		// AC-001.2: an arming-write failure means this claim dispatches
@@ -506,6 +507,9 @@ type catchUpResult struct {
 	// Unknown is true when the walk failed; ElapsedTicks, FirstMissedAt
 	// and Truncated are not meaningful in that case.
 	Unknown bool
+	// Err is the underlying cron computation error when Unknown is true.
+	// Nil otherwise.
+	Err error
 }
 
 // computeCatchUp walks cron ticks between trigger.NextRunAt (inclusive —
@@ -523,7 +527,7 @@ func computeCatchUp(trigger *RoutineTrigger, routine *Routine, now time.Time) ca
 		elapsed++
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, cursor)
 		if err != nil {
-			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true}
+			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
 		}
 		cursor = next
 	}
@@ -534,7 +538,7 @@ func computeCatchUp(trigger *RoutineTrigger, routine *Routine, now time.Time) ca
 		// window cleanly, and record the count as a lower bound.
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, now)
 		if err != nil {
-			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true}
+			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
 		}
 		cursor = next
 		truncated = true

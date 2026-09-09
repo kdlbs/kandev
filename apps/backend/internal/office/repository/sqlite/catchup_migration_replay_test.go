@@ -98,6 +98,30 @@ func TestMigrate_RoutineCatchUpPolicyDefaultRebuild(t *testing.T) {
 		t.Fatalf("seed legacy routine: %v", err)
 	}
 	if _, err := db.Exec(`
+		INSERT INTO office_routines (
+			id, workspace_id, name, description, task_template,
+			assignee_agent_profile_id, status, concurrency_policy,
+			catch_up_policy, catch_up_max, variables, last_run_at, created_at, updated_at
+		) VALUES (
+			'routine-max-below-floor', 'ws-1', 'Below floor', 'desc', '{}',
+			'agent-1', 'active', 'skip_if_active',
+			'summarize_missed', 0, '{}', NULL, ?, ?
+		)`, createdAt, createdAt); err != nil {
+		t.Fatalf("seed below-floor routine: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO office_routines (
+			id, workspace_id, name, description, task_template,
+			assignee_agent_profile_id, status, concurrency_policy,
+			catch_up_policy, catch_up_max, variables, last_run_at, created_at, updated_at
+		) VALUES (
+			'routine-max-above-ceiling', 'ws-1', 'Above ceiling', 'desc', '{}',
+			'agent-1', 'active', 'skip_if_active',
+			'summarize_missed', 5000, '{}', NULL, ?, ?
+		)`, createdAt, createdAt); err != nil {
+		t.Fatalf("seed above-ceiling routine: %v", err)
+	}
+	if _, err := db.Exec(`
 		INSERT INTO office_routine_triggers (
 			id, routine_id, kind, cron_expression, timezone, enabled, created_at, updated_at
 		) VALUES ('trigger-legacy', 'routine-legacy', 'cron', '* * * * *', 'UTC', 1, ?, ?)
@@ -158,6 +182,27 @@ func TestMigrate_RoutineCatchUpPolicyDefaultRebuild(t *testing.T) {
 	}
 	if !routineCreatedAt.Equal(createdAt) {
 		t.Errorf("routine-legacy created_at = %v, want %v (preserved across rebuild)", routineCreatedAt, createdAt)
+	}
+
+	// catch_up_max out-of-range values are normalized once on upgrade
+	// (AC-OFFICE-ROUTINE-CATCHUP-001.13): below the floor snaps to the
+	// default, above the ceiling clamps down to it.
+	var belowFloorMax, aboveCeilingMax int
+	if err := db.QueryRow(
+		`SELECT catch_up_max FROM office_routines WHERE id = 'routine-max-below-floor'`,
+	).Scan(&belowFloorMax); err != nil {
+		t.Fatalf("select below-floor routine: %v", err)
+	}
+	if belowFloorMax != 25 {
+		t.Errorf("routine-max-below-floor catch_up_max = %d, want 25 (default floor)", belowFloorMax)
+	}
+	if err := db.QueryRow(
+		`SELECT catch_up_max FROM office_routines WHERE id = 'routine-max-above-ceiling'`,
+	).Scan(&aboveCeilingMax); err != nil {
+		t.Fatalf("select above-ceiling routine: %v", err)
+	}
+	if aboveCeilingMax != 1000 {
+		t.Errorf("routine-max-above-ceiling catch_up_max = %d, want 1000 (ceiling)", aboveCeilingMax)
 	}
 
 	// The trigger and run rows must survive the drop+rename — this is the

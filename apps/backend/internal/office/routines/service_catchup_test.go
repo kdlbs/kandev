@@ -8,11 +8,15 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
+	"github.com/kandev/kandev/internal/office/wakeup"
 )
 
 // wrapRepo wraps a real routines.Repository (the sqlite implementation) and
@@ -410,6 +414,57 @@ func TestTickScheduledTriggers_MalformedExpressionDispatchesOncePerDay(t *testin
 	}
 }
 
+// TestTickScheduledTriggers_MalformedExpressionLogsUnderlyingError covers
+// AC-OFFICE-ROUTINE-CATCHUP-001.11: the warning emitted when the elapsed-tick
+// computation fails must name the underlying cron-parse error, not just the
+// trigger ID and expression.
+func TestTickScheduledTriggers_MalformedExpressionLogsUnderlyingError(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	svc := routines.NewRoutineService(repo, log, &noopActivity{})
+
+	ctx := context.Background()
+	routine := &models.Routine{
+		WorkspaceID: "ws-1", Name: "Bad cron", AssigneeAgentProfileID: "agent-1",
+		Status: "active", ConcurrencyPolicy: models.ConcurrencyPolicyAlwaysCreate,
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	past := time.Now().UTC().Add(-time.Hour)
+	if err := repo.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
+		RoutineID: routine.ID, Kind: "cron", CronExpression: "garbage", Timezone: "UTC",
+		Enabled: true, NextRunAt: &past,
+	}); err != nil {
+		t.Fatalf("seed malformed trigger: %v", err)
+	}
+
+	if err := svc.TickScheduledTriggers(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	entries := logs.FilterMessage("compute routine catch-up failed").All()
+	if len(entries) == 0 {
+		t.Fatal("expected a 'compute routine catch-up failed' warning")
+	}
+	if errVal, ok := entries[0].ContextMap()["error"]; !ok || errVal == "" {
+		t.Fatalf("warning did not name the underlying error, context = %#v", entries[0].ContextMap())
+	}
+}
+
 // TestTickScheduledTriggers_GapExceedingCapProducesExactlyOneRun covers
 // AC-OFFICE-ROUTINE-CATCHUP-001.1 and 001.3 together at the service level:
 // a gap spanning far more ticks than catch_up_max produces exactly one
@@ -473,5 +528,144 @@ func TestTickScheduledTriggers_GapExceedingCapProducesExactlyOneRun(t *testing.T
 	}
 	if run.CatchUpFirstMissedAt == nil || !run.CatchUpFirstMissedAt.Equal(longDown) {
 		t.Errorf("CatchUpFirstMissedAt = %v, want %v", run.CatchUpFirstMissedAt, longDown)
+	}
+
+	// AC-OFFICE-ROUTINE-CATCHUP-002.5: the gap must also be readable from
+	// the actual wakeup-request payload dispatched to the agent, not only
+	// from the run's DB columns.
+	if len(enq.created) != 1 {
+		t.Fatalf("wakeup requests created = %d, want exactly 1", len(enq.created))
+	}
+	var payload wakeup.RoutinePayload
+	if err := wakeup.UnmarshalPayload(enq.created[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal wakeup payload: %v", err)
+	}
+	if payload.MissedTicks != routine.CatchUpMax-1 {
+		t.Errorf("payload MissedTicks = %d, want %d", payload.MissedTicks, routine.CatchUpMax-1)
+	}
+	if !payload.MissedTruncated {
+		t.Error("payload MissedTruncated = false, want true")
+	}
+	if payload.MissedSince != longDown.UTC().Format(time.RFC3339) {
+		t.Errorf("payload MissedSince = %q, want %q", payload.MissedSince, longDown.UTC().Format(time.RFC3339))
+	}
+}
+
+// TestTickScheduledTriggers_HeavyRoutineGapLeavesTaskUnmodified covers
+// AC-OFFICE-ROUTINE-CATCHUP-002.6: a heavy routine dispatched across a
+// measured gap must render its task title/description exactly as the
+// template does, with the gap readable only through the routine run, not
+// injected into the task the agent sees.
+func TestTickScheduledTriggers_HeavyRoutineGapLeavesTaskUnmodified(t *testing.T) {
+	svc, _, db := newWrappedTestRoutineService(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID: "ws-1", Name: "Heavy gapped", AssigneeAgentProfileID: "agent-1",
+		TaskTemplate:      `{"title":"Daily review","description":"Fixed description"}`,
+		Status:            "active",
+		ConcurrencyPolicy: models.ConcurrencyPolicyAlwaysCreate,
+		CatchUpPolicy:     models.CatchUpPolicySummarizeMissed, CatchUpMax: 25,
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	if err := svc.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
+		RoutineID: routine.ID, Kind: "cron", CronExpression: "* * * * *", Timezone: "UTC", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	longDown := time.Now().UTC().Add(-10 * time.Minute)
+	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
+	if err != nil || len(triggers) != 1 {
+		t.Fatalf("list triggers: %v (len=%d)", err, len(triggers))
+	}
+	if _, err := db.ExecContext(ctx,
+		"UPDATE office_routine_triggers SET next_run_at = ? WHERE id = ?", longDown, triggers[0].ID,
+	); err != nil {
+		t.Fatalf("backdate next_run_at: %v", err)
+	}
+
+	wf := &fakeWorkflowEnsurer{}
+	tc := &fakeTaskCreator{}
+	svc.SetWorkflowEnsurer(wf)
+	svc.SetTaskCreator(tc)
+
+	if err := svc.TickScheduledTriggers(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if tc.captured.title != "Daily review" {
+		t.Errorf("task title = %q, want exactly %q (unmodified by the gap)", tc.captured.title, "Daily review")
+	}
+	if tc.captured.description != "Fixed description" {
+		t.Errorf("task description = %q, want exactly %q (unmodified by the gap)",
+			tc.captured.description, "Fixed description")
+	}
+
+	runs, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("routine runs = %d, want 1", len(runs))
+	}
+	run := runs[0]
+	if run.CatchUpMissedTicks == nil || *run.CatchUpMissedTicks < 1 {
+		t.Fatalf("CatchUpMissedTicks = %v, want set and >= 1 (gap summary readable via the run)", run.CatchUpMissedTicks)
+	}
+	if run.CatchUpFirstMissedAt == nil || !run.CatchUpFirstMissedAt.Equal(longDown) {
+		t.Errorf("CatchUpFirstMissedAt = %v, want %v", run.CatchUpFirstMissedAt, longDown)
+	}
+	if run.LinkedTaskID != "task-routine-1" {
+		t.Errorf("LinkedTaskID = %q, want task-routine-1 (heavy dispatch happened)", run.LinkedTaskID)
+	}
+}
+
+// TestFireManual_RecordsNoGapSummaryDespitePendingTriggerGap covers
+// AC-OFFICE-ROUTINE-CATCHUP-002.12: gap measurement applies only to a cron
+// trigger's own armed claim. A manual fire on a routine whose cron trigger
+// has a large backdated next_run_at (i.e. would produce a gap on its own
+// tick) must still record no gap summary at all.
+func TestFireManual_RecordsNoGapSummaryDespitePendingTriggerGap(t *testing.T) {
+	svc, _, db := newWrappedTestRoutineService(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID: "ws-1", Name: "Manual despite gap", AssigneeAgentProfileID: "agent-1",
+		Status: "active", ConcurrencyPolicy: models.ConcurrencyPolicyAlwaysCreate,
+		CatchUpPolicy: models.CatchUpPolicySummarizeMissed, CatchUpMax: 25,
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	if err := svc.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
+		RoutineID: routine.ID, Kind: "cron", CronExpression: "* * * * *", Timezone: "UTC", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
+	if err != nil || len(triggers) != 1 {
+		t.Fatalf("list triggers: %v (len=%d)", err, len(triggers))
+	}
+	longDown := time.Now().UTC().Add(-100 * time.Minute)
+	if _, err := db.ExecContext(ctx,
+		"UPDATE office_routine_triggers SET next_run_at = ? WHERE id = ?", longDown, triggers[0].ID,
+	); err != nil {
+		t.Fatalf("backdate next_run_at: %v", err)
+	}
+
+	run, err := svc.FireManual(ctx, routine.ID, nil)
+	if err != nil {
+		t.Fatalf("fire manual: %v", err)
+	}
+	if run.CatchUpMissedTicks != nil {
+		t.Errorf("CatchUpMissedTicks = %v, want nil (manual fire records no gap)", *run.CatchUpMissedTicks)
+	}
+	if run.CatchUpFirstMissedAt != nil {
+		t.Errorf("CatchUpFirstMissedAt = %v, want nil", *run.CatchUpFirstMissedAt)
+	}
+	if run.CatchUpTruncated {
+		t.Error("CatchUpTruncated = true, want false")
 	}
 }

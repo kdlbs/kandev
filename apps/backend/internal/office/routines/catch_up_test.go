@@ -203,6 +203,12 @@ func TestComputeCatchUp_MalformedExpression(t *testing.T) {
 	if !result.NextRunAt.Equal(want) {
 		t.Errorf("NextRunAt = %v, want %v (now + 24h)", result.NextRunAt, want)
 	}
+	// AC-001.11 requires the eventual warning to name "the underlying
+	// error", which means it has to survive on catchUpResult rather than
+	// being discarded at the point of failure.
+	if result.Err == nil {
+		t.Error("Err = nil, want the underlying NextCronTime parse error")
+	}
 
 	// A second tick a day later dispatches once more, not repeatedly: the
 	// re-armed NextRunAt is itself now due, and re-computing from it

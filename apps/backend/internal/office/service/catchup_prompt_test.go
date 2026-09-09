@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/office/routines"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -29,7 +31,11 @@ func TestBuildPrompt_RoutineGap_RendersUnderEachRoutineReason(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	snapshot := `{"routine_id":"r-1","missed_ticks":5,"missed_since":"2026-05-10T11:55:00Z","missed_truncated":true}`
+	firstMissed := time.Date(2026, 5, 10, 11, 55, 0, 0, time.UTC)
+	snapshot, err := routines.MarshalRoutinePayloadForTest("r-1", nil, 5, firstMissed, true)
+	if err != nil {
+		t.Fatalf("marshal routine payload: %v", err)
+	}
 
 	for _, reason := range routineCatchUpReasons {
 		t.Run(reason, func(t *testing.T) {
@@ -86,7 +92,12 @@ func TestBuildPrompt_RoutineGap_NonRoutineReasonIgnoresSnapshot(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	snapshot := `{"routine_id":"r-1","missed_ticks":5,"missed_since":"2026-05-10T11:55:00Z","missed_truncated":true}`
+	snapshot, err := routines.MarshalRoutinePayloadForTest(
+		"r-1", nil, 5, time.Date(2026, 5, 10, 11, 55, 0, 0, time.UTC), true,
+	)
+	if err != nil {
+		t.Fatalf("marshal routine payload: %v", err)
+	}
 	pc := service.BuildPromptContextWithSnapshotForTest(svc, ctx, service.RunReasonHeartbeat, "{}", snapshot)
 	if pc.MissedTicks != 0 {
 		t.Fatalf("MissedTicks = %d, want 0 (non-routine reason must not decode the snapshot)", pc.MissedTicks)
