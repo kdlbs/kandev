@@ -1,7 +1,7 @@
 ---
 id: "01-wave-identity-primitives"
 title: "Wave identity primitives"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -109,4 +109,8 @@ for any existing caller.
 
 ## Results
 
-Pending.
+Done. `internal/office/waveidentity` (`WaveString`, `WaveKey`) plus
+`Repository.ListWaveMembers` (excludes archived, ephemeral, and
+automation-origin children, ordered ascending by id) landed in
+`feat(office): add wave identity derivation and wave-member read`.
+`go test ./internal/office/waveidentity/... ./internal/office/repository/sqlite/... -run 'WaveIdentity|WaveMembers'` green.

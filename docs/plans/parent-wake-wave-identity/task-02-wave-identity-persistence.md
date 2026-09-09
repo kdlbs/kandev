@@ -1,7 +1,7 @@
 ---
 id: "02-wave-identity-persistence"
 title: "Persist wave identity and classify its unique violation"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-wave-identity-primitives"]
 plan: "plan.md"
@@ -127,4 +127,12 @@ code in this task).
 
 ## Results
 
-Pending.
+Done, across three commits: `feat(runs): add wake_wave_key and
+wake_wave_string columns to runs` (migration-only index per the
+schema-init-before-migration rule, `models.Run` fields), `feat(runs):
+dedupe and skip coalescing for wave-carrying queue requests`
+(`IsWakeWaveUniqueViolation`, `runs/service` classification +
+`shouldCoalesceRun` guard, `office/shared.ParentWakeDedupedTotal`), and
+`test(runs): add Postgres twin for the wake-wave-key dedupe race`
+(env-gated, skips cleanly without `KANDEV_TEST_POSTGRES_DSN`).
+`go test ./internal/runs/... ./internal/office/repository/sqlite/...` green.

@@ -1,7 +1,7 @@
 ---
 id: "03-wire-cascade-producer"
 title: "Wire cascade (P1) onto wave identity"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-wave-identity-primitives", "02-wave-identity-persistence"]
 plan: "plan.md"
@@ -124,4 +124,26 @@ Task 01 (`waveidentity`, `ListWaveMembers`), Task 02 (`models.Run` columns,
 
 ## Results
 
-Pending.
+Done, in `feat(office): wire the cascade producer onto wave identity`.
+`cascadeChildrenCompleted` now calls `resolveWaveIdentity` (its own
+terminality-confirming `ListWaveMembers` read) and `resolveWaveActionPayload`
+(step lookup + `engine.CompileStep`) after the existing `ListChildStates`
+loop; `RunContext` carries `WaveKey`/`WaveString`/`ExtraPayload` (all
+`json:"-"`); `queueRun` (the shared body behind `QueueRun`/`QueueRunCtx`)
+skips `CoalesceRun` and classifies `IsWakeWaveUniqueViolation` when a wave
+key is present. `SetWorkflowStepGetter` wired in
+`internal/backendapp/main.go` to `services.Workflow` alongside the
+existing `SetWorkflowEngineDispatcher` call.
+
+One deviation from the original scope note: rather than changing the
+public `QueueRun`/`QueueRunCtx` signatures (`QueueRun` implements
+`shared.RunQueuer`, used by other non-wave callers), the wave fields route
+through a new unexported `queueRun` helper both public methods call.
+
+`go test ./internal/office/scheduler/...` green (18 new/changed tests
+across `run_test.go` and `reactivity_children_completed_wave_test.go`,
+plus `newReactivityTestRepo`'s ad hoc `tasks` fixture gained
+`archived_at`/`is_ephemeral`/`origin` columns so `ListWaveMembers` can run
+against it). `golangci-lint run ./internal/office/scheduler/...
+./internal/backendapp/... --new-from-rev=cd78236315f28982848de4938d56f7722c7f632f`
+clean.
