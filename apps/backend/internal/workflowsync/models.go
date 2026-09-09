@@ -45,21 +45,26 @@ type Config struct {
 	WorkspaceID string `json:"workspace_id"`
 	// Provider selects the sync source: ProviderGitHub uses RepoOwner and
 	// RepoName, ProviderGitLab uses ProjectPath.
-	Provider        string     `json:"provider"`
-	RepoOwner       string     `json:"repo_owner"`
-	RepoName        string     `json:"repo_name"`
-	ProjectPath     string     `json:"project_path"`
-	Branch          string     `json:"branch"`
-	Path            string     `json:"path"`
-	IntervalSeconds int        `json:"interval_seconds"`
-	PollEnabled     bool       `json:"poll_enabled"`
-	LastSyncedAt    *time.Time `json:"last_synced_at,omitempty"`
-	LastOk          bool       `json:"last_ok"`
-	LastError       string     `json:"last_error,omitempty"`
-	LastWarnings    []string   `json:"last_warnings,omitempty"`
-	LastHash        string     `json:"-"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Provider             string     `json:"provider"`
+	RepoOwner            string     `json:"repo_owner"`
+	RepoName             string     `json:"repo_name"`
+	ProjectPath          string     `json:"project_path"`
+	Branch               string     `json:"branch"`
+	Path                 string     `json:"path"`
+	IntervalSeconds      int        `json:"interval_seconds"`
+	PollEnabled          bool       `json:"poll_enabled"`
+	LastSyncedAt         *time.Time `json:"last_synced_at,omitempty"`
+	LastOk               bool       `json:"last_ok"`
+	LastError            string     `json:"last_error,omitempty"`
+	LastWarnings         []string   `json:"last_warnings,omitempty"`
+	ConsecutiveFailures  int        `json:"consecutive_failures"`
+	NextAttemptAt        *time.Time `json:"next_attempt_at,omitempty"`
+	LastErrorClass       string     `json:"last_error_class,omitempty"`
+	PollSuspended        bool       `json:"poll_suspended"`
+	PollSuspensionReason string     `json:"poll_suspension_reason,omitempty"`
+	LastHash             string     `json:"-"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 // SetConfigRequest is the payload for creating or updating a workspace's

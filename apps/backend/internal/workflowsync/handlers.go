@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -150,7 +151,13 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 	}
 	response := gin.H{"config": cfg}
 	if syncErr != nil {
-		response["error"] = syncErr.Error()
+		if rateLimit, rateLimited := github.OperationRateLimitFromError(syncErr, c.service.now().UTC()); rateLimited {
+			response["error"] = "GitHub operation is rate limited"
+			response["error_code"] = github.RateLimitErrorCode
+			response["rate_limit"] = rateLimit
+		} else {
+			response["error"] = syncErr.Error()
+		}
 	}
 	if result != nil {
 		response["result"] = result

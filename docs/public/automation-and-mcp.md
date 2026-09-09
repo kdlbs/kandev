@@ -504,6 +504,7 @@ A task session currently registers these tool groups:
 | Walkthroughs                        | Show, get, and delete the task's code walkthrough.                                                                                                                                                                                                                 |
 | Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base.                                                                                                               |
 | Workflow signal                     | Signal step completion when an auto-advance step explicitly requires that signal.                                                                                                                                                                                  |
+| GitHub rate-limit state             | Read cached primary quota observations, observed secondary throttling, and current admission decisions for the task workspace without a GitHub request.                                                                                                        |
 
 When **Settings → General → Task Actions → Agent-generated task titles** is enabled (the default; an
 explicitly saved **off** value remains off), a task-mode session for a newly created task or subtask can
@@ -528,6 +529,15 @@ If one managed repository cannot be renamed or its snapshot cannot be persisted,
 accepted and the response reports the successful, preserved, and failed branch outcomes separately.
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
+
+\`get_github_rate_limit_kandev\` is read-only and has no input fields. It uses the
+current task's workspace, so it cannot inspect another workspace. Its response
+reports cached Core and GraphQL quota state, any locally observed secondary
+throttle, and whether interactive or background work is currently admitted.
+\`known: false\` means Kandev has not yet observed that primary bucket; the tool
+does not fetch GitHub to fill it. An active secondary throttle can coexist with
+healthy cached primary quota because GitHub does not expose secondary-limit
+state through its primary-quota endpoint.
 
 ### Provider-scoped review automation tools
 
@@ -582,12 +592,19 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
 - `list_related_tasks_kandev`;
+- `get_github_rate_limit_kandev`, which reads the current task workspace's
+  cached GitHub quota and admission state without provider I/O;
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
 - `show_rich_output_kandev`;
 - `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery,
+cached GitHub rate state, task documents, quorum decisions, and the
+step-completion signal. Office state changes use the injected
+`$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for
+additional Kandev MCP tools: Kanban/configuration tools are task-mode only and
+are not registered in Office mode.
 
 ### Runtime credentials
 

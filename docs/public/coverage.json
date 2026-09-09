@@ -185,6 +185,7 @@
         "archive_task_kandev",
         "create_task_kandev",
         "delete_task_kandev",
+        "get_github_rate_limit_kandev",
         "list_tasks_kandev",
         "move_task_kandev",
         "remove_task_dependency_kandev",
@@ -416,7 +417,8 @@
       "stability": "stable",
       "docs": [
         "integrations",
-        "configuration"
+        "configuration",
+        "workflow-sync"
       ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",

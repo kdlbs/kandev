@@ -755,7 +755,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 36, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 37, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -928,6 +928,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
+	assert.Contains(t, tools, "get_github_rate_limit_kandev")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
@@ -935,7 +936,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 39, len(tools))
+	assert.Equal(t, 40, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {
@@ -1055,7 +1056,7 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
-	assert.Equal(t, 12, len(tools))
+	assert.Equal(t, 13, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1075,7 +1076,7 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output
 	// + 1 decisions + 1 step_complete (ADR 0015) = 11
 	// (no ask_user_question, no delegate, no list_task_comments)
-	assert.Equal(t, 11, len(tools))
+	assert.Equal(t, 12, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {

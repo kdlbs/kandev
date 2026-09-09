@@ -1085,6 +1085,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
+		{name: "github-rate-limit", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerGitHubRateLimitTool() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
@@ -1105,6 +1106,20 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
 	}
+}
+
+func (s *Server) registerGitHubRateLimitTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool(
+			"get_github_rate_limit_kandev",
+			mcp.WithDescription("Get Kandev's locally observed GitHub rate-limit state for the current task's workspace. It distinguishes primary quota observations from observed secondary throttling and makes no GitHub request."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+		),
+		s.wrapHandler("get_github_rate_limit_kandev", s.getGitHubRateLimitHandler()),
+	)
 }
 
 func (s *Server) registerAgentPermissionTools() {

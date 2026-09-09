@@ -106,8 +106,21 @@ func TestGHClient_ListUserRepos_AuthFailureSkipsTheSearch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "list user repos") {
 		t.Fatalf("err = %v, want a wrapped list-user-repos error", err)
 	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized || FailureKindOf(err) != FailureInvalidCredentials {
+		t.Fatalf("err = %v, want typed invalid-credentials 401", err)
+	}
 	if len(calls(t)) != 1 {
 		t.Errorf("gh calls = %d, want 1 — the repo search must not run after auth fails", len(calls(t)))
+	}
+}
+
+func TestGHClient_ListUserRepos_ForbiddenAuthFailureIsTyped(t *testing.T) {
+	newFakeGH(t, ghResponse{Prefix: "api user -q", Stderr: "gh: HTTP 403: Forbidden", Exit: 1})
+	_, err := NewGHClient().ListUserRepos(context.Background(), "", 20)
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusForbidden || FailureKindOf(err) != FailureInvalidCredentials {
+		t.Fatalf("err = %v, want typed invalid-credentials 403", err)
 	}
 }
 

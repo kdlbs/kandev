@@ -72,7 +72,15 @@ There is at most one sync configuration per workspace.
 
 `repo_owner`/`repo_name` and `project_path` are mutually exclusive; the backend rejects a request carrying both, and switching the provider in the dialog clears the other provider's fields automatically.
 
-The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_warnings`. Auto-sync checks due configurations on a 60-second outer ticker and waits one full tick after backend startup. A configured interval is therefore a minimum cadence, not an exact schedule; a due sync can start roughly another minute later.
+The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_warnings`. Recovery state is reported as `consecutive_failures`, `next_attempt_at`, `last_error_class`, `poll_suspended`, and `poll_suspension_reason`. Auto-sync checks due configurations on a 60-second outer ticker and waits one full tick after backend startup. A configured interval is therefore a minimum cadence, not an exact schedule; a due sync can start roughly another minute later.
+
+## Automatic retry and suspension
+
+Auto-sync does not retry a failing provider on every outer poll tick. Transient failures use equal-jitter exponential backoff: the base is the larger of the configured interval and one minute, each consecutive failure doubles it, and the pre-jitter delay stops growing at one hour. A provider `Retry-After` time or exhausted primary-bucket reset can move `next_attempt_at` later, never earlier.
+
+Kandev suspends automatic polling after a definite credential/access failure or a missing repository, branch, path, or ref. The configuration retains one actionable failure and suspension reason; later skipped ticks make no provider request and do not repeat the warning. GitLab sync receives the same generic transient backoff, but GitHub-specific response classification is not applied to GitLab errors.
+
+Saving the configuration clears its retry and suspension schedule. **Sync now** also bypasses the automatic schedule for one interactive recovery attempt. A successful attempt clears the failure state; another definite failure suspends polling again with the current reason.
 
 ## Definition directory
 
@@ -145,7 +153,7 @@ The settings UI uses these backend routes. All require a `workspace_id` query pa
 | `GET` | `/api/v1/workflow-sync/config?workspace_id=ID` | `200` with the configuration, or `204 No Content` when absent. |
 | `POST` | `/api/v1/workflow-sync/config?workspace_id=ID` | Validate/upsert the JSON configuration and return it. Does not sync. |
 | `DELETE` | `/api/v1/workflow-sync/config?workspace_id=ID` | Release synced workflows to manual ownership, delete the configuration, and return `{"deleted":true}`. |
-| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. |
+| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. A rate failure also returns `error_code` and `rate_limit`. |
 
 Example (GitHub):
 
@@ -185,6 +193,10 @@ curl -fsS -X POST \
 
 Except for “not configured,” a completed force-sync request returns HTTP `200` even when the response contains an `error`; inspect the JSON and `config.last_ok`, not only the HTTP status. A force sync without a configuration returns `404`.
 
+A GitHub rate failure sets `error_code` to `github_rate_limited`. Its
+`rate_limit` object contains `kind`, `resource`, `retry_at`,
+`retry_after_seconds`, and `source`. Successful syncs omit these fields.
+
 ## Stop syncing and clean up
 
 Choose **Remove sync** to stop polling. Kandev first clears sync ownership from all synced workflows in the workspace, making them normal editable workflows, and then removes the configuration. It does not delete those workflows. If releasing any workflow fails, removal fails and the configuration remains so the operation can be retried.
@@ -203,6 +215,7 @@ Deleting an individual repository definition has the different reconciliation be
 - **Completed with warnings:** read every warning. Invalid files freeze their previous workflows; tasks in removed steps or workflows block deletion; duplicate step names block safe matching.
 - **Unexpected duplicate after rename:** restore the original `(file path, workflow name)`, or move/archive tasks from the old workflow before deleting it.
 - **Changes appear to revert:** a synced workflow is repository-owned. Commit the change to its source file; the next reconciliation repairs local drift.
-- **Rate limits or intermittent network failures:** lengthen `interval_seconds`, use **Sync now** after recovery, and inspect the GitHub/GitLab integration status and backend logs.
+- **Rate limits or intermittent network failures:** inspect `last_error_class` and `next_attempt_at` before retrying. Lengthen `interval_seconds` when the normal cadence is too aggressive, or use **Sync now** for one interactive recovery attempt.
+- **GitHub shows full core quota but real calls still fail with 403:** a healthy `GET /rate_limit` result does not rule out a secondary throttle. Kandev keeps primary quota observations separate from a secondary refusal and waits until its locally enforced `retry_at`, unless an accepted GitHub response clears that estimate earlier.
 
 Related guides: [Workflow Tips](workflow-tips.md), [Workflow Import / Export](workflow-import-export.md), [Configuration](configuration.md), and [Operations](operations.md).

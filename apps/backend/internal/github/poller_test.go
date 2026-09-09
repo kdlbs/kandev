@@ -61,6 +61,16 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	return poller, svc, mockClient, store
 }
 
+func TestPollerContextUsesNonBlockingBackgroundAdmission(t *testing.T) {
+	ctx := pollerContext(context.Background())
+	if githubWorkClass(ctx) != WorkClassBackground {
+		t.Fatalf("work class = %v, want background", githubWorkClass(ctx))
+	}
+	if !nonBlockingGitHubAdmission(ctx) {
+		t.Fatal("poller context must use non-blocking admission")
+	}
+}
+
 // seedTask inserts a minimal task row for JOIN-based queries. Pass archived=true
 // to seed an archived task (archived_at set to now).
 func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
@@ -72,6 +82,21 @@ func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
 	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id, archived_at) VALUES (?, ?, ?)`,
 		taskID, testWorkspaceID, archivedAt); err != nil {
 		t.Fatalf("seed task %s: %v", taskID, err)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestPollerRateTrackerStopsBackgroundAtPrimaryReserve(t *testing.T) {
+	poller, service, _, _ := setupPollerTest(t)
+	service.rateTracker.Record(RateSnapshot{
+		Resource: ResourceGraphQL, Limit: 5000, Remaining: 500,
+		ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if poller.waitForRateLimit(ctx, ResourceGraphQL, "reserve") {
+		t.Fatal("background poller proceeded after reaching the ten-percent reserve")
 	}
 }
 
