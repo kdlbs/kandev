@@ -407,7 +407,7 @@ function TopBarRight({
       )}
       {officeTaskHref && (
         <TopbarCluster label={t("task:openInOfficeView")} className="[&_a]:h-7 [&_a]:text-xs">
-          <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">
+          <Button asChild size="sm" variant="outline" className="cursor-pointer px-2">
             <Link href={officeTaskHref}>{t("task:openInOfficeView")}</Link>
           </Button>
         </TopbarCluster>

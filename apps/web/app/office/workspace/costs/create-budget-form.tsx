@@ -8,6 +8,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { toast } from "@/lib/toast/sonner";
 import { createBudget } from "@/lib/api/domains/office-api";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type Props = {
   workspaceId: string;
@@ -45,7 +46,7 @@ function FormFields({
     <div className="grid grid-cols-2 gap-3">
       <FormField label={t("office:scopeType")}>
         <Select value={state.scopeType} onValueChange={(v) => onChange({ scopeType: v })}>
-          <SelectTrigger className="h-8 text-sm cursor-pointer">
+          <SelectTrigger className={controlSizingClassName("standard", "text-sm cursor-pointer")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -63,7 +64,7 @@ function FormFields({
       </FormField>
       <FormField label={t("office:scopeId")}>
         <Input
-          className="h-8 text-sm"
+          className={controlSizingClassName("standard", "text-sm")}
           value={state.scopeId}
           onChange={(e) => onChange({ scopeId: e.target.value })}
           placeholder={t("office:entityId")}
@@ -71,7 +72,7 @@ function FormFields({
       </FormField>
       <FormField label={t("office:limit")}>
         <Input
-          className="h-8 text-sm"
+          className={controlSizingClassName("standard", "text-sm")}
           type="number"
           value={state.limitDollars}
           onChange={(e) => onChange({ limitDollars: e.target.value })}
@@ -80,7 +81,7 @@ function FormFields({
       </FormField>
       <FormField label={t("office:period")}>
         <Select value={state.period} onValueChange={(v) => onChange({ period: v })}>
-          <SelectTrigger className="h-8 text-sm cursor-pointer">
+          <SelectTrigger className={controlSizingClassName("standard", "text-sm cursor-pointer")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -95,7 +96,7 @@ function FormFields({
       </FormField>
       <FormField label={t("office:alertThreshold")}>
         <Input
-          className="h-8 text-sm"
+          className={controlSizingClassName("standard", "text-sm")}
           type="number"
           value={state.alertPct}
           onChange={(e) => onChange({ alertPct: e.target.value })}
@@ -103,7 +104,7 @@ function FormFields({
       </FormField>
       <FormField label={t("office:actionOnExceed")}>
         <Select value={state.action} onValueChange={(v) => onChange({ action: v })}>
-          <SelectTrigger className="h-8 text-sm cursor-pointer">
+          <SelectTrigger className={controlSizingClassName("standard", "text-sm cursor-pointer")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

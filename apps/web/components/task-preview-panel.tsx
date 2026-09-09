@@ -100,7 +100,7 @@ function PreviewPanelHeader({
             <span className="sr-only">{t("common:openFullPage")}</span>
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="cursor-pointer" onClick={onClose}>
           <IconX className="h-4 w-4" />
           <span className="sr-only">{t("task:closePreview")}</span>
         </Button>

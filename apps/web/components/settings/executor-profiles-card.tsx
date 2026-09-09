@@ -135,7 +135,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                       variant="ghost"
                       size="sm"
                       onClick={(e) => handleDelete(e, profile.id)}
-                      className="h-11 w-11 p-0 text-destructive hover:text-destructive cursor-pointer md:h-7 md:w-7"
+                      className={settingsActionClassName(
+                        "p-0 text-destructive hover:text-destructive cursor-pointer",
+                      )}
                     >
                       <IconTrash className="h-3.5 w-3.5" />
                     </Button>

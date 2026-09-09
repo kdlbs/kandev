@@ -28,6 +28,7 @@ import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-con
 import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
+import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
 // --- StepConfigHeader ---
 
@@ -66,7 +67,7 @@ function StepConfigHeader({
           }}
           placeholder={t("workflows:stepNamePlaceholder")}
           disabled={readOnly}
-          className="h-8 w-full sm:max-w-[240px]"
+          className={settingsControlClassName("w-full sm:max-w-[240px]")}
           data-settings-dirty={!savedStep || localName !== savedStep.name}
         />
         <Select
@@ -78,7 +79,7 @@ function StepConfigHeader({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="h-8 w-full sm:w-[120px]"
+            className={settingsControlClassName("w-full sm:w-[120px]")}
             data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.color)}
           >
             <SelectValue placeholder={t("workflows:color")} />
@@ -110,10 +111,11 @@ function StepConfigHeader({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
         onClick={onRemove}
         disabled={readOnly}
-        className="h-8 self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto"
+        className={settingsActionClassName(
+          "self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto",
+        )}
       >
         <IconTrash className="h-3.5 w-3.5 mr-1" />
         {t("workflows:delete")}
@@ -159,7 +161,7 @@ function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArc
             id={`${step.id}-auto-archive-hours`}
             type="number"
             min={1}
-            className="w-20 h-7 text-sm"
+            className={settingsControlClassName("w-20 text-sm")}
             value={step.auto_archive_after_hours ?? 24}
             onChange={(e) => {
               if (readOnly) return;

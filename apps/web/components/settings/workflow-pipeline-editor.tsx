@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import type { WorkflowStep } from "@/lib/types/http";
 import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle-analysis";
 import { cn } from "@/lib/utils";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { StepConfigPanel } from "./workflow-pipeline-editor-panels";
 import { isWorkflowStepDirty } from "./workflow-dirty-state";
 import { WorkflowCycleDiagnostic } from "./workflow-cycle-diagnostic";
@@ -243,7 +244,10 @@ function PipelineArea({
         onClick={readOnly ? undefined : onAddStep}
         disabled={readOnly}
         data-testid="add-step-button"
-        className="shrink-0 h-10 w-10 rounded-lg border border-dashed border-border text-muted-foreground hover:border-primary/50 hover:text-foreground flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className={cn(
+          controlSizingClassName("icon"),
+          "shrink-0 rounded-lg border border-dashed border-border text-muted-foreground hover:border-primary/50 hover:text-foreground flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+        )}
       >
         <IconPlus className="h-4 w-4" />
       </button>

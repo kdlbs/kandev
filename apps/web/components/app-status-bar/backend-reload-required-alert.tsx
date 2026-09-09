@@ -6,6 +6,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { backendReloadCoordinator } from "@/lib/platform/backend-reload-coordinator";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function BackendReloadRequiredAlert() {
   const { t } = useTranslation();
@@ -31,8 +32,10 @@ export function BackendReloadRequiredAlert() {
           <p className="min-w-0 break-words">{t("system:backendReloadRequiredBody")}</p>
           <Button
             type="button"
-            size="sm"
-            className="h-11 w-full shrink-0 cursor-pointer sm:w-auto"
+            className={controlSizingClassName(
+              "standard",
+              "w-full shrink-0 cursor-pointer sm:w-auto",
+            )}
             onClick={() => window.location.reload()}
           >
             {t("system:backendReloadRequiredAction")}

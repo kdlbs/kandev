@@ -19,7 +19,7 @@ import { Dialog } from "@kandev/ui/dialog";
 
 **Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
 
-- Always prefer native shadcn components over custom implementations.
+- Prefer shared shadcn controls. Ordinary desktop buttons, inputs, and selectors use 28px; deliberate compact inline controls use 24px. See the [sizing guide](../../.agents/skills/mobile-parity/references/control-sizing.md) for touch sizing and exceptions.
 - Check `apps/packages/ui/src/` for available components (pagination, table, dialog, etc.).
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.

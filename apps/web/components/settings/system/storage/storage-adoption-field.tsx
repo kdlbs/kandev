@@ -3,6 +3,7 @@ import { Label } from "@kandev/ui/label";
 import { useTranslation } from "react-i18next";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 type Props = {
   path: string;
@@ -46,7 +47,7 @@ export function StorageAdoptionField({
           disabled={pending || !enabled}
           onChange={(event) => setPath(event.target.value)}
           placeholder="/root/.cache/go-build"
-          className="h-11 min-w-0 font-mono"
+          className={settingsControlClassName("min-w-0 font-mono")}
           data-testid="storage-go-cache-adopt-path"
         />
         <StorageActionButton

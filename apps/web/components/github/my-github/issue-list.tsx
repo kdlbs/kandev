@@ -41,7 +41,7 @@ function StartTaskMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="h-7 gap-1 cursor-pointer">
+        <Button size="sm" variant="outline" className="gap-1 cursor-pointer">
           <IconPlus className="h-3.5 w-3.5" />
           {t("github:task")}
           <IconChevronDown className="h-3 w-3" />
