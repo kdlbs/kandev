@@ -166,7 +166,7 @@ func appendMissedTicksSection(prompt string, pc *PromptContext) string {
 	if !strings.HasSuffix(prompt, "\n") {
 		prompt += "\n"
 	}
-	line := fmt.Sprintf("\nYou missed %d scheduled run(s) since %s.", pc.MissedTicks, pc.MissedSince)
+	line := fmt.Sprintf("\nYou missed %d scheduled tick(s) since %s.", pc.MissedTicks, pc.MissedSince)
 	if pc.MissedTruncated {
 		line += " This count is a lower bound (more ticks were missed than could be counted)."
 	}

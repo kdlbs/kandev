@@ -992,7 +992,7 @@ func applyRoutineCatchUpContext(pc *PromptContext, reason, contextSnapshot strin
 	if err := wakeup.UnmarshalPayload(contextSnapshot, &routinePayload); err != nil {
 		return
 	}
-	if routinePayload.MissedTicks <= 0 {
+	if routinePayload.MissedTicks <= 0 || routinePayload.MissedSince == "" {
 		return
 	}
 	pc.MissedTicks = routinePayload.MissedTicks

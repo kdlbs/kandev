@@ -54,6 +54,12 @@ func TestBuildPrompt_RoutineGap_RendersUnderEachRoutineReason(t *testing.T) {
 			if !strings.Contains(prompt, "missed 5") {
 				t.Errorf("prompt = %q, want it to state the missed-tick count", prompt)
 			}
+			if !strings.Contains(prompt, "tick") {
+				t.Errorf("prompt = %q, want it to describe missed ticks, not runs (a tick never becomes a run)", prompt)
+			}
+			if strings.Contains(prompt, "run") {
+				t.Errorf("prompt = %q, want no mention of a missed run — only one run is ever dispatched", prompt)
+			}
 			if !strings.Contains(prompt, "2026-05-10T11:55:00Z") {
 				t.Errorf("prompt = %q, want it to state the first-missed timestamp", prompt)
 			}
@@ -81,6 +87,34 @@ func TestBuildPrompt_RoutineGap_NoSummaryRendersNoStatement(t *testing.T) {
 	prompt := service.BuildPrompt(pc)
 	if strings.Contains(prompt, "missed") {
 		t.Errorf("prompt = %q, want no missed-tick statement", prompt)
+	}
+}
+
+// TestBuildPrompt_RoutineGap_LegacyPayloadWithoutMissedSinceIsIgnored covers
+// the upgrade path: a wakeup request queued by a pre-catch-up build wrote
+// only {"routine_id":...,"missed_ticks":N} — missed_since did not exist yet
+// — and can sit undispatched across a deploy. Decoding that legacy shape
+// must not populate the catch-up fields from an incomplete payload, or the
+// rendered prompt states a tick count with no timestamp ("since .").
+func TestBuildPrompt_RoutineGap_LegacyPayloadWithoutMissedSinceIsIgnored(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	legacySnapshot := `{"routine_id":"r1","missed_ticks":5}`
+	pc := service.BuildPromptContextWithSnapshotForTest(svc, ctx, shared.RunReasonRoutineDispatchCron, "{}", legacySnapshot)
+	if pc.MissedTicks != 0 {
+		t.Fatalf("MissedTicks = %d, want 0 (a legacy payload with no missed_since must not populate the gap fields)", pc.MissedTicks)
+	}
+	if pc.MissedSince != "" {
+		t.Errorf("MissedSince = %q, want empty", pc.MissedSince)
+	}
+
+	prompt := service.BuildPrompt(pc)
+	if strings.Contains(prompt, "missed") {
+		t.Errorf("prompt = %q, want no missed-tick statement for a legacy payload missing missed_since", prompt)
+	}
+	if strings.Contains(prompt, "since .") {
+		t.Errorf("prompt = %q, must never render a malformed empty timestamp", prompt)
 	}
 }
 
