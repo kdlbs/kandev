@@ -82,8 +82,9 @@ func TestRoutine_CronFire_CreatesTasklessRun_StopsBeforeSchedulerIntegration(t *
 	}
 
 	// This round-trips the repo's continuation-summary upsert under a
-	// "routine:<routine.ID>" scope key, proving the 8 KB schema
-	// constraint and the upsert-key shape via the public repo API.
+	// "routine:<routine.ID>" scope key, proving the upsert-key shape
+	// and scope-key readback via the public repo API. It does not
+	// exercise the 8 KB content limit.
 	// Nothing in production writes this key yet for a taskless
 	// completion — see card 49894d63 — so this is repo-API coverage,
 	// not a production contract round-trip.
