@@ -363,11 +363,25 @@ spec's E2E decision explicitly leaves to Go-level coverage.
 - [x] [Task 04: Wire engine-routed producers (P2, P3) onto wave identity](task-04-wire-engine-routed-producers.md)
 - [x] [Task 05: Wire orchestrator (P4) onto wave identity](task-05-wire-orchestrator-producer.md)
 - [x] [Task 06: Backstop admission compares wave identity](task-06-backstop-admission.md)
-- [ ] [Task 07: Race, parity, and regression coverage](task-07-race-and-regression-coverage.md)
+- [x] [Task 07: Race, parity, and regression coverage](task-07-race-and-regression-coverage.md)
 
 ## Verification results
 
-Pending.
+All 7 work orders done. Full-package tests pass with `-race` across every
+touched package (`office/scheduler`, `office/service`,
+`office/repository/sqlite`, `orchestrator`, `runs/service`,
+`runs/repository/sqlite`, `task/repository/sqlite`, `office/waveidentity`,
+`db/dialect`); `golangci-lint --new-from-rev=cd78236315f28982848de4938d56f7722c7f632f`
+clean on every changed package. See each task file's own Results section
+for command output and per-task detail. `KANDEV_TEST_POSTGRES_DSN` was not
+provisioned in this environment, so the gated Postgres twins (Task 06's
+`OrderedIDConcat`, this initiative's other dialect-sensitive coverage)
+skipped rather than ran — consistent with the card's instruction not to
+provision Docker/Postgres here.
+
+Remaining before this card closes: the Definition of Done gauntlet
+(`make fmt`, `make typecheck test lint`, `make lint-format`,
+`pnpm run i18n:ratchet`) has not yet been run.
 
 ## Risks
 
