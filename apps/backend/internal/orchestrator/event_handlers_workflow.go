@@ -2389,10 +2389,10 @@ func (s *Service) resolveStepProfileSessionStartPolicy(step *wfmodels.WorkflowSt
 }
 
 // resolveStepProfileSessionEndPolicy returns the source step's session end
-// behavior. Invalid or absent values use the safe complete default.
+// behavior. Invalid or absent values use the conversation-preserving park default.
 func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep) models.WorkflowProfileSessionEndPolicy {
 	if step == nil {
-		return models.WorkflowProfileSessionEndPolicyComplete
+		return models.WorkflowProfileSessionEndPolicyPark
 	}
 	return models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
 }

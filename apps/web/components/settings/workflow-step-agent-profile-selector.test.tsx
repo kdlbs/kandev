@@ -112,11 +112,25 @@ describe("WorkflowStepAgentProfileSelector", () => {
     expect(onUpdate).toHaveBeenNthCalledWith(2, { profile_session_end_policy: "park" });
   });
 
+  it("selects park on end when the lifecycle policy is unset", () => {
+    const { trigger } = renderSelector({ profile_session_end_policy: undefined });
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
+
+    expect(screen.getByTestId("step-1-profile-session-end-park").getAttribute(ARIA_PRESSED)).toBe(
+      ARIA_TRUE,
+    );
+    expect(
+      screen.getByTestId("step-1-profile-session-end-complete").getAttribute(ARIA_PRESSED),
+    ).toBe("false");
+  });
+
   it("renders the same nested surface in the mobile drawer", () => {
     breakpoint.isMobile = true;
     const { trigger } = renderSelector({
       profile_session_start_policy: "new",
-      profile_session_end_policy: "park",
+      profile_session_end_policy: undefined,
     });
 
     fireEvent.click(trigger);

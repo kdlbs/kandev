@@ -73,7 +73,7 @@ func (r *Repository) initSchema() error {
 		show_in_command_panel INTEGER DEFAULT 1,
 		auto_archive_after_hours INTEGER DEFAULT 0,
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-		profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
 		wip_limit INTEGER NOT NULL DEFAULT 0,
 		pull_from_step_id TEXT NOT NULL DEFAULT '',
 		session_target TEXT,
@@ -117,7 +117,7 @@ func (r *Repository) initSchema() error {
 	r.migrate.Apply("workflow_steps.show_in_command_panel", `ALTER TABLE workflow_steps ADD COLUMN show_in_command_panel INTEGER DEFAULT 1`)
 	r.migrate.Apply("workflow_steps.agent_profile_id", `ALTER TABLE workflow_steps ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
-	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
+	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
 	// Phase 2 (ADR-0004) - workflow_steps.stage_type, a UX hint for the
 	// frontend ("work" | "review" | "approval" | "custom"). Backend code
 	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows at "custom".

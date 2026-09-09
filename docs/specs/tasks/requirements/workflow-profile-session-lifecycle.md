@@ -39,7 +39,7 @@ fresh conversation for independent work.
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001: Configurable step profile-session lifecycle
 
 **Intent:** Let a workflow author configure each step's conversation boundary
-without changing existing workflow behavior.
+with a conversation-preserving default and explicit completion when required.
 
 **User story:** As a workflow author, I want each step to define how its session
 starts and ends, so repeated stages use the intended context.
@@ -74,12 +74,16 @@ starts and ends, so repeated stages use the intended context.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.7:** When a workflow step is saved,
   reloaded, exported, imported, or synchronized, its start and end settings
   shall round-trip. Missing or invalid values shall use **Reuse an available
-  session** and **Complete the session**.
+  session** and **Park the session**. An explicitly saved **Complete the
+  session** value shall remain selected and shall retain its completion
+  behavior.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.8:** When an author edits a mutable
   workflow, one step selector shall show the recipient and a **Session
   lifecycle** setting above the searchable choices. That setting shall remain
   visible while the choices scroll or search has no results. It shall present separate **When this
   step starts** and **When this step ends** choices with visible explanations.
+  For a new or unset step, **Park the session** shall be selected by default on
+  desktop and phone surfaces.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.9:** When the selector shows an agent
   profile, it shall show the same agent logo used by the new-task profile
   selector. The workflow-default choice shall use the generic agent icon.

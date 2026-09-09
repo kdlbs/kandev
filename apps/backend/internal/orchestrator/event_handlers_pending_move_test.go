@@ -439,7 +439,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	sg := newMockStepGetter()
 	sg.steps[stepInProgressID] = &wfmodels.WorkflowStep{
 		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
-		AgentProfileID: profileImpl,
+		AgentProfileID:          profileImpl,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
@@ -449,7 +450,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	}
 	sg.steps[stepInReviewID] = &wfmodels.WorkflowStep{
 		ID: stepInReviewID, WorkflowID: "wf1", Name: "In Review", Position: 2,
-		AgentProfileID: profileReview,
+		AgentProfileID:          profileReview,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{

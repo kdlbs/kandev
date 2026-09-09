@@ -65,13 +65,13 @@ The step stores two independent enums:
 | `profile_session_end_policy` | `complete` | Complete the source session before runtime stop. |
 | `profile_session_end_policy` | `park` | Keep the source session nonterminal and stop its runtime. |
 
-The schema defaults are `reuse` and `complete`. Domain constructors,
+The schema defaults are `reuse` and `park`. Domain constructors,
 repository scans, request updates, templates, portable import, and sync use the
 same defaults for missing or unknown values.
 
-These defaults preserve the actual compatibility behavior of the current
-`complete` policy. That policy looks for an eligible nonterminal destination
-session and completes the source session.
+The `park` default preserves the source conversation when an author has not
+made an explicit destructive lifecycle choice. An explicit `complete` value
+continues to complete the source session and remains unchanged when loaded.
 
 The current implementation uses the two independent lifecycle fields. The
 earlier combined `profile_session_policy` contract was replaced; removing it

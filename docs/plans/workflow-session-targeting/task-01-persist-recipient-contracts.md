@@ -51,7 +51,7 @@ This first slice has no source-step bindings or reference graph.
 - REST/MCP preserve target values and partial-update semantics, reject conflicts,
   and emit equivalent events with explicit target test inputs.
 - Templates, built-in initialization, portable version 1/2, duplication, and
-  sync preserve initial intent and legacy lifecycle defaults.
+  sync preserve initial intent and the reuse/park lifecycle defaults.
 - Snapshot writes are immutable; session deletion retains initial profile.
   Fresh insertion/prepared route and promotion/committed route have transactional
   repository seams. Stale writes and failures preserve unrelated metadata.
@@ -123,3 +123,7 @@ The PostgreSQL-specific repository checks were not run because
 `KANDEV_TEST_POSTGRES_DSN` was unavailable. The store-conformance run covered
 the available SQLite adapter, and the requested PostgreSQL boot test had no
 matching test in this checkout.
+
+A follow-up changed missing and invalid end-policy values, both SQL schema
+defaults, and built-in insertion normalization from `complete` to `park`.
+Explicit `complete` values continue to round-trip unchanged.

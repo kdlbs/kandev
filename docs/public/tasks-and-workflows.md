@@ -478,8 +478,9 @@ until you choose another target, clear the target, or undo the source edit.
 Synced workflows require the same repair in the source file before the next
 sync.
 
-Existing steps use **Reuse an available session** and **Complete the session** by
-default. A parked session is not an active process. You can answer it later, or
+New or unset steps use **Reuse an available session** and **Park the session** by
+default. An explicitly saved **Complete the session** choice remains unchanged.
+A parked session is not an active process. You can answer it later, or
 Kandev can reuse it when a later destination step selects the matching profile
 and start behavior. If Kandev cannot prepare the destination session or record
 the parked switch, it keeps the current session recoverable and reports the

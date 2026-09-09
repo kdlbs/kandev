@@ -470,9 +470,10 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID:             "step1",
-		WorkflowID:     "wf1",
-		AgentProfileID: "profile-a",
+		ID:                      "step1",
+		WorkflowID:              "wf1",
+		AgentProfileID:          "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 	}
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID:             "step2",
@@ -682,9 +683,10 @@ func TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction(t *testing
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID:             "step1",
-		WorkflowID:     "wf1",
-		AgentProfileID: "profile-a",
+		ID:                      "step1",
+		WorkflowID:              "wf1",
+		AgentProfileID:          "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 	}
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 		ID:             "step2",
@@ -1510,6 +1512,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg := newMockStepGetter()
 		sourceStep := &wfmodels.WorkflowStep{
 			ID: "step1", WorkflowID: "wf1", Name: "Plan", AgentProfileID: "profile-a",
+			ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		}
 		step := &wfmodels.WorkflowStep{
 			ID:             "step2",

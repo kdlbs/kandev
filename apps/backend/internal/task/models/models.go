@@ -1172,10 +1172,10 @@ const (
 // and unknown workflow step session-end policy values.
 func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
 	value = strings.TrimSpace(value)
-	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
-		return WorkflowProfileSessionEndPolicyPark
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyComplete {
+		return WorkflowProfileSessionEndPolicyComplete
 	}
-	return WorkflowProfileSessionEndPolicyComplete
+	return WorkflowProfileSessionEndPolicyPark
 }
 
 // WorkflowSource values are persisted in workflows.source and record where a

@@ -131,7 +131,7 @@ Entry: open the agent selector in the Review step. Proposed desktop popover:
 ```text
 +--------------------------------------------------+
 | Session lifecycle                              > |
-| Reuse on start / Complete on end                 |
+| Reuse on start / Park on end                     |
 +--------------------------------------------------+
 | Search agents or workflow sessions...            |
 +--------------------------------------------------+
@@ -174,9 +174,9 @@ Entry: choose Session lifecycle. Both groups belong to the selected Review step.
 |     Initial agent profile, fresh conversation.   |
 |                                                  |
 | When this step ends:                             |
-| (*) Complete the session                         |
+| ( ) Complete the session                         |
 |     This conversation cannot be reused.          |
-| ( ) Park the session                             |
+| (*) Park the session                             |
 |     Stop the agent; keep its conversation.       |
 +--------------------------------------------------+
 ```
@@ -337,6 +337,14 @@ passed. Frontend focused tests passed 36 tests; typecheck and full web ESLint
 passed with no warnings. All translation gates passed. Desktop workflow
 targeting E2E passed 4 tests; mobile workflow targeting E2E passed 1 test.
 Public documentation validation, full spec lint, and whitespace checks passed.
+
+The park-by-default follow-up aligned the backend and frontend normalizers,
+both SQL schema owners, runtime nil handling, public docs, and the desktop and
+phone previews. Final checks passed 69 frontend regressions, 164 focused
+orchestrator regressions, 11 race regressions, SQL guard, backend lint,
+frontend typecheck and targeted lint, i18n ratchet, spec lint, and public-doc
+validation. A full orchestrator attempt reached 1,385 passing tests before the
+package's fixed 10-minute timeout; the task-defined focused suite completed.
 
 The PostgreSQL-specific commands were not run because this environment did not
 provide an isolated KANDEV_TEST_POSTGRES_DSN. The backend boot test command was

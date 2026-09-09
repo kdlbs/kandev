@@ -150,7 +150,8 @@ a new session when none is available. **Start a new session** always creates a
 fresh conversation. The source step's **Complete the session** setting closes
 the conversation, while **Park the session** stops the agent and keeps the
 conversation available for reuse or manual follow-up. These settings default
-to reuse on start and complete on end.
+to reuse on start and park on end. An explicitly selected completion policy is
+preserved.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 

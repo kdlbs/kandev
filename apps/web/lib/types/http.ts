@@ -241,7 +241,7 @@ export function normalizeWorkflowProfileSessionStartPolicy(
 export function normalizeWorkflowProfileSessionEndPolicy(
   value: unknown,
 ): WorkflowProfileSessionEndPolicy {
-  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
+  return typeof value === "string" && value.trim() === "complete" ? "complete" : "park";
 }
 
 /**

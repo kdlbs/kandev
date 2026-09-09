@@ -77,7 +77,7 @@ Entry: open the agent selector in the Review step. Proposed desktop popover:
 ```text
 +--------------------------------------------------+
 | Session lifecycle                              > |
-| Reuse on start / Complete on end                 |
+| Reuse on start / Park on end                     |
 +--------------------------------------------------+
 | Search agents or workflow sessions...            |
 +--------------------------------------------------+
@@ -118,9 +118,9 @@ Entry: choose Session lifecycle. Both groups belong to the selected Review step.
 |     Initial agent profile, fresh conversation.   |
 |                                                  |
 | When this step ends:                             |
-| (*) Complete the session                         |
+| ( ) Complete the session                         |
 |     This conversation cannot be reused.          |
-| ( ) Park the session                             |
+| (*) Park the session                             |
 |     Stop the agent; keep its conversation.       |
 +--------------------------------------------------+
 ```
@@ -235,3 +235,7 @@ Implemented the combined profile/session selector, lifecycle navigation above
 search and scrolling choices, draft validation, translated copy, and shared
 desktop/mobile state. Focused frontend tests passed 36 tests, typecheck and
 full web lint passed with no warnings, and all translation gates passed.
+
+A follow-up made the shared desktop/mobile lifecycle surface select **Park the
+session** for new or unset policies. Explicitly saved completion remains
+selected when reloaded.

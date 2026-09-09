@@ -233,7 +233,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-		profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,

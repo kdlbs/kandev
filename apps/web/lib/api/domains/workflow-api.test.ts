@@ -101,6 +101,6 @@ describe("createWorkflowStep", () => {
     );
 
     expect(step.profile_session_start_policy).toBe("reuse");
-    expect(step.profile_session_end_policy).toBe("complete");
+    expect(step.profile_session_end_policy).toBe("park");
   });
 });
