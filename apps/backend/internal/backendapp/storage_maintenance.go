@@ -31,7 +31,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const workspaceDependenciesProviderName = "workspace_dependencies"
+const (
+	workspaceDependenciesProviderName   = "workspace_dependencies"
+	archivedManagedBranchesProviderName = "archived_managed_branches"
+)
 
 type storageComposition struct {
 	handler           *storagepkg.Handler
@@ -200,7 +203,7 @@ func prepareStorageDependencies(
 		coordinator: coordinator, goCache: goCache, workspaceFactory: workspaceFactory,
 		cachedOverview: cachedOverview,
 		quarantine:     quarantine,
-		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider),
+		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
 	}, nil
 }
 
@@ -259,6 +262,26 @@ type taskCleanupActivityGate struct {
 
 type attachmentCleanupProvider struct {
 	service *taskservice.AttachmentService
+}
+
+type archivedBranchMaintainer interface {
+	MaintainArchivedBranches(context.Context, int) (worktree.BranchCleanupReceipt, error)
+}
+
+type archivedManagedBranchesCleanupProvider struct {
+	maintainer archivedBranchMaintainer
+}
+
+func (p archivedManagedBranchesCleanupProvider) Name() string {
+	return archivedManagedBranchesProviderName
+}
+
+func (p archivedManagedBranchesCleanupProvider) Cleanup(ctx context.Context) (map[string]any, error) {
+	if p.maintainer == nil {
+		return nil, nil
+	}
+	receipt, err := p.maintainer.MaintainArchivedBranches(ctx, worktree.ArchivedBranchMaintenanceBatchLimit)
+	return toMap(receipt), err
 }
 
 func (p attachmentCleanupProvider) Name() string { return "prompt_attachments" }
@@ -699,10 +722,12 @@ func storageCleanupProviders(
 	goCache *gocache.Provider,
 	docker *dockerstore.Provider,
 	quarantine quarantinePurger,
+	archivedBranches archivedBranchMaintainer,
 	temporary ...storagepkg.CleanupProvider,
 ) []storagepkg.CleanupProvider {
 	providers := []storagepkg.CleanupProvider{
 		quarantineCleanupProvider{purger: quarantine},
+		archivedManagedBranchesCleanupProvider{maintainer: archivedBranches},
 		workspaceCleanupAdapter(settings, workspaceFactory),
 		workspaceDependencyCleanupAdapter(settings, workspaceFactory),
 		goCacheCleanupProvider{provider: goCache},

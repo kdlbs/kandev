@@ -348,6 +348,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Extract worktree info from metadata if available
 	metadata := execution.MetadataSnapshot()
 	var worktreeID, worktreePath, worktreeBranch string
+	var worktreeBranchOwner, worktreeIntegrationRef string
 	if metadata != nil {
 		if id, ok := metadata["worktree_id"].(string); ok {
 			worktreeID = id
@@ -358,6 +359,10 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		if branch, ok := metadata["worktree_branch"].(string); ok {
 			worktreeBranch = branch
 		}
+	}
+	if execution.PrepareResult != nil {
+		worktreeBranchOwner = execution.PrepareResult.WorktreeBranchOwner
+		worktreeIntegrationRef = execution.PrepareResult.WorktreeIntegrationRef
 	}
 
 	// Surface per-repo worktree results from the prepare step so the orchestrator
@@ -378,6 +383,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				BranchSlug:                w.BranchSlug,
 				WorktreeID:                w.WorktreeID,
 				WorktreeBranch:            w.WorktreeBranch,
+				WorktreeBranchOwner:       w.WorktreeBranchOwner,
+				WorktreeIntegrationRef:    w.WorktreeIntegrationRef,
 				WorktreePath:              w.WorktreePath,
 				MainRepoGitDir:            w.MainRepoGitDir,
 				RequestedBaseBranch:       w.RequestedBaseBranch,
@@ -395,6 +402,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeID:                worktreeID,
 		WorktreePath:              worktreePath,
 		WorktreeBranch:            worktreeBranch,
+		WorktreeBranchOwner:       worktreeBranchOwner,
+		WorktreeIntegrationRef:    worktreeIntegrationRef,
 		RequestedBaseBranch:       requestedBaseBranch,
 		BaseBranch:                baseBranch,
 		BaseBranchFallbackWarning: baseBranchFallbackWarning,
@@ -446,6 +455,7 @@ func buildLifecycleLaunchRequest(
 		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
+		IntegrationRef:                req.IntegrationRef,
 		DefaultBranch:                 req.DefaultBranch,
 		CheckoutBranch:                req.CheckoutBranch,
 		PRNumber:                      req.PRNumber,
@@ -510,6 +520,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			RepositoryURL:              r.RepositoryURL,
 			RepoName:                   r.RepoName,
 			BaseBranch:                 r.BaseBranch,
+			IntegrationRef:             r.IntegrationRef,
 			DefaultBranch:              r.DefaultBranch,
 			CheckoutBranch:             r.CheckoutBranch,
 			PRNumber:                   r.PRNumber,

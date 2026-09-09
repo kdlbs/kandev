@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -66,14 +68,19 @@ func TestTaskEnvironmentRepo_CRUD(t *testing.T) {
 
 	newTaskWithRepo(t, repo, "task-env-2")
 	env := newEnv(t, repo, "task-env-2", "env-2")
+	compactedAt := time.Now().UTC().Truncate(time.Second)
 
 	er := &models.TaskEnvironmentRepo{
-		TaskEnvironmentID: env.ID,
-		RepositoryID:      "repo-frontend",
-		WorktreeID:        "wt-1",
-		WorktreePath:      "/tmp/tasks/x/frontend",
-		WorktreeBranch:    "feature/x",
-		Position:          0,
+		TaskEnvironmentID:         env.ID,
+		RepositoryID:              "repo-frontend",
+		WorktreeID:                "wt-1",
+		WorktreePath:              "/tmp/tasks/x/frontend",
+		WorktreeBranch:            "feature/x",
+		WorktreeBranchOwner:       "kandev",
+		WorktreeIntegrationRef:    "main",
+		WorktreeRecoveryHeadSHA:   strings.Repeat("a", 40),
+		WorktreeBranchCompactedAt: &compactedAt,
+		Position:                  0,
 	}
 	if err := repo.CreateTaskEnvironmentRepo(ctx, er); err != nil {
 		t.Fatalf("create env repo: %v", err)
@@ -86,17 +93,22 @@ func TestTaskEnvironmentRepo_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(list) != 1 || list[0].RepositoryID != "repo-frontend" {
+	if len(list) != 1 || list[0].RepositoryID != "repo-frontend" ||
+		list[0].WorktreeBranchOwner != "kandev" || list[0].WorktreeIntegrationRef != "main" ||
+		list[0].WorktreeRecoveryHeadSHA != strings.Repeat("a", 40) ||
+		list[0].WorktreeBranchCompactedAt == nil ||
+		!list[0].WorktreeBranchCompactedAt.Equal(compactedAt) {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 
 	er.WorktreeBranch = "feature/x-renamed"
+	er.WorktreeIntegrationRef = "develop"
 	er.ErrorMessage = "fetch failed"
 	if err := repo.UpdateTaskEnvironmentRepo(ctx, er); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	list, _ = repo.ListTaskEnvironmentRepos(ctx, env.ID)
-	if list[0].WorktreeBranch != "feature/x-renamed" || list[0].ErrorMessage != "fetch failed" {
+	if list[0].WorktreeBranch != "feature/x-renamed" || list[0].WorktreeIntegrationRef != "develop" || list[0].ErrorMessage != "fetch failed" {
 		t.Errorf("update did not persist: %+v", list[0])
 	}
 

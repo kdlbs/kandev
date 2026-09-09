@@ -59,12 +59,14 @@ type legacySession struct {
 }
 
 type legacyEnvRepo struct {
-	id, envID, repositoryID, branchSlug      string
-	worktreeID, worktreePath, worktreeBranch string
-	position                                 int
-	errorMessage, status                     string
-	mergedAt, deletedAt                      *time.Time
-	createdAt, updatedAt                     time.Time
+	id, envID, repositoryID, branchSlug                                  string
+	worktreeID, worktreePath, worktreeBranch                             string
+	worktreeBranchOwner, worktreeIntegrationRef, worktreeRecoveryHeadSHA string
+	worktreeBranchCompactedAt                                            *time.Time
+	position                                                             int
+	errorMessage, status                                                 string
+	mergedAt, deletedAt                                                  *time.Time
+	createdAt, updatedAt                                                 time.Time
 }
 
 type legacySessionWorktree struct {
@@ -189,9 +191,13 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 	rows, err := tx.Query(fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
-			COALESCE(worktree_branch, ''), position, COALESCE(error_message, ''),
-			%s, created_at, updated_at, %s, %s
+		COALESCE(worktree_branch, ''), %s, %s, %s, %s, position, COALESCE(error_message, ''),
+		%s, created_at, updated_at, %s, %s
 		FROM task_environment_repos`,
+		legacyRepoColumnExpr(columns, "worktree_branch_owner", "CAST('unknown' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_integration_ref", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_recovery_head_sha", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_branch_compacted_at", "NULL"),
 		legacyRepoColumnExpr(columns, "status", "CAST('active' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "merged_at", "NULL"),
 		legacyRepoColumnExpr(columns, "deleted_at", "NULL")))
@@ -201,10 +207,11 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var row legacyEnvRepo
-		var mergedAt, deletedAt sql.NullTime
+		var mergedAt, deletedAt, compactedAt sql.NullTime
 		if err := rows.Scan(&row.id, &row.envID, &row.repositoryID, &row.branchSlug,
-			&row.worktreeID, &row.worktreePath, &row.worktreeBranch, &row.position,
-			&row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
+			&row.worktreeID, &row.worktreePath, &row.worktreeBranch,
+			&row.worktreeBranchOwner, &row.worktreeIntegrationRef, &row.worktreeRecoveryHeadSHA,
+			&compactedAt, &row.position, &row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment repo: %w", err)
 		}
 		if mergedAt.Valid {
@@ -214,6 +221,10 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 		if deletedAt.Valid {
 			t := deletedAt.Time
 			row.deletedAt = &t
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			row.worktreeBranchCompactedAt = &t
 		}
 		c.envRepos = append(c.envRepos, row)
 	}
@@ -272,17 +283,21 @@ type taskWorktreeTargets struct {
 }
 
 type envRepoTarget struct {
-	key                      string
-	repositoryID, branchSlug string
-	canonical                bool
-	worktreeID               string
-	worktreePath             string
-	worktreeBranch           string
-	position                 int
-	errorMessage             string
-	status                   string
-	mergedAt, deletedAt      *time.Time
-	createdAt, updatedAt     time.Time
+	key                       string
+	repositoryID, branchSlug  string
+	canonical                 bool
+	worktreeID                string
+	worktreePath              string
+	worktreeBranch            string
+	worktreeBranchOwner       string
+	worktreeIntegrationRef    string
+	worktreeRecoveryHeadSHA   string
+	worktreeBranchCompactedAt *time.Time
+	position                  int
+	errorMessage              string
+	status                    string
+	mergedAt, deletedAt       *time.Time
+	createdAt, updatedAt      time.Time
 }
 
 // normalize builds the final ownership graph in memory: one environment per

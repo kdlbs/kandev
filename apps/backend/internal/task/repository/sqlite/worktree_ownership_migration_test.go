@@ -5,6 +5,7 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,10 +225,15 @@ func TestCutover_FreshSchemaHasFinalShape(t *testing.T) {
 		}
 	}
 	repoCols := tableColumnSet(t, sqlxDB, tableTaskEnvRepos)
-	for _, required := range []string{"status", "merged_at", "deleted_at"} {
+	for _, required := range []string{
+		"status", "merged_at", "deleted_at", "worktree_branch_compacted_at",
+	} {
 		if !repoCols[required] {
 			t.Fatalf("fresh task_environment_repos missing %s", required)
 		}
+	}
+	if !indexExists(t, sqlxDB, "idx_task_environment_repos_archived_branch_candidates") {
+		t.Fatal("fresh task_environment_repos missing archived branch candidate index")
 	}
 }
 
@@ -279,8 +285,14 @@ func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed
 	}
 	if _, err := db.Exec(db.Rebind(`
 		UPDATE task_environment_repos
-		SET status = 'deleted', merged_at = ?, deleted_at = ?
-		WHERE id = 'env-repo-hybrid'`), now, now); err != nil {
+		SET status = 'deleted',
+			worktree_branch_owner = 'kandev',
+			worktree_integration_ref = 'refs/heads/main',
+			worktree_recovery_head_sha = ?,
+			worktree_branch_compacted_at = ?,
+			merged_at = ?,
+			deleted_at = ?
+		WHERE id = 'env-repo-hybrid'`), strings.Repeat("a", 40), now, now, now); err != nil {
 		t.Fatalf("seed normalized repository lifecycle: %v", err)
 	}
 	if _, err := db.Exec(legacySessionWorktreeDDL); err != nil {
@@ -316,6 +328,12 @@ func assertHybridCutoverResult(t *testing.T, repo *Repository, seed legacySeed) 
 		!got[seed.repoID].MergedAt.Equal(got[seed.repoID].CreatedAt) || got[seed.repoID].DeletedAt == nil ||
 		!got[seed.repoID].DeletedAt.Equal(got[seed.repoID].CreatedAt) {
 		t.Fatalf("normalized repository lifecycle = %+v", got[seed.repoID])
+	}
+	if got[seed.repoID].WorktreeBranchOwner != "kandev" ||
+		got[seed.repoID].WorktreeIntegrationRef != "refs/heads/main" ||
+		got[seed.repoID].WorktreeRecoveryHeadSHA != strings.Repeat("a", 40) ||
+		got[seed.repoID].WorktreeBranchCompactedAt == nil {
+		t.Fatalf("normalized repository branch metadata = %+v", got[seed.repoID])
 	}
 	assertHybridWorktree(t, got[seed.repoID+"-session-only"], "wt-session-only",
 		"/tasks/hybrid/session-only", "feature/session-only")
@@ -353,6 +371,17 @@ func tableColumnSet(t *testing.T, db *sqlx.DB, table string) map[string]bool {
 		cols[name] = true
 	}
 	return cols
+}
+
+func indexExists(t *testing.T, db *sqlx.DB, index string) bool {
+	t.Helper()
+	var exists bool
+	err := db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name=?)`, index).Scan(&exists)
+	if err != nil {
+		t.Fatalf("probe index: %v", err)
+	}
+	return exists
 }
 
 // ---------------------------------------------------------------------------

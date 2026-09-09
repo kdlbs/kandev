@@ -338,6 +338,33 @@ func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T
 	}
 }
 
+func TestCleanupDestructiveTaskResources_DoesNotDuplicateBatchWorktreeCleanup(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{ID: "env-1", TaskID: "task-1"}}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	cleaner := &policyRecordingWorktreeCleanup{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetWorktreeCleanup(cleaner)
+	wt := &worktree.Worktree{ID: "wt-once", TaskID: "task-1"}
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "task-1", nil, []*worktree.Worktree{wt},
+		taskEnvironmentCleanup{
+			env:              &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: wt.ID}}},
+			preserveBranches: true,
+		}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v", errs)
+	}
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("destroyer worktree calls = %v, want none", destroyer.worktreeCalls)
+	}
+	if cleaner.preservingCalls != 1 {
+		t.Fatalf("batch preserving calls = %d, want 1", cleaner.preservingCalls)
+	}
+}
+
 func TestResetTaskEnvironment_ContainerDestroyFailurePreservesRow(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
 		ID:          "env-1",

@@ -40,6 +40,18 @@ func (s *failingReleaseStore) UpdateWorktree(ctx context.Context, wt *Worktree) 
 	return s.SQLiteStore.UpdateWorktree(ctx, wt)
 }
 
+func TestCleanupWorktreesPreservingBranches_RetainsBranchWhenReleaseFails(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-preserve-retry", "session-preserve-retry", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-preserve-retry", "session-preserve-retry")
+
+	mgr.store = &failingReleaseStore{SQLiteStore: store, failUpdate: true}
+	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup succeeded despite injected reference-release failure")
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+}
+
 type swappingCleanupScriptHandler struct{}
 
 func (h *swappingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
@@ -117,7 +129,9 @@ func TestCleanupWorktreesPreservingBranches_RetriesAfterReleaseFailure(t *testin
 	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err != nil {
 		t.Fatalf("retry pathless branch-preserving cleanup: %v", err)
 	}
-	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	// The retry has now released the reference successfully, so the eligible
+	// fully integrated managed branch is safely compacted.
+	assertCleanupBranchAbsent(t, wt.RepositoryPath, wt.Branch)
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
 }
 
