@@ -59,3 +59,46 @@ func TestGetTaskAssignee_MostRecentlyAssignedRunnerWins(t *testing.T) {
 		t.Fatalf("GetTaskAssignee = %q, want agent-recent (highest created_at, not highest rowid)", got)
 	}
 }
+
+func TestGetTaskAssignee_EqualCreatedAtUsesIDTieBreak(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	createdAt := time.Now().UTC().Truncate(time.Millisecond)
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_steps (id, agent_profile_id) VALUES ('step-current-tied', '')
+	`); err != nil {
+		t.Fatalf("insert step: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('task-tied', 'ws-1', 'step-current-tied', 'Tied task', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	for _, row := range []struct {
+		id     string
+		agent  string
+		stepID string
+	}{
+		{id: "runner-z", agent: "agent-a", stepID: "step-old-a"},
+		{id: "runner-a", agent: "agent-z", stepID: "step-old-b"},
+	} {
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+			VALUES (?, ?, 'task-tied', 'runner', ?, 0, 0, ?)
+		`, row.id, row.stepID, row.agent, createdAt); err != nil {
+			t.Fatalf("insert runner %s: %v", row.id, err)
+		}
+	}
+
+	got, err := repo.GetTaskAssignee(ctx, "task-tied")
+	if err != nil {
+		t.Fatalf("GetTaskAssignee: %v", err)
+	}
+	if got != "agent-z" {
+		t.Fatalf("expected id ASC tie-break to select agent-z, got %q", got)
+	}
+}

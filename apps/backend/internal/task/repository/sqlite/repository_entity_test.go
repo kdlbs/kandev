@@ -721,3 +721,25 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 		t.Fatalf("legacy workflow step defaults = (%d, %d), want (0, 0)", autoAdvance, cancelComplete)
 	}
 }
+
+func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	if _, err := repo.db.Exec(`ALTER TABLE workflow_step_participants DROP COLUMN created_at`); err != nil {
+		t.Fatalf("drop legacy workflow_step_participants.created_at: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations on legacy workflow_step_participants schema: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay runMigrations: %v", err)
+	}
+
+	var count int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_step_participants') WHERE name = 'created_at'`).Scan(&count); err != nil {
+		t.Fatalf("inspect workflow_step_participants.created_at: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("workflow_step_participants.created_at column count = %d, want 1", count)
+	}
+}

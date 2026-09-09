@@ -86,8 +86,8 @@ func TestGetTaskAssignee_LegacyEpochRowsResolveToLaterInserted(t *testing.T) {
 
 	// Both rows left at the ADD COLUMN default, inserted oldest-first so
 	// agent-newer gets the higher rowid. IDs are deliberately ordered
-	// opposite to insertion order (id-1 < id-2 lexically, but id-1 is the
-	// *later* insert): without the created_at backfill, both rows tie and
+	// opposite to insertion order (id-1 < id-2 lexically, and id-1 is the
+	// *earlier* insert): without the created_at backfill, both rows tie and
 	// the id-ASC tiebreak would pick id-1 (agent-older) — the wrong,
 	// pre-fix answer — so this can't pass by id-ordering coincidence.
 	insertLegacyRunner := func(id, agentProfileID string) {
