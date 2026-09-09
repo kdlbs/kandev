@@ -148,6 +148,10 @@ func TestCheckBudget_ExceededClaimsCompanionAlert(t *testing.T) {
 	// own by a rollup query, only inferred via the companion claim.
 	insertBudgetTestCostEvent(t, execSQL, "agent-companion", "task-1", 600)
 
+	// Captured before CheckBudget so this assertion can't compute a
+	// different month boundary than the evaluation did if the two calls
+	// straddle a UTC month rollover.
+	periodKey := monthlyPeriodKey()
 	results, err := svc.CheckBudget(ctx, "ws-1", "agent-companion", "proj-1")
 	if err != nil {
 		t.Fatalf("CheckBudget: %v", err)
@@ -162,7 +166,7 @@ func TestCheckBudget_ExceededClaimsCompanionAlert(t *testing.T) {
 	var count int
 	if err := queryRow(
 		`SELECT COUNT(*) FROM office_budget_claims WHERE policy_id = ? AND period_key = ? AND level = 'alert'`,
-		policy.ID, monthlyPeriodKey(),
+		policy.ID, periodKey,
 	).Scan(&count); err != nil {
 		t.Fatalf("count companion claim: %v", err)
 	}
@@ -579,6 +583,10 @@ func TestCheckBudget_PeriodKeyMatchesSpendBoundary(t *testing.T) {
 	}
 	insertBudgetTestCostEvent(t, execSQL, "agent-period", "task-1", 850)
 
+	// Captured before CheckBudget so the comparison can't compute a
+	// different month boundary than the evaluation did if the two calls
+	// straddle a UTC month rollover.
+	wantKey := monthlyPeriodKey()
 	if _, err := svc.CheckBudget(ctx, "ws-1", "agent-period", "proj-1"); err != nil {
 		t.Fatalf("CheckBudget: %v", err)
 	}
@@ -589,8 +597,8 @@ func TestCheckBudget_PeriodKeyMatchesSpendBoundary(t *testing.T) {
 	).Scan(&gotKey); err != nil {
 		t.Fatalf("query claim period_key: %v", err)
 	}
-	if gotKey != monthlyPeriodKey() {
-		t.Fatalf("claim period_key = %q, want %q (must match the spend rollup's boundary)", gotKey, monthlyPeriodKey())
+	if gotKey != wantKey {
+		t.Fatalf("claim period_key = %q, want %q (must match the spend rollup's boundary)", gotKey, wantKey)
 	}
 }
 

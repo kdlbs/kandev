@@ -76,7 +76,7 @@ func (r *Repository) runMigrations() error {
 // db.IsDuplicateColumnError is the only local classifier (ADR 0027), reused
 // via MigrateLogger.Apply rather than adding a new one.
 func (r *Repository) migrateBudgetPolicyRevision() {
-	r.migrate.Apply("office_budget_policies.revision",
+	_ = r.migrate.Apply("office_budget_policies.revision",
 		`ALTER TABLE office_budget_policies ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
 }
 
