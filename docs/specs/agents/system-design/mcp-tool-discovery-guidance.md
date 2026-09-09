@@ -74,7 +74,9 @@ need them. Rename `Available tools` to `Essential workflow guidance`.
 
 The raw template currently has 3,482 UTF-8 bytes. Target at most 2,800 bytes
 after compaction, including the discovery text and optional placeholders.
-Record rendered sizes for an ordinary task and a canvas-enabled task too.
+Record rendered sizes for an ordinary task and a canvas-enabled task too. The
+rendered budgets are separate because capability sections and runtime values
+expand the reusable template at render time.
 Byte counts measure prompt size without adding a model-specific tokenizer.
 
 `sysprompt.KandevContextOptions` adds an explicit canvas-guidance boolean.

@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -60,12 +61,9 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
       await dialog.getByTestId("task-title-input").fill("E2E Desktop Canvas Task");
       await dialog.getByTestId("task-description-input").fill(editedDescription);
 
-      const responsePromise = testPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/tasks") && response.request().method() === "POST",
-      );
       const startAgent = dialog.getByTestId("submit-start-agent");
-      await expect(startAgent).toBeEnabled({ timeout: 30_000 });
+      await expect(startAgent).toBeEnabled();
+      const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
       await startAgent.click();
       const response = await responsePromise;
       const responseBody = await response.text();

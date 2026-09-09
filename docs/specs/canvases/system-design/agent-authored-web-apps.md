@@ -246,6 +246,7 @@ this compact instruction:
 > Create the draft in Kandev before writing application files.
 > Read the authoring skill once and edit only inside the returned source directory.
 > Publish through MCP and report the returned release status.
+> If publication is unsuccessful, report the failure and do not claim that the canvas is published.
 > Files or a successful local build do not create a published Kandev canvas.
 
 The optional section is absent when the resolved profile lacks canvas tools.
@@ -264,7 +265,8 @@ The preset is visible and editable. Proposed English wording:
 > Read `read_canvas_authoring_skill_kandev` once without a path.
 > Build inside the returned directory and use authorized live Kandev data for domain views.
 > Call `publish_canvas_kandev` and address any validation errors.
-> Report the canvas identity and whether its release is active or awaits permission review.
+> Report the canvas identity and whether its release is active, awaits permission review, or was unsuccessful.
+> If publication is unsuccessful, report the failure and do not claim that the canvas is published.
 > If workspace access requires promotion, explain the user action that is still required.
 > A local build alone does not publish a canvas inside Kandev.
 > If the tools remain unavailable, report the limitation instead of claiming that workspace files are a Kandev canvas.

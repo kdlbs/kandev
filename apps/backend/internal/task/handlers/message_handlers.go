@@ -610,13 +610,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// "type in chat to start the agent" path. Wrap with the Kandev MCP
 		// system block before persisting so the DB row matches what the agent
 		// receives (and "Show formatted" reveals it).
-		includeCanvasGuidance, resolveErr := h.resolveCanvasGuidance(ctx, req.TaskID, req.TaskSessionID)
-		if resolveErr != nil {
-			h.logger.Warn("failed to resolve canvas prompt capability",
-				zap.String("task_id", req.TaskID),
-				zap.String("session_id", req.TaskSessionID),
-				zap.Error(resolveErr))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt capabilities", nil)
+		includeCanvasGuidance := false
+		if task != nil && !task.IsFromOffice && !sessionResp.Session.IsPassthrough && !configMode {
+			var resolveErr error
+			includeCanvasGuidance, resolveErr = h.resolveCanvasGuidance(ctx, req.TaskID, req.TaskSessionID)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, orchestrator.ErrTaskSessionPairMismatch) {
+					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task and session do not match", nil)
+				}
+				h.logger.Warn("failed to resolve canvas prompt capability; omitting optional guidance",
+					zap.String("task_id", req.TaskID),
+					zap.String("session_id", req.TaskSessionID),
+					zap.Error(resolveErr))
+				includeCanvasGuidance = false
+			}
 		}
 		storedContent = h.injectMessageContext(
 			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, storedContent,

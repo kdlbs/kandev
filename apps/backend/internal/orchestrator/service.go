@@ -1711,12 +1711,19 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 // a session includes canvas authoring. It is the narrow read-only seam used by
 // message handlers before they persist the first prompt.
 func (s *Service) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return false, err
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
 	return s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
 }
+
+// ErrTaskSessionPairMismatch reports that a task/session API request named
+// two rows that do not belong together.
+var ErrTaskSessionPairMismatch = errors.New("task session pair mismatch")
 
 func (s *Service) taskSessionCanvasGuidanceEnabled(
 	ctx context.Context,
@@ -1934,7 +1941,7 @@ func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionI
 		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
 	}
 	if session.TaskID != taskID {
-		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+		return fmt.Errorf("%w: session %s does not belong to task %s", ErrTaskSessionPairMismatch, sessionID, taskID)
 	}
 	return nil
 }

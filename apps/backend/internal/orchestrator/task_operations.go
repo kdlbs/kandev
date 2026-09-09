@@ -735,11 +735,13 @@ func (s *Service) startCreatedSession(
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	includeCanvasGuidance := false
-	if effectivePrompt != "" || len(attachments) > 0 {
+	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
 		includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
 		}
+	}
+	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
 			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, references, promptReferenceContext,
@@ -1268,9 +1270,12 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
-		includeCanvasGuidance, err := s.taskSessionCanvasGuidanceEnabled(ctx, task.ID, launchSession, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+		includeCanvasGuidance := false
+		if !isOfficeTask && !skipKandevMCPWrap && !configMode {
+			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, task.ID, launchSession, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+			}
 		}
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
 			prompt:                    effectivePrompt,

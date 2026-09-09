@@ -4357,23 +4357,26 @@ func (s *Service) resolveAutoStartPromptContext(
 	if err != nil {
 		return false, nil, false, false, fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
 	}
-	includeCanvasGuidance, err := s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
-	if err != nil {
-		return false, nil, false, false, fmt.Errorf("resolve canvas prompt capability for workflow auto-start: %w", err)
-	}
 	if isOfficeTask {
-		return true, nil, false, includeCanvasGuidance, nil
+		return true, nil, false, false, nil
 	}
 
 	taskForPrompt, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return false, nil, false, false, fmt.Errorf("load task for autopilot prompt: %w", err)
 	}
+	configMode, _ := session.Metadata["config_mode"].(bool)
+	includeCanvasGuidance := false
+	if !session.IsPassthrough && !configMode {
+		includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
+		if err != nil {
+			return false, nil, false, false, fmt.Errorf("resolve canvas prompt capability for workflow auto-start: %w", err)
+		}
+	}
 	if session.State != models.TaskSessionStateCreated {
 		return false, taskForPrompt, false, includeCanvasGuidance, nil
 	}
 
-	configMode, _ := session.Metadata["config_mode"].(bool)
 	if configMode {
 		return false, taskForPrompt, false, includeCanvasGuidance, nil
 	}

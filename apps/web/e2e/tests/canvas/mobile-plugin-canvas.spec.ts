@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -146,12 +147,9 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await dialog.getByTestId("task-title-input").fill(taskTitle);
       await dialog.getByTestId("task-description-input").fill(description);
 
-      const responsePromise = testPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/tasks") && response.request().method() === "POST",
-      );
       const startAgent = dialog.getByTestId("submit-start-agent");
-      await expect(startAgent).toBeEnabled({ timeout: 30_000 });
+      await expect(startAgent).toBeEnabled();
+      const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
       await startAgent.tap();
       const response = await responsePromise;
       const responseBody = await response.text();

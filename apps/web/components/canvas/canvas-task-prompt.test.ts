@@ -38,6 +38,8 @@ describe("canvas creation task preset", () => {
     expect(prompt).toContain("Create the draft in Kandev");
     expect(prompt).toContain("Build inside the returned directory");
     expect(prompt).toContain("A local build alone does not publish a canvas inside Kandev");
+    expect(prompt).toContain("If publication is unsuccessful, report the failure");
+    expect(prompt).toContain("do not claim that the canvas is published");
     expect(prompt).toContain("report the limitation instead of claiming");
   });
 });

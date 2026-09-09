@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWrapCreatedSessionPrompt_CanvasPromptFollowsResolvedCapability(t *testing.T) {
@@ -46,6 +47,15 @@ func TestApplyLaunchPromptContext_CanvasPromptFollowsResolvedCapability(t *testi
 	assert.Equal(t, 1, countSystemBlocks(withCanvas))
 
 	assert.NotContains(t, sysprompt.StripSystemContent(withCanvas), "create_canvas_kandev")
+}
+
+func TestTaskSessionCanvasGuidanceEnabledRejectsMismatchedPair(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-a", "session-a", models.TaskSessionStateCreated)
+	seedTaskAndSession(t, repo, "task-b", "session-b", models.TaskSessionStateCreated)
+
+	_, err := (&Service{repo: repo}).TaskSessionCanvasGuidanceEnabled(context.Background(), "task-a", "session-b")
+	require.ErrorIs(t, err, ErrTaskSessionPairMismatch)
 }
 
 func countSystemBlocks(prompt string) int {

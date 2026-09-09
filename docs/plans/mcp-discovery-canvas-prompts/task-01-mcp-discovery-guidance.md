@@ -121,7 +121,7 @@ or add a second canvas flag owner.
 - Added discovery, profile, prepared-launch, reset, and prompt-rendering
   regression coverage. Recorded and dispatched reset prompts use the same
   resolved canvas capability.
-- Rendered sizes are 4,758 bytes for the ordinary task context and 5,179 bytes
+- Rendered sizes are 4,758 bytes for the ordinary task context and 5,231 bytes
   with canvas guidance enabled.
 - Verification: focused backend packages passed with 5,396 tests across seven
   packages; `rtk make lint` reported 0 issues; `rtk git diff --check` passed.
