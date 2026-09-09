@@ -341,6 +341,12 @@ type repoStore interface {
 type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	// GetPendingActionsBySessionIDs reports, per session, whether it currently
+	// carries a durable clarification/permission request — used to tell a
+	// genuine "waiting on the operator to decide" turn end apart from an
+	// ordinary "turn finished, nothing pending" one when reconciling task
+	// state (see writeTaskReviewState and reconcileActiveSessionOnStartup).
+	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 	// HasUserPromptHistory reads the durable prompt sequence without scanning
 	// the session transcript. Empty workflow steps use it to decide whether the
 	// task description is still eligible as the initial prompt.
@@ -3231,17 +3237,32 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
+	// Ensure task is out of a stuck IN_PROGRESS state. If the session being
+	// reconciled to WAITING_FOR_INPUT above is blocked on a genuine
+	// clarification/permission question, land the task in WAITING_FOR_INPUT
+	// too rather than REVIEW — otherwise a backend restart silently turns a
+	// pending decision into a "ready to review" checkmark and the operator
+	// never sees that the agent is still waiting on them.
 	if running.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
+			targetState := v1.TaskStateReview
+			if pendingActions, pendingErr := s.repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID}); pendingErr != nil {
+				s.logger.Warn("failed to check pending action before startup state reconcile",
+					zap.String("task_id", running.TaskID),
+					zap.String("session_id", sessionID),
+					zap.Error(pendingErr))
+			} else if action, ok := pendingActions[sessionID]; ok &&
+				(action == models.TaskPendingActionClarification || action == models.TaskPendingActionPermission) {
+				targetState = v1.TaskStateWaitingForInput
+			}
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
 			// so the write is atomic against archived_at: the taskArchived guard
 			// above reads the row before this call, and ArchiveTask can commit in
 			// that window without changing task.State, so only an archive-aware
 			// conditional write closes the race.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task to REVIEW on startup",
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, targetState, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
+				s.logger.Warn("failed to update task state on startup",
 					zap.String("task_id", running.TaskID),
 					zap.Error(updateErr))
 			}

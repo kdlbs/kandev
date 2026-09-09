@@ -3379,6 +3379,81 @@ func TestWriteTaskReviewState_DoesNotMoveTaskToReviewWhenSameSessionRestarted(t 
 		"the just-completed session may have restarted before REVIEW reconciliation")
 }
 
+// TestWriteTaskReviewState_UsesWaitingForInputWhenActionPending pins the fix
+// for the REVIEW/WAITING_FOR_INPUT conflation: a session that lands idle
+// because the agent is genuinely blocked on a clarification or permission
+// question must not collapse the task to REVIEW (the "ready to look at"
+// checkmark) — the operator is not being asked to review finished work, they
+// are being asked to make a decision. Only an idle session with nothing
+// pending should land the task in REVIEW.
+func TestWriteTaskReviewState_UsesWaitingForInputWhenActionPending(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		msgType     models.MessageType
+		wantState   v1.TaskState
+		seedMessage bool
+	}{
+		{
+			name:        "no pending action falls back to REVIEW",
+			seedMessage: false,
+			wantState:   v1.TaskStateReview,
+		},
+		{
+			name:        "pending clarification lands WAITING_FOR_INPUT",
+			msgType:     models.MessageTypeClarificationRequest,
+			seedMessage: true,
+			wantState:   v1.TaskStateWaitingForInput,
+		},
+		{
+			name:        "pending permission lands WAITING_FOR_INPUT",
+			msgType:     models.MessageTypePermissionRequest,
+			seedMessage: true,
+			wantState:   v1.TaskStateWaitingForInput,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateWaitingForInput
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			if tc.seedMessage {
+				now := time.Now().UTC()
+				require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+					ID:            "turn1",
+					TaskSessionID: "s1",
+					TaskID:        "t1",
+					StartedAt:     now,
+					CreatedAt:     now,
+				}))
+				require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+					ID:            "msg1",
+					TaskSessionID: "s1",
+					TaskID:        "t1",
+					TurnID:        "turn1",
+					AuthorType:    models.MessageAuthorAgent,
+					Content:       "msg1",
+					Type:          tc.msgType,
+					Metadata:      map[string]interface{}{"status": "pending"},
+					CreatedAt:     now,
+				}))
+			}
+
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+			svc.writeTaskReviewState(ctx, "t1", "s1")
+
+			require.Equal(t, tc.wantState, taskRepo.updatedStates["t1"])
+		})
+	}
+}
+
 func TestSessionStateString(t *testing.T) {
 	require.Equal(t, "", sessionStateString(nil),
 		"nil session must render as empty so trace logs stay clean")

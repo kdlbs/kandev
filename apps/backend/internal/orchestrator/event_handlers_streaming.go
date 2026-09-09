@@ -2222,23 +2222,48 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
+
+	// A session landing in WAITING_FOR_INPUT because the agent asked the user
+	// a genuine clarifying/permission question is not "ready for review" —
+	// it is blocked on a decision only the user can make. Collapsing both
+	// cases into REVIEW makes the task-state icon (a checkmark) and the
+	// session-state icon lie: the operator sees "done, take a look" instead
+	// of "agent needs your input." Check for an actual pending action on this
+	// session first and, if one exists, land the task in WAITING_FOR_INPUT
+	// instead so the UI renders the distinct question-mark affordance.
+	targetState := v1.TaskStateReview
+	if completedSessionID != "" {
+		pendingActions, err := s.repo.GetPendingActionsBySessionIDs(ctx, []string{completedSessionID})
+		if err != nil {
+			s.logger.Warn("failed to check pending action before REVIEW state reconcile",
+				zap.String("task_id", taskID),
+				zap.String("session_id", completedSessionID),
+				zap.Error(err))
+		} else if action, ok := pendingActions[completedSessionID]; ok &&
+			(action == models.TaskPendingActionClarification || action == models.TaskPendingActionPermission) {
+			targetState = v1.TaskStateWaitingForInput
+		}
+	}
+
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
 		ctx,
 		taskID,
-		v1.TaskStateReview,
+		targetState,
 		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
 	)
 	if err != nil {
-		s.logger.Error("failed to update task state to REVIEW",
+		s.logger.Error("failed to update task state after turn completion",
 			zap.String("task_id", taskID),
+			zap.String("target_state", string(targetState)),
 			zap.Error(err))
 		return
 	}
 	if !updated {
 		return
 	}
-	s.logger.Info("task moved to REVIEW state",
-		zap.String("task_id", taskID))
+	s.logger.Info("task moved to state after turn completion",
+		zap.String("task_id", taskID),
+		zap.String("target_state", string(targetState)))
 }
 
 func isWorkingSessionState(state models.TaskSessionState) bool {
