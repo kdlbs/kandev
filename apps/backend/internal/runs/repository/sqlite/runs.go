@@ -41,13 +41,15 @@ func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.R
 			id, agent_profile_id, reason, payload, status, coalesced_count,
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
 			output_summary, failure_reason, session_id, retry_count, scheduled_retry_at,
-			requested_at, error_message, cancel_reason, continuation_scope
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			requested_at, error_message, cancel_reason, continuation_scope,
+			wake_wave_key, wake_wave_string
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), req.ID, req.AgentProfileID, req.Reason, req.Payload, req.Status,
 		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot,
 		req.Capabilities, req.InputSnapshot, req.OutputSummary, req.FailureReason,
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
-		req.ErrorMessage, req.CancelReason, req.ContinuationScope)
+		req.ErrorMessage, req.CancelReason, req.ContinuationScope,
+		req.WakeWaveKey, req.WakeWaveString)
 	return err
 }
 

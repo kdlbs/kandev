@@ -379,6 +379,13 @@ func (r *Repository) createRunTables() error {
 		-- re-deriving it against a context_snapshot a coalesced wakeup
 		-- may have since patched.
 		continuation_scope TEXT NOT NULL DEFAULT '',
+		-- Completion-wave identity (parent-wake-wave-identity): both
+		-- columns are set together, only for task_children_completed
+		-- runs, from one derivation per queued run. wake_wave_key is
+		-- the digest idx_run_wake_wave indexes; wake_wave_string is the
+		-- plain string the backstop's candidate query compares.
+		wake_wave_key TEXT NOT NULL DEFAULT '',
+		wake_wave_string TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP

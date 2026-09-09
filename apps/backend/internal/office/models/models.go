@@ -420,8 +420,16 @@ type Run struct {
 	// after claim but a re-derivation against the freshly re-fetched
 	// row would disagree with the derivation the claiming scheduler is
 	// still holding in memory.
-	ContinuationScope string     `json:"continuation_scope,omitempty" db:"continuation_scope"`
-	RequestedAt       time.Time  `json:"requested_at" db:"requested_at"`
+	ContinuationScope string `json:"continuation_scope,omitempty" db:"continuation_scope"`
+	// WakeWaveKey and WakeWaveString are the completion-wave identity
+	// (parent-wake-wave-identity): both set together, only for
+	// task_children_completed runs, from one derivation per queued run.
+	// WakeWaveKey is the digest idx_run_wake_wave indexes; WakeWaveString
+	// is the plain string the backstop's candidate query compares. Empty
+	// for every other run reason and for every pre-upgrade row.
+	WakeWaveKey    string     `json:"wake_wave_key,omitempty" db:"wake_wave_key"`
+	WakeWaveString string     `json:"wake_wave_string,omitempty" db:"wake_wave_string"`
+	RequestedAt    time.Time  `json:"requested_at" db:"requested_at"`
 	ClaimedAt         *time.Time `json:"claimed_at" db:"claimed_at"`
 	FinishedAt        *time.Time `json:"finished_at" db:"finished_at"`
 
