@@ -406,6 +406,32 @@ describe("useSyncDisabledState", () => {
   });
 });
 
+describe("useSyncDisabledState cleanup", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stops retrying after unmount", () => {
+    stubAnimationFrame();
+    const editor = makeEditor(true);
+    editor.commands.focus = vi.fn();
+    const { rerender, unmount } = renderHook(
+      ({ disabled }) => useSyncDisabledState(editor, disabled),
+      { initialProps: { disabled: false } },
+    );
+
+    rerender({ disabled: true });
+    rerender({ disabled: false });
+
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+
+    unmount();
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+  });
+});
+
 describe("decideHistoryNav", () => {
   const base = {
     disabled: false,

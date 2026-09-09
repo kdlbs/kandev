@@ -338,33 +338,17 @@ type SyncEditorOptions = {
   onChangeRef: React.RefObject<(value: string) => void>;
 };
 
-/** Editor surface `useSyncDisabledState` needs -- narrowed from the full
- *  TipTap `Editor` so the effect is testable against a plain mock instead of
- *  a mounted editor instance. */
+/** Editor methods required to synchronize the disabled state. */
 type DisabledStateEditor = {
   view: { hasFocus: () => boolean };
   setEditable: (editable: boolean) => void;
   commands: { focus: () => void };
 };
 
-/** How many animation frames to retry the focus restore across. A browser
- *  can apply the blur caused by `contenteditable` flipping to `false` on a
- *  queued task rather than synchronously, so a same-tick restore can race
- *  that queued blur and be silently discarded once it lands (Chromium is
- *  known to let contenteditable focus/blur state settle a frame or more
- *  after the triggering DOM change:
- *  https://issues.chromium.org/issues/41134847). Retrying across a few
- *  frames gives that queued blur time to land before the restore is
- *  considered final, while stopping as soon as focus sticks or something
- *  else visibly claims it. */
+/** Bound focus restoration while browser focus settles after re-enabling. */
 const FOCUS_RESTORE_MAX_ATTEMPTS = 5;
 
-/** Sync disabled state onto the editor. ProseMirror maps `editable` onto the
- *  DOM `contenteditable` attribute, and a real browser blurs the element when
- *  that attribute flips to `false` without restoring focus when it flips
- *  back. Capture focus before disabling and restore it on re-enable, but only
- *  when nothing else has since claimed focus (a user who clicked another
- *  control mid-send should keep it there). */
+/** Preserve editor focus across temporary disabled states without stealing focus. */
 export function useSyncDisabledState(editor: DisabledStateEditor | null, disabled: boolean) {
   const hadFocusBeforeDisableRef = useRef(false);
   useEffect(() => {
@@ -384,7 +368,7 @@ export function useSyncDisabledState(editor: DisabledStateEditor | null, disable
     const tick = () => {
       attempts += 1;
       if (!editor.view.hasFocus()) {
-        if (!shouldRestoreFocusOnEnable(true)) return;
+        if (!shouldRestoreFocusOnEnable(hadFocus)) return;
         editor.commands.focus();
       }
       if (attempts < FOCUS_RESTORE_MAX_ATTEMPTS) frame = requestAnimationFrame(tick);
@@ -485,13 +469,7 @@ function syncEditorValue({
 
 // ── Focus-restore decision ───────────────────────────────────────────
 
-/** Pure decision for whether re-enabling the editor should restore focus to
- *  it. A real browser blurs the element when ProseMirror flips
- *  `contenteditable` to `false` and does not restore focus when it flips
- *  back, so the caller must do it explicitly -- but only when the editor had
- *  focus before it was disabled, and only when nothing else has since
- *  claimed focus (a user who clicked another control mid-send keeps it
- *  there). */
+/** Return true only when the editor had focus and no other control owns focus. */
 export function shouldRestoreFocusOnEnable(hadFocusBeforeDisable: boolean): boolean {
   if (!hadFocusBeforeDisable) return false;
   const active = document.activeElement;

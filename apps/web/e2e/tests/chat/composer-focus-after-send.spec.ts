@@ -1,6 +1,6 @@
-import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
+import { assertComposerFocusAfterSend } from "./composer-focus-after-send-helpers";
 
 // Regression coverage for the composer losing focus after a send. ProseMirror
 // maps its `editable` state onto the DOM `contenteditable` attribute, and a
@@ -27,23 +27,6 @@ test.describe("Composer focus after send", () => {
       seedData,
       "Composer focus after send",
     );
-    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
-
-    await session.sendMessageViaButton("first message after send");
-    await expect(
-      session.activeChat().getByText("first message after send", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
-    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
-    await expect(editor).toBeFocused({ timeout: 10_000 });
-
-    // No click here: the editor must already hold focus from the fix, so
-    // typing lands directly in the composer.
-    await testPage.keyboard.type("second message after send");
-    await session.clickSubmitWhenReady();
-    await expect(
-      session.activeChat().getByText("second message after send", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
-    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
-    await expect(editor).toBeFocused({ timeout: 10_000 });
+    await assertComposerFocusAfterSend(session, testPage, () => session.clickSubmitWhenReady());
   });
 });
