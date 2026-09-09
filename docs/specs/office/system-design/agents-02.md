@@ -246,7 +246,7 @@ Three MCP modes coexist:
 |---|---|---|---|
 | `ModeTask` | 27 (kanban + plans + walkthroughs + coordination + completion) | ~3-5K | Interactive kanban sessions |
 | `ModeConfig` | 29 (workflows + agents + executors) | ~8-10K | Config setup sessions |
-| `ModeOffice` | 12 (plans + tasks + rich output + decisions + completion) | ~1-2K | Office agent sessions |
+| `ModeOffice` | 11 (plans + tasks + rich output + completion) | ~1-2K, without the decision schema | Office agent sessions |
 
 Agent routing and Office ownership are independent. Workflow-level defaults, per-step agent profiles, and `runner` participants select the execution identity only; they never make a Kanban task Office-owned. A task is Office-owned only when it is linked to an Office project or its workflow matches the workspace's Office workflow.
 
@@ -255,13 +255,17 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - `ask_user_question_kandev` (only meaningful when the user opens the task in advanced mode).
 - `list_related_tasks_kandev`.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
-- `show_rich_output_kandev`, `record_step_decision_kandev`, and gated `step_complete_kandev`.
+- `show_rich_output_kandev` and gated `step_complete_kandev`.
 
-`ModeOffice` excludes kanban/config tools and workspace/workflow listing tools. Its first-turn context lists only registered tools, and Office mutations use `$KANDEV_CLI`.
+`ModeOffice` excludes kanban/config tools, workspace/workflow listing tools, and
+the workflow-step decision action. Its first-turn context lists only registered
+tools. Reviewer and approver runs receive an injected Kandev skill for
+`$KANDEV_CLI kandev task decision`; other Office mutations also use
+`$KANDEV_CLI`.
 
 ### Skills are preferred over MCP tools
 
-Skills are the preferred pattern for teaching agents office capabilities. A skill provides instructions in `SKILL.md` and the agent calls API endpoints via `$KANDEV_CLI`. This is cheaper than MCP tools: instructions read once per session, shell calls thereafter; MCP tool definitions add per-call overhead (tool schemas in context, structured I/O parsing on every invocation). The `kandev-protocol` system skill teaches CLI usage and replaces the earlier curl-based version. New office capabilities expose API endpoints, ship a skill that teaches the agent how to call them, and assign the skill to agents that need it.
+Skills are the preferred pattern for teaching agents office capabilities. A skill provides instructions in `SKILL.md` and the agent calls API endpoints via `$KANDEV_CLI`. This is cheaper than MCP tools: instructions read once per session, shell calls thereafter; MCP tool definitions add per-turn schema cost and structured I/O parsing on every invocation. The `kandev-protocol` system skill teaches general CLI usage and replaces the earlier curl-based version. The narrow `kandev-step-decision` system skill is injected when the launch-time seat lookup finds a reviewer or approver seat; the runtime endpoint still authorizes the seat live on every call. New office capabilities expose API endpoints, ship a skill that teaches the agent how to call them, and assign or inject the skill only where it is useful.
 
 ## UI
 

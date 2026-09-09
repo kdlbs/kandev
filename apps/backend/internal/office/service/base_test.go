@@ -208,6 +208,9 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.EventBus != nil {
 		opts.EventBus = o.EventBus
 	}
+	if o.TaskPRs != nil {
+		opts.TaskPRs = o.TaskPRs
+	}
 }
 
 // insertTestCostEvent inserts a cost event directly into the DB for

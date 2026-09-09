@@ -1931,10 +1931,6 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
 		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
 	})
-	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
-		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
-	}
-
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.

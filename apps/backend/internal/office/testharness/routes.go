@@ -339,9 +339,8 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 			return
 		}
 		// If a session already exists for this (task, agent) pair, update its
-		// state in place. Office sessions are unique per (task, agent) per the
-		// schema's partial unique index, and tests routinely flip the same
-		// pair RUNNING → IDLE (and back) to exercise reactive UI.
+		// state in place. The harness keeps fixture state stable while tests
+		// flip the same pair RUNNING → IDLE (and back) to exercise reactive UI.
 		existing := getExistingSeedSession(ctx, repo, &req)
 		if existing != nil {
 			session, err = updateSeededSession(ctx, repo, existing, session, req.TaskID)

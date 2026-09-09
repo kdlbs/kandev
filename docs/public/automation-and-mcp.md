@@ -605,12 +605,11 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
 - `list_related_tasks_kandev`;
-- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
+- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`;
 - `show_rich_output_kandev`;
-- `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 
@@ -625,6 +624,19 @@ If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
 missing, do not set either variable yourself. A regular task session should use
 its injected Kandev MCP tools. An Office-owned task must be started or woken
 through Office so the scheduler can supply its signed runtime context.
+
+Reviewers and approvers record a workflow-step verdict through the task-bound
+runtime CLI. The command accepts only `approved` or `rejected` and requires a
+non-empty reason:
+
+```bash
+$KANDEV_CLI kandev task decision --decision approved --reason "..."
+```
+
+The runtime derives the task, session, and agent identity from the signed run
+context. A repeated decision supersedes the earlier decision for that
+participant and step. Comments and approval-inbox commands do not record a
+workflow-step verdict.
 
 An Office run can inspect the projects in its current workspace:
 
