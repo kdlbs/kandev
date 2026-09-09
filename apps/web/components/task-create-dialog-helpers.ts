@@ -148,6 +148,27 @@ export function computeRunnerIneligibleReason(
   return editingTask?.runnerIneligibleReason ?? "evaluation_unavailable";
 }
 
+/**
+ * Maps a projected `runner_ineligible_reason` (REQ-TASKS-RUNNER-SWITCH-001),
+ * or the matching `details.error_code` on a rejected `task.runner` switch, to
+ * the i18n key presented to the user. Closed vocabulary; a code this dialog
+ * doesn't recognize (a future reason it predates) falls back to the same
+ * retriable copy as an evaluation failure rather than an empty message or a
+ * raw code (AC-TASKS-RUNNER-SWITCH-004.4b).
+ */
+export const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
+  task_archived: "task:runnerReasonTaskArchived",
+  no_repository: "task:runnerReasonNoRepository",
+  multiple_repositories: "task:runnerReasonMultipleRepositories",
+  session_exists: "task:runnerReasonSessionExists",
+  environment_exists: "task:runnerReasonEnvironmentExists",
+  executor_running: "task:runnerReasonExecutorRunning",
+  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
+  workspace_path_set: "task:runnerReasonWorkspacePathSet",
+  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
+  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
+};
+
 export function shouldShowTaskTitleField(
   isCreateMode: boolean,
   isEditMode: boolean,

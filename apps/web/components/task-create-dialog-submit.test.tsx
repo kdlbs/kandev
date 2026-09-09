@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { createRef } from "react";
 import { ApiError } from "@/lib/api/client";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 // All external module mocks must be declared with vi.mock before the import of
 // the unit under test so vitest hoists them. The mocks below capture the
@@ -96,6 +97,14 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
   hasPendingAttachmentUploads: () => false,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
   toMessageAttachments: () => [],
+  RUNNER_INELIGIBLE_REASON_KEYS: {
+    session_exists: "task:runnerReasonSessionExists",
+  },
+}));
+
+const switchTaskRunnerMock = vi.fn(async (..._args: unknown[]) => ({ id: TASK_ID }));
+vi.mock("@/lib/api/domains/task-runner-api", () => ({
+  switchTaskRunner: (...args: unknown[]) => switchTaskRunnerMock(...args),
 }));
 
 const createTaskRetryMock = vi.fn(async (buildPayload: (consented: string[]) => unknown) => {
@@ -165,6 +174,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     agentProfileId: "agent-1",
     executorId: "exec-1",
     executorProfileId: "execp-1",
+    seededExecutorProfileId: null,
     editingTask: null,
     onSuccess: vi.fn(),
     onOpenChange: vi.fn(),
@@ -205,6 +215,8 @@ beforeEach(() => {
   pushMock.mockClear();
   toastMock.mockClear();
   recordRecentUseMock.mockClear();
+  switchTaskRunnerMock.mockClear();
+  switchTaskRunnerMock.mockResolvedValue({ id: TASK_ID });
 });
 
 // eslint-disable-next-line max-lines-per-function -- grouped edit regressions share one fixture.
@@ -461,6 +473,169 @@ describe("useTaskSubmitHandlers — started task edits", () => {
     expect(setHasDescription).toHaveBeenCalledWith(true);
     expect(toastMock).toHaveBeenCalledWith(
       expect.objectContaining({ description: "Dependency cycle: task-1 -> task-2 -> task-1" }),
+    );
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- runner-switch ordering regressions share one fixture.
+describe("useTaskSubmitHandlers — runner switch (REQ-TASKS-RUNNER-SWITCH-004)", () => {
+  const EXISTING_PROFILE = "execp-seeded";
+  const CHOSEN_PROFILE = "execp-chosen";
+
+  function editingTaskFixture() {
+    return {
+      id: TASK_ID,
+      title: ORIGINAL_TITLE,
+      description: ORIGINAL_PROMPT,
+      workflowStepId: "step-1",
+      state: TODO_STATE,
+    };
+  }
+
+  it("issues no switch when the final selection matches what was seeded", async () => {
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      executorProfileId: EXISTING_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).not.toHaveBeenCalled();
+    expect(updateTaskMock).toHaveBeenCalled();
+  });
+
+  it("issues no switch while nothing has been seeded yet", async () => {
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: null,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).not.toHaveBeenCalled();
+  });
+
+  it("issues the switch before the field update when the selection changed (AC-004.4a)", async () => {
+    const callOrder: string[] = [];
+    switchTaskRunnerMock.mockImplementationOnce(async () => {
+      callOrder.push("switch");
+      return { id: TASK_ID };
+    });
+    updateTaskMock.mockImplementationOnce(async () => {
+      callOrder.push("update");
+      return { id: TASK_ID, title: ORIGINAL_TITLE };
+    });
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).toHaveBeenCalledWith(TASK_ID, CHOSEN_PROFILE);
+    expect(callOrder).toEqual(["switch", "update"]);
+  });
+
+  it("saves nothing and issues no launch when the switch is rejected (AC-004.4a/4d)", async () => {
+    const onOpenChange = vi.fn();
+    switchTaskRunnerMock.mockRejectedValueOnce(
+      new WebSocketRequestError("conflict", "CONFLICT", { error_code: "session_exists" }),
+    );
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      agentProfileId: "agent-1",
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+      onOpenChange,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(launchSessionMock).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "The runner can't be changed because this task already has a session.",
+      }),
+    );
+  });
+
+  it("reports an unrecognized outcome class for a not-found switch rejection (AC-004.4b)", async () => {
+    switchTaskRunnerMock.mockRejectedValueOnce(
+      new WebSocketRequestError("gone", "NOT_FOUND"),
+    );
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "This task could not be found." }),
+    );
+  });
+
+  it("reports a truthful partial save when the field update fails after the switch committed (AC-004.4c)", async () => {
+    const onOpenChange = vi.fn();
+    updateTaskMock.mockRejectedValueOnce(new Error("network blip"));
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+      onOpenChange,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).toHaveBeenCalledWith(TASK_ID, CHOSEN_PROFILE);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description:
+          "The runner was switched, but the rest of your changes couldn't be saved. Your other edits are still shown below: try saving again.",
+      }),
     );
   });
 });

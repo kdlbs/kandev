@@ -18,6 +18,8 @@ import { ApiError } from "@/lib/api/client";
 import { getTaskDependencyCycle } from "@/lib/api/domains/task-dependencies-api";
 import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
+import { switchTaskRunner } from "@/lib/api/domains/task-runner-api";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -31,6 +33,7 @@ import {
   validateCreateInputs,
   hasPendingAttachmentUploads,
   toMessageAttachments,
+  RUNNER_INELIGIBLE_REASON_KEYS,
 } from "@/components/task-create-dialog-helpers";
 import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
@@ -85,12 +88,57 @@ const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
   repository_selection_unavailable: "task:repositorySelectionUnavailable",
 };
 
+/**
+ * Wraps a rejected `task.runner` switch (AC-TASKS-RUNNER-SWITCH-004.4a): the
+ * save issues no other call once this throws, so `performTaskUpdate` never
+ * reaches `updateTask`.
+ */
+class RunnerSwitchRejectedError extends Error {
+  constructor(readonly cause: unknown) {
+    super("runner switch rejected");
+  }
+}
+
+/**
+ * Wraps a failure in the sequence AFTER a runner switch already committed
+ * (AC-TASKS-RUNNER-SWITCH-004.4c): the switch is not rolled back, so this
+ * exists to tell that state apart from an ordinary save failure.
+ */
+class TaskUpdateAfterRunnerSwitchError extends Error {
+  constructor(readonly cause: unknown) {
+    super("task update failed after runner switch committed");
+  }
+}
+
+// Maps a rejected task.runner switch to outcome-specific text
+// (AC-TASKS-RUNNER-SWITCH-004.4b): a typed mutability conflict reuses the
+// same reason copy as the read-side projection; an untyped outcome (invalid,
+// not-found, evaluation-unavailable) gets text for that class instead of the
+// raw wire code.
+function runnerSwitchErrorMessage(error: unknown): string {
+  if (error instanceof WebSocketRequestError) {
+    const errorCode =
+      typeof error.details?.error_code === "string" ? error.details.error_code : undefined;
+    if (errorCode === "target_cannot_materialize_repository") {
+      return t("task:runnerConflictTargetCannotMaterializeRepository");
+    }
+    const reasonKey = errorCode ? RUNNER_INELIGIBLE_REASON_KEYS[errorCode] : undefined;
+    if (reasonKey) return t(reasonKey);
+    if (error.code === "NOT_FOUND") return t("task:runnerSwitchNotFound");
+    if (error.code === "VALIDATION_ERROR") return t("task:runnerSwitchInvalid");
+    if (error.code === "UNAVAILABLE") return t("task:runnerReasonEvaluationUnavailable");
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
 export function taskSubmitErrorMessage(error: unknown): string {
   if (isTaskDependencyUpdateFailure(error)) {
     const cycle = getTaskDependencyCycle(error.cause);
     if (cycle?.length) return t("task:dependencyCycleError", { cycle: cycle.join(" -> ") });
     return t("task:dependencyUpdateFailed");
   }
+  if (error instanceof RunnerSwitchRejectedError) return runnerSwitchErrorMessage(error.cause);
+  if (error instanceof TaskUpdateAfterRunnerSwitchError) return t("task:runnerSwitchPartiallySaved");
   if (error instanceof ApiError) {
     const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
     if (key) return t(key);
@@ -142,6 +190,11 @@ async function shouldKeepEditDialogOpen(
 ): Promise<boolean> {
   if (isRepositorySelectionError(error)) return true;
   if (isTaskDependencyUpdateFailure(error)) return true;
+  // AC-TASKS-RUNNER-SWITCH-004.4/4c: a rejected switch, or a later call
+  // failing after the switch already committed, both need the user back in
+  // the dialog to see the reason and retry.
+  if (error instanceof RunnerSwitchRejectedError) return true;
+  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
   return refreshStaleBranchPolicies(error);
 }
 
@@ -172,6 +225,7 @@ export function useTaskSubmitHandlers({
   agentProfileId,
   executorId,
   executorProfileId,
+  seededExecutorProfileId,
   editingTask,
   onSuccess,
   onCreateSession,
@@ -422,6 +476,25 @@ export function useTaskSubmitHandlers({
     if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
+
+    // AC-TASKS-RUNNER-SWITCH-004.5/5b: only a final selection that differs
+    // from what the dialog seeded (stored profile or resolved default) counts
+    // as a user change; reverting back to the seeded value issues no switch.
+    const runnerChanged =
+      seededExecutorProfileId !== null &&
+      executorProfileId !== "" &&
+      executorProfileId !== seededExecutorProfileId;
+
+    if (runnerChanged) {
+      // AC-TASKS-RUNNER-SWITCH-004.4a: issued first. A rejection here must
+      // leave every other field unsaved, so nothing below runs.
+      try {
+        await switchTaskRunner(editingTask.id, executorProfileId);
+      } catch (error) {
+        throw new RunnerSwitchRejectedError(error);
+      }
+    }
+
     const description = isStartedEdit
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
@@ -435,16 +508,24 @@ export function useTaskSubmitHandlers({
       ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
-    const updatedTask = await updateTask(editingTask.id, updatePayload);
-    await saveEditedTaskDependencies({
-      editDependencies,
-      updatedTask,
-      isStartedEdit,
-      descriptionInputRef,
-      setTaskName,
-      setHasDescription,
-    });
-    return { updatedTask, trimmedDescription };
+    try {
+      const updatedTask = await updateTask(editingTask.id, updatePayload);
+      await saveEditedTaskDependencies({
+        editDependencies,
+        updatedTask,
+        isStartedEdit,
+        descriptionInputRef,
+        setTaskName,
+        setHasDescription,
+      });
+      return { updatedTask, trimmedDescription };
+    } catch (error) {
+      // AC-TASKS-RUNNER-SWITCH-004.4c: a runner switch that already
+      // committed is never rolled back; tag the failure so the caller
+      // reports the true partial state instead of implying total rejection.
+      if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
+      throw error;
+    }
   }, [
     editingTask,
     taskName,
@@ -456,6 +537,8 @@ export function useTaskSubmitHandlers({
     isEditMode,
     setTaskName,
     setHasDescription,
+    executorProfileId,
+    seededExecutorProfileId,
   ]);
 
   const handleEditSubmit = useCallback(async () => {

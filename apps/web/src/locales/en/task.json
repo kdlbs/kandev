@@ -1839,7 +1839,7 @@
   "runnerConflictTargetCannotMaterializeRepository": "That executor can't run this task's repository.",
   "runnerSwitchNotFound": "This task could not be found.",
   "runnerSwitchInvalid": "That executor profile is not available.",
-  "runnerSwitchPartiallySaved": "The runner change was rejected, so nothing was saved.",
+  "runnerSwitchPartiallySaved": "The runner was switched, but the rest of your changes couldn't be saved. Your other edits are still shown below: try saving again.",
   "failedToCreateFile": "Failed to create file",
   "failedToCreateSession": "Failed to create session",
   "failedToCreateTask": "Failed to create task",

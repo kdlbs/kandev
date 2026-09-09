@@ -147,6 +147,7 @@ function makeFs(): DialogFormState {
     setExecutorId: () => {},
     executorProfileId: "",
     setExecutorProfileId: () => {},
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => {},
     discoverReposLoading: false,
@@ -436,7 +437,14 @@ describe("CreateEditSelectors", () => {
   // AC-TASKS-RUNNER-SWITCH-004.3: runner editability is independent of
   // isTaskStarted — the previous state-only gate must no longer govern it.
   it("shows the executor selector for a started task that is still runner-editable", () => {
-    render(<CreateEditSelectors {...baseProps} isTaskStarted={true} runnerEditable={true} />);
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        isTaskStarted={true}
+        runnerEditable={true}
+      />,
+    );
 
     expect(screen.getByRole("button", { name: "executor" })).toBeTruthy();
     expect(screen.queryByTestId("agent-selector-stub")).toBeNull();
@@ -448,6 +456,7 @@ describe("CreateEditSelectors", () => {
     render(
       <CreateEditSelectors
         {...baseProps}
+        agentCompatState="compatible"
         runnerEditable={false}
         runnerIneligibleReason="session_exists"
       />,
@@ -463,6 +472,7 @@ describe("CreateEditSelectors", () => {
     render(
       <CreateEditSelectors
         {...baseProps}
+        agentCompatState="compatible"
         runnerEditable={false}
         runnerIneligibleReason="some_future_reason_this_dialog_predates"
       />,
@@ -473,6 +483,7 @@ describe("CreateEditSelectors", () => {
     render(
       <CreateEditSelectors
         {...baseProps}
+        agentCompatState="compatible"
         runnerEditable={false}
         runnerIneligibleReason="evaluation_unavailable"
       />,
@@ -487,6 +498,7 @@ describe("CreateEditSelectors", () => {
     const { container } = render(
       <CreateEditSelectors
         {...baseProps}
+        agentCompatState="compatible"
         isTaskStarted={true}
         runnerEditable={false}
         runnerIneligibleReason="session_exists"

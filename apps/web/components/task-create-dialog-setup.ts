@@ -188,6 +188,7 @@ function useSubmitHandlersWiring({
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
+    seededExecutorProfileId: fs.seededExecutorProfileId,
     editingTask,
     onSuccess,
     onCreateSession,

@@ -412,6 +412,57 @@ describe("useDialogFormState — remoteRepos key allocation", () => {
   });
 });
 
+describe("useDialogFormState — seededExecutorProfileId", () => {
+  // AC-TASKS-RUNNER-SWITCH-004.5b: the submit flow decides whether the user
+  // "changed" the runner by comparing the final selection to whatever the
+  // dialog itself seeded — not to a touched flag — so a value set by
+  // autopick/stored-profile seeding must be captured once and held steady
+  // even as the user experiments with other selections.
+  it("is null until the first executorProfileId value is set", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    expect(result.current.seededExecutorProfileId).toBeNull();
+  });
+
+  it("captures the first non-empty executorProfileId and keeps it despite later user changes", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+
+    act(() => {
+      result.current.setExecutorProfileId("profile-autopicked");
+    });
+    expect(result.current.seededExecutorProfileId).toBe("profile-autopicked");
+
+    act(() => {
+      result.current.setExecutorProfileId("profile-user-chosen");
+    });
+    expect(result.current.seededExecutorProfileId).toBe("profile-autopicked");
+
+    // Changing back to the seeded value doesn't create a second "seed".
+    act(() => {
+      result.current.setExecutorProfileId("profile-autopicked");
+    });
+    expect(result.current.seededExecutorProfileId).toBe("profile-autopicked");
+  });
+
+  it("resets to null on the next open cycle", () => {
+    const { result, rerender } = renderHook(
+      ({ open }: { open: boolean }) => useDialogFormState(open, "ws-1", null),
+      { initialProps: { open: true } },
+    );
+
+    act(() => {
+      result.current.setExecutorProfileId("profile-first-cycle");
+    });
+    expect(result.current.seededExecutorProfileId).toBe("profile-first-cycle");
+
+    // Close then reopen: a rising edge bumps openCycle and the reset effects
+    // clear executorProfileId back to "".
+    rerender({ open: false });
+    rerender({ open: true });
+
+    expect(result.current.seededExecutorProfileId).toBeNull();
+  });
+});
+
 describe("buildRepositoriesPayload — remoteRepos rows", () => {
   it("filters out rows with empty url before mapping to repos[]", () => {
     const payload = buildRepositoriesPayload({

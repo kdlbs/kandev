@@ -17,6 +17,7 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { RUNNER_INELIGIBLE_REASON_KEYS } from "@/components/task-create-dialog-helpers";
 import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
@@ -267,24 +268,6 @@ function AgentColumn({
     </>
   );
 }
-
-// Maps a projected runner_ineligible_reason (REQ-TASKS-RUNNER-SWITCH-001) to
-// the i18n key presented instead of the selector. Closed vocabulary; a code
-// this dialog doesn't recognize (a future reason it predates) falls back to
-// the same retriable copy as an evaluation failure rather than rendering
-// nothing (AC-TASKS-RUNNER-SWITCH-004.4b: never an empty reason or raw code).
-const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
-  task_archived: "task:runnerReasonTaskArchived",
-  no_repository: "task:runnerReasonNoRepository",
-  multiple_repositories: "task:runnerReasonMultipleRepositories",
-  session_exists: "task:runnerReasonSessionExists",
-  environment_exists: "task:runnerReasonEnvironmentExists",
-  executor_running: "task:runnerReasonExecutorRunning",
-  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
-  workspace_path_set: "task:runnerReasonWorkspacePathSet",
-  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
-  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
-};
 
 function RunnerIneligibleNote({ reason }: { reason: string }) {
   const { t } = useTranslation();

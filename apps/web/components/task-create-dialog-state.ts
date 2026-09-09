@@ -467,6 +467,11 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
+  const seededExecutorProfileId = useSeededExecutorProfileId(
+    form.openCycle,
+    form.executorProfileId,
+  );
+
   return {
     ...form,
     ...discovery,
@@ -479,7 +484,27 @@ export function useDialogFormState(
     branchesByUrl,
     prInfoByUrl,
     clearDraft,
+    seededExecutorProfileId,
   };
+}
+
+/**
+ * Captures the first non-empty executorProfileId value each open cycle,
+ * whether it arrives via the create-mode autopick or the edit-mode stored-
+ * profile seed effect. Resets on the next open cycle. This is "what the
+ * dialog put there", independent of any later user selection.
+ */
+function useSeededExecutorProfileId(openCycle: number, executorProfileId: string) {
+  const seededRef = useRef<string | null>(null);
+  const lastOpenCycleRef = useRef(openCycle);
+  if (lastOpenCycleRef.current !== openCycle) {
+    lastOpenCycleRef.current = openCycle;
+    seededRef.current = null;
+  }
+  if (seededRef.current === null && executorProfileId) {
+    seededRef.current = executorProfileId;
+  }
+  return seededRef.current;
 }
 
 /**

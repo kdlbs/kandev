@@ -437,6 +437,14 @@ export type DialogFormState = {
   setExecutorId: (v: string) => void;
   executorProfileId: string;
   setExecutorProfileId: (v: string) => void;
+  /**
+   * The executor profile id the dialog seeded for this open cycle (stored
+   * value in edit mode, resolved default in create mode) — never a value the
+   * user chose. Null until a value has been seeded. Submit flows compare the
+   * final selection against this to decide whether the user actually changed
+   * the runner (AC-TASKS-RUNNER-SWITCH-004.5b).
+   */
+  seededExecutorProfileId: string | null;
   discoveredRepositories: LocalRepository[];
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
   discoverReposLoading: boolean;
@@ -520,6 +528,8 @@ export type SubmitHandlersDeps = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
+  /** See {@link DialogFormState.seededExecutorProfileId}. */
+  seededExecutorProfileId: string | null;
   editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
