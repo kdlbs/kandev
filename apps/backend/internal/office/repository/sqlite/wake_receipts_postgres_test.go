@@ -13,8 +13,9 @@ import (
 )
 
 // TestPostgresListStuckParents is the PostgreSQL twin of the SQLite
-// ListStuckParents suite. The query carried three SQLite-only constructs —
-// GROUP_CONCAT, json_extract(...), and IS NOT with a column right-hand side —
+// ListStuckParents suite. The query carried several SQLite-only constructs —
+// GROUP_CONCAT, json_extract(...), and IS NOT with a column right-hand side
+// are the three fixed here; a fourth, wsp.rowid, was already fixed in #3459 —
 // each a parse error on Postgres, so ParentWakeReconciler's backing query
 // could not run there at all and the reconciler recovered nothing. Postgres
 // rejects the whole statement at parse time, so this fails on the first
