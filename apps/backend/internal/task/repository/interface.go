@@ -423,7 +423,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)

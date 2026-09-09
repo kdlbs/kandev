@@ -19,6 +19,13 @@ type failingDeliveryQueueAcknowledgementRepository struct {
 	failDispatchAcknowledgement bool
 }
 
+func seedDeliveryTarget(t *testing.T, repo Repository) {
+	t.Helper()
+	seedQueueSessionIdentity(t, repo, QueueSessionIdentity{
+		TaskID: "target-task", SessionID: "target-session", SessionIncarnationID: "target-incarnation",
+	})
+}
+
 func (r *failingDeliveryQueueAcknowledgementRepository) MarkDeliveryQueued(
 	ctx context.Context,
 	deliveryID, leaseOwner, queueEntryID string,
@@ -51,6 +58,7 @@ func (r *failingDeliveryQueueAcknowledgementRepository) AcknowledgeDeliveryByQue
 
 func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 1, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	ctx := context.Background()
@@ -113,6 +121,7 @@ func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing
 // the worker actually invokes it, and only after a real promotion.
 func TestProcessDueDeliveriesNotifiesOnQueuePromotion(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 10, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	ctx := context.Background()
@@ -157,6 +166,7 @@ func TestProcessDueDeliveriesNotifiesOnQueuePromotion(t *testing.T) {
 
 func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 1, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	ctx := context.Background()
@@ -188,6 +198,7 @@ func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
 
 func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure(t *testing.T) {
 	baseRepo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, baseRepo)
 	ledger := baseRepo.(DeliveryLedger)
 	repo := &failingDeliveryQueueAcknowledgementRepository{
 		Repository:               baseRepo,
@@ -239,6 +250,7 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 
 func TestAcknowledgeQueuedDeliveryFailureRetainsAmbiguousReceiptWithoutReplay(t *testing.T) {
 	baseRepo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, baseRepo)
 	ledger := baseRepo.(DeliveryLedger)
 	repo := &failingDeliveryQueueAcknowledgementRepository{
 		Repository: baseRepo, DeliveryLedger: ledger, failDispatchAcknowledgement: true,
@@ -279,6 +291,7 @@ func TestAcknowledgeQueuedDeliveryFailureRetainsAmbiguousReceiptWithoutReplay(t 
 
 func TestAcknowledgeQueuedDeliveryFinalizesDirectInterruptReceiptFromEntryMetadata(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 2, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	ctx := context.Background()
@@ -311,6 +324,7 @@ func TestAcknowledgeQueuedDeliveryFinalizesDirectInterruptReceiptFromEntryMetada
 
 func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 1, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	delivery, _, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
@@ -358,6 +372,7 @@ func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {
 
 func TestProcessDueDeliveriesRetainsExhaustedCapacityFailureForRecovery(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
 	service := NewService(repo, 1, logger.Default())
 	ledger := repo.(DeliveryLedger)
 	retries := expvar.Get("administrative_turn_message_delivery_retries_total").(*expvar.Int)

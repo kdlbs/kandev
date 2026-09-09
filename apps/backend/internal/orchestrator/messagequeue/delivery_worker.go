@@ -107,6 +107,11 @@ func (s *Service) ProcessDueDeliveries(ctx context.Context, now time.Time, worke
 }
 
 func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID string, now time.Time) {
+	identity, err := s.ResolveSessionIdentity(ctx, delivery.TargetTaskID, delivery.TargetSessionID)
+	if err != nil {
+		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)
+		return
+	}
 	queueEntryID, found, err := s.findQueueEntryForDelivery(ctx, delivery.TargetSessionID, delivery.ID)
 	if err != nil {
 		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)
@@ -127,9 +132,8 @@ func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLed
 	metadata := copyMessageMetadata(delivery.Metadata, 2)
 	metadata[MetadataDeliveryID] = delivery.ID
 	metadata[MetadataLifecycleDurable] = true
-	queued, err := s.queueMessageWithMetadataSeparate(
-		ctx, delivery.TargetSessionID, delivery.TargetTaskID, delivery.Content, "", QueuedByAgent,
-		false, nil, metadata, s.MaxPerSession(),
+	queued, err := s.QueueMessageWithMetadataForSession(
+		ctx, identity, delivery.Content, "", QueuedByAgent, false, nil, metadata,
 	)
 	if err != nil {
 		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)

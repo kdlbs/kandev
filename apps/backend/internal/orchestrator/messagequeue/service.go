@@ -17,16 +17,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
+
+type autoMergePolicyLoader struct {
+	load func(context.Context) (bool, int64, error)
+}
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
 	repo                   Repository
 	maxPerSession          atomic.Int64
 	mergeEnabled           atomic.Bool
-	autoMergeEnabled       atomic.Bool
+	autoMergePolicy        atomic.Pointer[AutoMergePolicy]
+	autoMergeLoader        atomic.Pointer[autoMergePolicyLoader]
+	statusEpoch            string
 	logger                 *logger.Logger
 	admissionMu            sync.Mutex
 	admissions             map[string]*sessionAdmission
@@ -37,19 +44,10 @@ type Service struct {
 	deliveryWorkerStopped  bool
 	deliveryWorkerWG       sync.WaitGroup
 	deliveryWorkerInterval time.Duration
-	queuePromotionNotifier func(ctx context.Context, sessionID string)
+	queuePromotionNotifier func(context.Context, string)
 }
 
-// SetQueuePromotionNotifier registers a callback invoked after the delivery
-// recovery worker admits a durable receipt into a session's visible FIFO
-// queue. queueMessageWithMetadataSeparate (called directly by the worker,
-// bypassing the WS handler / MCP handler layers that normally publish
-// message.queue.status_changed) has no event-bus access of its own, so
-// without this hook a cross-task message queued while the target is busy
-// updates the database but never reaches the frontend's queue store. The
-// orchestrator wires this to its own publishQueueStatusEvent at construction
-// time, mirroring SetTaskQueuePurgeNotifier's bridging pattern.
-func (s *Service) SetQueuePromotionNotifier(notifier func(ctx context.Context, sessionID string)) {
+func (s *Service) SetQueuePromotionNotifier(notifier func(context.Context, string)) {
 	s.queuePromotionNotifier = notifier
 }
 
@@ -65,18 +63,53 @@ type sessionAdmissionToken struct {
 	sessionID string
 }
 
+type queueAttachmentRepository interface {
+	InsertForSessionWithClaim(context.Context, QueueSessionIdentity, *QueuedMessage, QueueAttachmentClaim, int) error
+	AutoMergeCandidateIntoAboveForSessionWithClaim(context.Context, QueueSessionIdentity, *QueuedMessage, QueueAttachmentClaim) (*QueuedMessage, bool, error)
+	UpdateContentAndMetadataForSessionWithClaim(context.Context, QueueSessionIdentity, string, string, []MessageAttachment, map[string]interface{}, string, QueueAttachmentClaim) error
+}
+
+type deletedSessionRepository interface {
+	PurgeDeletedSession(context.Context, QueueSessionIdentity) error
+}
+
+type autoMergeAdmissionRepository interface {
+	InsertForSessionWithPolicy(
+		context.Context,
+		QueueSessionIdentity,
+		*QueuedMessage,
+		*QueueAttachmentClaim,
+		int,
+		AutoMergePolicy,
+	) error
+	AutoMergeCandidateIntoAboveForSessionWithPolicy(
+		context.Context,
+		QueueSessionIdentity,
+		*QueuedMessage,
+		*QueueAttachmentClaim,
+		AutoMergePolicy,
+	) (*QueuedMessage, bool, error)
+	AutoMergeIntoAboveForSessionWithPolicy(
+		context.Context,
+		QueueSessionIdentity,
+		string,
+		AutoMergePolicy,
+	) (*QueuedMessage, bool, error)
+}
+
 // NewService creates a Service backed by the supplied repository. maxPerSession
 // is the per-session cap (entries beyond this return ErrQueueFull on insert);
 // pass 0 to disable the cap.
 func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service {
 	service := &Service{
-		repo:       repo,
-		logger:     log.WithFields(zap.String("component", "message-queue")),
-		admissions: make(map[string]*sessionAdmission),
+		repo:        repo,
+		statusEpoch: uuid.NewString(),
+		logger:      log.WithFields(zap.String("component", "message-queue")),
+		admissions:  make(map[string]*sessionAdmission),
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
-	service.autoMergeEnabled.Store(true)
+	service.SetAutoMergePolicy(true, 0)
 	service.deliveryWorkerInterval = time.Second
 	return service
 }
@@ -87,15 +120,15 @@ func NewServiceMemory(log *logger.Logger) *Service {
 	return NewService(NewMemoryRepository(), DefaultMaxPerSession, log)
 }
 
-// SupportsDeliveryReceipts reports whether this queue has the durable ledger
-// needed to retain cross-task delivery independently of the sender turn.
+// SupportsDeliveryReceipts reports whether this queue persists cross-task
+// delivery independently of the sender turn.
 func (s *Service) SupportsDeliveryReceipts() bool {
 	_, ok := s.repo.(DeliveryLedger)
 	return ok
 }
 
-// GetDeliveryReceipt loads a durable receipt. Callers outside this package
-// must project a safe status view rather than returning Content.
+// GetDeliveryReceipt loads a receipt for a trusted caller that will project a
+// safe status view rather than exposing its content.
 func (s *Service) GetDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
@@ -112,20 +145,6 @@ func (s *Service) GetDeliveryReceiptBySourceKey(ctx context.Context, senderSessi
 	return ledger.GetDeliveryBySourceKey(ctx, senderSessionID, sourceTurnID, idempotencyKey)
 }
 
-// RetryDeliveryReceipt reopens a recoverable receipt for bounded worker
-// admission without requiring the original source turn to remain active.
-func (s *Service) RetryDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
-	ledger, ok := s.repo.(DeliveryLedger)
-	if !ok {
-		return nil, ErrDeliveryReceiptsUnsupported
-	}
-	return ledger.RetryDelivery(ctx, deliveryID, time.Now().UTC())
-}
-
-// CreateOrGetDeliveryReceipt persists one idempotent cross-task delivery
-// receipt before target FIFO admission. The recovery worker owns later queue
-// promotion, so a full target queue cannot turn an accepted receipt into a
-// sender-side retry loop.
 func (s *Service) CreateOrGetDeliveryReceipt(ctx context.Context, delivery Delivery) (*Delivery, bool, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
@@ -134,9 +153,6 @@ func (s *Service) CreateOrGetDeliveryReceipt(ctx context.Context, delivery Deliv
 	return ledger.CreateOrGetDelivery(ctx, delivery)
 }
 
-// ReserveDeliveryForDirectDispatch serializes a direct WAITING/CREATED or
-// interrupt/reply handoff with recovery workers. The returned false means a
-// prior source-turn call already owns or completed the receipt.
 func (s *Service) ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, bool, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
@@ -153,34 +169,14 @@ func (s *Service) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, lea
 	return ledger.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC())
 }
 
-// MarkDirectDeliveryAcceptanceUncertain persists agentctl acceptance before a
-// later delivered acknowledgement. Its ambiguous state is intentionally not
-// eligible for worker replay.
+// MarkDirectDeliveryAcceptanceUncertain fences an accepted agentctl prompt
+// before its terminal receipt update, preventing automatic replay.
 func (s *Service) MarkDirectDeliveryAcceptanceUncertain(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
 		return nil, ErrEntryNotFound
 	}
 	return ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner)
-}
-
-func (s *Service) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
-	ledger, ok := s.repo.(DeliveryLedger)
-	if !ok {
-		return nil, ErrEntryNotFound
-	}
-	return ledger.MarkDirectDeliveryAmbiguous(ctx, deliveryID, leaseOwner, lastError)
-}
-
-// MarkQueuedDeliveryAmbiguous retains an accepted prompt when the queue-entry
-// acknowledgement could not be confirmed. The record is intentionally not
-// eligible for automatic retry.
-func (s *Service) MarkQueuedDeliveryAmbiguous(ctx context.Context, queueEntryID, lastError string) (*Delivery, error) {
-	ledger, ok := s.repo.(DeliveryLedger)
-	if !ok {
-		return nil, ErrEntryNotFound
-	}
-	return ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, queueEntryID, lastError)
 }
 
 func (s *Service) MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error) {
@@ -191,6 +187,14 @@ func (s *Service) MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner
 	return ledger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
 }
 
+func (s *Service) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDirectDeliveryAmbiguous(ctx, deliveryID, leaseOwner, lastError)
+}
+
 func (s *Service) RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
@@ -199,11 +203,31 @@ func (s *Service) RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner
 	return ledger.RescheduleDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC(), lastError)
 }
 
-// FindQueueEntryForDelivery closes the small direct-dispatch gap where an
-// existing workflow handoff queues through QueueUserPrompt, whose legacy
-// interface predates queue entry IDs.
+// FindQueueEntryForDelivery closes the handoff gap when a state transition
+// queues the prompt through a legacy path that does not return its entry ID.
 func (s *Service) FindQueueEntryForDelivery(ctx context.Context, sessionID, deliveryID string) (string, bool, error) {
 	return s.findQueueEntryForDelivery(ctx, sessionID, deliveryID)
+}
+
+func (s *Service) RetryDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrDeliveryReceiptsUnsupported
+	}
+	return ledger.RetryDelivery(ctx, deliveryID, time.Now().UTC())
+}
+
+// ResolveSessionIdentity returns the repository-authoritative immutable queue
+// identity for trusted internal callers migrating legacy session snapshots.
+func (s *Service) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (QueueSessionIdentity, error) {
+	return s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
+}
+
+// SupportsAtomicDeferredMoveTransition reports whether task and queue rows share
+// one SQL transaction. The in-memory queue cannot participate in task storage.
+func (s *Service) SupportsAtomicDeferredMoveTransition() bool {
+	_, ok := s.repo.(*sqliteRepository)
+	return ok
 }
 
 // MaxPerSession returns the configured per-session cap.
@@ -242,14 +266,105 @@ func (s *Service) SetMergeEnabled(enabled bool) {
 	s.mergeEnabled.Store(enabled)
 }
 
-// AutoMergeEnabled reports whether ordinary newly admitted messages may be
-// folded into a compatible queue tail. It is independent from manual merge.
-func (s *Service) AutoMergeEnabled() bool { return s.autoMergeEnabled.Load() }
+// AutoMergeEnabled reports the global admission policy used by sessions that
+// do not have an explicit override.
+func (s *Service) AutoMergeEnabled() bool {
+	return s.globalAutoMergePolicy().Enabled
+}
 
-// SetAutoMergeEnabled toggles admission-time automatic merging. Existing rows
-// are never compacted retroactively.
+// SetAutoMergeEnabled updates the global policy while preserving the legacy
+// boolean target used by callers that do not own the persisted revision.
 func (s *Service) SetAutoMergeEnabled(enabled bool) {
-	s.autoMergeEnabled.Store(enabled)
+	current := s.globalAutoMergePolicy()
+	revision := current.Revision
+	if current.Enabled != enabled {
+		revision++
+	}
+	s.SetAutoMergePolicy(enabled, revision)
+}
+
+// SetAutoMergePolicy atomically publishes a complete global policy snapshot.
+func (s *Service) SetAutoMergePolicy(enabled bool, revision int64) {
+	policy := &AutoMergePolicy{
+		Enabled:  enabled,
+		Source:   AutoMergeSourceGlobal,
+		Revision: revision,
+	}
+	s.autoMergePolicy.Store(policy)
+}
+
+// SetAutoMergePolicyLoader installs the shared persisted-policy reader used by
+// identity-bound admissions and snapshots. The atomic cache remains available
+// to legacy callers that cannot carry a context.
+func (s *Service) SetAutoMergePolicyLoader(
+	load func(context.Context) (bool, int64, error),
+) {
+	if load == nil {
+		s.autoMergeLoader.Store(nil)
+		return
+	}
+	s.autoMergeLoader.Store(&autoMergePolicyLoader{load: load})
+}
+
+func (s *Service) globalAutoMergePolicy() AutoMergePolicy {
+	policy := s.autoMergePolicy.Load()
+	if policy == nil {
+		return AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal}
+	}
+	return *policy
+}
+
+// ResolveAutoMergePolicy returns the session override when present, otherwise
+// the current global policy snapshot.
+func (s *Service) ResolveAutoMergePolicy(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (AutoMergePolicy, error) {
+	override, err := s.repo.GetAutoMergeOverride(ctx, identity)
+	if err != nil {
+		return AutoMergePolicy{}, err
+	}
+	if override == nil {
+		return s.loadGlobalAutoMergePolicy(ctx)
+	}
+	return AutoMergePolicy{
+		Enabled:  override.Enabled,
+		Source:   AutoMergeSourceSession,
+		Revision: override.Revision,
+	}, nil
+}
+
+func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (AutoMergePolicy, error) {
+	if loader := s.autoMergeLoader.Load(); loader != nil {
+		enabled, revision, err := loader.load(ctx)
+		if err != nil {
+			return AutoMergePolicy{}, err
+		}
+		s.SetAutoMergePolicy(enabled, revision)
+	}
+	return s.globalAutoMergePolicy(), nil
+}
+
+// SetSessionAutoMerge persists and returns an explicit per-session policy.
+func (s *Service) SetSessionAutoMerge(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	enabled bool,
+) (AutoMergePolicy, error) {
+	var override AutoMergeOverride
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var setErr error
+		override, setErr = s.repo.SetAutoMergeOverride(admittedCtx, identity, enabled)
+		return setErr
+	})
+	if err != nil {
+		return AutoMergePolicy{}, err
+	}
+	return AutoMergePolicy{
+		Enabled:  override.Enabled,
+		Source:   AutoMergeSourceSession,
+		Revision: override.Revision,
+	}, nil
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
@@ -302,8 +417,12 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
+	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	return s.queueMessageWithMetadataAdmission(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil,
+		ctx, &identity, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil, nil,
 	)
 }
 
@@ -312,89 +431,205 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 // the snapshotted automatic fold. Callers use the hook to claim staged
 // attachments before folding; if it returns an error, no fold is attempted.
 func (s *Service) QueueMessageWithMetadataAfterInsert(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	return s.queueMessageWithMetadataAdmission(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, afterInsert,
+		ctx, &identity, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil, afterInsert,
 	)
 }
 
-// queueMessageWithMetadataAdmission snapshots policy and completes admission
-// under one per-session lock.
-func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+// QueueMessageWithMetadataForSession admits a browser message using the
+// effective policy bound to the supplied immutable session identity.
+func (s *Service) QueueMessageWithMetadataForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmission(
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode, attachments, metadata, nil, nil,
+	)
+}
+
+// QueueMessageWithMetadataForSessionWithClaim atomically claims staged
+// attachments when admission inserts a queue entry. An empty claim carries
+// inline-only attachments and may use the compatible full-queue fold path.
+func (s *Service) QueueMessageWithMetadataForSessionWithClaim(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim QueueAttachmentClaim,
+) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmission(
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode, attachments, metadata, &claim, nil,
+	)
+}
+
+// QueueMessageWithMetadataForSessionAfterInsert is the identity-bound variant
+// used while attachment claiming still participates in the admission lock.
+func (s *Service) QueueMessageWithMetadataForSessionAfterInsert(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	afterInsert func(context.Context, *QueuedMessage) error,
+) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmission(
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode, attachments, metadata, nil, afterInsert,
+	)
+}
+
+// queueMessageWithMetadataAdmission resolves policy and completes admission
+// under one per-session lock. Identity-bound repositories compare that policy
+// inside every durable mutation; an override race restarts before admission.
+//
+//nolint:gocognit // retry boundaries keep policy validation before each mutation.
+func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		maxPerSession := s.MaxPerSession()
-		autoMergeEnabled := s.AutoMergeEnabled()
-		source, err := s.insertQueueMessageWithMetadata(
-			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
-		)
-		if err != nil {
-			if errors.Is(err, ErrQueueFull) && autoMergeEnabled && afterInsert == nil {
-				// A full queue must still accept a message that would fold into
-				// the tail: admission-time auto-merge runs after a successful
-				// insert, so at capacity it could never fire. Fold the
-				// candidate directly — the fold is the admission. The
-				// afterInsert hook is excluded because it claims staged
-				// attachments against a persisted source row, which this path
-				// never creates.
-				candidate := &QueuedMessage{
-					SessionID:   sessionID,
-					TaskID:      taskID,
-					Content:     content,
-					Model:       model,
-					PlanMode:    planMode,
-					Attachments: attachments,
-					Metadata:    copyMessageMetadata(metadata, 0),
-					QueuedAt:    time.Now().UTC(),
-					QueuedBy:    userID,
+		for {
+			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, identity, sessionID)
+			source, insertErr := s.insertQueueMessageWithMetadata(
+				admittedCtx, identity, sessionID, taskID, content, model, userID, planMode,
+				attachments, metadata, claim, s.MaxPerSession(), policy,
+			)
+			if errors.Is(insertErr, ErrAutoMergePolicyChanged) {
+				continue
+			}
+			autoMergeEnabled := policy != nil && policy.Enabled
+			if insertErr != nil {
+				hasStagedAttachments := claim != nil && len(claim.IDs) > 0
+				if !errors.Is(insertErr, ErrQueueFull) || !autoMergeEnabled || hasStagedAttachments || afterInsert != nil {
+					return insertErr
 				}
-				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)
-				switch {
-				case mergeErr != nil:
-					if errors.Is(mergeErr, ErrTaskInactive) {
-						// The task was archived or deleted while the admission
-						// was in flight; surface the inactive-task contract
-						// instead of a misleading queue-full rejection.
-						return mergeErr
-					}
-					s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
-						zap.String("session_id", sessionID),
-						zap.Error(mergeErr))
-					return err
-				case didMerge && merged != nil:
-					s.logger.Info("automatically merged queued entry into full tail",
-						zap.String("session_id", sessionID),
-						zap.String("surviving_entry_id", merged.ID))
+				var merged *QueuedMessage
+				source, merged, insertErr = s.admitQueueFullMessage(
+					admittedCtx, identity, insertErr, sessionID, taskID, content, model, userID, planMode,
+					attachments, metadata, claim, s.MaxPerSession(), policy,
+				)
+				if errors.Is(insertErr, ErrAutoMergePolicyChanged) {
+					continue
+				}
+				if insertErr != nil {
+					return insertErr
+				}
+				if merged != nil {
 					queued = merged
 					return nil
-				default:
-					// The fold skipped because the tail is absent or changed —
-					// a concurrent drain freed capacity (or a concurrent fold or
-					// drain moved the tail) between the failed insert and the
-					// fold scan. Retry the ordinary insert once under the held
-					// admission lock: it succeeds now that capacity is free, and
-					// still returns ErrQueueFull when another writer keeps the
-					// cap occupied. Without this retry a stale ErrQueueFull
-					// would drop a message that is admissible at fold time.
-					source, err = s.insertQueueMessageWithMetadata(
-						admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
-					)
-					if err != nil {
-						return err
-					}
 				}
-			} else {
-				return err
 			}
-		}
-		if afterInsert != nil {
-			if err := afterInsert(admittedCtx, source); err != nil {
-				return err
+			if afterInsert != nil {
+				if err := afterInsert(admittedCtx, source); err != nil {
+					return err
+				}
 			}
+			queued = s.finalizeAutoMerge(admittedCtx, identity, source, policy)
+			return nil
 		}
-		queued = s.finalizeAutoMerge(admittedCtx, source, autoMergeEnabled)
-		return nil
 	})
 	return queued, err
+}
+
+func (s *Service) resolveAdmissionAutoMergePolicy(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	sessionID string,
+) *AutoMergePolicy {
+	if identity == nil {
+		policy := s.globalAutoMergePolicy()
+		return &policy
+	}
+	policy, err := s.ResolveAutoMergePolicy(ctx, *identity)
+	if err == nil {
+		return &policy
+	}
+	s.logger.Warn("automatic merge policy unavailable; admitting separate message",
+		zap.String("session_id", sessionID),
+		zap.Error(err))
+	return nil
+}
+
+func (s *Service) autoMergeCandidate(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	if identity == nil {
+		return s.repo.AutoMergeCandidateIntoAbove(ctx, candidate)
+	}
+	if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok && policy != nil {
+		return policyRepo.AutoMergeCandidateIntoAboveForSessionWithPolicy(ctx, *identity, candidate, claim, *policy)
+	}
+	if claim == nil {
+		return s.repo.AutoMergeCandidateIntoAboveForSession(ctx, *identity, candidate)
+	}
+	claimRepo, ok := s.repo.(queueAttachmentRepository)
+	if !ok {
+		return nil, false, errors.New("transactional attachment queue repository is unavailable")
+	}
+	return claimRepo.AutoMergeCandidateIntoAboveForSessionWithClaim(ctx, *identity, candidate, *claim)
+}
+
+// admitQueueFullMessage folds a candidate into the tail or retries insertion
+// when the fold observes capacity freed by a concurrent drain.
+func (s *Service) admitQueueFullMessage(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	queueFullErr error,
+	sessionID, taskID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, *QueuedMessage, error) {
+	candidate := &QueuedMessage{
+		SessionID:   sessionID,
+		TaskID:      taskID,
+		Content:     content,
+		Model:       model,
+		PlanMode:    planMode,
+		Attachments: attachments,
+		Metadata:    copyMessageMetadata(metadata, 0),
+		QueuedAt:    time.Now().UTC(),
+		QueuedBy:    userID,
+	}
+	merged, didMerge, err := s.autoMergeCandidate(ctx, identity, candidate, claim, policy)
+	if errors.Is(err, ErrAutoMergePolicyChanged) {
+		return nil, nil, err
+	}
+	if err != nil {
+		if errors.Is(err, ErrTaskInactive) {
+			return nil, nil, err
+		}
+		s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, nil, queueFullErr
+	}
+	if didMerge && merged != nil {
+		s.logger.Info("automatically merged queued entry into full tail",
+			zap.String("session_id", sessionID),
+			zap.String("surviving_entry_id", merged.ID))
+		return nil, merged, nil
+	}
+	source, err := s.insertQueueMessageWithMetadata(
+		ctx, identity, sessionID, taskID, content, model, userID, planMode,
+		attachments, metadata, claim, maxPerSession, policy,
+	)
+	return source, nil, err
 }
 
 // queueMessageWithMetadataSeparate is used by retry paths whose existing
@@ -404,37 +639,80 @@ func (s *Service) queueMessageWithMetadataSeparate(ctx context.Context, sessionI
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
 		queued, err = s.insertQueueMessageWithMetadata(
-			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+			admittedCtx, nil, sessionID, taskID, content, model, userID, planMode,
+			attachments, metadata, nil, maxPerSession, nil,
 		)
 		return err
 	})
 	return queued, err
 }
 
-func (s *Service) finalizeAutoMerge(ctx context.Context, source *QueuedMessage, enabled bool) *QueuedMessage {
-	if !enabled {
-		return source
-	}
-	merged, didMerge, err := s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
-	if err != nil {
-		s.logger.Error("automatic queue merge failed; preserving separate admission",
+func (s *Service) finalizeAutoMerge(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	source *QueuedMessage,
+	policy *AutoMergePolicy,
+) *QueuedMessage {
+	for policy != nil && policy.Enabled {
+		var merged *QueuedMessage
+		var didMerge bool
+		var err error
+		if identity == nil {
+			merged, didMerge, err = s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
+		} else if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok {
+			merged, didMerge, err = policyRepo.AutoMergeIntoAboveForSessionWithPolicy(ctx, *identity, source.ID, *policy)
+		} else {
+			merged, didMerge, err = s.repo.AutoMergeIntoAboveForSession(ctx, *identity, source.ID)
+		}
+		if errors.Is(err, ErrAutoMergePolicyChanged) && identity != nil {
+			policy = s.resolveAdmissionAutoMergePolicy(ctx, identity, source.SessionID)
+			continue
+		}
+		if err != nil {
+			s.logger.Error("automatic queue merge failed; preserving separate admission",
+				zap.String("session_id", source.SessionID),
+				zap.String("source_entry_id", source.ID),
+				zap.Error(err))
+			return source
+		}
+		if !didMerge || merged == nil {
+			return source
+		}
+		s.logger.Info("automatically merged queued entry into tail",
 			zap.String("session_id", source.SessionID),
 			zap.String("source_entry_id", source.ID),
-			zap.Error(err))
-		return source
+			zap.String("surviving_entry_id", merged.ID))
+		return merged
 	}
-	if !didMerge || merged == nil {
-		return source
+	return source
+}
+
+func (s *Service) insertQueueMessage(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) error {
+	if identity == nil {
+		return s.repo.Insert(ctx, msg, maxPerSession)
 	}
-	s.logger.Info("automatically merged queued entry into tail",
-		zap.String("session_id", source.SessionID),
-		zap.String("source_entry_id", source.ID),
-		zap.String("surviving_entry_id", merged.ID))
-	return merged
+	if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok && policy != nil {
+		return policyRepo.InsertForSessionWithPolicy(ctx, *identity, msg, claim, maxPerSession, *policy)
+	}
+	if claim == nil {
+		return s.repo.InsertForSession(ctx, *identity, msg, maxPerSession)
+	}
+	claimRepo, ok := s.repo.(queueAttachmentRepository)
+	if !ok {
+		return errors.New("transactional attachment queue repository is unavailable")
+	}
+	return claimRepo.InsertForSessionWithClaim(ctx, *identity, msg, *claim, maxPerSession)
 }
 
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
-func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
+func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -446,7 +724,8 @@ func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, sessionID,
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	if err := s.repo.Insert(ctx, msg, maxPerSession); err != nil {
+	err := s.insertQueueMessage(ctx, identity, msg, claim, maxPerSession, policy)
+	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",
 				zap.String("session_id", sessionID),
@@ -479,6 +758,30 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 	return restored, err
 }
 
+func (s *Service) RestoreMessageForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+) (*QueuedMessage, error) {
+	if msg == nil {
+		return nil, errors.New("queued message is nil")
+	}
+	var restored *QueuedMessage
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		candidate := *msg
+		candidate.Metadata = copyMessageMetadata(msg.Metadata, 0)
+		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
+			return err
+		}
+		if err := s.repo.RestoreForSession(admittedCtx, identity, &candidate, 0); err != nil {
+			return err
+		}
+		restored = &candidate
+		return nil
+	})
+	return restored, err
+}
+
 // restoreMessage is the admission-checked core of RestoreMessage.
 func (s *Service) restoreMessage(ctx context.Context, msg *QueuedMessage) (*QueuedMessage, error) {
 	restored := *msg
@@ -503,6 +806,35 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
 		coalesceKey, allowInsert, s.MaxPerSession(),
 	)
+}
+
+func (s *Service) QueueMessageWithCoalesceKeyForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	coalesceKey string,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	var queued *QueuedMessage
+	var replaced bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		metadataCopy := copyMessageMetadata(metadata, 1)
+		metadataCopy[MetadataCoalesceKey] = coalesceKey
+		candidate := &QueuedMessage{
+			SessionID: identity.SessionID, TaskID: identity.TaskID,
+			Content: content, Model: model, PlanMode: planMode,
+			Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID,
+		}
+		var err error
+		queued, replaced, err = s.repo.InsertOrReplaceByCoalesceKeyForSession(
+			admittedCtx, identity, candidate, coalesceKey, s.MaxPerSession(), allowInsert,
+		)
+		return err
+	})
+	return queued, replaced, err
 }
 
 // queueMessageWithCoalesceKey is the admission-checked core of QueueMessageWithCoalesceKey.
@@ -592,17 +924,47 @@ func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
 	})
 }
 
+func (s *Service) RequeueAtHeadForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
+			return err
+		}
+		return s.repo.RequeuePreservingFIFOForSession(admittedCtx, identity, msg)
+	})
+}
+
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, s.MaxPerSession(), nil)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, nil)
+}
+
+func (s *Service) QueueLifecycleMessageWithCoalesceKeyForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	coalesceKey string,
+	allowInsert bool,
+) (*QueuedMessage, bool, bool, error) {
+	return s.queueLifecycleMessageWithCoalesceKey(
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode,
+		attachments, metadata, coalesceKey, allowInsert, false, nil,
+	)
 }
 
 // QueueLifecycleMessageWithCoalesceKeyAfterInsert runs afterInsert while the
 // queue admission lock is held. If the callback fails, the exact queue
 // snapshot from before admission is restored before the error is returned.
-// Lifecycle dispatch uses this boundary when it must reserve durable attempt
-// metadata together with a queue entry.
 func (s *Service) QueueLifecycleMessageWithCoalesceKeyAfterInsert(
 	ctx context.Context,
 	sessionID, taskID, content, model, userID string,
@@ -613,39 +975,69 @@ func (s *Service) QueueLifecycleMessageWithCoalesceKeyAfterInsert(
 	allowInsert bool,
 	afterInsert func(context.Context, *QueuedMessage, bool) error,
 ) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, s.MaxPerSession(), afterInsert)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, afterInsert)
+}
+
+func (s *Service) QueueLifecycleMessageWithCoalesceKeyForSessionAfterInsert(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	coalesceKey string,
+	allowInsert bool,
+	afterInsert func(context.Context, *QueuedMessage, bool) error,
+) (*QueuedMessage, bool, bool, error) {
+	return s.queueLifecycleMessageWithCoalesceKey(
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode,
+		attachments, metadata, coalesceKey, allowInsert, false, afterInsert,
+	)
 }
 
 // RequeueLifecycleMessageWithCoalesceKey preserves the generation captured by
 // an existing durable row. This prevents a stale retry from becoming a new
 // prompt after the task was archived and then unarchived.
 func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true, 0, nil)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true, nil)
 }
 
-// QueueWorkflowControlMessage persists one transition-keyed workflow prompt
-// in the control lane. Control messages use the existing durable reserve/ack
-// mechanics but bypass ordinary FIFO capacity, so a saturated peer-message
-// queue cannot prevent a committed workflow transition from being handed off.
 func (s *Service) QueueWorkflowControlMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, transitionID int64) (*QueuedMessage, bool, bool, error) {
 	if transitionID <= 0 {
 		return nil, false, false, errors.New("workflow transition identity is required")
 	}
-	metadataCopy := copyMessageMetadata(metadata, 2)
-	metadataCopy[MetadataWorkflowTransitionID] = transitionID
-	metadataCopy[MetadataWorkflowControl] = true
-	coalesceKey := fmt.Sprintf("workflow-transition:%d", transitionID)
+	copy := copyMessageMetadata(metadata, 2)
+	copy[MetadataWorkflowTransitionID] = transitionID
+	copy[MetadataWorkflowControl] = true
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, copy, fmt.Sprintf("workflow-transition:%d", transitionID), true, false, nil)
+}
+
+func (s *Service) RequeueLifecycleMessageWithCoalesceKeyForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	coalesceKey string,
+	allowInsert bool,
+) (*QueuedMessage, bool, bool, error) {
 	return s.queueLifecycleMessageWithCoalesceKey(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments,
-		metadataCopy, coalesceKey, true, false, 0, nil,
+		ctx, &identity, identity.SessionID, identity.TaskID, content, model, userID, planMode,
+		attachments, metadata, coalesceKey, allowInsert, true, nil,
 	)
 }
 
 // queueLifecycleMessageWithCoalesceKey is the lifecycle-guarded core of the lifecycle queue methods.
-func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, maxPerSession int, afterInsert func(context.Context, *QueuedMessage, bool) error) (*QueuedMessage, bool, bool, error) {
+func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, afterInsert func(context.Context, *QueuedMessage, bool) error) (*QueuedMessage, bool, bool, error) {
 	var queued *QueuedMessage
 	var replaced, accepted bool
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if identity != nil {
+			if err := s.validateSessionIdentity(admittedCtx, *identity); err != nil {
+				return err
+			}
+		}
 		var snapshot []QueuedMessage
 		var pendingMove *PendingMove
 		if afterInsert != nil {
@@ -661,8 +1053,8 @@ func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sess
 		}
 		var err error
 		queued, replaced, accepted, err = s.insertLifecycleMessageWithCoalesceKey(
-			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments,
-			metadata, coalesceKey, allowInsert, isRetry, maxPerSession,
+			admittedCtx, identity, sessionID, taskID, content, model, userID, planMode, attachments,
+			metadata, coalesceKey, allowInsert, isRetry,
 		)
 		if err != nil || !accepted || afterInsert == nil {
 			return err
@@ -692,7 +1084,7 @@ func (s *Service) restoreCoalescedAdmission(ctx context.Context, sessionID strin
 }
 
 // insertLifecycleMessageWithCoalesceKey inserts or replaces a lifecycle entry under the admission lock.
-func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, maxPerSession int) (*QueuedMessage, bool, bool, error) {
+func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
 	metadataCopy := clearReservedMetadata(metadata)
 	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
 	if err != nil {
@@ -714,10 +1106,17 @@ func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, ses
 	metadataCopy[MetadataLifecycleDurable] = true
 	metadataCopy[MetadataLifecycleGeneration] = generation
 	msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID}
-	if isRetry {
+	maxPerSession := s.MaxPerSession()
+	if isRetry || msg.IsWorkflowControl() {
 		maxPerSession = 0
 	}
-	queued, replaced, err := s.repo.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
+	var queued *QueuedMessage
+	var replaced bool
+	if identity == nil {
+		queued, replaced, err = s.repo.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
+	} else {
+		queued, replaced, err = s.repo.InsertOrReplaceLifecycleByCoalesceKeyForSession(ctx, *identity, msg, coalesceKey, maxPerSession, allowInsert)
+	}
 	if errors.Is(err, ErrTaskInactive) || errors.Is(err, ErrLifecycleCancelled) {
 		return nil, false, false, nil
 	}
@@ -780,10 +1179,51 @@ func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string
 	return msg, msg != nil, autoRun
 }
 
+// ReserveQueuedWithAutoRunForSession reserves the FIFO head only for the exact session incarnation.
+func (s *Service) ReserveQueuedWithAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, bool, error) {
+	var msg *QueuedMessage
+	var autoRun bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, autoRun, err = s.repo.ReserveHeadIfAutoRunForSession(admittedCtx, identity)
+		return err
+	})
+	if err != nil {
+		return nil, false, true, err
+	}
+	return msg, msg != nil, autoRun, nil
+}
+
+// ReserveQueuedForDeliveryWithAutoRunForSession retains the FIFO head until
+// explicit acknowledgement, regardless of producer type.
+func (s *Service) ReserveQueuedForDeliveryWithAutoRunForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (*QueuedMessage, bool, bool, error) {
+	var msg *QueuedMessage
+	var autoRun bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, autoRun, err = s.repo.ReserveHeadForDeliveryIfAutoRunForSession(admittedCtx, identity)
+		return err
+	})
+	if err != nil {
+		return nil, false, true, err
+	}
+	return msg, msg != nil, autoRun, nil
+}
+
 // SetAutoRun persists automatic-drain policy through the queue admission gate.
 func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
 	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return s.repo.SetAutoRun(admittedCtx, sessionID, enabled)
+	})
+}
+
+// SetAutoRunForSession persists automatic-drain policy only for the exact session incarnation.
+func (s *Service) SetAutoRunForSession(ctx context.Context, identity QueueSessionIdentity, enabled bool) error {
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.SetAutoRunForSession(admittedCtx, identity, enabled)
 	})
 }
 
@@ -793,6 +1233,18 @@ func (s *Service) PauseAutoRunIfPending(ctx context.Context, sessionID string) (
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
 		paused, err = s.repo.PauseAutoRunIfPending(admittedCtx, sessionID)
+		return err
+	})
+	return paused, err
+}
+func (s *Service) PauseAutoRunIfPendingForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (bool, error) {
+	var paused bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		paused, err = s.repo.PauseAutoRunIfPendingForSession(admittedCtx, identity)
 		return err
 	})
 	return paused, err
@@ -817,6 +1269,29 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID stri
 		return nil
 	}
 	_, err = ledger.AcknowledgeDeliveryByQueueEntry(ctx, entryID, time.Now().UTC())
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (s *Service) AcknowledgeQueuedForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	if acknowledger, ok := s.repo.(deliveryQueueIdentityAcknowledger); ok {
+		return s.acknowledgeQueuedForSessionDurably(ctx, acknowledger, identity, entryID)
+	}
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
+			return err
+		}
+		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, entryID)
+	})
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
 	return err
 }
 
@@ -824,6 +1299,17 @@ func (s *Service) acknowledgeQueuedDurably(
 	ctx context.Context, acknowledger deliveryQueueAcknowledger, sessionID, entryID string,
 ) error {
 	err := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, sessionID, entryID, time.Now().UTC())
+	return s.handleDurableAcknowledgementFailure(ctx, sessionID, entryID, err)
+}
+
+func (s *Service) acknowledgeQueuedForSessionDurably(
+	ctx context.Context, acknowledger deliveryQueueIdentityAcknowledger, identity QueueSessionIdentity, entryID string,
+) error {
+	err := acknowledger.AcknowledgeQueueEntryAndDeliveryForSession(ctx, identity, entryID, time.Now().UTC())
+	return s.handleDurableAcknowledgementFailure(ctx, identity.SessionID, entryID, err)
+}
+
+func (s *Service) handleDurableAcknowledgementFailure(ctx context.Context, sessionID, entryID string, err error) error {
 	if err == nil || errors.Is(err, ErrEntryNotFound) {
 		return nil
 	}
@@ -836,14 +1322,46 @@ func (s *Service) acknowledgeQueuedDurably(
 	}
 	_, markErr := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, entryID, "accepted_prompt_acknowledgement_failed")
 	if markErr == nil || errors.Is(markErr, ErrEntryNotFound) {
-		// Also delete the reserved queue entry so it cannot permanently block
-		// the target session's FIFO. The prompt was already handed to the
-		// executor; keeping a non-replayable row at the head of the queue would
-		// prevent every later message from being dispatched.
+		// The prompt was already handed to the executor. Remove the retained
+		// row so it cannot block later messages; the ambiguous receipt remains
+		// available for operator inspection and cannot replay automatically.
 		_ = s.repo.AcknowledgeByID(ctx, sessionID, entryID)
 		return err
 	}
 	return errors.Join(err, markErr)
+}
+
+// ReleaseQueuedDeliveryForSession makes an unaccepted retained entry visible
+// again for the same session incarnation.
+func (s *Service) ReleaseQueuedDeliveryForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.ReleaseDeliveryReservationForSession(admittedCtx, identity, entryID)
+	})
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	return err
+}
+
+// DiscardLifecycleReservation removes a reservation still owned by a replaced
+// session incarnation. The repository compares persisted ownership, so this
+// cannot delete a reservation subsequently claimed by another incarnation.
+func (s *Service) DiscardLifecycleReservation(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.DiscardLifecycleReservation(admittedCtx, identity, entryID)
+	})
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	return err
 }
 
 // IsCurrentLifecycleReservation verifies that msg is still the durable row
@@ -862,15 +1380,30 @@ func (s *Service) IsCurrentLifecycleReservation(ctx context.Context, msg *Queued
 	if err != nil || generation != expectedGeneration {
 		return false
 	}
+	if msg.reservationIdentity.SessionIncarnationID != "" {
+		current, err := s.repo.ResolveSessionIdentity(
+			ctx,
+			msg.reservationIdentity.TaskID,
+			msg.reservationIdentity.SessionID,
+		)
+		if err != nil || current != msg.reservationIdentity {
+			return false
+		}
+	}
 	entries, err := s.repo.ListBySession(ctx, msg.SessionID)
 	if err != nil {
 		return false
 	}
 	for i := range entries {
 		entry := &entries[i]
-		if entry.ID == msg.ID && entry.TaskID == msg.TaskID && entry.IsDurableLifecycle() {
-			return true
+		if entry.ID != msg.ID || entry.TaskID != msg.TaskID || !entry.IsDurableLifecycle() {
+			continue
 		}
+		if msg.reservationIdentity.SessionIncarnationID != "" &&
+			lifecycleReservationIncarnation(entry.Metadata) != msg.reservationIdentity.SessionIncarnationID {
+			return false
+		}
+		return true
 	}
 	return false
 }
@@ -891,18 +1424,27 @@ func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map
 // queued_by matches userID. Otherwise inserts a new entry. Returns
 // ErrQueueFull when an insert would exceed the cap.
 func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
+	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	return s.AppendContentForSession(ctx, identity, content, model, userID, planMode, attachments)
+}
+
+// AppendContentForSession admits content only for the exact session incarnation.
+func (s *Service) AppendContentForSession(ctx context.Context, identity QueueSessionIdentity, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
 	var msg *QueuedMessage
 	var appended bool
-	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		var err error
-		msg, appended, err = s.repo.AppendOrInsertTail(admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, nil, s.MaxPerSession())
+		msg, appended, err = s.repo.AppendOrInsertTailForSession(admittedCtx, identity, content, model, userID, planMode, attachments, nil, s.MaxPerSession())
 		return err
 	})
 	if err != nil {
 		return nil, false, err
 	}
 	s.logger.Info("queue append-or-insert",
-		zap.String("session_id", sessionID),
+		zap.String("session_id", identity.SessionID),
 		zap.String("entry_id", msg.ID),
 		zap.Bool("appended", appended))
 	return msg, appended, nil
@@ -995,6 +1537,33 @@ func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string
 	return msg, true, nil
 }
 
+func (s *Service) TakeQueuedEntryForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) (*QueuedMessage, bool, error) {
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.TakeByIDForSession(admittedCtx, identity, entryID)
+		return err
+	})
+	if err != nil {
+		s.logger.Error("take by id for session failed",
+			zap.String("session_id", identity.SessionID),
+			zap.String("entry_id", entryID),
+			zap.Error(err))
+		return nil, false, err
+	}
+	if msg == nil {
+		return nil, false, nil
+	}
+	s.logger.Info("message dequeued by id",
+		zap.String("session_id", identity.SessionID),
+		zap.String("entry_id", msg.ID))
+	return msg, true, nil
+}
+
 // UpdateMessage replaces the content (and optionally attachments) of a queued
 // entry. The sessionID scope is mandatory — callers can't update an entry by
 // guessing its UUID across sessions. Returns ErrEntryNotFound when the entry
@@ -1042,6 +1611,23 @@ func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected [
 	return claim, nil
 }
 
+// ClaimSendNowForSession claims the exact pending snapshot only for the exact session incarnation.
+func (s *Service) ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
+	var claim *SendNowClaim
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		claim, err = s.repo.ClaimSendNowForSession(admittedCtx, identity, expected)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("claimed queued messages for send now",
+		zap.String("session_id", identity.SessionID),
+		zap.Int("source_count", len(claim.Sources)))
+	return claim, nil
+}
+
 // RestoreSendNowClaim restores every source from an interrupted replacement
 // dispatch. Durable lifecycle reservations are cleared as part of the same
 // repository operation.
@@ -1072,6 +1658,22 @@ func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowCla
 	return nil
 }
 
+// GetEntryForSession returns an entry from an identity-bound repository
+// snapshot, preventing edits from observing a reincarnated session.
+func (s *Service) GetEntryForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) (*QueuedMessage, error) {
+	snapshot, err := s.repo.Snapshot(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	for index := range snapshot.Entries {
+		if snapshot.Entries[index].ID == entryID {
+			entry := snapshot.Entries[index]
+			return &entry, nil
+		}
+	}
+	return nil, ErrEntryNotFound
+}
+
 // UpdateMessageWithMetadata atomically edits queue content and applies
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
@@ -1082,6 +1684,37 @@ func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entr
 	}
 	s.logger.Info("queued entry updated",
 		zap.String("session_id", sessionID),
+		zap.String("entry_id", entryID))
+	return nil
+}
+
+// UpdateMessageWithMetadataForSession edits content only for the exact session incarnation.
+func (s *Service) UpdateMessageWithMetadataForSession(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.UpdateContentAndMetadataForSession(admittedCtx, identity, entryID, content, attachments, metadataUpdates, queuedBy)
+	}); err != nil {
+		return err
+	}
+	s.logger.Info("queued entry updated",
+		zap.String("session_id", identity.SessionID),
+		zap.String("entry_id", entryID))
+	return nil
+}
+
+// UpdateMessageWithMetadataForSessionWithClaim claims newly referenced staged
+// attachments and updates the exact queue row atomically.
+func (s *Service) UpdateMessageWithMetadataForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string, claim QueueAttachmentClaim) error {
+	if err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		claimRepo, ok := s.repo.(queueAttachmentRepository)
+		if !ok {
+			return errors.New("transactional attachment queue repository is unavailable")
+		}
+		return claimRepo.UpdateContentAndMetadataForSessionWithClaim(admittedCtx, identity, entryID, content, attachments, metadataUpdates, queuedBy, claim)
+	}); err != nil {
+		return err
+	}
+	s.logger.Info("queued entry updated",
+		zap.String("session_id", identity.SessionID),
 		zap.String("entry_id", entryID))
 	return nil
 }
@@ -1099,6 +1732,24 @@ func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) er
 		zap.String("session_id", sessionID),
 		zap.String("entry_id", entryID))
 	return nil
+}
+
+// RemoveEntryForSession deletes an entry only for the exact session incarnation
+// and returns the removed entry plus every retained row from the same transaction.
+func (s *Service) RemoveEntryForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) (*QueueRemovalResult, error) {
+	var result *QueueRemovalResult
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		result, err = s.repo.DeleteByIDForSession(admittedCtx, identity, entryID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("queued entry removed",
+		zap.String("session_id", identity.SessionID),
+		zap.String("entry_id", entryID))
+	return result, nil
 }
 
 // MergeIntoAbove folds the entry identified by entryID into the entry directly
@@ -1123,6 +1774,26 @@ func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queued
 	return merged, nil
 }
 
+// MergeIntoAboveForSession merges an entry only for the exact session incarnation.
+func (s *Service) MergeIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, entryID, queuedBy string) (*QueuedMessage, error) {
+	if !s.MergeEnabled() {
+		return nil, ErrMergeDisabled
+	}
+	var merged *QueuedMessage
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		merged, err = s.repo.MergeIntoAboveForSession(admittedCtx, identity, entryID, queuedBy)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("queued entry merged into entry above",
+		zap.String("session_id", identity.SessionID),
+		zap.String("entry_id", merged.ID))
+	return merged, nil
+}
+
 // ReorderEntries rewrites the pending FIFO order of a session's queue to
 // match orderedIDs. Returns ErrQueueChanged when the submitted order is empty,
 // contains duplicates, or does not match the current visible pending set (a
@@ -1143,6 +1814,22 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 	return nil
 }
 
+// ReorderEntriesForSession reorders pending entries only for the exact session incarnation.
+func (s *Service) ReorderEntriesForSession(ctx context.Context, identity QueueSessionIdentity, orderedIDs []string) error {
+	if err := validateReorderInput(orderedIDs); err != nil {
+		return err
+	}
+	if err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.ReorderEntriesForSession(admittedCtx, identity, orderedIDs)
+	}); err != nil {
+		return err
+	}
+	s.logger.Info("queued entries reordered",
+		zap.String("session_id", identity.SessionID),
+		zap.Int("entry_count", len(orderedIDs)))
+	return nil
+}
+
 // CancelAll clears every queued entry for a session. Returns the number of
 // rows removed.
 func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) {
@@ -1159,6 +1846,36 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 		zap.String("session_id", sessionID),
 		zap.Int("removed", n))
 	return n, nil
+}
+
+// CancelAllForSession clears pending entries only for the exact session
+// incarnation and returns both removed and retained rows atomically.
+func (s *Service) CancelAllForSession(ctx context.Context, identity QueueSessionIdentity) (*QueueRemovalResult, error) {
+	var result *QueueRemovalResult
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		result, err = s.repo.DeleteAllBySessionForIdentity(admittedCtx, identity)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("queue cancel-all",
+		zap.String("session_id", identity.SessionID),
+		zap.Int("removed", len(result.Removed)))
+	return result, nil
+}
+
+// PurgeDeletedSession removes all ephemeral queue state after the authoritative
+// task-session row is gone. It never matches a replacement incarnation.
+func (s *Service) PurgeDeletedSession(ctx context.Context, identity QueueSessionIdentity) error {
+	purger, ok := s.repo.(deletedSessionRepository)
+	if !ok {
+		return nil
+	}
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return purger.PurgeDeletedSession(admittedCtx, identity)
+	})
 }
 
 // GetStatus returns the full pending list and capacity info for a session.
@@ -1199,9 +1916,9 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 }
 
 // HasUserOwnedEntryAtOrAfter is the error-preserving queue read used by
-// stale-turn reconciliation. Unlike GetStatus, it must not turn a transient
-// storage failure into an empty queue because that would make settlement lose
-// evidence of newer user work.
+// completion settlement. A storage failure must remain visible to the caller:
+// treating it as an empty queue could let an old administrative turn settle
+// over newer user work.
 func (s *Service) HasUserOwnedEntryAtOrAfter(ctx context.Context, sessionID string, at time.Time) (bool, error) {
 	entries, err := s.repo.ListBySession(ctx, sessionID)
 	if err != nil {
@@ -1215,6 +1932,58 @@ func (s *Service) HasUserOwnedEntryAtOrAfter(ctx context.Context, sessionID stri
 		}
 	}
 	return false, nil
+}
+
+// Snapshot returns an ordered status bound to one immutable session identity.
+func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (*QueueStatus, error) {
+	snapshot, err := s.repo.Snapshot(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]QueuedMessage, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		if !entry.IsReservedInFlight() {
+			pending = append(pending, entry)
+		}
+	}
+	status := &QueueStatus{
+		Entries:              pending,
+		Count:                len(pending),
+		Max:                  s.MaxPerSession(),
+		TaskID:               identity.TaskID,
+		SessionID:            identity.SessionID,
+		SessionIncarnationID: identity.SessionIncarnationID,
+		StatusEpoch:          s.statusEpoch,
+		StatusGeneration:     snapshot.StatusGeneration,
+		AutoRun:              snapshot.AutoRun,
+		MergeEnabled:         s.MergeEnabled(),
+	}
+	if snapshot.AutoMergeError != nil {
+		s.logger.Warn("automatic merge policy unavailable while reading queue status",
+			zap.String("session_id", identity.SessionID),
+			zap.Error(snapshot.AutoMergeError))
+		return status, nil
+	}
+	var policy AutoMergePolicy
+	if snapshot.AutoMergeOverride != nil {
+		policy = AutoMergePolicy{
+			Enabled: snapshot.AutoMergeOverride.Enabled, Source: AutoMergeSourceSession,
+			Revision: snapshot.AutoMergeOverride.Revision,
+		}
+	} else {
+		policy, err = s.loadGlobalAutoMergePolicy(ctx)
+		if err != nil {
+			s.logger.Warn("global automatic merge policy unavailable while reading queue status",
+				zap.String("session_id", identity.SessionID),
+				zap.Error(err))
+			return status, nil
+		}
+	}
+	status.AutoMergeAvailable = true
+	status.AutoMergeEnabled = &policy.Enabled
+	status.AutoMergeSource = policy.Source
+	status.AutoMergeRevision = &policy.Revision
+	return status, nil
 }
 
 // CountPendingByTaskIDs returns the pending prompt count per task, keyed by
@@ -1256,6 +2025,15 @@ func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]Queu
 	return entries, move, nil
 }
 
+// SnapshotSessionForIdentity captures queue and deferred-move state for one exact incarnation.
+func (s *Service) SnapshotSessionForIdentity(ctx context.Context, identity QueueSessionIdentity) ([]QueuedMessage, *PendingMove, error) {
+	snapshot, err := s.repo.Snapshot(ctx, identity)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot session queue: %w", err)
+	}
+	return snapshot.Entries, snapshot.PendingMove, nil
+}
+
 // TransferSession moves any queued messages and pending move from one session
 // to another. Used by workflow session switches. Returns an error so the
 // caller can fail closed instead of silently leaving entries orphaned on the
@@ -1275,6 +2053,41 @@ func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionI
 	return nil
 }
 
+func (s *Service) validateSessionIdentity(ctx context.Context, identity QueueSessionIdentity) error {
+	current, err := s.repo.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
+	if err != nil {
+		return err
+	}
+	if current != identity {
+		return ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+// TransferSessionIdentities moves queue state between exact live incarnations of the same task.
+func (s *Service) TransferSessionIdentities(ctx context.Context, source, destination QueueSessionIdentity) error {
+	if source.TaskID != destination.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	if err := s.validateSessionIdentity(ctx, source); err != nil {
+		return err
+	}
+	if err := s.validateSessionIdentity(ctx, destination); err != nil {
+		return err
+	}
+	if err := s.repo.TransferSessionIdentities(ctx, source, destination); err != nil {
+		s.logger.Error("transfer session failed",
+			zap.String("from_session_id", source.SessionID),
+			zap.String("to_session_id", destination.SessionID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("transferred queue between sessions",
+		zap.String("from_session_id", source.SessionID),
+		zap.String("to_session_id", destination.SessionID))
+	return nil
+}
+
 // RestoreSession replaces a session's queue and pending move from a snapshot,
 // preserving queued-message identity fields.
 func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
@@ -1291,19 +2104,38 @@ func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries 
 	return nil
 }
 
+// RestoreSessionForIdentity replaces queue state only for the captured session incarnation.
+func (s *Service) RestoreSessionForIdentity(ctx context.Context, identity QueueSessionIdentity, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if err := s.validateSessionIdentity(ctx, identity); err != nil {
+		return err
+	}
+	if err := s.repo.ReplaceSessionForIdentity(ctx, identity, entries, pendingMove); err != nil {
+		s.logger.Error("restore session queue failed",
+			zap.String("session_id", identity.SessionID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("restored session queue",
+		zap.String("session_id", identity.SessionID),
+		zap.Int("entries", len(entries)),
+		zap.Bool("pending_move", pendingMove != nil))
+	return nil
+}
+
 // SetPendingMove records a pending move for a session (replaces any existing one).
 // The move is applied by handleAgentReady when the agent's current turn completes.
-func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
+func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
 	if err := s.repo.SetPendingMove(ctx, sessionID, move); err != nil {
 		s.logger.Error("set pending move failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	s.logger.Info("pending move recorded",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", move.TaskID),
 		zap.String("workflow_step_id", move.WorkflowStepID))
+	return nil
 }
 
 // GetPendingMoveWithError retrieves the pending move for a session without

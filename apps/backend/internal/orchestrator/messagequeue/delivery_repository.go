@@ -67,12 +67,36 @@ type deliveryQueueAcknowledger interface {
 	AcknowledgeQueueEntryAndDelivery(ctx context.Context, sessionID, queueEntryID string, deliveredAt time.Time) error
 }
 
+// deliveryQueueIdentityAcknowledger extends the legacy acknowledgement seam
+// with the target session incarnation. Queue consumers that already have an
+// authoritative identity must use this path so an old callback cannot remove
+// a retained delivery owned by a replacement session.
+type deliveryQueueIdentityAcknowledger interface {
+	AcknowledgeQueueEntryAndDeliveryForSession(ctx context.Context, identity QueueSessionIdentity, queueEntryID string, deliveredAt time.Time) error
+}
+
 // AcknowledgeQueueEntryAndDelivery atomically deletes a reserved FIFO entry
 // and records its durable receipt as delivered. The transaction is the commit
 // point after executor acceptance: a crash or injected failure rolls back both
 // mutations, so retrying the acknowledgement cannot lose or duplicate work.
 func (r *sqliteRepository) AcknowledgeQueueEntryAndDelivery(
 	ctx context.Context, sessionID, queueEntryID string, deliveredAt time.Time,
+) error {
+	return r.acknowledgeQueueEntryAndDelivery(ctx, nil, sessionID, queueEntryID, deliveredAt)
+}
+
+// AcknowledgeQueueEntryAndDeliveryForSession commits executor acceptance only
+// when the retained queue row still belongs to the supplied session
+// incarnation. It keeps FIFO deletion and the durable receipt transition in
+// one transaction.
+func (r *sqliteRepository) AcknowledgeQueueEntryAndDeliveryForSession(
+	ctx context.Context, identity QueueSessionIdentity, queueEntryID string, deliveredAt time.Time,
+) error {
+	return r.acknowledgeQueueEntryAndDelivery(ctx, &identity, identity.SessionID, queueEntryID, deliveredAt)
+}
+
+func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
+	ctx context.Context, identity *QueueSessionIdentity, sessionID, queueEntryID string, deliveredAt time.Time,
 ) error {
 	if deliveredAt.IsZero() {
 		deliveredAt = time.Now().UTC()
@@ -86,6 +110,28 @@ func (r *sqliteRepository) AcknowledgeQueueEntryAndDelivery(
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if identity != nil {
+		var metadataJSON string
+		err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+			SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+		`), queueEntryID, sessionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read identity-bound delivery acknowledgement: %w", err)
+		}
+		reservationIncarnation, reserved, err := lifecycleReservationFromMetadataJSON(metadataJSON)
+		if err != nil {
+			return err
+		}
+		if !reserved || reservationIncarnation != identity.SessionIncarnationID {
+			return ErrEntryNotFound
+		}
 	}
 
 	// Not every queued entry has a delivery receipt. A direct interrupt may

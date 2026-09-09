@@ -176,6 +176,11 @@ func TestTurnHadAgentOutput(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "agent search tool",
+			msgs: []*models.Message{agentMsg(models.MessageTypeToolSearch, "")},
+			want: true,
+		},
+		{
 			name: "agent content chunk",
 			msgs: []*models.Message{agentMsg(models.MessageTypeContent, "partial")},
 			want: true,

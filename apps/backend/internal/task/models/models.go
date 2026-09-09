@@ -215,7 +215,23 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+	// MetaKeyStepHandoffCarry is a single-slot, task-scoped token carrying one
+	// consuming transition's completion handoff exactly one hop, to the next
+	// step's first dispatched prompt. Its value is a StepHandoffCarryToken.
+	// Recording it replaces any existing token (single-slot by construction);
+	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
+	MetaKeyStepHandoffCarry = "step_handoff_carry"
 )
+
+// StepHandoffCarryToken is the JSON shape stored under
+// tasks.metadata[MetaKeyStepHandoffCarry]. Stamp is a fresh unique value
+// (uuid.NewString()) minted on every write, compared by the claim's
+// compare-and-swap alongside StepID; it must never be content-derived.
+type StepHandoffCarryToken struct {
+	Handoff string `json:"handoff"`
+	StepID  string `json:"step_id"`
+	Stamp   string `json:"stamp"`
+}
 
 // IsAgentTitlePending reports whether task metadata contains the durable
 // pending title marker. JSON rehydration produces bool values, while a
@@ -1378,6 +1394,8 @@ const (
 	MessageTypeToolEdit MessageType = "tool_edit"
 	// MessageTypeToolRead is for file read operations
 	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolSearch is for code and file search operations
+	MessageTypeToolSearch MessageType = "tool_search"
 	// MessageTypeToolExecute is for command execution operations
 	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates
@@ -1721,6 +1739,7 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
+	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
 	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
 	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
 	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
@@ -1786,6 +1805,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                   s.ID,
 		"task_id":              s.TaskID,
+		"queue_incarnation_id": s.QueueIncarnationID,
 		"agent_execution_id":   s.AgentExecutionID,
 		"container_id":         s.ContainerID,
 		"agent_profile_id":     s.AgentProfileID,

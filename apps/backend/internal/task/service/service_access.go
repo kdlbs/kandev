@@ -309,9 +309,28 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	return nil
 }
 
+// AuthorizeTaskSessionIncarnationAccess additionally rejects a stale queue
+// identity after a textual session ID has been deleted and recreated.
+func (s *Service) AuthorizeTaskSessionIncarnationAccess(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+) error {
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID || session.QueueIncarnationID != incarnationID {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
+}
+
 // AuthorizeEnvironmentAccess checks reach of a task environment via its task's
-// workspace. Used by the terminal environment-shell route, which resolves
-// executions by environment ID rather than session ID.
+// workspace. Used by the terminal environment-shell route, which
+// resolves executions by environment ID rather than session ID.
 func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
 	return s.AuthorizeEnvironmentScope(ctx, taskEnvironmentID, authz.ScopeWorkspaceRead)
 }

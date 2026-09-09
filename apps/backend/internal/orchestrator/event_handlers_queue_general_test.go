@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/github"
@@ -13,8 +14,29 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type sessionIdentityTransitionHookRepository struct {
+	repoStore
+	afterTransition func()
+}
+
+func (r *sessionIdentityTransitionHookRepository) UpdateTaskSessionStateIfCurrentIdentity(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+	expected, state models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	changed, updatedAt, err := r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
+	)
+	if err == nil && changed && r.afterTransition != nil {
+		r.afterTransition()
+	}
+	return changed, updatedAt, err
+}
 
 func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	ctx := context.Background()
@@ -55,30 +77,56 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	}
 }
 
-func TestExecuteQueuedMessage_PreservesPermanentFailureForRecovery(t *testing.T) {
+func TestExecuteQueuedMessage_DoesNotPublishVisibleEffectsForReplacedIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
-	session, err := repo.GetTaskSession(ctx, "s1")
+	seedSession(t, repo, "t-replaced", "s-replaced", "step-replaced")
+	seedExecutorRunning(t, repo, "s-replaced", "t-replaced", "exec-replaced")
+	session, err := repo.GetTaskSession(ctx, "s-replaced")
 	if err != nil {
-		t.Fatalf("GetTaskSession: %v", err)
+		t.Fatalf("get session: %v", err)
 	}
 	session.State = models.TaskSessionStateWaitingForInput
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("UpdateTaskSession: %v", err)
+		t.Fatalf("set waiting session: %v", err)
 	}
-
-	agentMgr := &mockAgentManager{isAgentRunning: true, promptErr: fmt.Errorf("permanent prompt failure")}
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-	queued := &messagequeue.QueuedMessage{ID: "q-permanent", SessionID: "s1", TaskID: "t1", Content: "do not lose this", QueuedBy: "test"}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.repo = &sessionIdentityTransitionHookRepository{
+		repoStore: repo,
+		afterTransition: func() {
+			if _, updateErr := repo.DB().Exec(
+				`UPDATE task_sessions
+				    SET queue_incarnation_id = ?, state = ?
+				  WHERE id = ?`,
+				"replacement-incarnation",
+				models.TaskSessionStateWaitingForInput,
+				"s-replaced",
+			); updateErr != nil {
+				t.Fatalf("replace session identity: %v", updateErr)
+			}
+		},
+	}
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t-replaced", "s-replaced")
+	if err != nil {
+		t.Fatalf("resolve queue identity: %v", err)
+	}
+	queued := &messagequeue.QueuedMessage{
+		ID: "replaced-dispatch", SessionID: "s-replaced", TaskID: "t-replaced", Content: "stale prompt",
+	}
+	lock, release := svc.acquireCancelInFlightGuard(identity.SessionID)
+	lock.Lock()
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, nil)
+	lock.Unlock()
+	release()
 
-	svc.executeQueuedMessage("s1", queued)
+	svc.executeQueuedMessageWithReservation(identity.SessionID, queued, reservation)
 
-	status := svc.messageQueue.GetStatus(ctx, "s1")
-	if status.Count != 1 || status.Entries[0].Content != queued.Content {
-		t.Fatalf("permanent failure lost queued message: %+v", status.Entries)
+	if len(messages.userMessages) != 0 {
+		t.Fatalf("replacement received %d stale visible messages, want 0", len(messages.userMessages))
 	}
 }
 
@@ -179,6 +227,73 @@ func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) 
 	}
 }
 
+// TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed pins the
+// double-fire fix: wsAddMessage's queuePromptIfRuntimeUnavailable path queues
+// a prompt after ProcessOnTurnStart already ran synchronously for it, so the
+// queued-dispatch path must not fire on_turn_start a second time. Without the
+// MetaKeyTurnStartAlreadyProcessed guard, this drain would move the task's
+// step twice for one prompt.
+func TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnStart: []wfmodels.OnTurnStartAction{
+				{Type: wfmodels.OnTurnStartMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		Events: wfmodels.StepEvents{},
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "hello",
+		QueuedBy:  "test",
+		Metadata: map[string]interface{}{
+			MetaKeyTurnStartAlreadyProcessed: true,
+		},
+	}
+
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("on_turn_start fired a second time: task moved to %q, want it to stay on step1", task.WorkflowStepID)
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected the prompt to still reach PromptAgent, captured=%d", len(agentMgr.capturedPrompts))
+	}
+}
+
 func TestExecuteQueuedMessage_RecordsCIAutomationPromptOnDrain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -250,6 +365,7 @@ func TestExecuteQueuedMessage_StoresAttachmentsInUserMessageMetadata(t *testing.
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
@@ -311,6 +427,14 @@ func TestExecuteQueuedMessageTransientRetryDoesNotDuplicateRecordedUserMessage(t
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set waiting session: %v", err)
+	}
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		promptErr:              fmt.Errorf("agent stream disconnected while prompting"),

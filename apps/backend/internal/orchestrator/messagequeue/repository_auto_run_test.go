@@ -116,37 +116,45 @@ func TestRepositories_ReserveHeadIfAutoRunDistinguishesPausedAndEmpty(t *testing
 	}
 }
 
-func TestRepositories_ReserveHeadPrioritizesWorkflowControlOverOrdinaryBacklog(t *testing.T) {
+func TestRepositories_AutoRunPolicyDoesNotLeakAcrossSessionIncarnations(t *testing.T) {
 	for _, factory := range autoRunRepositoryFactories {
 		t.Run(factory.name, func(t *testing.T) {
-			base := factory.new(t)
+			repo := factory.new(t)
 			ctx := context.Background()
-			ordinary := &QueuedMessage{SessionID: "session-1", TaskID: "task-1", Content: "old ordinary work", QueuedBy: QueuedByUser}
-			staleControl := &QueuedMessage{
-				SessionID: "session-1", TaskID: "task-1", Content: "enter old step", QueuedBy: QueuedByWorkflow,
-				Metadata: map[string]interface{}{
-					MetadataLifecycleDurable:     true,
-					MetadataWorkflowControl:      true,
-					MetadataWorkflowTransitionID: int64(41),
-				},
+			first := QueueSessionIdentity{
+				TaskID:               "task-1",
+				SessionID:            "session-1",
+				SessionIncarnationID: "incarnation-1",
 			}
-			currentControl := &QueuedMessage{
-				SessionID: "session-1", TaskID: "task-1", Content: "enter current step", QueuedBy: QueuedByWorkflow,
-				Metadata: map[string]interface{}{
-					MetadataLifecycleDurable:     true,
-					MetadataWorkflowControl:      true,
-					MetadataWorkflowTransitionID: int64(42),
-				},
-			}
-			require.NoError(t, base.Insert(ctx, ordinary, 10))
-			require.NoError(t, base.Insert(ctx, staleControl, 0))
-			require.NoError(t, base.Insert(ctx, currentControl, 0))
-
-			reserved, err := base.ReserveHead(ctx, "session-1")
+			seedQueueSessionIdentity(t, repo, first)
+			require.NoError(t, repo.SetAutoRunForSession(ctx, first, false))
+			firstSnapshot, err := repo.Snapshot(ctx, first)
 			require.NoError(t, err)
-			require.NotNil(t, reserved)
-			assert.Equal(t, currentControl.ID, reserved.ID)
-			assert.True(t, reserved.IsWorkflowControl())
+			assert.False(t, firstSnapshot.AutoRun)
+
+			replacement := first
+			replacement.SessionIncarnationID = "incarnation-2"
+			seedQueueSessionIdentity(t, repo, replacement)
+			replacementSnapshot, err := repo.Snapshot(ctx, replacement)
+			require.NoError(t, err)
+			assert.True(t, replacementSnapshot.AutoRun)
+			reserved, enabled, err := repo.ReserveHeadIfAutoRunForSession(ctx, replacement)
+			require.NoError(t, err)
+			assert.Nil(t, reserved)
+			assert.True(t, enabled)
+			entry := &QueuedMessage{
+				SessionID: replacement.SessionID,
+				TaskID:    replacement.TaskID,
+				Content:   "queued",
+				QueuedBy:  QueuedByUser,
+			}
+			require.NoError(t, repo.InsertForSession(ctx, replacement, entry, 10))
+			paused, err := repo.PauseAutoRunIfPendingForSession(ctx, replacement)
+			require.NoError(t, err)
+			assert.True(t, paused)
+			replacementSnapshot, err = repo.Snapshot(ctx, replacement)
+			require.NoError(t, err)
+			assert.False(t, replacementSnapshot.AutoRun)
 		})
 	}
 }

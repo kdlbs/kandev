@@ -37,7 +37,11 @@ func TestPostgresDeleteSessionCancelsDeliveryReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrGetDelivery: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, "session-pg-delivery"); err != nil {
+	session, err := repo.GetTaskSession(ctx, "session-pg-delivery")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 	stored, err := ledger.GetDelivery(ctx, delivery.ID)

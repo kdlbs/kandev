@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1083,6 +1084,29 @@ func (s *Service) updateTaskSessionStateWithHook(
 	onChanged func(),
 	preloadedSession ...*models.TaskSession,
 ) (*models.TaskSession, bool) {
+	if isTerminalSessionState(nextState) && s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var updated *models.TaskSession
+			var changed bool
+			err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				updated, changed = s.updateTaskSessionStateWithHook(
+					admittedCtx,
+					taskID,
+					sessionID,
+					nextState,
+					errorMessage,
+					allowWakeFromWaiting,
+					onChanged,
+				)
+				return nil
+			})
+			if err != nil {
+				return nil, false
+			}
+			return updated, changed
+		}
+	}
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -1246,6 +1270,26 @@ func (s *Service) transitionTaskSessionState(
 	errorMessage string,
 	onChanged func(),
 ) (bool, models.TaskSessionState, error) {
+	if isTerminalSessionState(nextState) && s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var changed bool
+			var finalState models.TaskSessionState
+			var err error
+			err = s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				changed, finalState, err = s.transitionTaskSessionState(
+					admittedCtx,
+					taskID,
+					sessionID,
+					nextState,
+					errorMessage,
+					onChanged,
+				)
+				return err
+			})
+			return changed, finalState, err
+		}
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, "", fmt.Errorf("get session before state transition: %w", err)
@@ -2307,6 +2351,54 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	}
 	s.logger.Info("task moved to REVIEW state after turn cancel",
 		zap.String("task_id", taskID))
+}
+
+func (s *Service) setQueuedSessionRunningForIdentity(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	session *models.TaskSession,
+) error {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+	oldState := session.State
+	changed, updatedAt, err := s.repo.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx,
+		identity.TaskID,
+		identity.SessionID,
+		identity.SessionIncarnationID,
+		oldState,
+		models.TaskSessionStateRunning,
+		"",
+	)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	session.State = models.TaskSessionStateRunning
+	session.ErrorMessage = ""
+	session.CompletedAt = nil
+	session.UpdatedAt = updatedAt
+	if oldState != models.TaskSessionStateRunning {
+		s.reconcileRunningTaskStateLocked(ctx, identity.TaskID, identity.SessionID)
+		s.clearTaskInterruptedMarker(ctx, identity.TaskID)
+		s.clearTaskAutoStartFailedMarker(ctx, identity.TaskID)
+		s.publishTaskSessionStateChanged(
+			ctx,
+			identity.TaskID,
+			identity.SessionID,
+			oldState,
+			models.TaskSessionStateRunning,
+			"",
+			&updatedAt,
+			session,
+		)
+		s.republishTaskActivityOnSettle(
+			ctx, identity.TaskID, oldState, models.TaskSessionStateRunning,
+		)
+	}
+	return nil
 }
 
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {

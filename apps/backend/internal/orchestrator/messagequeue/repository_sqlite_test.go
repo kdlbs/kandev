@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/jmoiron/sqlx"
+	internaldb "github.com/kandev/kandev/internal/db"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -34,6 +34,39 @@ func newTestSQLiteRepo(t *testing.T) Repository {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
 	return repo
+}
+
+func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessionIdentity) {
+	t.Helper()
+	switch typed := repo.(type) {
+	case *memoryRepository:
+		typed.mu.Lock()
+		typed.identities[identity.SessionID] = identity
+		typed.mu.Unlock()
+	case *sqliteRepository:
+		statements := []string{
+			`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
+			`ALTER TABLE task_sessions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE task_sessions ADD COLUMN queue_incarnation_id TEXT NOT NULL DEFAULT ''`,
+		}
+		for index, statement := range statements {
+			if _, err := typed.db.Exec(statement); err != nil && (index == 0 || !internaldb.IsDuplicateColumnError(err)) {
+				t.Fatalf("prepare queue session authority: %v", err)
+			}
+		}
+		if _, err := typed.db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, identity.TaskID); err != nil {
+			t.Fatalf("seed queue task authority: %v", err)
+		}
+		if _, err := typed.db.Exec(`
+			INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
+		`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+			t.Fatalf("seed queue session authority: %v", err)
+		}
+		typed.tasksTablePresent = true
+	default:
+		t.Fatalf("unsupported queue repository authority fixture %T", repo)
+	}
 }
 
 // seedLiveSessions inserts stub task_sessions rows so queue counts that join
@@ -218,187 +251,49 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 }
 
-func TestSQLiteRepository_PreAcceptancePeerReservationIsReclaimedAfterRestart(t *testing.T) {
+func TestSQLiteRepository_ReplacementIncarnationDiscardsStaleLifecycleReservation(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
-	ledger := repo.(DeliveryLedger)
-	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
-		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
-		IdempotencyKey: "restart-pre-acceptance", TargetTaskID: "t1", TargetSessionID: "s1",
-		Content: "accepted peer report", State: DeliveryPendingCapacity,
-	})
-	if err != nil {
-		t.Fatalf("create delivery: %v", err)
+	first := QueueSessionIdentity{
+		TaskID:               "t1",
+		SessionID:            "s1",
+		SessionIncarnationID: "incarnation-1",
 	}
-	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
-	}
+	seedQueueSessionIdentity(t, repo, first)
 	msg := &QueuedMessage{
-		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
-		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID},
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true},
 	}
-	if err := repo.Insert(ctx, msg, 0); err != nil {
-		t.Fatalf("insert: %v", err)
+	if err := repo.InsertForSession(ctx, first, msg, 0); err != nil {
+		t.Fatalf("insert lifecycle message: %v", err)
 	}
-	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "worker", msg.ID); err != nil {
-		t.Fatalf("mark queued: %v", err)
+	reserved, enabled, err := repo.ReserveHeadIfAutoRunForSession(ctx, first)
+	if err != nil || !enabled || reserved == nil {
+		t.Fatalf("reserve first incarnation: reserved=%+v enabled=%v err=%v", reserved, enabled, err)
 	}
-	reserved, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || reserved == nil {
-		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
-	}
-	// A process dying before the executor accepts the prompt leaves only the
-	// reservation marker. It must be safely reclaimable, not hidden forever.
-	replayed, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || replayed == nil {
-		t.Fatalf("restart reserve = (%+v, %v), want row", replayed, err)
-	}
-	if replayed.ID != msg.ID {
-		t.Fatalf("restart reserved %q, want original %q", replayed.ID, msg.ID)
-	}
-}
 
-func TestSQLiteRepository_AmbiguousPeerReservationIsNotReplayedAfterRestart(t *testing.T) {
-	repo := newTestSQLiteRepo(t)
-	ctx := context.Background()
-	ledger := repo.(DeliveryLedger)
-	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
-		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
-		IdempotencyKey: "restart-ambiguous", TargetTaskID: "t1", TargetSessionID: "s1",
-		Content: "accepted peer report", State: DeliveryPendingCapacity,
-	})
+	replacement := first
+	replacement.SessionIncarnationID = "incarnation-2"
+	seedQueueSessionIdentity(t, repo, replacement)
+	fresh := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "fresh prompt", QueuedBy: QueuedByUser,
+	}
+	if err := repo.InsertForSession(ctx, replacement, fresh, 0); err != nil {
+		t.Fatalf("insert replacement message: %v", err)
+	}
+	next, enabled, err := repo.ReserveHeadIfAutoRunForSession(ctx, replacement)
+	if err != nil || !enabled {
+		t.Fatalf("reserve replacement incarnation: enabled=%v err=%v", enabled, err)
+	}
+	if next == nil || next.ID != fresh.ID {
+		t.Fatalf("replacement reservation = %+v, want fresh row %s", next, fresh.ID)
+	}
+	entries, err := repo.ListBySession(ctx, first.SessionID)
 	if err != nil {
-		t.Fatalf("create delivery: %v", err)
+		t.Fatalf("list after stale reservation discard: %v", err)
 	}
-	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
-	}
-	msg := &QueuedMessage{
-		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
-		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID},
-	}
-	if err := repo.Insert(ctx, msg, 0); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "worker", msg.ID); err != nil {
-		t.Fatalf("mark queued: %v", err)
-	}
-	reserved, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || reserved == nil {
-		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
-	}
-	if _, err := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, msg.ID, "accepted_prompt_receipt_failed"); err != nil {
-		t.Fatalf("mark ambiguous: %v", err)
-	}
-	// The executor might already have accepted this prompt. The retained
-	// receipt is visible to authorized callers, but a restart must never guess
-	// that replaying it is safe. Remove the ambiguous FIFO head so it cannot
-	// permanently block later ordinary work.
-	following := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "later work", QueuedBy: QueuedByUser}
-	if err := repo.Insert(ctx, following, 0); err != nil {
-		t.Fatalf("insert following: %v", err)
-	}
-	skipped, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || skipped != nil {
-		t.Fatalf("skip ambiguous reserve = (%+v, %v), want nil", skipped, err)
-	}
-	replayed, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || replayed == nil || replayed.ID != following.ID {
-		t.Fatalf("reserve following work = (%+v, %v), want %q", replayed, err, following.ID)
-	}
-	stored, err := ledger.GetDelivery(ctx, delivery.ID)
-	if err != nil {
-		t.Fatalf("get delivery: %v", err)
-	}
-	if stored.State != DeliveryAmbiguous {
-		t.Fatalf("delivery state = %q, want %q", stored.State, DeliveryAmbiguous)
-	}
-}
-
-func TestSQLiteRepository_AmbiguousUnlinkedPeerReservationIsNotReplayed(t *testing.T) {
-	repo := newTestSQLiteRepo(t)
-	ctx := context.Background()
-	ledger := repo.(DeliveryLedger)
-	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
-		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
-		IdempotencyKey: "unlinked-ambiguous", TargetTaskID: "t1", TargetSessionID: "s1",
-		Content: "accepted peer report", State: DeliveryPendingCapacity,
-	})
-	if err != nil {
-		t.Fatalf("create delivery: %v", err)
-	}
-	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
-	}
-	msg := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
-		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID}}
-	if err := repo.Insert(ctx, msg, 0); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-	if _, err := repo.ReserveHead(ctx, "s1"); err != nil {
-		t.Fatalf("reserve: %v", err)
-	}
-	if _, err := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, msg.ID, "accepted_prompt_receipt_failed"); err != nil {
-		t.Fatalf("mark ambiguous: %v", err)
-	}
-	replayed, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || replayed != nil {
-		t.Fatalf("restart reserve = (%+v, %v), want nil", replayed, err)
-	}
-}
-
-// TestSQLiteRepository_PeerReservationAmbiguityCheckFailsClosedOnQueryError
-// covers peerDeliveryReservationIsAmbiguous's precondition: a query error
-// other than "no such delivery row" (sql.ErrNoRows) leaves the true delivery
-// state unknown. ReserveHead must propagate the error and refuse to replay
-// the prompt, rather than treating a failed read the same as "not ambiguous".
-func TestSQLiteRepository_PeerReservationAmbiguityCheckFailsClosedOnQueryError(t *testing.T) {
-	repo := newTestSQLiteRepo(t)
-	ctx := context.Background()
-	ledger := repo.(DeliveryLedger)
-	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
-		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
-		IdempotencyKey: "restart-query-error", TargetTaskID: "t1", TargetSessionID: "s1",
-		Content: "accepted peer report", State: DeliveryPendingCapacity,
-	})
-	if err != nil {
-		t.Fatalf("create delivery: %v", err)
-	}
-	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
-	}
-	msg := &QueuedMessage{
-		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
-		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID},
-	}
-	if err := repo.Insert(ctx, msg, 0); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "worker", msg.ID); err != nil {
-		t.Fatalf("mark queued: %v", err)
-	}
-	reserved, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || reserved == nil {
-		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
-	}
-
-	// Simulate a genuine read failure (not "row absent") on the ambiguity
-	// check's table.
-	sqliteRepo := repo.(*sqliteRepository)
-	if _, err := sqliteRepo.db.Exec(`DROP TABLE message_deliveries`); err != nil {
-		t.Fatalf("drop message_deliveries: %v", err)
-	}
-
-	replayed, err := repo.ReserveHead(ctx, "s1")
-	if err == nil {
-		t.Fatalf("restart reserve = (%+v, nil), want a propagated error", replayed)
-	}
-	if replayed != nil {
-		t.Fatalf("restart reserve returned %+v on error, want nil (must not replay on unknown state)", replayed)
+	if len(entries) != 0 {
+		t.Fatalf("entries after stale reservation discard = %d, want 0", len(entries))
 	}
 }
 
@@ -512,14 +407,11 @@ func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t
 		t.Fatal("returned reservation lost process-local reservation evidence")
 	}
 
-	retried, _, err := repo.InsertOrReplaceLifecycleByCoalesceKey(
-		ctx, reserved, "github-pr:repo:1:merged", 0, false,
-	)
-	if err != nil {
+	if err := repo.RequeuePreservingFIFO(ctx, reserved); err != nil {
 		t.Fatalf("requeue failed delivery: %v", err)
 	}
-	if retried.IsReservedInFlight() {
-		t.Fatalf("requeued copy retained transient marker: %+v", retried.Metadata)
+	if reserved.IsReservedInFlight() {
+		t.Fatalf("requeued copy retained transient marker: %+v", reserved.Metadata)
 	}
 	entries, err := repo.ListBySession(ctx, "s1")
 	if err != nil {
@@ -982,6 +874,55 @@ func TestSQLiteRepository_TransferSession(t *testing.T) {
 	}
 }
 
+func TestRepositories_TransferRejectsSourceLifecycleReservation(t *testing.T) {
+	factories := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+	}
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			repo := factory.new(t)
+			ctx := context.Background()
+			source := QueueSessionIdentity{
+				TaskID: "t1", SessionID: "source", SessionIncarnationID: "source-incarnation",
+			}
+			destination := QueueSessionIdentity{
+				TaskID: "t1", SessionID: "destination", SessionIncarnationID: "destination-incarnation",
+			}
+			seedQueueSessionIdentity(t, repo, source)
+			seedQueueSessionIdentity(t, repo, destination)
+			entry := &QueuedMessage{
+				SessionID: source.SessionID,
+				TaskID:    source.TaskID,
+				Content:   "durable",
+				QueuedBy:  QueuedByWorkflow,
+				Metadata:  map[string]interface{}{MetadataLifecycleDurable: true},
+			}
+			if err := repo.InsertForSession(ctx, source, entry, 0); err != nil {
+				t.Fatalf("insert durable source: %v", err)
+			}
+			if reserved, _, err := repo.ReserveHeadIfAutoRunForSession(ctx, source); err != nil || reserved == nil {
+				t.Fatalf("reserve durable source: reserved=%+v err=%v", reserved, err)
+			}
+
+			if err := repo.TransferSessionIdentities(ctx, source, destination); !errors.Is(err, ErrQueueChanged) {
+				t.Fatalf("transfer error = %v, want ErrQueueChanged", err)
+			}
+			sourceEntries, err := repo.ListBySession(ctx, source.SessionID)
+			if err != nil || len(sourceEntries) != 1 {
+				t.Fatalf("source entries after rejected transfer = %+v err=%v", sourceEntries, err)
+			}
+			destinationEntries, err := repo.ListBySession(ctx, destination.SessionID)
+			if err != nil || len(destinationEntries) != 0 {
+				t.Fatalf("destination entries after rejected transfer = %+v err=%v", destinationEntries, err)
+			}
+		})
+	}
+}
+
 func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -1050,7 +991,16 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 		t.Fatalf("expected nil move on empty, got %v err=%v", move, err)
 	}
 
-	move := &PendingMove{MoveID: "move-a", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent", SenderSessionID: "sender-s1"}
+	move := &PendingMove{
+		MoveID:               "move-a",
+		SessionIncarnationID: "incarnation-a",
+		TaskID:               "t1",
+		WorkflowID:           "w1",
+		WorkflowStepID:       "step-A",
+		Position:             0,
+		Actor:                "agent",
+		SenderSessionID:      "sender-s1",
+	}
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("set pending: %v", err)
 	}
@@ -1071,6 +1021,9 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 	if got == nil || got.MoveID != "move-b" {
 		t.Errorf("expected move-b move ID after upsert, got %+v", got)
+	}
+	if got == nil || got.SessionIncarnationID != "incarnation-a" {
+		t.Errorf("expected incarnation-a after upsert, got %+v", got)
 	}
 	if got == nil || got.Actor != "agent" {
 		t.Errorf("expected agent actor after upsert, got %+v", got)
