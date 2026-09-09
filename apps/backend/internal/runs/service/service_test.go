@@ -628,6 +628,132 @@ func TestQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 	}
 }
 
+// TestQueueRun_DedupesOnWakeWaveKeyIndexRace mirrors
+// TestQueueRun_DedupesOnIdempotencyIndexRace for idx_run_wake_wave: two
+// requests carrying the same (WakeWaveKey, AgentProfileID) must collapse to
+// one runs row, and the losing request must return QueueOutcomeDeduped, not
+// an error (AC-OFFICE-WAKE-WAVE-IDENTITY-002.3/.4).
+func TestQueueRun_DedupesOnWakeWaveKeyIndexRace(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	const waveKey = "task_children_completed:parent-1:deadbeef"
+
+	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    waveKey,
+		WakeWaveString: "parent-1|child-1,child-2",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", first, runsservice.QueueOutcomeQueued)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    waveKey,
+		WakeWaveString: "parent-1|child-1,child-2",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue racing run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeDeduped {
+		t.Fatalf("racing outcome = %q, want %q", second, runsservice.QueueOutcomeDeduped)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE wake_wave_key = ?`, waveKey); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("runs with wake_wave_key %q = %d, want 1", waveKey, count)
+	}
+}
+
+// TestQueueRun_WakeWaveKey_DifferentAgentBothQueued pins .002.7: the same
+// wave fanning out to two distinct target agents must produce one run per
+// agent, not a suppressed second one.
+func TestQueueRun_WakeWaveKey_DifferentAgentBothQueued(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	const waveKey = "task_children_completed:parent-1:deadbeef"
+
+	for _, agent := range []string{"a1", "a2"} {
+		outcome, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			Reason:         "task_children_completed",
+			WakeWaveKey:    waveKey,
+			WakeWaveString: "parent-1|child-1,child-2",
+			Payload:        agentInPayload(agent),
+		})
+		if err != nil {
+			t.Fatalf("queue run for %s: %v", agent, err)
+		}
+		if outcome != runsservice.QueueOutcomeQueued {
+			t.Fatalf("outcome for %s = %q, want %q", agent, outcome, runsservice.QueueOutcomeQueued)
+		}
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE wake_wave_key = ?`, waveKey); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("runs with wake_wave_key %q = %d, want 2 (one per agent)", waveKey, count)
+	}
+}
+
+// TestQueueRun_WakeCarryingRequest_NotCoalesced pins .002.14: a request
+// carrying a wave identity is never merged into an existing queued run, and
+// a queued run carrying one is never merged into by a later request for a
+// different parent addressed to the same agent inside the coalescing
+// window. Two independent rows must exist afterward.
+func TestQueueRun_WakeCarryingRequest_NotCoalesced(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    "task_children_completed:parent-1:aaaa",
+		WakeWaveString: "parent-1|child-1",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", first, runsservice.QueueOutcomeQueued)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    "task_children_completed:parent-2:bbbb",
+		WakeWaveString: "parent-2|child-2",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue second run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeQueued {
+		t.Fatalf("second outcome = %q, want %q (must not coalesce into the first parent's run)", second, runsservice.QueueOutcomeQueued)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE agent_profile_id = 'a1' AND reason = 'task_children_completed'`,
+	); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("runs for a1 = %d, want 2 (no coalescing across distinct waves)", count)
+	}
+}
+
 // TestQueueRun_Coalescing pins that two requests for the same
 // (agent, reason) inside the 5s window collapse onto a single row
 // with coalesced_count = 2 instead of producing two queued rows.

@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
@@ -38,6 +39,16 @@ import (
 // error, so the losing producer's caller does not abort or log a spurious
 // failure for what is really a no-op.
 var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
+
+// errWakeWaveKeyConflict is errIdempotencyKeyConflict's sibling for
+// idx_run_wake_wave: two producers deriving the same completion-wave
+// identity for the same target agent can both pass upstream checks before
+// either commits (this constraint has no windowed pre-check the way
+// IdempotencyKey does — .002.6 requires it stay unbounded). QueueRun treats
+// this exactly like an idempotency-key conflict: QueueOutcomeDeduped, not
+// an error, so the losing producer's caller does not log a spurious
+// failure for what is really a no-op (AC-OFFICE-WAKE-WAVE-IDENTITY-002.4).
+var errWakeWaveKeyConflict = errors.New("wake wave key conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
 // runs from queue_run actions. Phase 2 final's parallel agent
@@ -89,6 +100,14 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// WakeWaveKey and WakeWaveString are the completion-wave identity
+	// (parent-wake-wave-identity). When WakeWaveKey is non-empty, QueueRun
+	// never coalesces this request into an existing row, is never merged
+	// into by a later request, and idx_run_wake_wave deduplicates a second
+	// insert for the same (WakeWaveKey, AgentProfileID) into
+	// QueueOutcomeDeduped instead of an error.
+	WakeWaveKey    string
+	WakeWaveString string
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -231,6 +250,12 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 				zap.String("key", req.IdempotencyKey))
 			return QueueOutcomeDeduped, nil
 		}
+		if errors.Is(err, errWakeWaveKeyConflict) {
+			s.log.Debug("run skipped (wake wave index race)",
+				zap.String("wake_wave_key", req.WakeWaveKey))
+			shared.ParentWakeDedupedTotal.Add(1)
+			return QueueOutcomeDeduped, nil
+		}
 		return "", err
 	}
 
@@ -263,10 +288,15 @@ func (s *Service) insertRun(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		WakeWaveKey:    req.WakeWaveKey,
+		WakeWaveString: req.WakeWaveString,
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
 		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
 			return nil, errIdempotencyKeyConflict
+		}
+		if runssqlite.IsWakeWaveUniqueViolation(err) {
+			return nil, errWakeWaveKeyConflict
 		}
 		return nil, fmt.Errorf("enqueue run: %w", err)
 	}
@@ -313,8 +343,15 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 	return out
 }
 
+// shouldCoalesceRun decides whether a request may be merged into an
+// existing queued row. A wave-carrying request is never coalesced
+// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.14): coalescing replaces the target
+// row's payload without moving its recorded identity, which would leave a
+// run whose wave columns no longer describe the wake it delivers.
+// idx_run_wake_wave, not this window, is what reconciles wave-carrying
+// requests.
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

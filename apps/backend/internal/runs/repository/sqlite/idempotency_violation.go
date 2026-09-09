@@ -36,3 +36,34 @@ func IsIdempotencyKeyUniqueViolation(err error) bool {
 	}
 	return strings.Contains(err.Error(), sqliteRunIdempotencyViolationMessage)
 }
+
+// runWakeWaveIndexName is the unique index enforcing at most one runs row
+// per (wake_wave_key, agent_profile_id) pair (internal/office/repository/
+// sqlite/base.go, idx_run_wake_wave).
+const runWakeWaveIndexName = "idx_run_wake_wave"
+
+// sqliteRunWakeWaveViolationMessage is the substring go-sqlite3 puts in a
+// UNIQUE-constraint error for this index. Composite-index violations list
+// every participating column ("UNIQUE constraint failed: runs.wake_wave_key,
+// runs.agent_profile_id"), a different shape from
+// sqliteRunIdempotencyViolationMessage's single-column message — confirmed
+// empirically, not assumed from the single-column case.
+const sqliteRunWakeWaveViolationMessage = "UNIQUE constraint failed: runs.wake_wave_key, runs.agent_profile_id"
+
+// IsWakeWaveUniqueViolation reports whether err is a violation of
+// idx_run_wake_wave specifically. Deliberately a sibling function rather
+// than widening IsIdempotencyKeyUniqueViolation to "any unique violation":
+// the two indexes have independent meanings ("same dispatch" vs "same
+// wave") and a caller that needs to distinguish which one fired (the runs
+// service and office/scheduler both do, per AC-OFFICE-WAKE-WAVE-IDENTITY-002.4)
+// would otherwise have to re-derive the distinction itself.
+func IsWakeWaveUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == runWakeWaveIndexName
+	}
+	return strings.Contains(err.Error(), sqliteRunWakeWaveViolationMessage)
+}

@@ -473,6 +473,7 @@ func (r *Repository) CoalesceRun(
 			WHERE agent_profile_id = ? AND reason = ? AND status = 'queued'
 			  AND requested_at > ?
 			  AND (idempotency_key IS NULL OR idempotency_key NOT LIKE ?)
+			  AND wake_wave_key = ''
 			%s
 			ORDER BY requested_at DESC
 			LIMIT 1
