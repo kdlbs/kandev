@@ -2241,11 +2241,19 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	if completedSessionID != "" {
 		pendingActions, err := s.repo.GetPendingActionsBySessionIDs(ctx, []string{completedSessionID})
 		if err != nil {
-			s.logger.Warn("failed to check pending action before REVIEW state reconcile",
+			// Fail closed, not open: a lookup error is not evidence that
+			// nothing is pending. Defaulting to REVIEW here would silently
+			// reproduce the exact bug this function exists to fix whenever
+			// the pending-action query itself errors. Skip the state write
+			// this cycle; the next turn-completion or reconcile pass gets
+			// another chance to read the real pending-action state.
+			s.logger.Warn("failed to check pending action before REVIEW state reconcile; skipping state write",
 				zap.String("task_id", taskID),
 				zap.String("session_id", completedSessionID),
 				zap.Error(err))
-		} else if action, ok := pendingActions[completedSessionID]; ok &&
+			return
+		}
+		if action, ok := pendingActions[completedSessionID]; ok &&
 			(action == models.TaskPendingActionClarification || action == models.TaskPendingActionPermission) {
 			targetState = v1.TaskStateWaitingForInput
 		}

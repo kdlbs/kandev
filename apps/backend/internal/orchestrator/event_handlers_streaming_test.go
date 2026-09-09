@@ -3454,6 +3454,50 @@ func TestWriteTaskReviewState_UsesWaitingForInputWhenActionPending(t *testing.T)
 	}
 }
 
+// pendingActionsErrorRepo forces GetPendingActionsBySessionIDs to fail, so
+// TestWriteTaskReviewState_SkipsStateWriteWhenPendingActionLookupFails can
+// pin the fail-closed behavior: a lookup error must not fall back to writing
+// REVIEW, since that would silently reproduce the bug this function exists
+// to fix whenever the pending-action query itself errors.
+type pendingActionsErrorRepo struct {
+	sessionExecutorStore
+}
+
+// GetPendingActionsBySessionIDs always errors, overriding the embedded
+// sessionExecutorStore so callers see a lookup failure regardless of what
+// pending actions actually exist underneath.
+func (pendingActionsErrorRepo) GetPendingActionsBySessionIDs(
+	context.Context, []string,
+) (map[string]models.TaskPendingAction, error) {
+	return nil, errors.New("pending action lookup failed")
+}
+
+// TestWriteTaskReviewState_SkipsStateWriteWhenPendingActionLookupFails pins
+// the fail-closed behavior added alongside the REVIEW/WAITING_FOR_INPUT fix:
+// a pending-action lookup error must skip the task-state write entirely
+// rather than defaulting to REVIEW, which would silently reintroduce the bug
+// this function exists to fix whenever the lookup itself is unavailable.
+func TestWriteTaskReviewState_SkipsStateWriteWhenPendingActionLookupFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.repo = pendingActionsErrorRepo{sessionExecutorStore: svc.repo}
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Empty(t, taskRepo.updatedStates,
+		"a pending-action lookup failure must not fall back to writing REVIEW")
+}
+
 func TestSessionStateString(t *testing.T) {
 	require.Equal(t, "", sessionStateString(nil),
 		"nil session must render as empty so trace logs stay clean")

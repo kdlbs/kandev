@@ -3254,11 +3254,18 @@ func (s *Service) reconcileActiveSessionOnStartup(
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			targetState := v1.TaskStateReview
+			skipStateWrite := false
 			if pendingActions, pendingErr := s.repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID}); pendingErr != nil {
-				s.logger.Warn("failed to check pending action before startup state reconcile",
+				// Fail closed, not open: a lookup error is not evidence that
+				// nothing is pending. Defaulting to REVIEW here would silently
+				// reproduce the exact bug this reconciliation exists to fix
+				// whenever the pending-action query itself errors on startup.
+				// Skip the write; a later reconcile pass gets another chance.
+				s.logger.Warn("failed to check pending action before startup state reconcile; skipping state write",
 					zap.String("task_id", running.TaskID),
 					zap.String("session_id", sessionID),
 					zap.Error(pendingErr))
+				skipStateWrite = true
 			} else if action, ok := pendingActions[sessionID]; ok &&
 				(action == models.TaskPendingActionClarification || action == models.TaskPendingActionPermission) {
 				targetState = v1.TaskStateWaitingForInput
@@ -3268,10 +3275,12 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			// above reads the row before this call, and ArchiveTask can commit in
 			// that window without changing task.State, so only an archive-aware
 			// conditional write closes the race.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, targetState, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task state on startup",
-					zap.String("task_id", running.TaskID),
-					zap.Error(updateErr))
+			if !skipStateWrite {
+				if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, targetState, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
+					s.logger.Warn("failed to update task state on startup",
+						zap.String("task_id", running.TaskID),
+						zap.Error(updateErr))
+				}
 			}
 		}
 	}
