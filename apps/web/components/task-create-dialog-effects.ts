@@ -492,12 +492,13 @@ export function useDefaultSelectionsEffect(
     ],
   );
   const hasStoredEditingExecutorProfile = Boolean(editingTaskExecutorProfileId);
-  // Seed the picker from the task's own stored runner (edit mode only) before
-  // any create-mode "resolve a default" autopick runs — AC-004.5a presents
-  // this as a resolved default, but a task that already has one stores it,
-  // not resolves it. Gating the autopick effect's own `open` (below) rather
-  // than adding a state-machine flag keeps this race-free: the two effects
-  // cannot both compute a pick for the same render.
+  // Seed the picker from the task's own stored runner (edit mode only)
+  // before any create-mode "resolve a default" autopick runs: a task that
+  // already has a stored runner is seeded from that stored value, not from
+  // the create-mode default-resolution path. Gating the autopick effect's
+  // own `open` (below) rather than adding a state-machine flag keeps this
+  // race-free: the two effects cannot both compute a pick for the same
+  // render.
   useEffect(() => {
     if (!open || executorProfileId || !editingTaskExecutorProfileId) return;
     setExecutorProfileIdFromSeed(editingTaskExecutorProfileId);

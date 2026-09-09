@@ -93,9 +93,9 @@ type runnerRepositoryLinkSnapshot struct {
 	updatedAt    time.Time
 }
 
-// runnerSwitchEvaluate gathers every AC-TASKS-RUNNER-SWITCH-001.3 signal
-// inside the open transaction (after the row lock, so every read is as
-// current as the write it guards) and evaluates the mutability gate.
+// runnerSwitchEvaluate gathers every mutability signal inside the open
+// transaction (after the row lock, so every read is as current as the write
+// it guards) and evaluates the mutability gate.
 func (r *Repository) runnerSwitchEvaluate(
 	ctx context.Context, req models.RunnerSwitchRequest, task *models.Task,
 ) (models.RunnerMutabilityVerdict, runnerRepositoryLinkSnapshot, error) {
@@ -147,11 +147,11 @@ func runnerHasGroupMembership(ctx context.Context, req models.RunnerSwitchReques
 	return req.GroupMembershipChecker(ctx, taskID)
 }
 
-// runnerSwitchConfirmCompatibility implements AC-TASKS-RUNNER-SWITCH-002.7c:
-// a compatibility verdict resolved before the transaction is only valid for
-// the repository it was resolved against. A mismatch discards the verdict
-// and rejects as the retriable evaluation_unavailable rather than applying a
-// verdict computed against a repository the task no longer has.
+// runnerSwitchConfirmCompatibility enforces that a compatibility verdict
+// resolved before the transaction is only valid for the repository it was
+// resolved against. A mismatch discards the verdict and rejects as the
+// retriable evaluation_unavailable rather than applying a verdict computed
+// against a repository the task no longer has.
 func runnerSwitchConfirmCompatibility(req models.RunnerSwitchRequest, snapshot runnerRepositoryLinkSnapshot) error {
 	if snapshot.count != 1 ||
 		snapshot.repositoryID != req.ResolvedRepositoryID ||
@@ -165,8 +165,8 @@ func runnerSwitchConfirmCompatibility(req models.RunnerSwitchRequest, snapshot r
 }
 
 // runnerSwitchApply is stage 7 of the control flow: compare the requested
-// profile against the stored one and either report a no-op success
-// (AC-TASKS-RUNNER-SWITCH-002.11) or write the sole metadata change.
+// profile against the stored one and either report a no-op success or write
+// the sole metadata change.
 func (r *Repository) runnerSwitchApply(
 	ctx context.Context, tx *sqlx.Tx, task *models.Task, executorProfileID string,
 ) (*models.RunnerSwitchResult, error) {

@@ -7,9 +7,9 @@ import (
 )
 
 // Runner mutability reason codes. This is the closed vocabulary
-// AC-TASKS-RUNNER-SWITCH-001.1 requires runner_ineligible_reason to be a
-// member of: the ten ordered condition codes plus "eligible" and the
-// fail-closed "evaluation_unavailable" backstop.
+// runner_ineligible_reason is always a member of: the ten ordered condition
+// codes plus "eligible" and the fail-closed "evaluation_unavailable"
+// backstop.
 const (
 	RunnerReasonEligible                       = "eligible"
 	RunnerReasonEvaluationUnavailable          = "evaluation_unavailable"
@@ -26,9 +26,8 @@ const (
 )
 
 // RunnerConflictTargetCannotMaterializeRepository is the compatibility-gate
-// outcome (AC-TASKS-RUNNER-SWITCH-002.7). It is target-dependent and, unlike
-// the codes above, is never projected on REQ-TASKS-RUNNER-SWITCH-001's
-// runner_ineligible_reason field.
+// outcome. It is target-dependent and, unlike the codes above, is never
+// projected on the task's runner_ineligible_reason field.
 const RunnerConflictTargetCannotMaterializeRepository = "target_cannot_materialize_repository"
 
 // WorkspaceModeNewWorkspace and WorkspaceModeSharedGroup are the two
@@ -41,10 +40,9 @@ const (
 	WorkspaceModeSharedGroup   = "shared_group"
 )
 
-// RunnerMutabilitySignals is the raw, task-scoped state
-// AC-TASKS-RUNNER-SWITCH-001.3's ten ordered conditions read. It carries
-// nothing derived from workflow state, step, or priority
-// (AC-TASKS-RUNNER-SWITCH-001.12).
+// RunnerMutabilitySignals is the raw, task-scoped state the ten ordered
+// conditions in EvaluateRunnerMutability read. It carries nothing derived
+// from workflow state, step, or priority.
 type RunnerMutabilitySignals struct {
 	Archived                 bool
 	RepositoryCount          int
@@ -61,23 +59,22 @@ type RunnerMutabilitySignals struct {
 	WorkspaceMode string
 }
 
-// RunnerMutabilityVerdict is the projected pair
-// AC-TASKS-RUNNER-SWITCH-001.1 requires: always both present, reason always
-// a member of the closed vocabulary, never the empty string.
+// RunnerMutabilityVerdict is the projected pair: always both present, reason
+// always a member of the closed vocabulary, never the empty string.
 type RunnerMutabilityVerdict struct {
 	Editable bool
 	Reason   string
 }
 
 // EvaluateRunnerMutability is the single implementation of the ordered
-// condition list (AC-TASKS-RUNNER-SWITCH-001.3). Every caller — the
-// projection and the switch action alike — uses this function, so a
-// projected verdict and an enforced verdict cannot disagree.
+// condition list. Every caller — the projection and the switch action
+// alike — uses this function, so a projected verdict and an enforced
+// verdict cannot disagree.
 //
 // Condition 8's "non-empty" boundary for a stored workspace path is
 // resolved here: a whitespace-only value is treated as not set, the same
-// "blank" test AC-TASKS-RUNNER-SWITCH-002.8 applies to payload identifiers.
-// The spec (F23) leaves this boundary open; a false-immutable verdict is
+// blank test applied to payload identifiers elsewhere in this feature. This
+// boundary is deliberately left open: a false-immutable verdict is
 // unrecoverable from the product, while a false-editable one risks nothing
 // because nothing has materialized, so the boundary favors editable.
 func EvaluateRunnerMutability(s RunnerMutabilitySignals) RunnerMutabilityVerdict {
@@ -151,11 +148,11 @@ func runnerWorkspaceModeFromMetadata(metadata map[string]interface{}) string {
 }
 
 // RunnerSwitchRequest bundles a runner-switch write's inputs: the target
-// profile, the compatibility gate's pre-transaction resolution
-// (AC-TASKS-RUNNER-SWITCH-002.7b), and the office-owned workspace-group
-// membership check (mutability condition 9) that the task repository cannot
-// reach directly — GroupMembershipChecker is called after the task row lock
-// is acquired, so its answer is as current as every other condition's.
+// profile, the compatibility gate's pre-transaction resolution, and the
+// office-owned workspace-group membership check (mutability condition 9)
+// that the task repository cannot reach directly — GroupMembershipChecker is
+// called after the task row lock is acquired, so its answer is as current as
+// every other condition's.
 type RunnerSwitchRequest struct {
 	TaskID            string
 	ExecutorProfileID string
@@ -180,8 +177,8 @@ type RunnerSwitchRequest struct {
 // RunnerSwitchResult is SwitchTaskRunner's success outcome.
 type RunnerSwitchResult struct {
 	Task *Task
-	// Changed is false for the no-op success case of
-	// AC-TASKS-RUNNER-SWITCH-002.11: the requested profile already equals
-	// the stored one, both gates still passed, but nothing was written.
+	// Changed is false for the no-op success case: the requested profile
+	// already equals the stored one, both gates still passed, but nothing
+	// was written.
 	Changed bool
 }

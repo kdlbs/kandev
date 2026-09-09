@@ -139,9 +139,9 @@ func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, err
 }
 
 // UpsertExecutorRunning takes the shared task-row lock (db.LockTaskRowInTx)
-// before writing so a concurrent runner switch (AC-TASKS-RUNNER-SWITCH-002.3a)
-// cannot land between this write's mutability read and its own re-check —
-// the two either fully precede or fully follow each other. A row with no
+// before writing so a concurrent runner switch cannot land between this
+// write's mutability read and its own re-check — the two either fully
+// precede or fully follow each other. A row with no
 // TaskID (defensive only; every production caller populates it from the
 // owning execution) skips the lock, matching guardWorkspaceSourceParentTx's
 // no-parent case.

@@ -117,11 +117,11 @@ func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.
 // before this predicate (and is rejected) or after the source batch commits.
 //
 // A top-level task (ExpectedParentID == "") has no parent relation to
-// validate, but the batch still needs the same row lock
-// (AC-TASKS-RUNNER-SWITCH-002.3a class-2 writer): without it, a folder
-// attachment here and a concurrent runner switch's mutability read could
-// each proceed unaware of the other, letting the switch commit against a
-// task it had already judged eligible before the attachment landed.
+// validate, but the batch still needs the same row lock: without it, a
+// folder attachment here and a concurrent runner switch's mutability read
+// could each proceed unaware of the other, letting the switch commit
+// against a task it had already judged eligible before the attachment
+// landed.
 func (r *Repository) guardWorkspaceSourceParentTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
 	if batch.ExpectedParentID == "" {
 		return kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), batch.TaskID)

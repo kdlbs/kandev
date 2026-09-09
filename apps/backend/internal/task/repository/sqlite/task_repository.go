@@ -148,9 +148,9 @@ func (r *Repository) ListTaskRepositoryProviders(ctx context.Context, taskID str
 
 // UpdateTaskRepository updates an existing task-repository link in place.
 //
-// Takes the shared task-row lock (AC-TASKS-RUNNER-SWITCH-002.3a class-2
-// writer) on both the link's current and target task before writing: this
-// is the only writer that can change a task's repository count without
+// Takes the shared task-row lock on both the link's current and target task
+// before writing: this is the only writer that can change a task's
+// repository count without
 // insert/delete, so a concurrent runner switch's repository-count read must
 // resolve fully before or fully after this update, on whichever task ID(s)
 // it touches. Locking both (sorted, to avoid a lock-order deadlock between

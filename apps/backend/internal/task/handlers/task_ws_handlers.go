@@ -523,11 +523,10 @@ type wsUpdateTaskRunnerRequest struct {
 	ExecutorProfileID string `json:"executor_profile_id"`
 }
 
-// wsUpdateTaskRunner implements the task.runner action
-// (REQ-TASKS-RUNNER-SWITCH-002). The response DTO is built through
-// buildTaskDTOsWithSessionInfo, not the bare dto.FromTask, so it carries the
-// recomputed runner_editable/runner_ineligible_reason alongside every other
-// enriched field.
+// wsUpdateTaskRunner implements the task.runner action. The response DTO is
+// built through buildTaskDTOsWithSessionInfo, not the bare dto.FromTask, so
+// it carries the recomputed runner_editable/runner_ineligible_reason
+// alongside every other enriched field.
 func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsUpdateTaskRunnerRequest
 	if err := msg.ParsePayload(&req); err != nil {

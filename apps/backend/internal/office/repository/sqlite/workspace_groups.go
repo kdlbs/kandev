@@ -289,11 +289,11 @@ func (r *Repository) UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, 
 // AddWorkspaceGroupMember inserts a membership row. role defaults to "member"
 // when empty. INSERT OR IGNORE: re-adding the same task is a no-op.
 //
-// Takes the shared task-row lock (AC-TASKS-RUNNER-SWITCH-002.3a class-2
-// writer) before writing: office and the task package share the same tasks
-// table through the same SQLite writer pool, so this membership insert and a
-// concurrent runner switch on taskID must resolve to exactly one of two
-// outcomes rather than each proceeding unaware of the other.
+// Takes the shared task-row lock before writing: office and the task package
+// share the same tasks table through the same SQLite writer pool, so this
+// membership insert and a concurrent runner switch on taskID must resolve to
+// exactly one of two outcomes rather than each proceeding unaware of the
+// other.
 func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error {
 	if groupID == "" || taskID == "" {
 		return errors.New("workspace group member: groupID and taskID required")

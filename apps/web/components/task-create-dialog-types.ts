@@ -39,8 +39,8 @@ export type TaskCreateSubmit = (
 /**
  * Shape of the task being edited that both `TaskCreateDialogProps.editingTask`
  * and `SubmitHandlersDeps.editingTask` need. `runnerEditable`/
- * `runnerIneligibleReason` gate the executor-profile selector
- * (REQ-TASKS-RUNNER-SWITCH-004) independently of `state`.
+ * `runnerIneligibleReason` gate the executor-profile selector independently
+ * of `state`.
  */
 export type TaskEditTarget = {
   id: string;
@@ -363,8 +363,8 @@ export type TaskCreateEffectsArgs = {
   preserveBranch?: string;
   /**
    * The task's own stored executor profile, when editing a task that has one.
-   * Seeds the picker directly (REQ-TASKS-RUNNER-SWITCH-004.5a) instead of the
-   * create-mode "resolve a default" autopick.
+   * Seeds the picker directly instead of the create-mode "resolve a default"
+   * autopick.
    */
   editingTaskExecutorProfileId?: string | null;
 };
@@ -449,7 +449,7 @@ export type DialogFormState = {
    * value in edit mode, resolved default in create mode) — never a value the
    * user chose. Null until a value has been seeded. Submit flows compare the
    * final selection against this to decide whether the user actually changed
-   * the runner (AC-TASKS-RUNNER-SWITCH-004.5b).
+   * the runner.
    */
   seededExecutorProfileId: string | null;
   discoveredRepositories: LocalRepository[];

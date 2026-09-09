@@ -89,9 +89,8 @@ const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
 };
 
 /**
- * Wraps a rejected `task.runner` switch (AC-TASKS-RUNNER-SWITCH-004.4a): the
- * save issues no other call once this throws, so `performTaskUpdate` never
- * reaches `updateTask`.
+ * Wraps a rejected `task.runner` switch: the save issues no other call once
+ * this throws, so `performTaskUpdate` never reaches `updateTask`.
  */
 class RunnerSwitchRejectedError extends Error {
   constructor(readonly cause: unknown) {
@@ -100,9 +99,9 @@ class RunnerSwitchRejectedError extends Error {
 }
 
 /**
- * Wraps a failure in the sequence AFTER a runner switch already committed
- * (AC-TASKS-RUNNER-SWITCH-004.4c): the switch is not rolled back, so this
- * exists to tell that state apart from an ordinary save failure.
+ * Wraps a failure in the sequence AFTER a runner switch already committed:
+ * the switch is not rolled back, so this exists to tell that state apart
+ * from an ordinary save failure.
  */
 class TaskUpdateAfterRunnerSwitchError extends Error {
   constructor(readonly cause: unknown) {
@@ -110,11 +109,11 @@ class TaskUpdateAfterRunnerSwitchError extends Error {
   }
 }
 
-// Maps a rejected task.runner switch to outcome-specific text
-// (AC-TASKS-RUNNER-SWITCH-004.4b): a typed mutability conflict reuses the
-// same reason copy as the read-side projection; an untyped outcome (invalid,
-// not-found, evaluation-unavailable) gets text for that class instead of the
-// raw wire code.
+// Maps a rejected task.runner switch to outcome-specific text: a typed
+// mutability conflict reuses the same reason copy as the read-side
+// projection; an untyped outcome (invalid, not-found,
+// evaluation-unavailable) gets text for that class instead of the raw wire
+// code.
 function runnerSwitchErrorMessage(error: unknown): string {
   if (error instanceof WebSocketRequestError) {
     const errorCode =
@@ -185,9 +184,9 @@ function areEditDependenciesReady(
   return !isEditMode || editDependencies?.ready !== false;
 }
 
-// AC-TASKS-RUNNER-SWITCH-004.5/5b: only a final selection that differs from
-// what the dialog seeded (stored profile or resolved default) counts as a
-// user change; reverting back to the seeded value issues no switch.
+// Only a final selection that differs from what the dialog seeded (stored
+// profile or resolved default) counts as a user change; reverting back to
+// the seeded value issues no switch.
 function computeRunnerChanged(
   seededExecutorProfileId: string | null,
   executorProfileId: string,
@@ -199,9 +198,8 @@ function computeRunnerChanged(
   );
 }
 
-// AC-TASKS-RUNNER-SWITCH-004.4a: issued first. A rejection here must leave
-// every other field unsaved, so the caller never reaches the rest of the
-// save sequence.
+// Issued first. A rejection here must leave every other field unsaved, so
+// the caller never reaches the rest of the save sequence.
 async function issueRunnerSwitchIfChanged(
   runnerChanged: boolean,
   taskId: string,
@@ -222,9 +220,9 @@ type SaveEditedTaskFieldsArgs = {
   runnerChanged: boolean;
 } & Omit<EditDependencySaveArgs, "updatedTask">;
 
-// AC-TASKS-RUNNER-SWITCH-004.4c: a runner switch that already committed is
-// never rolled back; tag a failure here so the caller can report the true
-// partial state instead of implying the whole save was rejected.
+// A runner switch that already committed is never rolled back; tag a
+// failure here so the caller can report the true partial state instead of
+// implying the whole save was rejected.
 async function saveEditedTaskFields({
   editingTask,
   updatePayload,
@@ -248,9 +246,9 @@ async function shouldKeepEditDialogOpen(
 ): Promise<boolean> {
   if (isRepositorySelectionError(error)) return true;
   if (isTaskDependencyUpdateFailure(error)) return true;
-  // AC-TASKS-RUNNER-SWITCH-004.4/4c: a rejected switch, or a later call
-  // failing after the switch already committed, both need the user back in
-  // the dialog to see the reason and retry.
+  // A rejected switch, or a later call failing after the switch already
+  // committed, both need the user back in the dialog to see the reason and
+  // retry.
   if (error instanceof RunnerSwitchRejectedError) return true;
   if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
   return refreshStaleBranchPolicies(error);

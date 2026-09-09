@@ -65,7 +65,7 @@ type CreateEditSelectorsProps = {
   selectedAgentProfileName: string | null;
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
-  /** Gates the executor-profile column independently of isTaskStarted (REQ-TASKS-RUNNER-SWITCH-004). */
+  /** Gates the executor-profile column independently of isTaskStarted. */
   runnerEditable: boolean;
   /** Presented instead of the selector when runnerEditable is false. */
   runnerIneligibleReason: string;

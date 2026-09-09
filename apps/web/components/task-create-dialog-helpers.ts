@@ -123,11 +123,11 @@ export function computeIsTaskStarted(
 }
 
 /**
- * Whether the executor-profile selector should be offered for editing
- * (REQ-TASKS-RUNNER-SWITCH-004). Create mode always offers it — there is no
- * task yet for a mutability verdict to apply to. Edit mode defers entirely to
- * the projected `runner_editable`, never to workflow state
- * (AC-TASKS-RUNNER-SWITCH-004.3); an absent projection fails closed.
+ * Whether the executor-profile selector should be offered for editing.
+ * Create mode always offers it — there is no task yet for a mutability
+ * verdict to apply to. Edit mode defers entirely to the projected
+ * `runner_editable`, never to workflow state; an absent projection fails
+ * closed.
  */
 export function computeRunnerEditable(
   isEditMode: boolean,
@@ -149,12 +149,11 @@ export function computeRunnerIneligibleReason(
 }
 
 /**
- * Maps a projected `runner_ineligible_reason` (REQ-TASKS-RUNNER-SWITCH-001),
- * or the matching `details.error_code` on a rejected `task.runner` switch, to
- * the i18n key presented to the user. Closed vocabulary; a code this dialog
- * doesn't recognize (a future reason it predates) falls back to the same
- * retriable copy as an evaluation failure rather than an empty message or a
- * raw code (AC-TASKS-RUNNER-SWITCH-004.4b).
+ * Maps a projected `runner_ineligible_reason`, or the matching
+ * `details.error_code` on a rejected `task.runner` switch, to the i18n key
+ * presented to the user. Closed vocabulary; a code this dialog doesn't
+ * recognize (a future reason it predates) falls back to the same retriable
+ * copy as an evaluation failure rather than an empty message or a raw code.
  */
 export const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
   task_archived: "task:runnerReasonTaskArchived",
