@@ -21,6 +21,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
+		{"pi", NewPiACP(), "pi-acp", nil},
 	}
 
 	for _, tt := range tests {
