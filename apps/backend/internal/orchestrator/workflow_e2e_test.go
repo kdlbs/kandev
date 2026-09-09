@@ -132,7 +132,7 @@ var workflowTestCases = []workflowTestCase{
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
 			// Agent starts at New Context → on_turn_start → back to In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1, ExpectState: models.TaskSessionStateRunning},
 			// Agent finishes at In Progress → New Context again (same reset + auto_start path)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 2},
@@ -144,7 +144,7 @@ var workflowTestCases = []workflowTestCase{
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
 			// User sends message at Done → on_turn_start → In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3, ExpectState: models.TaskSessionStateRunning},
 		},
 	},
 	{

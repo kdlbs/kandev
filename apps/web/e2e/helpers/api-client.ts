@@ -2485,6 +2485,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     title: string;
+    description?: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
     primary_executor_type?: string | null;

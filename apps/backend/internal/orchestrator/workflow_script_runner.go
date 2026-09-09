@@ -21,6 +21,7 @@ import (
 const (
 	workflowScriptOutputBufferBytes = 2 * 1024 * 1024
 	workflowScriptMessageBatch      = 200 * time.Millisecond
+	workflowScriptProcessStarting   = "starting"
 )
 
 var (
@@ -634,7 +635,7 @@ func workflowScriptOutput(chunks []agentruntime.WorkspaceProcessOutputChunk) str
 
 func workflowScriptRunStatus(status agentruntime.WorkspaceProcessStatus) taskmodels.WorkflowScriptRunStatus {
 	switch string(status) {
-	case "starting":
+	case workflowScriptProcessStarting:
 		return taskmodels.WorkflowScriptRunStarting
 	case "running":
 		return taskmodels.WorkflowScriptRunRunning
