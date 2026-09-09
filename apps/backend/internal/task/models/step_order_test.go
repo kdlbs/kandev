@@ -39,6 +39,28 @@ func TestStepOrderLess(t *testing.T) {
 			want:  true,
 		},
 		{
+			// left's fallback (its own created_at, later) loses to right's
+			// earlier explicit queued_at, even though right's created_at is
+			// later still - discriminates the fallback from two wrong
+			// implementations that would both also report true here: (a)
+			// treating a nil queued_at as an always-smallest sentinel, and
+			// (b) comparing created_at directly instead of queued_at.
+			name:  "a nil queued_at's created_at fallback loses to an earlier explicit queued_at",
+			left:  &Task{ID: "a", Position: 1, Priority: "medium", QueuedAt: nil, CreatedAt: later},
+			right: &Task{ID: "b", Position: 1, Priority: "medium", QueuedAt: &earlier, CreatedAt: later.Add(time.Hour)},
+			want:  false,
+		},
+		{
+			// The mirror case: left's fallback (its own created_at, earlier)
+			// beats right's later explicit queued_at, even though right's
+			// created_at is earlier still - discriminates the fallback from
+			// comparing created_at directly instead of queued_at.
+			name:  "a nil queued_at's created_at fallback beats a later explicit queued_at",
+			left:  &Task{ID: "a", Position: 1, Priority: "medium", QueuedAt: nil, CreatedAt: earlier},
+			right: &Task{ID: "b", Position: 1, Priority: "medium", QueuedAt: &later, CreatedAt: earlier.Add(-time.Hour)},
+			want:  true,
+		},
+		{
 			name:  "created_at breaks a queued_at tie",
 			left:  &Task{ID: "a", Position: 1, Priority: "medium", QueuedAt: &earlier, CreatedAt: earlier},
 			right: &Task{ID: "b", Position: 1, Priority: "medium", QueuedAt: &earlier, CreatedAt: later},

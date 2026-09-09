@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeInsertionEdge,
-  computeKeyboardActiveIndex,
+  computeKeyboardInsertionEdge,
   findTaskIndex,
   type KeyboardReorderDraft,
 } from "./virtualized-column-task-list";
@@ -49,35 +49,55 @@ describe("findTaskIndex", () => {
   });
 });
 
-describe("computeKeyboardActiveIndex", () => {
-  const queuedStartIndex = 2;
-
+describe("computeKeyboardInsertionEdge", () => {
   function draft(overrides: Partial<KeyboardReorderDraft> = {}): KeyboardReorderDraft {
     return {
       taskId: "a",
       stepId: "step-1",
       band: "admitted",
-      order: ["a", "b"],
+      order: ["a", "b", "c", "d"],
       ...overrides,
     };
   }
 
   it("returns null when there is no draft", () => {
-    expect(computeKeyboardActiveIndex("step-1", queuedStartIndex, null)).toBeNull();
+    expect(computeKeyboardInsertionEdge(null, "step-1", "b")).toBeNull();
   });
 
   it("returns null when the draft belongs to a different step", () => {
-    expect(computeKeyboardActiveIndex("step-2", queuedStartIndex, draft())).toBeNull();
+    expect(computeKeyboardInsertionEdge(draft(), "step-2", "b")).toBeNull();
   });
 
-  it("resolves an admitted-band draft to its raw index", () => {
+  it("returns null for a row not present in the draft's band order", () => {
+    expect(computeKeyboardInsertionEdge(draft(), "step-1", "queued-task")).toBeNull();
+  });
+
+  it("returns null for the dragged card's own row", () => {
+    expect(computeKeyboardInsertionEdge(draft(), "step-1", "a")).toBeNull();
+  });
+
+  it("returns 'bottom' on the row immediately before the draft's position", () => {
     expect(
-      computeKeyboardActiveIndex("step-1", queuedStartIndex, draft({ order: ["b", "a"] })),
-    ).toBe(1);
+      computeKeyboardInsertionEdge(draft({ order: ["b", "a", "c", "d"] }), "step-1", "b"),
+    ).toBe("bottom");
   });
 
-  it("offsets a queued-band draft by queuedStartIndex", () => {
-    const queuedDraft = draft({ taskId: "c", band: "queued", order: ["d", "c"] });
-    expect(computeKeyboardActiveIndex("step-1", queuedStartIndex, queuedDraft)).toBe(3);
+  it("returns 'top' on the row immediately after the draft's position", () => {
+    expect(
+      computeKeyboardInsertionEdge(draft({ order: ["b", "a", "c", "d"] }), "step-1", "c"),
+    ).toBe("top");
+  });
+
+  it("tracks the draft's neighbors by identity after multiple moves, not by original DOM index", () => {
+    // "a" starts at index 0 ([a,b,c,d]) and is moved down twice, landing
+    // between "c" and "d" ([b,c,a,d]). The DOM never re-renders (only the
+    // draft evolves), so this proves the indicator follows "a"'s actual
+    // neighbors rather than whatever row sits at a numerically-adjacent DOM
+    // index (a regression that would flag "b" - "a"'s original DOM
+    // neighbor, not its current one).
+    const moved = draft({ order: ["b", "c", "a", "d"] });
+    expect(computeKeyboardInsertionEdge(moved, "step-1", "b")).toBeNull();
+    expect(computeKeyboardInsertionEdge(moved, "step-1", "c")).toBe("bottom");
+    expect(computeKeyboardInsertionEdge(moved, "step-1", "d")).toBe("top");
   });
 });

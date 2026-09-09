@@ -101,6 +101,18 @@ type Repository struct {
 	// than only the injected failpoint errors). Nil in production and in
 	// every test but the one that sets it.
 	usageEventPreRollupHook func()
+	// reorderPreWriteHook is a test-only synchronization seam, called (if
+	// set) inside ReorderStepTasks after stepID's current membership has
+	// been read and resolved against the caller's ordered id list, but
+	// before the renumbering write loop begins. Like usageEventPreRollupHook
+	// above, it does not alter control flow; it exists so a Postgres test
+	// can pause a real production reorder transaction at this exact
+	// boundary - after it has locked stepID and observed a task's
+	// still-current membership, but before it writes - to construct a real
+	// interleaving against a concurrent writer that changes that task's step
+	// membership in between. Nil in production and in every test but the
+	// one that sets it.
+	reorderPreWriteHook func()
 	// stepEntryDispatcher fires a step's session-independent on_enter
 	// sequence after a registered step-transition writer commits. Nil-safe
 	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every

@@ -84,6 +84,7 @@ func (r *Repository) ReorderStepTasks(
 	}
 
 	renumbered := renumberReorderedStep(band, orderedNamed, other)
+	r.fireReorderPreWriteHook()
 	for _, task := range renumbered {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?`),
 			task.Position, r.nowUTC(), task.ID); err != nil {
@@ -98,6 +99,12 @@ func (r *Repository) ReorderStepTasks(
 		return nil, 0, err
 	}
 	return renumbered, revision, nil
+}
+
+func (r *Repository) fireReorderPreWriteHook() {
+	if r.reorderPreWriteHook != nil {
+		r.reorderPreWriteHook()
+	}
 }
 
 func validateReorderIDList(orderedTaskIDs []string) error {

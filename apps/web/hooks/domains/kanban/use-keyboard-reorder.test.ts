@@ -128,4 +128,23 @@ describe("useKeyboardReorder", () => {
 
     expect(result.current.pickedUpTaskId).toBeNull();
   });
+
+  it("refuses to pick up a card whose band has fewer than two members (AC.32)", () => {
+    const soleTask = [admittedTask("solo", 0)];
+    const { result } = renderHook(() => useKeyboardReorder(WORKFLOW_ID, soleTask));
+
+    act(() => {
+      result.current.handleKeyDown(keyEvent(" "), soleTask[0]);
+    });
+    expect(result.current.pickedUpTaskId).toBeNull();
+
+    // A second Space/Enter with nothing picked up calls pickUp again, not
+    // commit - it must keep refusing rather than issue a no-op reorder
+    // request for the single-member band.
+    act(() => {
+      result.current.handleKeyDown(keyEvent("Enter"), soleTask[0]);
+    });
+    expect(result.current.pickedUpTaskId).toBeNull();
+    expect(reorderBand).not.toHaveBeenCalled();
+  });
 });

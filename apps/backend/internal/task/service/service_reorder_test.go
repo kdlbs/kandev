@@ -256,6 +256,46 @@ func TestService_ReorderStepTasksNamingTaskInAnotherWorkspaceDoesNotLeakExistenc
 	}
 }
 
+// TestService_ReorderStepTasksAcceptsStepWithActiveSession pins
+// AC-TASKS-KANBAN-TASK-REORDERING-001.22: the active-session restriction that
+// guards a step change (validateMoveSessions, checked by MoveTaskWithOptions
+// for every cross-step move) must not apply to a same-step reorder. A task
+// with a running session sits in the reordered band exactly like any other
+// task.
+func TestService_ReorderStepTasksAcceptsStepWithActiveSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-reorder-active-session", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-reorder-active-session", WorkspaceID: "ws-reorder-active-session", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedReorderTestStep(t, svc, repo, "step-reorder-active-session", "wf-reorder-active-session", 0)
+	mustCreateReorderServiceTask(t, ctx, repo, "active-session-a", "ws-reorder-active-session", "wf-reorder-active-session", "step-reorder-active-session")
+	mustCreateReorderServiceTask(t, ctx, repo, "active-session-b", "ws-reorder-active-session", "wf-reorder-active-session", "step-reorder-active-session")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-reorder-active", TaskID: "active-session-a", State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("seed running session: %v", err)
+	}
+
+	// The same task, same running session, would be rejected by an ordinary
+	// cross-step move (validateMoveSessions): confirms the fixture actually
+	// exercises the restriction the reorder path must bypass.
+	if _, err := svc.MoveTask(ctx, "active-session-a", "wf-reorder-active-session", "step-reorder-active-session", 0); err == nil {
+		t.Fatal("fixture invalid: MoveTask should reject a task with a running session")
+	}
+
+	result, err := svc.ReorderStepTasks(ctx, "step-reorder-active-session", "admitted", []string{"active-session-b", "active-session-a"})
+	if err != nil {
+		t.Fatalf("ReorderStepTasks must accept a step with an active session: %v", err)
+	}
+	if len(result.Tasks) != 2 || result.Tasks[0].ID != "active-session-b" || result.Tasks[1].ID != "active-session-a" {
+		t.Fatalf("result.Tasks = %+v, want [active-session-b active-session-a]", result.Tasks)
+	}
+}
+
 func TestService_ReorderStepTasksInvalidRequestReturnsNilResult(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

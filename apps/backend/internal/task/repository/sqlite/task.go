@@ -2217,7 +2217,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 
 	var unlock func()
-	ctx, unlock = r.withStepArrivalLocks(ctx, destinationStepID)
+	ctx, unlock = r.withStepArrivalLocks(ctx, destinationStepID, fromStepID)
 	defer unlock()
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -2226,11 +2226,18 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A promotion also leaves fromStepID's queued/admitted band, not only
+	// destinationStepID's, so a concurrent reorder of fromStepID must see
+	// the departure rather than commit a write against stale membership.
+	// Both locks are acquired here, sorted, mirroring
+	// updateTaskWithWorkflowStepAdmission's target+source pair.
+	if err := r.lockWorkflowStepsForAdmission(ctx, tx, destinationStepID, fromStepID); err != nil {
+		return false, err
+	}
+
 	// This is always an arrival — a promotion enters destinationStepID from a
 	// queued band, never a reorder — so the caller-supplied task.Position is
-	// overwritten (REQ-TASKS-KANBAN-TASK-REORDERING-001.28). Locks
-	// destinationStepID, superseding the standalone lock call below it used
-	// to be paired with.
+	// overwritten (REQ-TASKS-KANBAN-TASK-REORDERING-001.28).
 	if err := r.assignArrivalPosition(ctx, tx, task, destinationStepID); err != nil {
 		return false, err
 	}

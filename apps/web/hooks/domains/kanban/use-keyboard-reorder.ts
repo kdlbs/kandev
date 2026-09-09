@@ -28,6 +28,21 @@ function bandOrderFor(tasks: Task[], stepId: string, taskId: string) {
 }
 
 /**
+ * Whether a card in bandInfo's band may be picked up: the band must resolve,
+ * have no reorder already in flight (AC.27), and - REQ-TASKS-KANBAN-TASK-REORDERING-001.32 -
+ * have at least two members, since a band that small offers no reorder at
+ * all and committing with no arrow presses would otherwise still issue a
+ * no-op reorder request.
+ */
+function canPickUp(
+  bandInfo: ReturnType<typeof bandOrderFor>,
+  stepId: string,
+  isBandPending: (stepId: string, band: ReorderBand) => boolean,
+): bandInfo is NonNullable<ReturnType<typeof bandOrderFor>> {
+  return bandInfo !== null && bandInfo.order.length >= 2 && !isBandPending(stepId, bandInfo.band);
+}
+
+/**
  * Bespoke keyboard reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.12): Space
  * or Enter picks a focused card up, Up/Down Arrow move it one place among
  * the band members currently rendered, Space or Enter drops and commits,
@@ -59,7 +74,7 @@ export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
   const pickUp = useCallback(
     (task: Task) => {
       const bandInfo = bandOrderFor(tasks, task.workflowStepId, task.id);
-      if (!bandInfo || isBandPending(task.workflowStepId, bandInfo.band)) return;
+      if (!canPickUp(bandInfo, task.workflowStepId, isBandPending)) return;
       setPickedUp({
         taskId: task.id,
         stepId: task.workflowStepId,

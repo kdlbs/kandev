@@ -111,16 +111,41 @@ describe("compareStepOrder", () => {
     expect([...tasks].sort(compareStepOrder).map((t) => t.id)).toEqual(["critical", "low"]);
   });
 
+  const NEVER_QUEUED_ID = "never-queued";
+
   it("breaks a priority tie by queuedAt ascending, falling back to createdAt when absent", () => {
     const neverQueued = stepOrderTask({
-      id: "never-queued",
+      id: NEVER_QUEUED_ID,
       queuedAt: null,
       createdAt: "2026-08-12T07:00:00Z",
     });
     const queuedLater = stepOrderTask({ id: "queued-later", queuedAt: "2026-08-12T09:00:00Z" });
     expect([queuedLater, neverQueued].sort(compareStepOrder).map((t) => t.id)).toEqual([
-      "never-queued",
+      NEVER_QUEUED_ID,
       "queued-later",
+    ]);
+  });
+
+  it("uses a nil queuedAt's own createdAt fallback rather than comparing createdAt directly", () => {
+    // never-queued's fallback (its own createdAt, late) must lose to
+    // "queued-early"'s earlier explicit queuedAt, even though
+    // "queued-early"'s createdAt is later still - a comparator that
+    // silently fell back to comparing createdAt directly (ignoring
+    // queuedAt) would order these the same as the case above and pass it,
+    // but would reverse this one.
+    const neverQueued = stepOrderTask({
+      id: NEVER_QUEUED_ID,
+      queuedAt: null,
+      createdAt: "2026-08-12T09:00:00Z",
+    });
+    const queuedEarly = stepOrderTask({
+      id: "queued-early",
+      queuedAt: "2026-08-12T07:00:00Z",
+      createdAt: "2026-08-12T10:00:00Z",
+    });
+    expect([neverQueued, queuedEarly].sort(compareStepOrder).map((t) => t.id)).toEqual([
+      "queued-early",
+      NEVER_QUEUED_ID,
     ]);
   });
 

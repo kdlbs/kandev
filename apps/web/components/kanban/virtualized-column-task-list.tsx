@@ -226,21 +226,29 @@ export function findTaskIndex(
 }
 
 /**
- * The keyboard draft's current virtual index within this column's rendered
- * order, or `null` when the draft belongs to a different step. Unlike the
- * pointer path, this evolves with every arrow press (REQ-TASKS-KANBAN-TASK-REORDERING-001.12),
- * since keyboard reorder never live-reorders the DOM — only the insertion
- * indicator tracks the in-progress move.
+ * The insertion edge to render on a rendered row for an in-progress keyboard
+ * reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.12), or `null` if that row is
+ * not adjacent to the draft's current position. Unlike the pointer path, this
+ * cannot compare numeric indices: `draft.order` is the band-local proposed
+ * order and evolves with every arrow press, while keyboard reorder never
+ * live-reorders the DOM, so a rendered row's index stays fixed to the
+ * unmoved order - after more than one move, the two index spaces name
+ * different tasks at the same offset. Row identity is compared by task id
+ * against the draft's immediate neighbors instead.
  */
-export function computeKeyboardActiveIndex(
-  stepId: string,
-  queuedStartIndex: number,
+export function computeKeyboardInsertionEdge(
   draft: KeyboardReorderDraft | null | undefined,
-): number | null {
+  stepId: string,
+  rowTaskId: string,
+): "top" | "bottom" | null {
   if (!draft || draft.stepId !== stepId) return null;
   const draftIndex = draft.order.indexOf(draft.taskId);
   if (draftIndex === -1) return null;
-  return (draft.band === "admitted" ? 0 : queuedStartIndex) + draftIndex;
+  const rowIndex = draft.order.indexOf(rowTaskId);
+  if (rowIndex === -1) return null;
+  if (rowIndex === draftIndex - 1) return "bottom";
+  if (rowIndex === draftIndex + 1) return "top";
+  return null;
 }
 
 type VirtualizedTaskRowProps = Pick<
@@ -397,7 +405,6 @@ export function VirtualizedColumnTaskList({
     overscan: 5,
   });
   const pointerActiveIndex = findTaskIndex(orderedTasks, activeTaskId);
-  const keyboardActiveIndex = computeKeyboardActiveIndex(step.id, queuedStartIndex, keyboardDraft);
 
   return (
     <div
@@ -410,10 +417,14 @@ export function VirtualizedColumnTaskList({
           const task = orderedTasks[virtualItem.index];
           if (!task) return null;
 
-          const isKeyboardAdjacent =
-            keyboardActiveIndex !== null && Math.abs(virtualItem.index - keyboardActiveIndex) === 1;
+          const keyboardInsertionEdge = computeKeyboardInsertionEdge(
+            keyboardDraft,
+            step.id,
+            task.id,
+          );
+          const isKeyboardAdjacent = keyboardInsertionEdge !== null;
           const insertionEdge = isKeyboardAdjacent
-            ? computeInsertionEdge(queuedStartIndex, keyboardActiveIndex, virtualItem.index)
+            ? keyboardInsertionEdge
             : computeInsertionEdge(queuedStartIndex, pointerActiveIndex, virtualItem.index);
 
           return (
