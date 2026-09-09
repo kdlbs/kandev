@@ -112,7 +112,7 @@ func (r *Repository) runnerSwitchEvaluate(
 			fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
 
-	repoSnapshot, err := r.runnerRepositoryLinkSnapshotTx(ctx, task.ID)
+	repoSnapshot, err := r.runnerRepositoryLinkSnapshot(ctx, task.ID)
 	if err != nil {
 		return unavailable(err)
 	}
@@ -225,7 +225,11 @@ func (r *Repository) setTaskMetadataKeyWithExecutor(
 	return err
 }
 
-func (r *Repository) runnerRepositoryLinkSnapshotTx(ctx context.Context, taskID string) (runnerRepositoryLinkSnapshot, error) {
+// runnerRepositoryLinkSnapshot reads through the reader pool (r.ro), not a
+// transaction. Isolation for this read comes from the task row lock the
+// caller already holds (LockTaskRowInTx in SwitchTaskRunner), not from
+// executing inside tx.
+func (r *Repository) runnerRepositoryLinkSnapshot(ctx context.Context, taskID string) (runnerRepositoryLinkSnapshot, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
 		`SELECT repository_id, updated_at FROM task_repositories WHERE task_id = ?`), taskID)
 	if err != nil {
