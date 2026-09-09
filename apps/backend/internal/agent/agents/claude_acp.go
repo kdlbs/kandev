@@ -123,14 +123,12 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
-			// MCP_TIMEOUT also governs the CLI's first-turn MCP prewait, so
-			// it must stay at the CLI's own default; MCP_TOOL_TIMEOUT bounds
-			// total call duration for Kandev's blocking MCP tool calls, but
-			// is not by itself sufficient: the CLI's separate per-tool-call
-			// idle watchdog aborts a silent call after ~300s at this budget,
-			// so the long wait survives on the keepalive that
-			// internal/mcp/server/handlers.go streams, not on this value.
-			// See docs/specs/agents/system-design/mcp-timeout-budgets.md.
+			// MCP_TIMEOUT must stay at the CLI's own default: it also governs
+			// the first-turn MCP prewait. MCP_TOOL_TIMEOUT bounds call
+			// duration, but the keepalive in
+			// internal/mcp/server/handlers.go, not this value, is what keeps
+			// a blocking tool call alive. See
+			// docs/specs/agents/system-design/mcp-timeout-budgets.md.
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",
 		},

@@ -146,6 +146,11 @@ returns) confirmed the formula and ruled out the obvious alternative fix:
 | `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=7200000`, `MCP_TOOL_TIMEOUT=7200000`, silent | 358.1s (reproduced twice) | `The operation timed out.` — a second, lower client-side ceiling the env var does not lift |
 | Default env, SSE + `notifications/progress` every 20s | 535.1s, still alive | ended only by the harness's own external kill |
 
+The first row's ~35s lifetime is longer than its 10s idle timeout because it
+includes the ~25s `subscriptions/listen` first-turn wait (`MCP_TIMEOUT -
+5000 = 25000ms`) that precedes the idle timer starting on the actual tool
+call: 25s preamble + 10s idle ≈ 35s.
+
 Setting `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` alongside `MCP_TOOL_TIMEOUT` is
 **not** a viable fix on its own: it raises the idle deadline from 300s to
 only ~358s, not to two hours, because of the second ceiling above. The progress
