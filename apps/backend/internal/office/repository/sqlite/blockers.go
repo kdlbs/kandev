@@ -284,6 +284,33 @@ func (r *Repository) ListChildStates(ctx context.Context, parentID string) ([]Ch
 	return rows, nil
 }
 
+// ListWaveMembers returns id+state for the parent's wave members, ordered
+// by id: direct children that are not archived, not ephemeral, and not
+// automation-origin. This is the predicate
+// task/repository/sqlite.ListChildCompletionRows already applies
+// (andNotAutomationOrigin) — the one predicate all four
+// task_children_completed producers can share (docs/specs/office/
+// system-design/parent-wake-wave-identity.md, "Which children count").
+// Unlike ListChildStates, this excludes ephemeral and automation-origin
+// children as well as archived ones, so its result set is a subset of
+// ListChildStates' for the same parent.
+func (r *Repository) ListWaveMembers(ctx context.Context, parentID string) ([]ChildState, error) {
+	var rows []ChildState
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, COALESCE(state, '') AS state FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		  AND COALESCE(origin, '') != 'automation_run'
+		ORDER BY id
+	`), parentID)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []ChildState{}
+	}
+	return rows, nil
+}
+
 // ChildSummary holds summary data for a completed child task.
 type ChildSummary struct {
 	TaskID                 string `db:"id" json:"id"`
