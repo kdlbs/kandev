@@ -209,11 +209,6 @@ func TestGitOperatorPushToNamedRemoteStaysNonForce(t *testing.T) {
 	}
 }
 
-func TestGitOperatorPushDoesNotEscalateRejectedNonForcePush(t *testing.T) {
-	// Same divergence, asserting no retry escalates to a force push.
-	TestGitOperatorPushToNamedRemoteStaysNonForce(t)
-}
-
 func TestGitOperatorPushToNamedRemoteSkipsBaselinePublication(t *testing.T) {
 	root := t.TempDir()
 	isolateTestGitEnv(t)
@@ -695,5 +690,63 @@ func TestGitOperatorPushReportsPlainMismatchAtSecondVerification(t *testing.T) {
 	}
 	if got := remoteBranchSHA(t, backupDir, "feature/work"); got != "" {
 		t.Errorf("backup gained %q, want untouched", got)
+	}
+}
+
+// TestGitOperatorPushReportsPlainMismatchWhenBaselineWasAlreadyPublished
+// covers the empty-remote path where the baseline was published by an earlier
+// request: this request's prepareEmptyRemotePublication only retires the
+// local marker and pushes nothing itself. A HEAD race at the second
+// verification must still report plain push_branch_mismatch, not the
+// after-baseline variant, because no baseline publication happened in this
+// request.
+func TestGitOperatorPushReportsPlainMismatchWhenBaselineWasAlreadyPublished(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git PATH shim is a POSIX shell script")
+	}
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+	// Publish the baseline directly, bypassing gitbootstrap, to simulate an
+	// earlier request having already published it. The local marker is left
+	// in place, so this request's empty-remote path takes the
+	// already-published, retire-only branch.
+	runGit(t, repoDir, "push", originDir, "main:refs/heads/main")
+
+	realGit, err := osExec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git) = %v", err)
+	}
+	// Move HEAD right after the remote-ref probe that decides the baseline is
+	// already published, which is before this request issues any push.
+	shimDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1 $2\" = 'ls-remote --refs' ]; then\n" +
+		"  " + realGit + " \"$@\"; rc=$?\n" +
+		"  " + realGit + " -C " + repoDir + " symbolic-ref HEAD refs/heads/switched\n" +
+		"  exit $rc\n" +
+		"fi\n" +
+		"exec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := operator.Push(context.Background(), PushOptions{ExpectedBranch: "feature/empty"})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if result.Success {
+		t.Fatalf("Push() succeeded, want a second-verification mismatch refusal: %+v", result)
+	}
+	if result.ErrorCode != pushBranchMismatchErrorCode {
+		t.Fatalf("ErrorCode = %q, want %q (not the after-baseline variant: no publication happened this request)", result.ErrorCode, pushBranchMismatchErrorCode)
+	}
+	if result.BaselinePublished {
+		t.Error("BaselinePublished = true, want false: the baseline was published by an earlier request, not this one")
+	}
+	if result.ExpectedBranch != "feature/empty" || result.CurrentBranch != "switched" {
+		t.Errorf("branches = (%q, %q), want (feature/empty, switched)", result.ExpectedBranch, result.CurrentBranch)
+	}
+	if got := remoteBranchSHA(t, originDir, "feature/empty"); got != "" {
+		t.Errorf("task branch published as %q, want unpublished", got)
 	}
 }

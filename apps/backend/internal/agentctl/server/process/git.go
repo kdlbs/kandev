@@ -507,7 +507,7 @@ func (g *GitOperator) Push(ctx context.Context, opts PushOptions) (*GitOperation
 	// Every remaining read happens before the second verification, so that the
 	// branch read is the last git command before the push.
 	shouldSetUpstream := g.resolveSetUpstream(ctx, opts, plan)
-	if refusal := g.verifyExpectedBranch(ctx, opts.ExpectedBranch, basePublication.active); refusal != nil {
+	if refusal := g.verifyExpectedBranch(ctx, opts.ExpectedBranch, basePublication.published); refusal != nil {
 		refusal.apply(result)
 		result.Output = basePublication.output
 		return result, nil

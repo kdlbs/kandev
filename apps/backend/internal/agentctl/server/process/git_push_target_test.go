@@ -200,3 +200,20 @@ func TestGitOperatorCurrentBranchReportsDetachedHeadAsEmpty(t *testing.T) {
 		t.Errorf("detached branch = %q, want empty", branch)
 	}
 }
+
+// TestGitOperatorCurrentBranchReportsSymbolicRefOutsideHeadsAsEmpty covers a
+// HEAD that resolves as a symbolic ref, but not under refs/heads/. Detached
+// state is determined by whether HEAD resolves under refs/heads/, not merely
+// by whether it fails to resolve at all.
+func TestGitOperatorCurrentBranchReportsSymbolicRefOutsideHeadsAsEmpty(t *testing.T) {
+	repoDir, operator := setupPushTargetRepo(t)
+
+	runGit(t, repoDir, "symbolic-ref", "HEAD", "refs/remotes/origin/main")
+	branch, err := operator.currentBranch(context.Background())
+	if err != nil {
+		t.Fatalf("currentBranch() on a non-refs/heads symbolic ref error = %v", err)
+	}
+	if branch != "" {
+		t.Errorf("branch = %q, want empty: HEAD does not resolve under refs/heads/", branch)
+	}
+}

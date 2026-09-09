@@ -93,6 +93,9 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != headSHA {
 				t.Fatalf("preflight changed source branch: %q != %q", got, headSHA)
 			}
+			if preflight.PushedRemote != "" || preflight.PushedBranch != "" {
+				t.Fatalf("contribution-routed preflight = %+v, want PushedRemote and PushedBranch omitted", preflight)
+			}
 
 			forced, err := operator.Push(context.Background(), PushOptions{Force: true})
 			if err != nil {

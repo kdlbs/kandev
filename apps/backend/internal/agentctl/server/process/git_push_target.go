@@ -231,6 +231,9 @@ func (g *GitOperator) currentBranch(ctx context.Context) (string, error) {
 	output, err := g.runGitCommand(ctx, "symbolic-ref", "HEAD")
 	if err == nil {
 		ref := strings.TrimSpace(output)
+		if !strings.HasPrefix(ref, "refs/heads/") {
+			return "", nil
+		}
 		return strings.TrimPrefix(ref, "refs/heads/"), nil
 	}
 	// symbolic-ref fails both for a detached HEAD and for an unreadable
