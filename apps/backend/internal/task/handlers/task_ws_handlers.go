@@ -280,7 +280,12 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	if err != nil {
+		h.logger.Error("failed to build task DTO", zap.Error(err))
+		return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dtos[0])
 }
 
 type wsUpdateTaskRequest struct {

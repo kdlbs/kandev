@@ -47,6 +47,27 @@ func (r *runnerSwitchWSRepo) GetExecutor(_ context.Context, id string) (*models.
 	return r.executor, nil
 }
 
+// ListTaskWorkspaceFoldersByTaskIDs and its siblings satisfy
+// repository.TaskWorkspaceFolderRepository so this fake can be wired as
+// service.Repos.WorkspaceFolders. Without it, BuildRunnerMutabilityViews
+// degrades every verdict to evaluation_unavailable regardless of the other
+// signals, which would mask a real assertion on the evaluated reason.
+func (r *runnerSwitchWSRepo) ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error) {
+	return nil, nil
+}
+
+func (r *runnerSwitchWSRepo) ListTaskWorkspaceFoldersByTaskIDs(context.Context, []string) (map[string][]*models.TaskWorkspaceFolder, error) {
+	return map[string][]*models.TaskWorkspaceFolder{}, nil
+}
+
+func (r *runnerSwitchWSRepo) CreateWorkspaceSourceBatch(context.Context, *models.WorkspaceSourceBatch) error {
+	return nil
+}
+
+func (r *runnerSwitchWSRepo) CompensateWorkspaceSourceBatch(context.Context, *models.WorkspaceSourceBatch) error {
+	return nil
+}
+
 func (r *runnerSwitchWSRepo) SwitchTaskRunner(_ context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
 	if r.mutabilityBlocked {
 		return nil, &repoerrors.ErrRunnerMutabilityConflict{Reason: models.RunnerReasonSessionExists}
@@ -71,7 +92,7 @@ func newRunnerSwitchWSHandlers(t *testing.T, repo *runnerSwitchWSRepo) *TaskHand
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
-		Reviews: repo,
+		Reviews: repo, WorkspaceFolders: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	return &TaskHandlers{service: svc, logger: log}
 }
@@ -180,6 +201,37 @@ func TestWSUpdateTaskRunnerErrorMapping(t *testing.T) {
 			}
 			assertWSErrorCode(t, resp, tc.wantCode)
 		})
+	}
+}
+
+// TestWSGetTaskReturnsEvaluatedRunnerMutability regression-tests that
+// task.get routes through the enriched DTO builder rather than the bare
+// dto.FromTask, which always defaults runner_ineligible_reason to
+// evaluation_unavailable regardless of the task's real signals.
+func TestWSGetTaskReturnsEvaluatedRunnerMutability(t *testing.T) {
+	repo := &runnerSwitchWSRepo{
+		task: &models.Task{ID: "task-1", WorkspaceID: "ws-1", Title: "T"},
+	}
+	h := newRunnerSwitchWSHandlers(t, repo)
+
+	raw, err := json.Marshal(map[string]any{"id": "task-1"})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	resp, err := h.wsGetTask(context.Background(), &ws.Message{ID: "msg-1", Action: ws.ActionTaskGet, Payload: raw})
+	if err != nil {
+		t.Fatalf("wsGetTask: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %v, want response (payload: %s)", resp.Type, resp.Payload)
+	}
+	var body map[string]any
+	if unmarshalErr := json.Unmarshal(resp.Payload, &body); unmarshalErr != nil {
+		t.Fatalf("unmarshal response payload: %v", unmarshalErr)
+	}
+	if body["runner_ineligible_reason"] != string(models.RunnerReasonNoRepository) {
+		t.Fatalf("runner_ineligible_reason = %v, want %q (task has no repository attached)",
+			body["runner_ineligible_reason"], models.RunnerReasonNoRepository)
 	}
 }
 
