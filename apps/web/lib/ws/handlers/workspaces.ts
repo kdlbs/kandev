@@ -4,6 +4,38 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 type WorkspaceItem = WorkspaceState["items"][number];
 
+function handleWorkspaceDeleted(store: StoreApi<AppState>, workspaceId: string): void {
+  const currentState = store.getState();
+  const workspaceTaskIds = new Set(
+    [
+      ...currentState.kanban.tasks,
+      ...Object.values(currentState.kanbanMulti.snapshots).flatMap((snapshot) => snapshot.tasks),
+    ]
+      .filter((task) => task.workspaceId === workspaceId)
+      .map((task) => task.id),
+  );
+  const sessionIds = Object.values(currentState.taskSessions.items)
+    .filter((session) => workspaceTaskIds.has(session.task_id))
+    .map((session) => session.id);
+  for (const sessionId of sessionIds) {
+    currentState.clearQueueStatus(sessionId);
+  }
+  store.setState((state) => {
+    const items = state.workspaces.items.filter((item) => item.id !== workspaceId);
+    const activeId =
+      state.workspaces.activeId === workspaceId
+        ? (items[0]?.id ?? null)
+        : state.workspaces.activeId;
+    const clearBoards = state.workspaces.activeId === workspaceId;
+    return {
+      ...state,
+      workspaces: { items, activeId },
+      workflows: clearBoards ? { items: [], activeId: null } : state.workflows,
+      kanban: clearBoards ? { workflowId: null, steps: [], tasks: [] } : state.kanban,
+    };
+  });
+}
+
 export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "workspace.created": (message) => {
@@ -72,24 +104,6 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
         },
       }));
     },
-    "workspace.deleted": (message) => {
-      store.setState((state) => {
-        const items = state.workspaces.items.filter((item) => item.id !== message.payload.id);
-        const activeId =
-          state.workspaces.activeId === message.payload.id
-            ? (items[0]?.id ?? null)
-            : state.workspaces.activeId;
-        const clearBoards = state.workspaces.activeId === message.payload.id;
-        return {
-          ...state,
-          workspaces: {
-            items,
-            activeId,
-          },
-          workflows: clearBoards ? { items: [], activeId: null } : state.workflows,
-          kanban: clearBoards ? { workflowId: null, steps: [], tasks: [] } : state.kanban,
-        };
-      });
-    },
+    "workspace.deleted": (message) => handleWorkspaceDeleted(store, message.payload.id),
   };
 }

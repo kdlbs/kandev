@@ -16,6 +16,9 @@ The task system prepares a direct structured message before persistence and
 agent dispatch. The preparation resolves saved-prompt references from backend
 storage and assigns trusted provenance to the generated context.
 
+The same preparation contract applies to initial structured launch prompts.
+Workflow composition is optional and does not determine expansion eligibility.
+
 The existing composer remains responsible for selection and visible `@name`
 serialization. Its prompt-definition block is compatibility input only. It is
 not a trusted source.
@@ -92,6 +95,34 @@ An eagerly started Quick Chat is already in `WAITING_FOR_INPUT` at step 2. The
 new preparation step therefore runs before the title-owner system-context
 canonicalization that caused the regression.
 
+### Launches without workflow composition
+
+`applyWorkflowAndPlanModeWithPromptContext` owns the fallback when workflow
+composition does not run. This covers an empty workflow-step ID, an ephemeral
+task, an absent step getter, and a failed step lookup. Keep the existing lookup
+warning and launch behavior; prepare the effective base prompt before adding
+the plan-mode prefix.
+
+For a structured session with no accepted expansion, use
+`expandPromptReferencesWithContext`. Return both the prepared prompt and the
+exact generated context to the caller. `startTask` and `StartCreatedSession`
+pass that context to their existing system-context injectors. Their message
+recording and agent dispatch use the resulting canonical prompt.
+
+When a direct message supplies trusted acceptance-time context, retain its
+exact block once and return the same trusted value. Do not read mutable saved
+records again or infer trust from a block found in the prompt text. Existing
+canonicalization continues to remove untrusted lookalikes.
+
+Use whether workflow composition ran to select the fallback. An empty context
+return is not sufficient: a completed lookup can validly resolve no references.
+The successful workflow path keeps its current composition and lookup behavior.
+Passthrough sessions remain excluded from generated hidden expansions.
+
+The MCP task-create handler continues to pass the task description and selected
+step into `LaunchSession`. It does not gain a separate expansion implementation.
+This repair does not infer a workflow step or change step-selection semantics.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -139,6 +170,11 @@ expansion reached the session during diagnosis.
   canonical persistence, dispatch equality, and passthrough exclusion.
 - Desktop and `mobile-chrome` Playwright tests select a saved prompt in Quick
   Chat and observe a deterministic agent response from its definition.
+- Orchestrator tests cover missing workflow-step IDs, ephemeral launches,
+  absent step getters, and lookup failures with the real saved-prompt service.
+- Launch integration tests capture the agent-manager prompt and recorded user
+  message for `LaunchSession` and `StartCreatedSession` without workflow steps.
+  They verify matching definitions, preserved trust, and passthrough exclusion.
 
 ## Related decisions
 

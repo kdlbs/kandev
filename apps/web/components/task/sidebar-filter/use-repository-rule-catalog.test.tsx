@@ -1,8 +1,13 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { StateProvider } from "@/components/state-provider";
 
 const mocks = vi.hoisted(() => ({
   fetchAccessibleRepos: vi.fn(),
+  fetchGitHubStatus: vi.fn(),
+  fetchGitLabStatus: vi.fn(),
+  getAzureDevOpsConfig: vi.fn(),
   listUserProjects: vi.fn(),
   listAzureDevOpsProjects: vi.fn(),
   listAzureDevOpsRepositories: vi.fn(),
@@ -10,11 +15,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchAccessibleRepos: mocks.fetchAccessibleRepos,
+  fetchGitHubStatus: mocks.fetchGitHubStatus,
 }));
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
+  fetchGitLabStatus: mocks.fetchGitLabStatus,
   listUserProjects: mocks.listUserProjects,
 }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
+  getAzureDevOpsConfig: mocks.getAzureDevOpsConfig,
   listAzureDevOpsProjects: mocks.listAzureDevOpsProjects,
   listAzureDevOpsRepositories: mocks.listAzureDevOpsRepositories,
 }));
@@ -33,6 +41,10 @@ import { useRepositoryRuleCatalog } from "./use-repository-rule-catalog";
 
 const WORKSPACE_ID = "workspace-1";
 const PLUGIN_ID = "catalog-bitbucket-provider";
+
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <StateProvider>{children}</StateProvider>
+);
 
 afterEach(() => {
   cleanup();
@@ -60,10 +72,16 @@ describe("useRepositoryRuleCatalog", () => {
       ],
     });
     mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
+    mocks.fetchGitHubStatus.mockResolvedValue({
+      authenticated: false,
+      token_configured: false,
+    });
+    mocks.fetchGitLabStatus.mockResolvedValue(null);
+    mocks.getAzureDevOpsConfig.mockResolvedValue(null);
     mocks.listUserProjects.mockRejectedValue(new Error("GitLab not configured"));
     mocks.listAzureDevOpsProjects.mockRejectedValue(new Error("Azure DevOps not configured"));
 
-    const { result } = renderHook(() => useRepositoryRuleCatalog(WORKSPACE_ID, true));
+    const { result } = renderHook(() => useRepositoryRuleCatalog(WORKSPACE_ID, true), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => result.current.setQuery("bitbucket.org"));

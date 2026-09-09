@@ -15,13 +15,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
-// notification to the agent while waiting for the user's answer. The agent's MCP
-// client (auggie runs on Node, whose fetch/undici applies a 300s idle timeout to
-// the in-flight tool-call request) aborts the call with "fetch failed" if no bytes
-// arrive for that long. Emitting a progress notification well inside that window
-// keeps the streamed POST/SSE response alive so the call survives until the user
-// responds. Declared as a var so tests can shorten it.
+// askQuestionKeepAliveInterval controls progress notifications during the
+// blocking ask_user_question call. Managed defaults keep it below client idle
+// deadlines. Tests can shorten it for fast transport tests.
 var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
@@ -327,6 +323,31 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := strings.TrimSpace(req.GetString("outcome", ""))
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if outcome != "action_taken" && outcome != "non_actionable" && outcome != "blocked" {
+			return mcp.NewToolResultError("outcome must be action_taken, non_actionable, or blocked"), nil
+		}
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"outcome":    outcome,
+			"summary":    summary,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReportPRAutoFixOutcome, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

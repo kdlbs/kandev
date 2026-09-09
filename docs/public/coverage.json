@@ -130,16 +130,17 @@
         "tasks-and-workflows"
       ],
       "sources": [
-        "apps/backend/internal/mcp/server/agent_decision_tool.go",
+        "apps/backend/cmd/agentctl/kandev_task.go",
+        "apps/backend/internal/office/configloader/skills/kandev-step-decision/SKILL.md",
+        "apps/backend/internal/office/runtime/handler.go",
         "apps/backend/internal/office/dashboard/agent_decisions.go"
       ],
       "tests": [
-        "apps/backend/internal/mcp/server/agent_decision_tool_test.go",
+        "apps/backend/cmd/agentctl/kandev_task_decision_test.go",
+        "apps/backend/internal/office/runtime/handler_decision_test.go",
         "apps/backend/internal/office/dashboard/agent_decisions_test.go"
       ],
-      "mcpTools": [
-        "record_step_decision_kandev"
-      ]
+      "mcpTools": []
     },
     {
       "id": "task-lifecycle",
@@ -450,6 +451,7 @@
       "mcpTools": [
         "get_task_mr_automation_kandev",
         "get_task_pr_automation_kandev",
+        "report_pr_auto_fix_outcome_kandev",
         "update_task_mr_automation_kandev",
         "update_task_pr_automation_kandev"
       ]

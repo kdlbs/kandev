@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-05
+last_updated: 2026-09-08
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-002
@@ -234,6 +234,59 @@ All launch surfaces remain behind `features.canvases`. A disabled client does
 not request canvas counts, add a settings tab, or register the task preset.
 
 ## Agent authoring guidance
+
+### Discovery and creation prompts
+
+The shared task prompt uses the
+[agent discovery contract](../../agents/system-design/mcp-tool-discovery-guidance.md).
+When the resolved session profile includes `CapabilityCanvas`, it also includes
+this compact instruction:
+
+> For a requested Kandev canvas, discover `create_canvas_kandev`, `read_canvas_authoring_skill_kandev`, and `publish_canvas_kandev`.
+> Create the draft in Kandev before writing application files.
+> Read the authoring skill once and edit only inside the returned source directory.
+> Publish through MCP and report the returned release status.
+> If publication is unsuccessful, report the failure and do not claim that the canvas is published.
+> Files or a successful local build do not create a published Kandev canvas.
+
+The optional section is absent when the resolved profile lacks canvas tools.
+This covers canvas requests inside ordinary task conversations, independently
+of the guided task preset.
+
+`CanvasTaskCreateLauncher` retains the localized
+`canvases:createCanvasTaskPrompt` preset in the normal `TaskCreateDialog`.
+The preset is visible and editable. Proposed English wording:
+
+> Create an interactive canvas inside Kandev for the application I describe.
+> If the application goal is missing, ask what the canvas must show or do.
+> Find the Kandev canvas MCP tools before writing application files.
+> If they are not callable, use native tool search for `kandev canvas` or inspect the available MCP catalog.
+> Call `create_canvas_kandev` to create the draft and obtain its source directory.
+> Read `read_canvas_authoring_skill_kandev` once without a path.
+> Build inside the returned directory and use authorized live Kandev data for domain views.
+> Call `publish_canvas_kandev` and address any validation errors.
+> Report the canvas identity and whether its release is active, awaits permission review, or was unsuccessful.
+> If publication is unsuccessful, report the failure and do not claim that the canvas is published.
+> If workspace access requires promotion, explain the user action that is still required.
+> A local build alone does not publish a canvas inside Kandev.
+> If the tools remain unavailable, report the limitation instead of claiming that workspace files are a Kandev canvas.
+
+The existing selected question capability governs any clarification. The
+preset cannot grant a question tool to an autopilot session that lacks one.
+An application goal already supplied by the user needs no repeated interview.
+
+English, Portuguese, and Simplified Chinese catalogs receive equivalent
+wording. Traditional Chinese catalogs use the repository generator. Tool names
+remain literal protocol identifiers. The pseudo-locale uses its generator.
+
+The nearest mobile exemplar is the existing full-screen `TaskCreateDialog`
+opened from workspace Canvases settings. This is a content change within that
+surface. Its scroll owner, touch controls, and navigation remain unchanged.
+Focused desktop and mobile tests cover the longer editable prompt and its
+submitted value. Tests inspect the real catalog value before replacing any
+description with mock-agent commands.
+
+### Bundled authoring skill
 
 Kandev bundles a read-only `kandev-canvas-authoring` system skill in a canvas
 embed that is separate from the Office skill embed. At startup, Kandev writes

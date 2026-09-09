@@ -3,6 +3,7 @@ import {
   LARGE_FILE_TREE_COUNT,
   LARGE_FILE_TREE_FOLDER,
   largeFileTreePath,
+  scrollToLastLargeFile,
   setupLargeFileTreeTask,
 } from "./large-file-tree-virtualization-helpers";
 
@@ -40,10 +41,10 @@ test.describe("Mobile large file tree virtualization", () => {
 
     const viewport = session.fileTreeScrollViewport();
     await expect(viewport).toBeVisible();
-    await viewport.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
+    await scrollToLastLargeFile(
+      session.fileTreeNode(largeFileTreePath(LARGE_FILE_TREE_COUNT - 1)),
+      viewport,
+    );
 
     const lastFile = largeFileTreePath(LARGE_FILE_TREE_COUNT - 1);
     await expect(session.fileTreeNode(lastFile)).toBeVisible({ timeout: 15_000 });

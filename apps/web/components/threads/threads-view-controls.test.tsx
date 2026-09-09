@@ -1,11 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import { ThreadsViewControls } from "./threads-view-controls";
 
-const responsive = vi.hoisted(() => ({ usesDesktopWorkbench: true }));
+const responsive = vi.hoisted(() => ({ usesDesktopWorkbench: true, isFinePointer: true }));
 const EMPTY_CANDIDATES: never[] = [];
 const VIEW_PICKER_TEST_ID = "threads-view-picker";
+const DELETE_ACTION_TEST_ID = "threads-view-delete";
+const MOBILE_DRAWER_TEST_ID = "threads-mobile-view-drawer";
 
 const ALL_VIEW: ThreadView = {
   id: "view-all-threads",
@@ -56,11 +58,73 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   responsive.usesDesktopWorkbench = true;
+  responsive.isFinePointer = true;
   state.threadViews.draft = null;
   state.threadViews.syncError = null;
 });
 
 describe("ThreadsViewControls", () => {
+  it("deletes the captured desktop view only after named confirmation", async () => {
+    render(
+      <ThreadsViewControls
+        candidates={EMPTY_CANDIDATES}
+        admittedCount={0}
+        matchingCount={0}
+        hiddenCount={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("threads-view-settings"));
+    fireEvent.click(screen.getByTestId(DELETE_ACTION_TEST_ID));
+
+    expect(state.deleteThreadView).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Delete All threads?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(state.deleteThreadView).not.toHaveBeenCalled();
+    expect(screen.getByTestId("threads-view-settings-popover")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(DELETE_ACTION_TEST_ID));
+    fireEvent.click(screen.getByRole("button", { name: "Delete All threads" }));
+
+    await waitFor(() => expect(state.deleteThreadView).toHaveBeenCalledWith(ALL_VIEW.id));
+    expect(state.deleteThreadView).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByTestId("threads-view-settings-popover")).toBeNull());
+  });
+
+  it("keeps mobile deletion inline until the user confirms", async () => {
+    responsive.usesDesktopWorkbench = false;
+    responsive.isFinePointer = false;
+    render(
+      <ThreadsViewControls
+        candidates={EMPTY_CANDIDATES}
+        admittedCount={0}
+        matchingCount={0}
+        hiddenCount={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("threads-mobile-view-trigger"));
+    fireEvent.click(await screen.findByTestId("threads-mobile-view-settings"));
+    fireEvent.click(await screen.findByTestId(DELETE_ACTION_TEST_ID));
+
+    expect(state.deleteThreadView).not.toHaveBeenCalled();
+    const confirmation = screen.getByRole("group", { name: "Delete All threads?" });
+    expect(within(confirmation).getByRole("button", { name: "Cancel" }).className).toContain(
+      "h-11",
+    );
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID).dataset.state).toBe("open");
+
+    fireEvent.click(screen.getByTestId(DELETE_ACTION_TEST_ID));
+    fireEvent.click(screen.getByRole("button", { name: "Delete All threads" }));
+
+    await waitFor(() => expect(state.deleteThreadView).toHaveBeenCalledWith(ALL_VIEW.id));
+    expect(state.deleteThreadView).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID).dataset.state).toBe("closed"),
+    );
+  });
+
   it("switches saved views from the compact selector and shows bounded counts", async () => {
     render(
       <ThreadsViewControls
@@ -99,7 +163,9 @@ describe("ThreadsViewControls", () => {
       expect.objectContaining({ filters: expect.arrayContaining([expect.any(Object)]) }),
     );
   });
+});
 
+describe("ThreadsViewControls mobile composition", () => {
   it("keeps the saved-view surface independent from sidebar view state", async () => {
     render(
       <ThreadsViewControls
@@ -133,7 +199,7 @@ describe("ThreadsViewControls", () => {
     expect(screen.queryByTestId(VIEW_PICKER_TEST_ID)).toBeNull();
 
     fireEvent.click(trigger);
-    expect(await screen.findByTestId("threads-mobile-view-drawer")).toBeTruthy();
+    expect(await screen.findByTestId(MOBILE_DRAWER_TEST_ID)).toBeTruthy();
     fireEvent.click(await screen.findByTestId("threads-mobile-view-option-view-review"));
 
     expect(state.setThreadActiveView).toHaveBeenCalledWith(REVIEW_VIEW.id);
@@ -165,6 +231,6 @@ describe("ThreadsViewControls", () => {
     expect(screen.getByTestId("threads-task-picker")).toBeTruthy();
     fireEvent.click(screen.getByTestId("threads-task-picker-back"));
     expect(screen.getByTestId("threads-view-editor")).toBeTruthy();
-    expect(screen.getByTestId("threads-mobile-view-drawer")).toBeTruthy();
+    expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID)).toBeTruthy();
   });
 });

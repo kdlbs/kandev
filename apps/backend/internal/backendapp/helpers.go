@@ -69,6 +69,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
@@ -694,6 +695,7 @@ type routeParams struct {
 	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
+	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -741,6 +743,11 @@ func registerRoutes(p routeParams) {
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -983,6 +990,16 @@ func readyHandler(p routeParams) gin.HandlerFunc {
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,
 				versionFieldKey: version,
+			})
+			return
+		}
+		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+				"reason":        "persistence",
+				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
 			})
 			return
 		}
@@ -1260,6 +1277,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1542,6 +1560,8 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
@@ -1852,13 +1872,12 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
+	if p.orchestratorSvc != nil {
+		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)
+	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
-	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
-		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
-	}
-
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.

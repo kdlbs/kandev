@@ -30,6 +30,30 @@ func (r lifecycleClaimSignalRepo) ClaimPromptableTaskSessionIfActive(
 	return claim, err
 }
 
+func (r lifecycleClaimSignalRepo) ClaimPromptableTaskSessionIfActiveForIdentity(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+) (models.PromptableTaskSessionClaim, error) {
+	claim, err := r.repoStore.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, taskID, sessionID, incarnationID,
+	)
+	if err == nil && claim.Status == models.PromptableTaskSessionClaimed {
+		r.claimed <- struct{}{}
+	}
+	return claim, err
+}
+
+func (r lifecycleClaimSignalRepo) UpdateTaskSessionStateIfCurrentIdentity(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+	expected, state models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	return r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
+	)
+}
+
 type orderedResetAgentManager struct {
 	*mockAgentManager
 	events chan string
@@ -199,7 +223,7 @@ func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 		}},
 	}
 	if err := svc.autoStartStepPrompt(
-		context.Background(), "task1", resetSession, step, "successor prompt", false, false,
+		context.Background(), "task1", resetSession, step, "successor prompt", false, false, nil,
 	); err != nil {
 		t.Fatalf("auto-start successor prompt: %v", err)
 	}
@@ -245,7 +269,7 @@ func TestResetAgentContext_ResetMarkerPrecedesCancellationWait(t *testing.T) {
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel()
 	_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
-		cancelledCtx, session.TaskID, session.ID, "", false, nil, nil, "", false,
+		cancelledCtx, session.TaskID, session.ID, "", false, nil, nil, "", false, nil,
 	)
 	if !errors.Is(err, ErrSessionResetInProgress) {
 		t.Fatalf("prompt admission error = %v, want %v", err, ErrSessionResetInProgress)
@@ -318,7 +342,7 @@ func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 	go func() {
 		close(promptStarted)
 		_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
-			ctx, session.TaskID, session.ID, "", false, nil, nil, "", false,
+			ctx, session.TaskID, session.ID, "", false, nil, nil, "", false, nil,
 		)
 		promptDone <- err
 	}()
