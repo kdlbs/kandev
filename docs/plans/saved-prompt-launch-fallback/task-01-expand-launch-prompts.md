@@ -115,7 +115,8 @@ launches, while accepted trusted context is preserved without re-reading mutable
 saved records. Added real SQLite-backed coverage for empty, ephemeral, missing,
 and failed workflow-step preparation, launch persistence and dispatch equality,
 trust preservation, forged-content guards, missing references, and passthrough
-exclusion. Documented the no-step launch behavior in the developer tools guide.
+exclusion, including dynamic routing to a passthrough candidate. Documented the
+no-step launch behavior in the developer tools guide.
 
 Verification passed on 2026-09-09:
 
@@ -123,6 +124,7 @@ Verification passed on 2026-09-09:
 - `rtk go test -race ./internal/prompts/service ./internal/sysprompt -count=1`
 - `rtk go test -race ./internal/task/handlers -run 'TestWSAddMessage_(PreparesSavedPromptBeforePersistenceAndDispatch|PassesTrustedPromptContextToCreatedSessionStart)' -count=1`
 - `rtk go test -race ./internal/orchestrator -run '^TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep$' -count=1`
+- `rtk go test -race ./internal/orchestrator -run '^TestStartCreatedSession_DropsAcceptedPromptContextWhenDynamicRouteIsPassthrough$' -count=1`
 - `rtk node --test scripts/validate-public-docs.test.mjs`
 - `rtk node scripts/validate-public-docs.mjs`
 - `rtk python3 scripts/lint-spec-files.py --all`

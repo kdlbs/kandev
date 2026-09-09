@@ -85,6 +85,11 @@ func TestApplyWorkflowAndPlanMode_ExpandsWithoutWorkflowComposition(t *testing.T
 				},
 			},
 		},
+		{
+			name:           "step not found without error",
+			workflowStepID: "unknown-step",
+			stepGetter:     newMockStepGetter(),
+		},
 	}
 
 	for _, test := range tests {
@@ -345,4 +350,53 @@ func TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep(t
 	require.Contains(t, dispatchedPrompt, "Use the original principles.")
 	require.NotContains(t, dispatchedPrompt, "Use the changed principles.")
 	require.Equal(t, 1, strings.Count(dispatchedPrompt, sysprompt.Wrap(trustedContext)))
+}
+
+// @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.8
+func TestStartCreatedSession_DropsAcceptedPromptContextWhenDynamicRouteIsPassthrough(t *testing.T) {
+	ctx := context.Background()
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	_, err := promptService.CreatePrompt(ctx, "principles", "Use the original principles.")
+	require.NoError(t, err)
+	preparedPrompt, trustedContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, "Follow @principles.", zap.NewNop(),
+	)
+	require.NotEmpty(t, trustedContext)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", Title: "Task", Description: "fallback description", State: v1.TaskStateInProgress,
+	}
+	const dynamicProfileID = "dynamic-profile"
+	const passthroughProfileID = "passthrough-profile"
+	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, dynamicProfileID, []workflowDynamicCandidate{{
+		executionProfileID: passthroughProfileID,
+		enabled:            true,
+		cliPassthrough:     true,
+	}})
+	var dispatchedPrompt string
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			dispatchedPrompt = req.TaskDescription
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.SetProfileExecutionResolver(resolver)
+	svc.promptExpander = promptService
+
+	_, err = svc.StartCreatedSessionWithPromptContext(
+		ctx, "task1", "session1", dynamicProfileID, preparedPrompt,
+		false, false, false, nil, nil, trustedContext,
+	)
+	require.NoError(t, err)
+	require.Contains(t, dispatchedPrompt, "Follow @principles.")
+	require.NotContains(t, dispatchedPrompt, sysprompt.Wrap(trustedContext))
+	require.NotContains(t, dispatchedPrompt, "Use the original principles.")
+	persisted, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.True(t, persisted.IsPassthrough)
 }

@@ -76,7 +76,7 @@ All new tests live in
 | --- | --- |
 | 001.9, 001.10 | `TestApplyWorkflowAndPlanMode_ExpandsWithoutWorkflowComposition`: empty step ID, ephemeral task, nil getter, failed lookup; assert both visible references and real saved definitions. |
 | 001.11 | `TestApplyWorkflowAndPlanMode_PreservesAcceptedContextWithoutWorkflow` and `TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep`: change saved content after acceptance; assert the original definition and no duplicate expansion through preparation and dispatch. |
-| 001.4, 001.5, 001.8 | `TestApplyWorkflowAndPlanMode_WithoutWorkflowGuards`: forged blocks, missing references, lookup failure, passthrough, absent expander, and empty prompts. |
+| 001.4, 001.5, 001.8 | `TestApplyWorkflowAndPlanMode_WithoutWorkflowGuards` and `TestStartCreatedSession_DropsAcceptedPromptContextWhenDynamicRouteIsPassthrough`: forged blocks, missing references, lookup failure, passthrough, absent expander, empty prompts, and dynamic passthrough routing. |
 | 001.6, 001.9 | `TestLaunchSession_ExpandsSavedPromptsWithoutWorkflowStep` and `TestStartCreatedSession_ExpandsSavedPromptsWithoutWorkflowStep`: capture the outgoing prompt and stored message through production entry points. |
 
 Run the first regression before editing production code. It must fail because
@@ -102,7 +102,9 @@ is recorded above. Package validation passed on 2026-09-09:
 - `rtk python3 scripts/lint-spec-files.test.py`: 30 tests passed.
 - `rtk python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `rtk git diff --check`: passed.
-- `rtk go test -race ./internal/orchestrator -run 'Test(ApplyWorkflowAndPlanMode|BuildWorkflowPrompt|LaunchSession_ExpandsSavedPromptsWithoutWorkflowStep|StartCreatedSession_ExpandsSavedPromptsWithoutWorkflowStep|StartTask_PreservesOnlyResolvedWorkflowPromptExpansion|StartCreatedSession_PreservesOnlyResolvedWorkflowPromptExpansion)' -count=1`: 38 tests passed.
+- `rtk go test -race ./internal/orchestrator -run 'Test(ApplyWorkflowAndPlanMode|BuildWorkflowPrompt|LaunchSession_ExpandsSavedPromptsWithoutWorkflowStep|StartCreatedSession_ExpandsSavedPromptsWithoutWorkflowStep|StartTask_PreservesOnlyResolvedWorkflowPromptExpansion|StartCreatedSession_PreservesOnlyResolvedWorkflowPromptExpansion)' -count=1`: 39 tests passed.
+- `rtk go test -race ./internal/orchestrator -run '^TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep$' -count=1`: 1 test passed.
+- `rtk go test -race ./internal/orchestrator -run '^TestStartCreatedSession_DropsAcceptedPromptContextWhenDynamicRouteIsPassthrough$' -count=1`: 1 test passed.
 - `rtk go test -race ./internal/prompts/service ./internal/sysprompt -count=1`: 95 tests passed.
 - `rtk go test -race ./internal/task/handlers -run 'TestWSAddMessage_(PreparesSavedPromptBeforePersistenceAndDispatch|PassesTrustedPromptContextToCreatedSessionStart)' -count=1`: 2 tests passed.
 - `rtk node --test scripts/validate-public-docs.test.mjs`: 61 tests passed.
