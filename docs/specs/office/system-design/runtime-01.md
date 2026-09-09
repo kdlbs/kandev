@@ -212,7 +212,7 @@ Mounted by `runtime.RegisterRoutes` (`internal/office/runtime/handler.go`). Ever
 | GET | `/runtime/skills` | `list_skills` | – |
 | DELETE | `/runtime/skills/:id` | `delete_skills` | – |
 
-Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies and other operational errors return `500 Internal Server Error` with the stable `internal server error` message. The server log keeps the original error cause.
+Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies and other operational errors return `500 Internal Server Error` with the stable `internal runtime error` message. The server log keeps the original error cause.
 
 ### Recovery actions (UI-facing, dashboard handler)
 
