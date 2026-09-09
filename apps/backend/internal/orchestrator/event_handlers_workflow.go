@@ -3081,48 +3081,17 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// When called from applyEngineTransition (on_turn_complete), processOnEnter
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
-		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
-			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-				if workflowAutoStartWasCancelled(err) {
-					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID))
-					return
-				}
-				s.logger.Info("creating fresh workflow session after reused session terminalized",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID))
-				replacement, replacementErr := s.createNewSessionForStep(
-					ctx, taskID, session, session.AgentProfileID,
-				)
-				if replacementErr != nil {
-					s.logger.Error("failed to create replacement after reused session terminalized",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
-					return
-				}
-				replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-					ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
-				)
-				if promptErr != nil {
-					s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
-					return
-				}
-				if replacementErr = s.autoStartStepPrompt(
-					ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true,
-				); replacementErr != nil {
-					s.logger.Error("failed to auto-start replacement after reused session terminalized",
-						zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
-					s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
-					s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
-				}
-				return
-			}
-			s.logger.Error("failed to auto-start agent for step",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("step_name", step.Name),
-				zap.Error(err))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true)
+		if err == nil {
+			return
 		}
+		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			s.handleTerminalizedWorkflowAutoStart(ctx, taskID, session, step, taskDescription, hasPlanMode, isPassthrough, err)
+			return
+		}
+		s.logger.Error("failed to auto-start agent for step", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("step_name", step.Name), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 
 	default:
 		// When the session was just switched (agent profile change) but the step
@@ -3543,7 +3512,35 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// for the same session. The DB transition is already persisted above, so
 	// it's safe to defer the rest.
 	taskDescription := task.Description
-	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+	go func() {
+		if err := s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription); err != nil {
+			s.logger.Error("process pending workflow move", zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(err))
+		}
+	}()
+}
+
+func (s *Service) handleTerminalizedWorkflowAutoStart(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, hasPlanMode, isPassthrough bool, err error) {
+	if workflowAutoStartWasCancelled(err) {
+		s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement", zap.String("task_id", taskID), zap.String("session_id", session.ID))
+		return
+	}
+	s.logger.Info("creating fresh workflow session after reused session terminalized", zap.String("task_id", taskID), zap.String("session_id", session.ID))
+	replacement, replacementErr := s.createNewSessionForStep(ctx, taskID, session, session.AgentProfileID)
+	if replacementErr != nil {
+		s.logger.Error("failed to create replacement after reused session terminalized", zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(replacementErr))
+		return
+	}
+	prompt, promptErr := s.buildWorkflowEntryPrompt(ctx, taskDescription, step, taskID, replacement.ID, isPassthrough)
+	if promptErr != nil {
+		s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
+		return
+	}
+	if replacementErr = s.autoStartStepPrompt(ctx, taskID, replacement, step, prompt, hasPlanMode, true); replacementErr == nil {
+		return
+	}
+	s.logger.Error("failed to auto-start replacement after reused session terminalized", zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+	s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+	s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {

@@ -187,63 +187,20 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, session
 		source, err := s.insertQueueMessageWithMetadata(
 			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
 		)
+		if err != nil && (!errors.Is(err, ErrQueueFull) || !autoMergeEnabled || afterInsert != nil) {
+			return err
+		}
 		if err != nil {
-			if errors.Is(err, ErrQueueFull) && autoMergeEnabled && afterInsert == nil {
-				// A full queue must still accept a message that would fold into
-				// the tail: admission-time auto-merge runs after a successful
-				// insert, so at capacity it could never fire. Fold the
-				// candidate directly — the fold is the admission. The
-				// afterInsert hook is excluded because it claims staged
-				// attachments against a persisted source row, which this path
-				// never creates.
-				candidate := &QueuedMessage{
-					SessionID:   sessionID,
-					TaskID:      taskID,
-					Content:     content,
-					Model:       model,
-					PlanMode:    planMode,
-					Attachments: attachments,
-					Metadata:    copyMessageMetadata(metadata, 0),
-					QueuedAt:    time.Now().UTC(),
-					QueuedBy:    userID,
-				}
-				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)
-				switch {
-				case mergeErr != nil:
-					if errors.Is(mergeErr, ErrTaskInactive) {
-						// The task was archived or deleted while the admission
-						// was in flight; surface the inactive-task contract
-						// instead of a misleading queue-full rejection.
-						return mergeErr
-					}
-					s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
-						zap.String("session_id", sessionID),
-						zap.Error(mergeErr))
-					return err
-				case didMerge && merged != nil:
-					s.logger.Info("automatically merged queued entry into full tail",
-						zap.String("session_id", sessionID),
-						zap.String("surviving_entry_id", merged.ID))
-					queued = merged
-					return nil
-				default:
-					// The fold skipped because the tail is absent or changed —
-					// a concurrent drain freed capacity (or a concurrent fold or
-					// drain moved the tail) between the failed insert and the
-					// fold scan. Retry the ordinary insert once under the held
-					// admission lock: it succeeds now that capacity is free, and
-					// still returns ErrQueueFull when another writer keeps the
-					// cap occupied. Without this retry a stale ErrQueueFull
-					// would drop a message that is admissible at fold time.
-					source, err = s.insertQueueMessageWithMetadata(
-						admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
-					)
-					if err != nil {
-						return err
-					}
-				}
-			} else {
+			var merged *QueuedMessage
+			source, merged, err = s.mergeFullQueueAdmission(
+				admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession, err,
+			)
+			if err != nil {
 				return err
+			}
+			if merged != nil {
+				queued = merged
+				return nil
 			}
 		}
 		if afterInsert != nil {
@@ -255,6 +212,33 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, session
 		return nil
 	})
 	return queued, err
+}
+
+// mergeFullQueueAdmission attempts the fold that admits a candidate to an
+// otherwise full queue. A nil source and non-nil merged row means the fold
+// completed; a non-nil source means a concurrent change freed capacity and the
+// caller should continue ordinary admission.
+func (s *Service) mergeFullQueueAdmission(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int, queueFullErr error) (*QueuedMessage, *QueuedMessage, error) {
+	candidate := &QueuedMessage{
+		SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode,
+		Attachments: attachments, Metadata: copyMessageMetadata(metadata, 0), QueuedAt: time.Now().UTC(), QueuedBy: userID,
+	}
+	merged, didMerge, err := s.repo.AutoMergeCandidateIntoAbove(ctx, candidate)
+	if err != nil {
+		if errors.Is(err, ErrTaskInactive) {
+			return nil, nil, err
+		}
+		s.logger.Error("automatic merge into full queue failed; preserving queue full rejection", zap.String("session_id", sessionID), zap.Error(err))
+		return nil, nil, queueFullErr
+	}
+	if didMerge && merged != nil {
+		s.logger.Info("automatically merged queued entry into full tail", zap.String("session_id", sessionID), zap.String("surviving_entry_id", merged.ID))
+		return nil, merged, nil
+	}
+	// The tail changed after the failed insert, so retry once under the held
+	// admission lock. It either admits normally or reports the current cap.
+	source, err := s.insertQueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession)
+	return source, nil, err
 }
 
 // queueMessageWithMetadataSeparate is used by retry paths whose existing
