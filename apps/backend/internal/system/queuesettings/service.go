@@ -18,6 +18,12 @@ type Target interface {
 	AutoMergeEnabled() bool
 	SetAutoMergeEnabled(bool)
 }
+type revisionedAutoMergeTarget interface {
+	SetAutoMergePolicy(enabled bool, revision int64)
+}
+type autoMergePolicyLoaderTarget interface {
+	SetAutoMergePolicyLoader(func(context.Context) (bool, int64, error))
+}
 
 type EnvironmentReader func() Environment
 
@@ -44,10 +50,14 @@ func NewService(
 	if len(startup) > 0 {
 		configuration = startup[0]
 	}
-	return &Service{
+	service := &Service{
 		store: store, target: target, readEnvironment: readEnvironment,
 		configuration: configuration, logger: log,
 	}
+	if target, ok := target.(autoMergePolicyLoaderTarget); ok {
+		target.SetAutoMergePolicyLoader(service.loadAutoMergePolicy)
+	}
+	return service
 }
 
 func ReadEnvironment() Environment {
@@ -80,30 +90,32 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	environment := s.readEnvironment()
-	current, err := s.loadConfigured(ctx)
-	if err != nil {
-		return Response{}, err
-	}
-	resolution, err := Resolve(current, environment, s.configuration)
-	if err != nil {
-		return Response{}, err
-	}
-	s.warnInvalidEnvironment(resolution)
-	if patch.MaxPerSession != nil && resolution.Effective.Locked {
-		if resolution.Effective.Source == SourceConfiguration {
-			return Response{}, ErrConfigurationLocked
-		}
-		return Response{}, ErrEnvironmentLocked
-	}
-	settings := patch.Apply(resolution.Settings)
-	if err := Validate(settings); err != nil {
-		return Response{}, err
-	}
 	if s.target == nil {
 		return Response{}, ErrTargetUnavailable
 	}
-	if err := s.store.Save(ctx, settings); err != nil {
+	environment := s.readEnvironment()
+	settings, err := s.store.Update(ctx, func(current *Settings) (Settings, error) {
+		resolution, resolveErr := Resolve(current, environment, s.configuration)
+		if resolveErr != nil {
+			return Settings{}, resolveErr
+		}
+		s.warnInvalidEnvironment(resolution)
+		if patch.MaxPerSession != nil && resolution.Effective.Locked {
+			if resolution.Effective.Source == SourceConfiguration {
+				return Settings{}, ErrConfigurationLocked
+			}
+			return Settings{}, ErrEnvironmentLocked
+		}
+		updated := patch.Apply(resolution.Settings)
+		if patch.AutoMergeEnabled != nil && *patch.AutoMergeEnabled != resolution.Settings.AutoMergeEnabled {
+			updated.AutoMergeRevision = resolution.Settings.AutoMergeRevision + 1
+		}
+		if validateErr := Validate(updated); validateErr != nil {
+			return Settings{}, validateErr
+		}
+		return updated, nil
+	})
+	if err != nil {
 		return Response{}, err
 	}
 	updated, err := Resolve(&settings, environment, s.configuration)
@@ -112,12 +124,42 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	}
 	s.target.SetMaxPerSession(updated.Effective.MaxPerSession)
 	s.target.SetMergeEnabled(updated.Effective.MergeEnabled)
-	s.target.SetAutoMergeEnabled(updated.Effective.AutoMergeEnabled)
+	if target, ok := s.target.(revisionedAutoMergeTarget); ok {
+		target.SetAutoMergePolicy(updated.Effective.AutoMergeEnabled, settings.AutoMergeRevision)
+	} else {
+		s.target.SetAutoMergeEnabled(updated.Effective.AutoMergeEnabled)
+	}
 	return updated.Response, nil
+}
+
+func (s *Service) loadAutoMergePolicy(ctx context.Context) (bool, int64, error) {
+	configured, err := s.loadConfiguredConsistent(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	resolution, err := Resolve(configured, s.readEnvironment(), s.configuration)
+	if err != nil {
+		return false, 0, err
+	}
+	return resolution.Effective.AutoMergeEnabled, resolution.Settings.AutoMergeRevision, nil
 }
 
 func (s *Service) loadConfigured(ctx context.Context) (*Settings, error) {
 	configured, err := s.store.Load(ctx)
+	if err == nil {
+		return configured, nil
+	}
+	if !errors.Is(err, ErrInvalidPersisted) {
+		return nil, err
+	}
+	if s.logger != nil {
+		s.logger.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
+	}
+	return nil, nil
+}
+
+func (s *Service) loadConfiguredConsistent(ctx context.Context) (*Settings, error) {
+	configured, err := s.store.LoadConsistent(ctx)
 	if err == nil {
 		return configured, nil
 	}

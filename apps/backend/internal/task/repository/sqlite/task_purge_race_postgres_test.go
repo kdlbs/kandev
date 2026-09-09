@@ -594,3 +594,80 @@ func TestPostgresRepository_WorkspaceCascade_SerializesWithTaskCreation(t *testi
 		t.Fatalf("workspace survived cascade: count=%d", count)
 	}
 }
+
+// TestPostgresClaimedAttachmentReleaseWaitsForQueueAdmission proves cleanup
+// acquires the queue repository's cross-process session lock and rechecks
+// references after the winning admission commits.
+func TestPostgresClaimedAttachmentReleaseWaitsForQueueAdmission(t *testing.T) {
+	repoA, repoB, dbC := newTaskPostgresRepoPair(t)
+	ctx := context.Background()
+	const (
+		taskID       = "task-attachment-release-race"
+		workspaceID  = "ws-attachment-release-race"
+		sessionID    = "session-attachment-release-race"
+		attachmentID = "attachment-release-race"
+		ownerID      = "owner-attachment-release-race"
+	)
+	seedTaskWithSession(t, repoA, taskID, workspaceID, sessionID)
+	if err := repoA.CreateMessageAttachment(ctx, &models.TaskMessageAttachment{
+		ID: attachmentID, OwnerID: ownerID, WorkspaceID: workspaceID,
+		TaskID: taskID, SessionID: sessionID, Name: "notes.txt", MimeType: "text/plain",
+		Kind: "resource", DeliveryMode: "path", SizeBytes: 5, StorageKey: attachmentID,
+		State: models.AttachmentStateClaimed, ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create claimed attachment: %v", err)
+	}
+	if _, err := repoA.db.ExecContext(ctx, `
+		INSERT INTO queue_session_locks (session_id) VALUES ($1)
+		ON CONFLICT(session_id) DO NOTHING
+	`, sessionID); err != nil {
+		t.Fatalf("seed queue session lock: %v", err)
+	}
+	admissionTx, err := repoA.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin admission transaction: %v", err)
+	}
+	defer func() { _ = admissionTx.Rollback() }()
+	if _, err := admissionTx.ExecContext(ctx, `
+		SELECT session_id FROM queue_session_locks WHERE session_id = $1 FOR UPDATE
+	`, sessionID); err != nil {
+		t.Fatalf("lock queue admission: %v", err)
+	}
+	if _, err := admissionTx.ExecContext(ctx, `
+		INSERT INTO queued_messages (
+			id, session_id, task_id, position, content, attachments_json, queued_at, queued_by
+		) VALUES ($1, $2, $3, 1, 'new reference', $4, now(), 'user')
+	`, "queue-attachment-release-race", sessionID, taskID,
+		`[{"attachment_id":"attachment-release-race","name":"notes.txt","delivery_mode":"path"}]`); err != nil {
+		t.Fatalf("insert uncommitted queue admission: %v", err)
+	}
+
+	releasePID := pgBackendPID(t, repoB.db)
+	releaseDone := make(chan struct {
+		released []*models.TaskMessageAttachment
+		err      error
+	}, 1)
+	go func() {
+		released, releaseErr := repoB.DeleteClaimedMessageAttachments(
+			ctx, []string{attachmentID}, ownerID, taskID, sessionID,
+		)
+		releaseDone <- struct {
+			released []*models.TaskMessageAttachment
+			err      error
+		}{released: released, err: releaseErr}
+	}()
+	waitForWaitingLocks(t, dbC, releasePID, 1, "attachment cleanup on queue admission")
+	if err := admissionTx.Commit(); err != nil {
+		t.Fatalf("commit queue admission: %v", err)
+	}
+	result := <-releaseDone
+	if result.err != nil {
+		t.Fatalf("release claimed attachment: %v", result.err)
+	}
+	if len(result.released) != 0 {
+		t.Fatalf("release removed newly referenced attachment: %+v", result.released)
+	}
+	if _, err := repoA.GetMessageAttachment(ctx, attachmentID); err != nil {
+		t.Fatalf("newly referenced attachment was deleted: %v", err)
+	}
+}

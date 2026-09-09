@@ -10,9 +10,8 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	internaldb "github.com/kandev/kandev/internal/db"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func newTestSQLiteRepo(t *testing.T) Repository {
@@ -37,6 +36,39 @@ func newTestSQLiteRepo(t *testing.T) Repository {
 	return repo
 }
 
+func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessionIdentity) {
+	t.Helper()
+	switch typed := repo.(type) {
+	case *memoryRepository:
+		typed.mu.Lock()
+		typed.identities[identity.SessionID] = identity
+		typed.mu.Unlock()
+	case *sqliteRepository:
+		statements := []string{
+			`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
+			`ALTER TABLE task_sessions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE task_sessions ADD COLUMN queue_incarnation_id TEXT NOT NULL DEFAULT ''`,
+		}
+		for index, statement := range statements {
+			if _, err := typed.db.Exec(statement); err != nil && (index == 0 || !internaldb.IsDuplicateColumnError(err)) {
+				t.Fatalf("prepare queue session authority: %v", err)
+			}
+		}
+		if _, err := typed.db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, identity.TaskID); err != nil {
+			t.Fatalf("seed queue task authority: %v", err)
+		}
+		if _, err := typed.db.Exec(`
+			INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
+		`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+			t.Fatalf("seed queue session authority: %v", err)
+		}
+		typed.tasksTablePresent = true
+	default:
+		t.Fatalf("unsupported queue repository authority fixture %T", repo)
+	}
+}
+
 // seedLiveSessions inserts stub task_sessions rows so queue counts that join
 // live sessions treat these session IDs as present.
 func seedLiveSessions(t *testing.T, repo Repository, sessionIDs ...string) {
@@ -50,83 +82,6 @@ func seedLiveSessions(t *testing.T, repo Repository, sessionIDs ...string) {
 			t.Fatalf("seed session %s: %v", id, err)
 		}
 	}
-}
-
-func TestSQLiteRepository_SetPendingMoveRejectsStaleAndTerminalTaskGenerations(t *testing.T) {
-	ctx := context.Background()
-	raw, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
-	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
-	raw.SetMaxIdleConns(1)
-	db := sqlx.NewDb(raw, "sqlite3")
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, func() error {
-		_, execErr := db.Exec(`
-			CREATE TABLE tasks (
-				id TEXT PRIMARY KEY,
-				workflow_step_id TEXT NOT NULL,
-				state TEXT NOT NULL,
-				archived_at TIMESTAMP NULL,
-				updated_at TIMESTAMP NOT NULL
-			);
-			CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
-			INSERT INTO tasks VALUES ('task-route', 'step-pr', 'IN_PROGRESS', NULL, CURRENT_TIMESTAMP);
-		`)
-		return execErr
-	}())
-	repo, err := NewSQLiteRepository(db, db)
-	require.NoError(t, err)
-
-	stale := &PendingMove{MoveID: "move-stale", TaskID: "task-route", WorkflowStepID: "step-done", ExpectedWorkflowStepID: "step-qa"}
-	require.ErrorIs(t, repo.SetPendingMove(ctx, "session-route", stale), ErrPendingMoveGenerationConflict)
-
-	_, err = db.Exec(`UPDATE tasks SET workflow_step_id = 'step-done', state = 'COMPLETED' WHERE id = 'task-route'`)
-	require.NoError(t, err)
-	terminal := &PendingMove{MoveID: "move-terminal", TaskID: "task-route", WorkflowStepID: "step-pr", ExpectedWorkflowStepID: "step-done"}
-	require.ErrorIs(t, repo.SetPendingMove(ctx, "session-route", terminal), ErrPendingMoveGenerationConflict)
-
-	pending, err := repo.GetPendingMove(ctx, "session-route")
-	require.NoError(t, err)
-	assert.Nil(t, pending)
-}
-
-func TestSQLiteRepository_ReplaceSessionRejectsSnapshotAfterTerminalSettlement(t *testing.T) {
-	ctx := context.Background()
-	raw, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
-	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
-	raw.SetMaxIdleConns(1)
-	db := sqlx.NewDb(raw, "sqlite3")
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, func() error {
-		_, execErr := db.Exec(`
-			CREATE TABLE tasks (
-				id TEXT PRIMARY KEY,
-				workflow_step_id TEXT NOT NULL,
-				state TEXT NOT NULL,
-				archived_at TIMESTAMP NULL,
-				updated_at TIMESTAMP NOT NULL
-			);
-			CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
-			INSERT INTO tasks VALUES ('task-route', 'step-done', 'COMPLETED', NULL, CURRENT_TIMESTAMP);
-		`)
-		return execErr
-	}())
-	repo, err := NewSQLiteRepository(db, db)
-	require.NoError(t, err)
-
-	snapshot := &PendingMove{
-		ID:                     "old-row-generation",
-		MoveID:                 "stable-route-operation",
-		TaskID:                 "task-route",
-		WorkflowStepID:         "step-done",
-		ExpectedWorkflowStepID: "step-review",
-	}
-	require.ErrorIs(t, repo.ReplaceSession(ctx, "session-route", nil, snapshot), ErrPendingMoveGenerationConflict)
-
-	current, err := repo.GetPendingMove(ctx, "session-route")
-	require.NoError(t, err)
-	assert.Nil(t, current, "terminal settlement must not be undone by snapshot restore")
 }
 
 func TestSQLiteRepository_InsertList(t *testing.T) {
@@ -296,6 +251,52 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReplacementIncarnationDiscardsStaleLifecycleReservation(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	first := QueueSessionIdentity{
+		TaskID:               "t1",
+		SessionID:            "s1",
+		SessionIncarnationID: "incarnation-1",
+	}
+	seedQueueSessionIdentity(t, repo, first)
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true},
+	}
+	if err := repo.InsertForSession(ctx, first, msg, 0); err != nil {
+		t.Fatalf("insert lifecycle message: %v", err)
+	}
+	reserved, enabled, err := repo.ReserveHeadIfAutoRunForSession(ctx, first)
+	if err != nil || !enabled || reserved == nil {
+		t.Fatalf("reserve first incarnation: reserved=%+v enabled=%v err=%v", reserved, enabled, err)
+	}
+
+	replacement := first
+	replacement.SessionIncarnationID = "incarnation-2"
+	seedQueueSessionIdentity(t, repo, replacement)
+	fresh := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "fresh prompt", QueuedBy: QueuedByUser,
+	}
+	if err := repo.InsertForSession(ctx, replacement, fresh, 0); err != nil {
+		t.Fatalf("insert replacement message: %v", err)
+	}
+	next, enabled, err := repo.ReserveHeadIfAutoRunForSession(ctx, replacement)
+	if err != nil || !enabled {
+		t.Fatalf("reserve replacement incarnation: enabled=%v err=%v", enabled, err)
+	}
+	if next == nil || next.ID != fresh.ID {
+		t.Fatalf("replacement reservation = %+v, want fresh row %s", next, fresh.ID)
+	}
+	entries, err := repo.ListBySession(ctx, first.SessionID)
+	if err != nil {
+		t.Fatalf("list after stale reservation discard: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries after stale reservation discard = %d, want 0", len(entries))
+	}
+}
+
 func TestSQLiteRepository_ReserveHeadUsesStoredMetadataGuard(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -406,14 +407,11 @@ func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t
 		t.Fatal("returned reservation lost process-local reservation evidence")
 	}
 
-	retried, _, err := repo.InsertOrReplaceLifecycleByCoalesceKey(
-		ctx, reserved, "github-pr:repo:1:merged", 0, false,
-	)
-	if err != nil {
+	if err := repo.RequeuePreservingFIFO(ctx, reserved); err != nil {
 		t.Fatalf("requeue failed delivery: %v", err)
 	}
-	if retried.IsReservedInFlight() {
-		t.Fatalf("requeued copy retained transient marker: %+v", retried.Metadata)
+	if reserved.IsReservedInFlight() {
+		t.Fatalf("requeued copy retained transient marker: %+v", reserved.Metadata)
 	}
 	entries, err := repo.ListBySession(ctx, "s1")
 	if err != nil {
@@ -876,41 +874,53 @@ func TestSQLiteRepository_TransferSession(t *testing.T) {
 	}
 }
 
-func TestSQLiteRepository_TransferSessionDoesNotOverwriteNewerPendingMove(t *testing.T) {
-	repo := newTestSQLiteRepo(t)
-	ctx := context.Background()
-	source := &PendingMove{MoveID: "move-old", TaskID: "task-1", WorkflowStepID: "step-old"}
-	destination := &PendingMove{MoveID: "move-new", TaskID: "task-1", WorkflowStepID: "step-new"}
-	require.NoError(t, repo.SetPendingMove(ctx, "source", source))
-	require.NoError(t, repo.SetPendingMove(ctx, "destination", destination))
+func TestRepositories_TransferRejectsSourceLifecycleReservation(t *testing.T) {
+	factories := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+	}
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			repo := factory.new(t)
+			ctx := context.Background()
+			source := QueueSessionIdentity{
+				TaskID: "t1", SessionID: "source", SessionIncarnationID: "source-incarnation",
+			}
+			destination := QueueSessionIdentity{
+				TaskID: "t1", SessionID: "destination", SessionIncarnationID: "destination-incarnation",
+			}
+			seedQueueSessionIdentity(t, repo, source)
+			seedQueueSessionIdentity(t, repo, destination)
+			entry := &QueuedMessage{
+				SessionID: source.SessionID,
+				TaskID:    source.TaskID,
+				Content:   "durable",
+				QueuedBy:  QueuedByWorkflow,
+				Metadata:  map[string]interface{}{MetadataLifecycleDurable: true},
+			}
+			if err := repo.InsertForSession(ctx, source, entry, 0); err != nil {
+				t.Fatalf("insert durable source: %v", err)
+			}
+			if reserved, _, err := repo.ReserveHeadIfAutoRunForSession(ctx, source); err != nil || reserved == nil {
+				t.Fatalf("reserve durable source: reserved=%+v err=%v", reserved, err)
+			}
 
-	require.Error(t, repo.TransferSession(ctx, "source", "destination"))
-
-	gotSource, err := repo.GetPendingMove(ctx, "source")
-	require.NoError(t, err)
-	require.NotNil(t, gotSource)
-	assert.Equal(t, "move-old", gotSource.MoveID)
-	gotDestination, err := repo.GetPendingMove(ctx, "destination")
-	require.NoError(t, err)
-	require.NotNil(t, gotDestination)
-	assert.Equal(t, "move-new", gotDestination.MoveID)
-}
-
-func TestSQLiteRepository_ReplaceSessionDoesNotOverwriteNewerPendingMove(t *testing.T) {
-	repo := newTestSQLiteRepo(t)
-	ctx := context.Background()
-	newer := &PendingMove{MoveID: "move-new", TaskID: "task-1", WorkflowStepID: "step-new"}
-	require.NoError(t, repo.SetPendingMove(ctx, "session", newer))
-
-	err := repo.ReplaceSession(ctx, "session", nil, &PendingMove{
-		MoveID: "move-old", TaskID: "task-1", WorkflowStepID: "step-old",
-	})
-	require.Error(t, err)
-
-	got, getErr := repo.GetPendingMove(ctx, "session")
-	require.NoError(t, getErr)
-	require.NotNil(t, got)
-	assert.Equal(t, "move-new", got.MoveID)
+			if err := repo.TransferSessionIdentities(ctx, source, destination); !errors.Is(err, ErrQueueChanged) {
+				t.Fatalf("transfer error = %v, want ErrQueueChanged", err)
+			}
+			sourceEntries, err := repo.ListBySession(ctx, source.SessionID)
+			if err != nil || len(sourceEntries) != 1 {
+				t.Fatalf("source entries after rejected transfer = %+v err=%v", sourceEntries, err)
+			}
+			destinationEntries, err := repo.ListBySession(ctx, destination.SessionID)
+			if err != nil || len(destinationEntries) != 0 {
+				t.Fatalf("destination entries after rejected transfer = %+v err=%v", destinationEntries, err)
+			}
+		})
+	}
 }
 
 func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
@@ -929,8 +939,7 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	if err := repo.Insert(ctx, original, 0); err != nil {
 		t.Fatalf("insert original: %v", err)
 	}
-	seedMove := &PendingMove{MoveID: "move-restore", TaskID: "t1", WorkflowStepID: "step-a"}
-	if err := repo.SetPendingMove(ctx, "s1", seedMove); err != nil {
+	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{TaskID: "t1", WorkflowStepID: "step-a"}); err != nil {
 		t.Fatalf("set pending move: %v", err)
 	}
 	if err := repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "mutated", QueuedBy: "user"}, 0); err != nil {
@@ -938,7 +947,6 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	}
 
 	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
-		ID:              seedMove.ID,
 		MoveID:          "move-restore",
 		TaskID:          "t1",
 		WorkflowStepID:  "step-a",
@@ -983,7 +991,16 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 		t.Fatalf("expected nil move on empty, got %v err=%v", move, err)
 	}
 
-	move := &PendingMove{MoveID: "move-a", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent", SenderSessionID: "sender-s1"}
+	move := &PendingMove{
+		MoveID:               "move-a",
+		SessionIncarnationID: "incarnation-a",
+		TaskID:               "t1",
+		WorkflowID:           "w1",
+		WorkflowStepID:       "step-A",
+		Position:             0,
+		Actor:                "agent",
+		SenderSessionID:      "sender-s1",
+	}
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("set pending: %v", err)
 	}
@@ -1004,6 +1021,9 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 	if got == nil || got.MoveID != "move-b" {
 		t.Errorf("expected move-b move ID after upsert, got %+v", got)
+	}
+	if got == nil || got.SessionIncarnationID != "incarnation-a" {
+		t.Errorf("expected incarnation-a after upsert, got %+v", got)
 	}
 	if got == nil || got.Actor != "agent" {
 		t.Errorf("expected agent actor after upsert, got %+v", got)
@@ -1049,7 +1069,6 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	ctx := context.Background()
 	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{
 		MoveID: "move-migrated", TaskID: "t1", WorkflowStepID: "step-a", SenderSessionID: "sender-s1",
-		ExpectedWorkflowStepID: "step-source", InitiatingTurnID: "turn-source",
 	}); err != nil {
 		t.Fatalf("set migrated pending move: %v", err)
 	}
@@ -1062,9 +1081,6 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	}
 	if move.MoveID != "move-migrated" {
 		t.Fatalf("migrated pending move move_id = %q, want move-migrated", move.MoveID)
-	}
-	if move.ExpectedWorkflowStepID != "step-source" || move.InitiatingTurnID != "turn-source" {
-		t.Fatalf("migrated pending move generation = %#v, want step-source/turn-source", move)
 	}
 }
 

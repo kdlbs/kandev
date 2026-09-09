@@ -7,21 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
-
-var ErrTransitionSourceChanged = errors.New("source workflow step changed before transition commit")
 
 // taskUpdatedPublisher is the minimal hook the workflow store needs to emit
 // task.updated events. The orchestrator Service binds this to its shared
@@ -61,17 +58,19 @@ type workflowMoveAdmissionCASRepository interface {
 	) (applied bool, err error)
 }
 
-type workflowMoveAdmissionStateCASRepository interface {
-	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+type deferredMoveAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 		ctx context.Context,
 		task *models.Task,
-		expectedStepID string,
-		targetStepID string,
+		expectedStepID, targetStepID string,
 		limit int,
-		admittedState *v1.TaskState,
-		queueExitPending bool,
-		expectedWorkflowID string,
-	) (admitted bool, applied bool, err error)
+		record messagequeue.PendingMoveRecord,
+	) (admitted, applied bool, err error)
+	MarkDeferredMoveAppliedForSession(
+		ctx context.Context,
+		taskID, moveID string,
+		record messagequeue.PendingMoveRecord,
+	) (applied bool, err error)
 }
 
 type workflowQueuedTaskPromoter interface {
@@ -290,111 +289,48 @@ func (s *workflowStore) LoadPreviousStep(ctx context.Context, workflowID string,
 }
 
 func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) error {
-	current, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("load transition source step: %w", err)
-	}
-	if current.WorkflowStepID == toStepID {
-		return s.recordAlreadySatisfiedTransition(ctx, current, toStepID)
-	}
-	if fromStepID == "" {
-		// Legacy/internal callers used an empty source to mean "the task's
-		// current persisted step". Resolve that generation before entering the
-		// CAS arbiter instead of turning the empty sentinel into an unconditional
-		// write. A concurrent lane change after this read is still rejected.
-		fromStepID = current.WorkflowStepID
-	}
-	// ApplyTransition is already called from a lifecycle owner. Commit through
-	// the raw CAS path so the optional guardedLifecycle bridge cannot re-enter
-	// on_exit/on_enter around the same physical transition.
-	applied, err := s.applyTransitionIfAtStepAllowMissingTarget(ctx, taskID, sessionID, fromStepID, toStepID, trigger)
-	if err != nil {
-		return err
-	}
-	if !applied {
-		return ErrTransitionSourceChanged
-	}
-	return nil
+	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, trigger, "", nil)
 }
 
-func (s *workflowStore) recordAlreadySatisfiedTransition(ctx context.Context, task *models.Task, targetStepID string) error {
-	recorder, ok := s.repo.(interface {
-		RecordWorkflowRouteOperation(context.Context, routing.Operation) error
-	})
-	if !ok {
-		s.logger.Warn("workflow route operation recorder unavailable for already-satisfied transition",
-			zap.String("task_id", task.ID), zap.String("target_step_id", targetStepID))
-		return nil
-	}
-	operation, ok := routing.FromContext(ctx)
-	if !ok {
-		return nil
-	}
-	operation.TaskID = task.ID
-	operation.WorkspaceID = task.WorkspaceID
-	operation.ObservedStepID = task.WorkflowStepID
-	operation.TargetStepID = targetStepID
-	operation.Outcome = routing.OutcomeAlreadySatisfied
-	if err := recorder.RecordWorkflowRouteOperation(ctx, operation); err != nil {
-		return fmt.Errorf("record already-satisfied transition: %w", err)
-	}
-	return nil
-}
-
-func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID, moveID string) error {
-	ctx, err := s.rehydrateDeferredRouteOperation(ctx, taskID, fromStepID, toStepID, moveID)
-	if err != nil {
-		return err
-	}
-	applied, err := s.applyTransitionIfAtStepWithMoveID(
-		ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, false,
-	)
-	if err != nil {
-		return err
-	}
-	if !applied {
-		return ErrTransitionSourceChanged
-	}
-	return nil
-}
-
-func (s *workflowStore) rehydrateDeferredRouteOperation(
+func (s *workflowStore) ApplyDeferredMoveTransition(
 	ctx context.Context,
-	taskID, fromStepID, toStepID, moveID string,
-) (context.Context, error) {
-	if moveID == "" {
-		return ctx, nil
-	}
-	reader, ok := s.repo.(interface {
-		GetWorkflowRouteOperation(context.Context, string) (routing.Operation, bool, error)
-	})
-	if !ok {
-		return ctx, nil
-	}
-	operation, found, err := reader.GetWorkflowRouteOperation(ctx, moveID)
-	if err != nil {
-		return ctx, fmt.Errorf("load deferred route operation: %w", err)
-	}
-	if !found {
-		return ctx, nil
-	}
-	if operation.TaskID != taskID || operation.ExpectedStepID != fromStepID || operation.TargetStepID != toStepID {
-		return ctx, fmt.Errorf("%w: %s", routing.ErrOperationIdentityConflict, moveID)
-	}
-	return routing.WithOperation(ctx, operation), nil
+	taskID, sessionID, fromStepID, toStepID, moveID string,
+	record messagequeue.PendingMoveRecord,
+) error {
+	return s.applyTransition(
+		ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, &record,
+	)
 }
 
-func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, moveID string) error {
+func (s *workflowStore) MarkDeferredMoveApplied(
+	ctx context.Context,
+	taskID, moveID string,
+	record messagequeue.PendingMoveRecord,
+) error {
+	if moveID == "" {
+		return nil
+	}
+	repo, ok := s.repo.(deferredMoveAdmissionRepository)
+	if !ok {
+		return fmt.Errorf("deferred move repository unavailable")
+	}
+	applied, err := repo.MarkDeferredMoveAppliedForSession(ctx, taskID, moveID, record)
+	if err != nil {
+		return fmt.Errorf("persist deferred move identity: %w", err)
+	}
+	if !applied {
+		return errDeferredMoveAlreadyApplied
+	}
+	return nil
+}
+
+func (s *workflowStore) markDeferredMoveAppliedUnfenced(ctx context.Context, taskID, moveID string) error {
 	if moveID == "" {
 		return nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load task for deferred move identity: %w", err)
-	}
-	ctx, err = s.rehydrateAlreadySatisfiedRouteOperation(ctx, task, moveID)
-	if err != nil {
-		return err
 	}
 	if err := markDeferredMoveApplied(task, moveID); err != nil {
 		return err
@@ -405,31 +341,13 @@ func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, mov
 	return nil
 }
 
-func (s *workflowStore) rehydrateAlreadySatisfiedRouteOperation(
+func (s *workflowStore) applyTransition(
 	ctx context.Context,
-	task *models.Task,
+	taskID, sessionID, fromStepID, toStepID string,
+	trigger engine.Trigger,
 	moveID string,
-) (context.Context, error) {
-	reader, ok := s.repo.(interface {
-		GetWorkflowRouteOperation(context.Context, string) (routing.Operation, bool, error)
-	})
-	if !ok {
-		return ctx, nil
-	}
-	operation, found, err := reader.GetWorkflowRouteOperation(ctx, moveID)
-	if err != nil {
-		return ctx, fmt.Errorf("load already-satisfied route operation: %w", err)
-	}
-	if !found {
-		return ctx, nil
-	}
-	if operation.TaskID != task.ID || operation.TargetStepID != task.WorkflowStepID {
-		return ctx, fmt.Errorf("%w: %s", routing.ErrOperationIdentityConflict, moveID)
-	}
-	return routing.WithOperation(ctx, operation), nil
-}
-
-func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger, moveID string) error {
+	deferredMove *messagequeue.PendingMoveRecord,
+) error {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load task for transition: %w", err)
@@ -460,30 +378,21 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
+	// Publish the on_turn_complete signal's handoff on the same task snapshot
+	// as admission so a queued destination cannot promote in between.
+	s.carryStepHandoffForTransition(ctx, task, sessionID, fromStepID, toStepID, trigger)
 	task.UpdatedAt = time.Now().UTC()
 	// engine_transition applies only when no outer caller already declared a
 	// trigger — applyPendingMove sets mcp_deferred_move before reaching this
 	// path, and that must survive rather than be overwritten.
-	transitionCtx := ctx
-	if !steptelemetry.HasTrigger(transitionCtx) {
-		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
-	}
-	// Only attach a PendingAllocation when the caller already opted in by
-	// wrapping ctx with a ResultHolder (applyEngineTransition does this for
-	// the engine-driven on_turn_complete path). Attaching it unconditionally
-	// would allocate workflow_step_entries rows for every transition into a
-	// step with engine-owned on_enter actions, including the callers (manual
-	// move, deferred move) that don't yet dispatch through them this Build
-	// round — see docs/specs/workflow-on-enter-action-dispatch/spec.md and
-	// the task plan's scope note for why those entry paths are deferred.
-	if targetStep != nil {
-		if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
-			if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
-				transitionCtx = stepentry.WithPendingAllocation(transitionCtx, pending)
-			}
+	transitionCtx := transitionContext(ctx, sessionID, trigger, targetStep)
+	if deferredMove != nil {
+		if err := s.updateDeferredTransitionTask(
+			transitionCtx, task, fromStepID, targetStep, *deferredMove,
+		); err != nil {
+			return fmt.Errorf("update task workflow step: %w", err)
 		}
-	}
-	if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
+	} else if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -493,7 +402,7 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 	// instead of leaving a stale duplicate until reload.
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
 
-	if task.QueuedForStepID == "" {
+	if deferredMove == nil && task.QueuedForStepID == "" {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
 				zap.String("session_id", sessionID),
@@ -509,6 +418,74 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
+	return nil
+}
+
+func (s *workflowStore) carryStepHandoffForTransition(
+	ctx context.Context,
+	task *models.Task,
+	sessionID, fromStepID, toStepID string,
+	trigger engine.Trigger,
+) {
+	if trigger != engine.TriggerOnTurnComplete {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to load session for step handoff carry",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if session == nil {
+		return
+	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
+		consumedSignal = &signal
+	}
+	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+}
+
+func transitionContext(
+	ctx context.Context,
+	sessionID string,
+	trigger engine.Trigger,
+	targetStep *wfmodels.WorkflowStep,
+) context.Context {
+	transitionCtx := ctx
+	if !steptelemetry.HasTrigger(transitionCtx) {
+		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+	}
+	if targetStep != nil {
+		if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
+			if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
+				transitionCtx = stepentry.WithPendingAllocation(transitionCtx, pending)
+			}
+		}
+	}
+	return transitionCtx
+}
+
+func (s *workflowStore) updateDeferredTransitionTask(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	record messagequeue.PendingMoveRecord,
+) error {
+	repo, ok := s.repo.(deferredMoveAdmissionRepository)
+	if !ok {
+		return fmt.Errorf("deferred move repository unavailable")
+	}
+	_, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
+		ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit, record,
+	)
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return fmt.Errorf("deferred move source changed")
+	}
 	return nil
 }
 
@@ -532,40 +509,11 @@ func (s *workflowStore) ApplyTransitionIfAtStep(
 func (s *workflowStore) applyTransitionIfAtStep(
 	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
 ) (bool, error) {
-	return s.applyTransitionIfAtStepWithMoveID(ctx, taskID, sessionID, expectedStepID, toStepID, trigger, "", false)
-}
-
-func (s *workflowStore) applyTransitionIfAtStepAllowMissingTarget(
-	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
-) (bool, error) {
-	return s.applyTransitionIfAtStepWithMoveID(ctx, taskID, sessionID, expectedStepID, toStepID, trigger, "", true)
-}
-
-func (s *workflowStore) applyTransitionIfAtStepWithMoveID(
-	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger, moveID string,
-	allowMissingTarget bool,
-) (bool, error) {
 	transitionCtx := ctx
 	if !steptelemetry.HasTrigger(transitionCtx) {
 		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 	}
-	if _, ok := routing.FromContext(transitionCtx); !ok {
-		operationID := moveID
-		producer := routing.ProducerDeferredMove
-		if operationID == "" {
-			operationID = "workflow:" + uuid.NewString()
-			producer = routing.ProducerWorkflow
-		}
-		attribution := steptelemetry.FromContext(transitionCtx)
-		transitionCtx = routing.WithOperation(transitionCtx, routing.Operation{
-			ID: operationID, TaskID: taskID, Producer: producer,
-			ExpectedStepID: expectedStepID, TargetStepID: toStepID,
-			SessionID: sessionID, ActorKind: string(attribution.ActorKind), ActorID: attribution.ActorID,
-		})
-	}
-	task, oldWorkflowID, applied, err := s.applyTransitionIfAtStepRawOptions(
-		transitionCtx, taskID, expectedStepID, toStepID, moveID, allowMissingTarget,
-	)
+	task, oldWorkflowID, applied, err := s.applyTransitionIfAtStepRaw(transitionCtx, taskID, expectedStepID, toStepID)
 	if err != nil {
 		return false, err
 	}
@@ -599,30 +547,24 @@ func (s *workflowStore) applyTransitionIfAtStepWithMoveID(
 // commit point after credential preflight and on_exit, then performs the
 // remaining transition lifecycle after the CAS succeeds.
 func (s *workflowStore) applyTransitionIfAtStepRaw(
-	ctx context.Context, taskID, expectedStepID, toStepID string, moveIDs ...string,
-) (*models.Task, string, bool, error) {
-	moveID := ""
-	if len(moveIDs) > 0 {
-		moveID = moveIDs[0]
-	}
-	return s.applyTransitionIfAtStepRawOptions(ctx, taskID, expectedStepID, toStepID, moveID, false)
-}
-
-func (s *workflowStore) applyTransitionIfAtStepRawOptions(
-	ctx context.Context, taskID, expectedStepID, toStepID, moveID string, allowMissingTarget bool,
+	ctx context.Context, taskID, expectedStepID, toStepID string,
 ) (*models.Task, string, bool, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("load task for CAS transition: %w", err)
 	}
-	ctx = routeObservationContext(ctx, task, toStepID)
-	targetStep, err := s.resolveCASTargetStep(ctx, task, toStepID, allowMissingTarget)
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", false, fmt.Errorf("load target step for CAS transition: %w", err)
 	}
-	if err := markDeferredMoveApplied(task, moveID); err != nil {
-		return nil, task.WorkflowID, false, err
+	if targetStep == nil {
+		return nil, "", false, fmt.Errorf("target step %s not found for CAS transition", toStepID)
 	}
+	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
+	if !ok {
+		return nil, "", false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
+	}
+
 	oldWorkflowID := task.WorkflowID
 	task.WorkflowID = targetStep.WorkflowID
 	task.WorkflowStepID = toStepID
@@ -635,93 +577,17 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
 	task.UpdatedAt = time.Now().UTC()
-	if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
-		if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
-			ctx = stepentry.WithPendingAllocation(ctx, pending)
-		}
-	}
 
-	applied, err := s.commitCASRoute(ctx, task, targetStep, expectedStepID, oldWorkflowID)
+	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+	)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("update task workflow step (CAS): %w", err)
 	}
 	if !applied {
-		if recorder, ok := s.repo.(interface {
-			RecordWorkflowRouteOperation(context.Context, routing.Operation) error
-		}); ok {
-			operation, hasOperation := routing.FromContext(ctx)
-			if hasOperation {
-				if current, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && current != nil {
-					operation.ObservedStepID = current.WorkflowStepID
-				}
-				operation.Outcome = routing.OutcomeStaleSource
-				if recordErr := recorder.RecordWorkflowRouteOperation(ctx, operation); recordErr != nil {
-					s.logger.Warn("failed to record stale workflow route operation",
-						zap.String("task_id", taskID), zap.String("operation_id", operation.ID), zap.Error(recordErr))
-				}
-			}
-		}
 		return nil, oldWorkflowID, false, nil
 	}
 	return task, oldWorkflowID, true, nil
-}
-
-func (s *workflowStore) commitCASRoute(
-	ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep, expectedStepID, expectedWorkflowID string,
-) (bool, error) {
-	next, err := s.workflowStepGetter.GetNextStepByPosition(ctx, targetStep.WorkflowID, targetStep.Position)
-	if err != nil {
-		return false, fmt.Errorf("load next step after %s: %w", targetStep.ID, err)
-	}
-	if wfmodels.IsTerminalStep(targetStep, next) {
-		stateRepo, ok := s.repo.(workflowMoveAdmissionStateCASRepository)
-		if !ok {
-			return false, fmt.Errorf("workflow terminal state CAS repository unavailable for step %s", targetStep.ID)
-		}
-		completed := v1.TaskStateCompleted
-		_, applied, err := stateRepo.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
-			ctx, task, expectedStepID, targetStep.ID, targetStep.WIPLimit, &completed, false, expectedWorkflowID,
-		)
-		return applied, err
-	}
-	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
-	if !ok {
-		return false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", targetStep.ID)
-	}
-	return casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
-		ctx, task, expectedStepID, targetStep.ID, targetStep.WIPLimit,
-	)
-}
-
-func routeObservationContext(ctx context.Context, task *models.Task, targetStepID string) context.Context {
-	operation, ok := routing.FromContext(ctx)
-	if !ok {
-		return ctx
-	}
-	operation.TaskID = task.ID
-	operation.WorkspaceID = task.WorkspaceID
-	operation.ObservedStepID = task.WorkflowStepID
-	operation.TargetStepID = targetStepID
-	return routing.WithOperation(ctx, operation)
-}
-
-func (s *workflowStore) resolveCASTargetStep(
-	ctx context.Context, task *models.Task, targetStepID string, allowMissing bool,
-) (*wfmodels.WorkflowStep, error) {
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, targetStepID)
-	if err != nil {
-		return nil, fmt.Errorf("load target step for CAS transition: %w", err)
-	}
-	if targetStep != nil {
-		return targetStep, nil
-	}
-	if !allowMissing {
-		return nil, fmt.Errorf("target step %s not found for CAS transition", targetStepID)
-	}
-	// ApplyTransition historically accepted test/adapter getters that did not
-	// materialize the target step. Preserve that compatibility while still
-	// performing a source CAS; guarded/engine paths continue to fail closed.
-	return &wfmodels.WorkflowStep{ID: targetStepID, WorkflowID: task.WorkflowID}, nil
 }
 
 func markDeferredMoveApplied(task *models.Task, moveID string) error {

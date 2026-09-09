@@ -46,6 +46,13 @@ const MetadataCoalesceKey = "coalesce_key"
 // queued message.
 const MetadataEntityReferences = "entity_references"
 
+// MetadataStepHandoff carries a completion-handoff carry token's claimed text
+// for a queued workflow auto-start prompt, so a dispatch path that defers
+// delivery through the queue (rather than sending it directly) still appends
+// the handoff at actual dispatch time, after entity-reference context, rather
+// than losing it at claim time or appending it out of order.
+const MetadataStepHandoff = "step_handoff"
+
 // MetadataContextFiles carries path/name references and optional directory
 // identity for queued user messages.
 const MetadataContextFiles = "context_files"
@@ -59,14 +66,17 @@ const MetadataLifecycleDurable = "lifecycle_durable_until_accepted"
 // so stale retries cannot revive work after an archive then unarchive.
 const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 
-// MetadataLifecycleReserved marks a durable lifecycle entry that ReserveHead
-// already handed to a dispatch attempt. The row stays in storage for crash
-// recovery, but it is no longer a pending message, so queue status hides it —
-// otherwise the delivered prompt and its own reservation row are both visible
-// and the reservation looks like a stuck duplicate. Cleared implicitly: a
-// requeue rewrites the row's metadata from the in-memory copy, which never
-// carries the flag.
+// MetadataLifecycleReserved marks a retained queue entry already handed to a
+// dispatch attempt. The historical key name is preserved for durable rows
+// written by older builds. Reserved rows stay in storage for crash recovery
+// but are hidden from pending queue status until acknowledged or released.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
+
+// MetadataLifecycleReservationIncarnation binds a retained row to the
+// immutable session incarnation that reserved it. A replacement incarnation
+// may discard that stale reservation but must never deliver it. The historical
+// key name is retained for storage compatibility.
+const MetadataLifecycleReservationIncarnation = "lifecycle_reservation_incarnation_id"
 
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
@@ -77,11 +87,6 @@ const MetadataSenderTaskID = "sender_task_id"
 // deferred workflow move. The orchestrator uses it to remove only stale move
 // prompts after a replay.
 const MetadataDeferredMoveID = "deferred_move_id"
-
-// MetadataMovePromptID identifies an immediate move hand-off prompt. Its
-// unique value prevents admission-time auto-merge from replacing the new row
-// with an older compatible prompt, so a failed move can roll back by entry ID.
-const MetadataMovePromptID = "move_prompt_id"
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
@@ -112,14 +117,51 @@ var (
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")
+	// ErrSessionIdentityMismatch means the supplied immutable session identity
+	// no longer names the authoritative task-session row.
+	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
-	// ErrPendingMoveGenerationConflict means a queue mutation observed a
-	// different pending-row generation than the one it was authorized to
-	// create, restore, or transfer. The newer row is preserved unchanged.
-	ErrPendingMoveGenerationConflict = errors.New("pending move generation changed")
+	// ErrAutoMergePolicyChanged means admission's immutable policy snapshot no
+	// longer matches the durable session override. The caller must re-resolve
+	// policy before deciding whether to fold.
+	ErrAutoMergePolicyChanged = errors.New("queue Auto-merge policy changed")
 )
+
+// QueueSessionIdentity is the immutable authority for session-scoped queue work.
+type QueueSessionIdentity struct {
+	TaskID               string `json:"task_id"`
+	SessionID            string `json:"session_id"`
+	SessionIncarnationID string `json:"session_incarnation_id"`
+}
+
+// QueueAttachmentClaim carries authenticated staged-attachment ownership into
+// the queue repository transaction.
+type QueueAttachmentClaim struct {
+	OwnerID     string
+	WorkspaceID string
+	IDs         []string
+}
+type AutoMergeSource string
+
+const (
+	AutoMergeSourceGlobal  AutoMergeSource = "global"
+	AutoMergeSourceSession AutoMergeSource = "session"
+)
+
+// AutoMergePolicy is one immutable effective policy snapshot.
+type AutoMergePolicy struct {
+	Enabled  bool
+	Source   AutoMergeSource
+	Revision int64
+}
+
+// AutoMergeOverride is the explicit per-session value and revision.
+type AutoMergeOverride struct {
+	Enabled  bool
+	Revision int64
+}
 
 // QueuedMessage represents a single FIFO entry queued for a session.
 type QueuedMessage struct {
@@ -136,9 +178,17 @@ type QueuedMessage struct {
 	QueuedBy    string                 `json:"queued_by"`
 
 	// reservedLifecycleDelivery is process-local evidence that ReserveHead
-	// retained this durable row for acknowledgement. It deliberately is not
-	// persisted in metadata, where a restart could leak it into a retry.
+	// retained this durable row for acknowledgement.
 	reservedLifecycleDelivery bool
+	reservationIdentity       QueueSessionIdentity
+}
+
+// QueueRemovalResult is the atomic outcome of a user-driven queue deletion.
+// Retained includes reserved in-flight rows so attachment cleanup cannot remove
+// a descriptor still owned by surviving work.
+type QueueRemovalResult struct {
+	Removed  []QueuedMessage
+	Retained []QueuedMessage
 }
 
 // IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
@@ -155,10 +205,10 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	return origin == "github_pr_automation" || origin == "ci_automation"
 }
 
-// IsReservedInFlight reports whether this durable row was already reserved for
-// a dispatch attempt and should not be shown as a pending queue entry.
+// IsReservedInFlight reports whether this row was retained for an in-flight
+// dispatch and should not be shown as a pending queue entry.
 func (m *QueuedMessage) IsReservedInFlight() bool {
-	if m == nil || !m.IsDurableLifecycle() {
+	if m == nil {
 		return false
 	}
 	reserved, _ := m.Metadata[MetadataLifecycleReserved].(bool)
@@ -174,20 +224,32 @@ func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
 // markReservedMetadata returns a copy of metadata carrying the in-flight
 // reservation marker.
 func markReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
-	marked := make(map[string]interface{}, len(metadata)+1)
+	return markReservedMetadataForIncarnation(metadata, "")
+}
+
+func markReservedMetadataForIncarnation(metadata map[string]interface{}, incarnationID string) map[string]interface{} {
+	marked := make(map[string]interface{}, len(metadata)+2)
 	for k, v := range metadata {
 		marked[k] = v
 	}
 	marked[MetadataLifecycleReserved] = true
+	if incarnationID != "" {
+		marked[MetadataLifecycleReservationIncarnation] = incarnationID
+	}
 	return marked
 }
 
-// clearReservedMetadata removes the transient in-process delivery marker from
-// copies returned to dispatch or written back for retry.
+func lifecycleReservationIncarnation(metadata map[string]interface{}) string {
+	incarnationID, _ := metadata[MetadataLifecycleReservationIncarnation].(string)
+	return incarnationID
+}
+
+// clearReservedMetadata removes transient delivery ownership from copies
+// returned to dispatch or written back for retry.
 func clearReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
 	cleared := make(map[string]interface{}, len(metadata))
 	for k, v := range metadata {
-		if k != MetadataLifecycleReserved {
+		if k != MetadataLifecycleReserved && k != MetadataLifecycleReservationIncarnation {
 			cleared[k] = v
 		}
 	}
@@ -208,38 +270,36 @@ type MessageAttachment struct {
 // QueueStatus is the per-session view returned to clients: full ordered list of
 // pending entries plus capacity info.
 type QueueStatus struct {
-	Entries []QueuedMessage `json:"entries"`
-	Count   int             `json:"count"`
-	Max     int             `json:"max"`
-	AutoRun bool            `json:"auto_run"`
-	// MergeEnabled mirrors Service.MergeEnabled so clients can hide the
-	// "Merge with above" affordance without a separate settings fetch.
-	MergeEnabled bool `json:"merge_enabled"`
+	Entries              []QueuedMessage `json:"entries"`
+	Count                int             `json:"count"`
+	Max                  int             `json:"max"`
+	TaskID               string          `json:"task_id,omitempty"`
+	SessionID            string          `json:"session_id,omitempty"`
+	SessionIncarnationID string          `json:"session_incarnation_id,omitempty"`
+	StatusEpoch          string          `json:"status_epoch,omitempty"`
+	StatusGeneration     int64           `json:"status_generation,omitempty"`
+	AutoRun              bool            `json:"auto_run"`
+	MergeEnabled         bool            `json:"merge_enabled"`
+	AutoMergeAvailable   bool            `json:"auto_merge_available"`
+	AutoMergeEnabled     *bool           `json:"auto_merge_enabled,omitempty"`
+	AutoMergeSource      AutoMergeSource `json:"auto_merge_source,omitempty"`
+	AutoMergeRevision    *int64          `json:"auto_merge_revision,omitempty"`
 }
 
 // PendingMove represents a workflow step move requested by an agent (via
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
-	// ID identifies the persisted pending_moves row generation. A new request
-	// gets a new ID; snapshot restore and session transfer preserve it. This is
-	// the same row identity consumed by exact administrative cancellation.
-	ID string `json:"id"`
-	// MoveID identifies one deferred move request across queue snapshots. A
-	// rollback can restore a previously consumed snapshot, so the orchestrator
-	// needs a durable identity to reject that stale replay.
-	MoveID         string `json:"move_id"`
-	TaskID         string `json:"task_id"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	// ExpectedWorkflowStepID is the task generation the request was authored
-	// against. Legacy rows leave it empty and fail closed during replay.
-	ExpectedWorkflowStepID string `json:"expected_workflow_step_id,omitempty"`
-	// InitiatingTurnID binds the route to the immutable turn generation when
-	// available. It is audit evidence; expected-step CAS owns mutation safety.
-	InitiatingTurnID string    `json:"initiating_turn_id,omitempty"`
-	Position         int       `json:"position"`
-	QueuedAt         time.Time `json:"queued_at"`
+	// MoveID is the durable effect token for one deferred move request across
+	// queue snapshots. Rollback can restore a consumed snapshot, so replay uses
+	// this token to suppress a second workflow effect.
+	MoveID               string    `json:"move_id"`
+	SessionIncarnationID string    `json:"session_incarnation_id,omitempty"`
+	TaskID               string    `json:"task_id"`
+	WorkflowID           string    `json:"workflow_id"`
+	WorkflowStepID       string    `json:"workflow_step_id"`
+	Position             int       `json:"position"`
+	QueuedAt             time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`
