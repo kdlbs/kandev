@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-23
-updated: 2026-08-27
+updated: 2026-09-09
 owners:
   - kandev
 ---
@@ -55,13 +55,31 @@ retained history after every log batch.
   250 ms collection window shall use the fewest committed batches allowed by
   the 50-entry and 256 KiB batch limits. Browser idle time shall not shorten
   that collection window.
-- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.9:** An explicit diagnostic
-  snapshot shall bypass an outstanding collection window, flush all staged
-  entries, and wait for the existing serialized drain.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.9:** When an explicit diagnostic
+  snapshot starts, it shall bypass the collection window and freeze the current
+  staged entries as its capture watermark. Entries staged later shall not delay
+  that capture.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.10:** An explicit diagnostic
+  capture shall enumerate the requested identity partition in chronological
+  batches bounded by the upload target. Each batch shall become available
+  before the capture enumerates or serializes the remainder of the partition.
+  The frontend shall establish the persisted upper boundary at notification
+  receipt before it flushes the receipt prefix. Entries committed after
+  notification receipt shall not appear in any batch. If the frontend cannot
+  prove this boundary, it shall use the bounded memory snapshot for the
+  capture.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.11:** A capture shall wait no more
+  than one second for the serialized drain to persist its capture watermark.
+  When this wait expires, the capture shall use its bounded memory snapshot and
+  shall not stop normal persistence.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.12:** A browser wall-clock offset
+  shall not change the frontend capture budget. When this budget expires, the
+  frontend shall stop new snapshot reads and uploads. It shall cancel an active
+  upload.
 
 ## Compatibility and persistence
 
-- The existing database name and retained entries survive the schema upgrade.
+- The existing database name and schema version remain unchanged.
 - Entries remain partitioned by the authenticated Kandev identity.
 - Each entry remains limited to 64 KiB.
 - A diagnostic snapshot returns only the requested identity partition.

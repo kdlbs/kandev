@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-08-30
+last_updated: 2026-09-08
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -67,6 +67,15 @@ the task, so that the interface matches the work.
 - **AC-CANVASES-AGENT-WEB-APPS-001.9:** Local, container, and remote task
   agents shall use the same authoring contract without access to a Kandev host
   file path.
+- **AC-CANVASES-AGENT-WEB-APPS-001.10:** Canvas-capable task instructions shall
+  identify the create, skill-read, and publish operations, including discovery
+  guidance when those tools are not immediately callable.
+- **AC-CANVASES-AGENT-WEB-APPS-001.11:** Authoring instructions shall require
+  creation in Kandev, edits inside the assigned source directory, and a publish
+  result before a completion claim.
+- **AC-CANVASES-AGENT-WEB-APPS-001.12:** Authoring instructions shall distinguish
+  an active release, a release awaiting permission review, and an unsuccessful
+  publish. Local files or a successful build shall not imply publication.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-002: Durable source and releases
 
@@ -248,6 +257,15 @@ agent and review the canvas in the same task.
   and review the canvas.
 - **AC-CANVASES-AGENT-WEB-APPS-009.5:** On a phone, workspace Canvases settings
   shall expose the same task creation flow without a canvas-only form.
+- **AC-CANVASES-AGENT-WEB-APPS-009.6:** The localized preset shall name the
+  canvas discovery, creation, skill-read, source-directory, and publication
+  steps. Tool identifiers shall remain exact in every locale.
+- **AC-CANVASES-AGENT-WEB-APPS-009.7:** On desktop and phone, the user shall
+  be able to read and edit the preset before submission. The submitted task
+  shall retain those edits.
+- **AC-CANVASES-AGENT-WEB-APPS-009.8:** The preset shall direct agents to use
+  authorized live Kandev data for domain views and report any required user
+  permission review or workspace promotion.
 
 ## Out of scope
 

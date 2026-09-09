@@ -21,7 +21,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
-	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -191,7 +190,7 @@ type SessionLauncher interface {
 	// this call actually dispatched the message immediately; callers must
 	// not report "sent" when it's false — the message is still only
 	// queued, to be delivered later by whichever drain gets to it.
-	QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
+	QueueAndInterruptForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
 	// RenameSession sets the user-visible session tab label and broadcasts
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
@@ -218,14 +217,11 @@ type TaskTitleBranchRenamer interface {
 	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
 }
 
-// MessageQueuer queues a prompt message for delivery to a session on its next turn.
-// TakeQueued is exposed so move_task can roll back the hand-off prompt when the
-// underlying MoveTask call fails — without it, a queued "you were moved..."
-// message would survive a failed move and be delivered on the next agent turn.
+// MessageQueuer owns session-incarnation-bound move handoffs and pending moves.
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
-	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
+	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove) error
+	RemoveEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueueRemovalResult, error)
 }
 
 // messageMetadataQueuer is an optional extension implemented by the
@@ -287,10 +283,6 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
-
-	// Office dashboard service (optional, set via SetDashboardService).
-	// Wires the record_step_decision_kandev MCP tool.
-	dashboardSvc *dashboard.DashboardService
 
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
@@ -556,9 +548,6 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-	}
-	if h.dashboardSvc != nil {
-		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		h.registerTaskConfigMutationHandlers(d)
@@ -2327,12 +2316,14 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
 	}
 
+	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
+	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
 		StepID:     launchStepID,
 		Source:     models.StepCompletionSourceAgent,
 		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    strings.TrimSpace(req.Handoff),
-		Blockers:   strings.TrimSpace(req.Blockers),
+		Handoff:    boundedHandoff,
+		Blockers:   boundedBlockers,
 		SignaledAt: time.Now().UTC(),
 	}
 	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
@@ -2364,11 +2355,23 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
-	})
+	}
+	var truncatedFields []string
+	if handoffTruncated {
+		truncatedFields = append(truncatedFields, "handoff")
+	}
+	if blockersTruncated {
+		truncatedFields = append(truncatedFields, "blockers")
+	}
+	if len(truncatedFields) > 0 {
+		response["truncated"] = truncatedFields
+		response["truncation_limit_bytes"] = stepCompletionSignalFieldLimitBytes
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -2937,6 +2940,7 @@ const (
 	keyBaseBranch       = "base_branch"
 	keyCheckoutBranch   = "checkout_branch"
 	keyPosition         = "position"
+	keyAutoMergeEnabled = "auto_merge_enabled"
 )
 
 // taskMessageStatusSent is the taskMessageDispatchResult.status value used
@@ -2992,6 +2996,8 @@ type taskMessageReviewRollback struct {
 
 type taskMessageSessionRollback struct {
 	sessionID            string
+	taskID               string
+	sessionIncarnationID string
 	state                models.TaskSessionState
 	error                string
 	completedAt          *time.Time
@@ -3003,6 +3009,7 @@ type taskMessageSessionRollback struct {
 }
 
 type taskMessageQueueRollback struct {
+	identity       messagequeue.QueueSessionIdentity
 	entries        []messagequeue.QueuedMessage
 	hadPendingMove bool
 	pendingMove    *messagequeue.PendingMove
@@ -3017,8 +3024,12 @@ type taskMessageSessionRollbackRepository interface {
 		expected models.TaskSessionState,
 	) (bool, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
+}
+
+type taskMessageSessionAttachmentDeleter interface {
+	DeleteTaskSessionWithAttachments(ctx context.Context, session *models.TaskSession) ([]*models.TaskMessageAttachment, error)
 }
 
 var errTaskMessageRollbackSuperseded = errors.New("task message rollback superseded by coordinator cancellation")
@@ -3059,12 +3070,21 @@ func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *me
 	}
 	queues := make(map[string]taskMessageQueueRollback, len(r.sessions))
 	for _, session := range r.sessions {
-		entries, move, err := queue.SnapshotSession(ctx, session.sessionID)
+		identity, err := queue.ResolveSessionIdentity(ctx, session.taskID, session.sessionID)
+		if err != nil {
+			return fmt.Errorf("resolve session queue identity: %w", err)
+		}
+		if session.sessionIncarnationID != "" &&
+			identity.SessionIncarnationID != session.sessionIncarnationID {
+			return messagequeue.ErrSessionIdentityMismatch
+		}
+		entries, move, err := queue.SnapshotSessionForIdentity(ctx, identity)
 		if err != nil {
 			return err
 		}
 		snapshot := taskMessageQueueRollback{
-			entries: cloneTaskMessageQueuedMessages(entries),
+			identity: identity,
+			entries:  cloneTaskMessageQueuedMessages(entries),
 		}
 		if move != nil {
 			snapshot.hadPendingMove = true
@@ -3091,6 +3111,8 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 	}
 	snapshot := taskMessageSessionRollback{
 		sessionID:            session.ID,
+		taskID:               session.TaskID,
+		sessionIncarnationID: session.QueueIncarnationID,
 		state:                session.State,
 		error:                session.ErrorMessage,
 		completedAt:          completedAt,
@@ -3285,10 +3307,23 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	if queue == nil {
 		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
-	queued, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if session.QueueIncarnationID != "" &&
+		identity.SessionIncarnationID != session.QueueIncarnationID {
+		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	queued, err := queue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+	)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status := queue.GetStatus(ctx, session.ID)
+			status, statusErr := queue.Snapshot(ctx, identity)
+			if statusErr != nil {
+				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
+			}
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3298,7 +3333,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		}
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
-	h.publishQueueStatusEvent(ctx, session.ID, queue)
+	h.publishQueueStatusEvent(ctx, identity, queue)
 	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
@@ -3337,11 +3372,25 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // "queued" status avoids inviting that duplicate. The failure is still
 // logged server-side for operators.
 func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
-	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, taskID, session.ID, prompt, metadata)
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
+	}
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if session.QueueIncarnationID != "" &&
+		identity.SessionIncarnationID != session.QueueIncarnationID {
+		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, identity, prompt, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			queue := h.sessionLauncher.GetMessageQueue()
-			status := queue.GetStatus(ctx, session.ID)
+			status, statusErr := queue.Snapshot(ctx, identity)
+			if statusErr != nil {
+				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
+			}
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3519,7 +3568,25 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 			return err
 		}
 	}
-	return repo.DeleteTaskSession(ctx, rollback.selectedID)
+	return h.deleteTaskMessageRollbackSession(ctx, repo, selected)
+}
+
+func (h *Handlers) deleteTaskMessageRollbackSession(
+	ctx context.Context,
+	repo taskMessageSessionRollbackRepository,
+	session *models.TaskSession,
+) error {
+	if deleter, ok := repo.(taskMessageSessionAttachmentDeleter); ok {
+		attachments, err := deleter.DeleteTaskSessionWithAttachments(ctx, session)
+		if err != nil {
+			return err
+		}
+		if attachmentSvc := h.taskSvc.AttachmentService(); attachmentSvc != nil {
+			attachmentSvc.RemoveBytes(attachments)
+		}
+		return nil
+	}
+	return repo.DeleteTaskSession(ctx, session)
 }
 
 func (r taskMessageReviewRollback) primarySessionID() string {
@@ -3552,7 +3619,7 @@ func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequ
 	if snapshot.hadPendingMove {
 		pendingMove = cloneTaskMessagePendingMove(snapshot.pendingMove)
 	}
-	return queue.RestoreSession(ctx, sessionID, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
+	return queue.RestoreSessionForIdentity(ctx, snapshot.identity, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
 func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID, primaryID string) error {
@@ -3560,9 +3627,38 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID,
 	if queue == nil {
 		return nil
 	}
-	return queue.TransferSession(ctx, selectedID, primaryID)
+	selected, err := h.sessionRepo.GetTaskSession(ctx, selectedID)
+	if err != nil {
+		return fmt.Errorf("load selected queue owner: %w", err)
+	}
+	if selected == nil {
+		return fmt.Errorf("load selected queue owner %q: not found", selectedID)
+	}
+	primary, err := h.sessionRepo.GetTaskSession(ctx, primaryID)
+	if err != nil {
+		return fmt.Errorf("load primary queue owner: %w", err)
+	}
+	if primary == nil {
+		return fmt.Errorf("load primary queue owner %q: not found", primaryID)
+	}
+	selectedIdentity, err := queue.ResolveSessionIdentity(ctx, selected.TaskID, selected.ID)
+	if err != nil {
+		return fmt.Errorf("resolve selected queue owner: %w", err)
+	}
+	if selected.QueueIncarnationID != "" &&
+		selectedIdentity.SessionIncarnationID != selected.QueueIncarnationID {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	primaryIdentity, err := queue.ResolveSessionIdentity(ctx, primary.TaskID, primary.ID)
+	if err != nil {
+		return fmt.Errorf("resolve primary queue owner: %w", err)
+	}
+	if primary.QueueIncarnationID != "" &&
+		primaryIdentity.SessionIncarnationID != primary.QueueIncarnationID {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	return queue.TransferSessionIdentities(ctx, selectedIdentity, primaryIdentity)
 }
-
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
 	if err != nil {
@@ -3710,22 +3806,44 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
 // can update the queue indicator.
-func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string, queue *messagequeue.Service) {
+func (h *Handlers) publishQueueStatusEvent(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queue *messagequeue.Service,
+) {
 	if h.eventBus == nil {
 		return
 	}
-	status := queue.GetStatus(ctx, sessionID)
+	status, err := queue.Snapshot(ctx, identity)
+	if err != nil {
+		return
+	}
+	eventData := map[string]interface{}{
+		keyTaskID:                status.TaskID,
+		keySessionID:             status.SessionID,
+		"session_incarnation_id": status.SessionIncarnationID,
+		"status_epoch":           status.StatusEpoch,
+		"status_generation":      status.StatusGeneration,
+		"entries":                status.Entries,
+		"count":                  status.Count,
+		"max":                    status.Max,
+		"auto_run":               status.AutoRun,
+		"merge_enabled":          status.MergeEnabled,
+		"auto_merge_available":   status.AutoMergeAvailable,
+	}
+	if status.AutoMergeEnabled != nil {
+		eventData[keyAutoMergeEnabled] = *status.AutoMergeEnabled
+	}
+	if status.AutoMergeSource != "" {
+		eventData["auto_merge_source"] = status.AutoMergeSource
+	}
+	if status.AutoMergeRevision != nil {
+		eventData["auto_merge_revision"] = *status.AutoMergeRevision
+	}
 	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
-		map[string]interface{}{
-			"session_id":    sessionID,
-			"entries":       status.Entries,
-			"count":         status.Count,
-			"max":           status.Max,
-			"auto_run":      status.AutoRun,
-			"merge_enabled": status.MergeEnabled,
-		},
+		eventData,
 	))
 }
 

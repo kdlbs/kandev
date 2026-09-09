@@ -82,6 +82,8 @@ pnpm e2e:run --project chromium tests/path/to/spec.ts
 
 The managed runner builds what it needs, chooses host or the CI runtime image, enables strict WebSocket assertions, and supports `--shards N`, `--no-build`, and `--project NAME`.
 
+Set `KANDEV_E2E_DOCKER_PROBE_TIMEOUT` to change the Docker availability limit in automatic mode. The default is 10 seconds. Set it to `0` to skip the probe and use host mode.
+
 Playwright uses one worker per process. Each worker fixture starts a real Go backend serving the built SPA with unique ports, a temporary `HOME`, Kandev home, SQLite database, repositories/worktrees, and agentctl port range. Each test receives a fresh browser context and resets seeded application state. Kandev process boundaries are real; external providers and the agent process are mocked unless a project says otherwise.
 
 Projects in `apps/web/e2e/playwright.config.ts` are:

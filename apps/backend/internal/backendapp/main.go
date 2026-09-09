@@ -81,7 +81,6 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/orchestrator"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Office feature packages
 	office "github.com/kandev/kandev/internal/office"
@@ -989,29 +988,6 @@ func startGatewayAndServe(
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
-	go func() {
-		if err := hostUtilityMgr.Start(ctx); err != nil {
-			log.Warn("host utility manager bootstrap error", zap.Error(err))
-		}
-		// Reconcile profiles against fresh probe results — seeds defaults for
-		// newly probed agents, heals stale profile models/modes, cleans up
-		// orphans referencing removed agents.
-		if err := profileReconciler.Run(ctx); err != nil {
-			log.Warn("profile reconciler error", zap.Error(err))
-		}
-		if migrated, err := services.Utility.MigrateLegacyBindings(ctx); err != nil {
-			log.Warn("utility profile migration failed", zap.Error(err))
-		} else if migrated > 0 {
-			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
-		}
-		migrateDefaultUtilityProfile(ctx, services.User, repos.AgentSettings, agentRegistry, log)
-	}()
-	addCleanup(func() error {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		hostUtilityMgr.Stop(stopCtx)
-		return nil
-	})
 
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
@@ -1185,6 +1161,12 @@ func startGatewayAndServe(
 		if err := profileReconciler.Run(hostUtilityCtx); err != nil {
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
+		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
+			log.Warn("utility profile migration failed", zap.Error(err))
+		} else if migrated > 0 {
+			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
+		}
+		migrateDefaultUtilityProfile(hostUtilityCtx, services.User, repos.AgentSettings, agentRegistry, log)
 	}()
 	addCleanup(func() error {
 		hostUtilityCancel()
@@ -2073,17 +2055,16 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnv in the
-// officeservice.TaskStarterWithEnvFunc adapter. Extracted from
+// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in the
+// officeservice.TaskStarterWithLaunchContextFunc adapter. Extracted from
 // initOfficeServices to keep that function under the funlen cap.
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
-	return officeservice.TaskStarterWithEnvFunc(
-		func(ctx context.Context, taskID, agentProfileID, executorID,
-			executorProfileID string, priority string, prompt, workflowStepID string,
-			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
-			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
-				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, false, attachments, env)
+	return officeservice.TaskStarterWithLaunchContextFunc(
+		func(ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext) error {
+			_, err := orchestratorSvc.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+				launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+				launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
+				launch.AdditionalSkillSlugs)
 			return err
 		},
 	)
@@ -2146,6 +2127,12 @@ func buildOfficeFeatureServices(
 	})
 	routineSvc.SetWorkflowEnsurer(&workflowEnsurerAdapter{repo: taskRepo})
 	routineSvc.SetTaskCreator(&taskCreatorAdapter{taskSvc: services.Task})
+	// office-routine-runs: closes out a heavy routine run when its
+	// linked task reaches a terminal step, so the routine's next fire
+	// isn't gated by a task that already finished.
+	if services.Office != nil {
+		services.Office.SetRoutineRunSyncer(routineSvc)
+	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
@@ -2348,6 +2335,10 @@ func buildHTTPServer(
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetReferenceChecker(secretReferenceChecker{
+		agents: repos.AgentSettings, tasks: repos.Task,
+		authorizeWorkspace: services.Task.AuthorizeWorkspaceAccess,
+	}.list)
 	// Workspace classification happens here, at the wiring boundary, where both
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through

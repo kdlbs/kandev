@@ -146,6 +146,7 @@ const (
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -470,9 +471,6 @@ const (
 	ActionMCPPublishCanvas            = "mcp.publish_canvas"
 	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
 	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
-
-	// Office quorum decision recording.
-	ActionMCPRecordStepDecision = "mcp.record_step_decision"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"

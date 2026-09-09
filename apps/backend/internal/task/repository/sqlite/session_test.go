@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -232,7 +231,9 @@ func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndR
 		t.Fatalf("initial runtime seed profile remained in task metadata: %#v", task.Metadata)
 	}
 
-	require.NoError(t, repo.DeleteTaskSession(ctx, initialSessionID))
+	initialSession, err := repo.GetTaskSession(ctx, initialSessionID)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteTaskSession(ctx, initialSession))
 	replacement := &models.TaskSession{
 		ID:             "initial-runtime-session-replacement",
 		TaskID:         taskID,
@@ -682,6 +683,54 @@ func TestClaimPromptableTaskSessionIfActive(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
 	})
+}
+
+func TestPromptableSessionClaimAndRestoreRequireExactIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-identity", "session-identity", "turn-identity")
+	_, err := repo.db.ExecContext(
+		ctx,
+		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+		"current-incarnation",
+		"session-identity",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-identity", models.TaskSessionStateWaitingForInput, "",
+	))
+	session, err := repo.GetTaskSession(ctx, "session-identity")
+	require.NoError(t, err)
+	require.NotEmpty(t, session.QueueIncarnationID)
+
+	stale, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, "replaced-incarnation",
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionInactive, stale.Status)
+	persisted, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, persisted.State)
+
+	claim, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, session.QueueIncarnationID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+	restored, _, err := repo.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx,
+		session.TaskID,
+		session.ID,
+		"replaced-incarnation",
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	)
+	require.NoError(t, err)
+	require.False(t, restored)
+	persisted, err = repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, persisted.State)
 }
 
 func TestClaimPromptableTaskSessionIfActive_ZeroRowAfterConcurrentBusyTransition(t *testing.T) {
@@ -1478,6 +1527,7 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 		t.Fatalf("seed running state: %v", err)
 	}
 	insertSession(t, repo, "session-completed", "task-cas", string(models.TaskSessionStateCompleted))
+	insertSession(t, repo, "session-idle", "task-cas", string(models.TaskSessionStateIdle))
 
 	changed, cancelledAt, err := repo.CancelActiveTaskSession(ctx, "session-running", "coordinator stop")
 	if err != nil {
@@ -1488,6 +1538,16 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 	if got := sessionState(t, repo, "session-running"); got != string(models.TaskSessionStateCancelled) {
 		t.Fatalf("running session state = %q, want CANCELLED", got)
+	}
+	changed, _, err = repo.CancelActiveTaskSession(ctx, "session-idle", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel idle session: %v", err)
+	}
+	if !changed {
+		t.Fatal("idle session was not cancelled")
+	}
+	if got := sessionState(t, repo, "session-idle"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("idle session state = %q, want CANCELLED", got)
 	}
 	cancelled, err := repo.GetTaskSession(ctx, "session-running")
 	if err != nil {
