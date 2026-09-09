@@ -25,7 +25,7 @@ import (
 //     drop+rename table-rebuild dance
 //   - preserves every column and timestamp on the surviving rows
 func TestMigrate_RoutineCatchUpPolicyDefaultRebuild(t *testing.T) {
-	dbPath := t.TempDir() + "/test.db?_journal_mode=WAL"
+	dbPath := t.TempDir() + "/test.db?_journal_mode=WAL&_foreign_keys=on"
 	db, err := sqlx.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

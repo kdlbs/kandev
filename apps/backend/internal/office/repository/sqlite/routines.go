@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -336,7 +337,7 @@ func (r *Repository) CreateRoutineRun(ctx context.Context, run *models.RoutineRu
 	`), run.ID, run.RoutineID, run.TriggerID, run.Source, run.Status,
 		run.TriggerPayload, run.LinkedTaskID, run.CoalescedIntoRunID,
 		run.DispatchFingerprint, run.CatchUpMissedTicks, run.CatchUpFirstMissedAt,
-		run.CatchUpTruncated, run.StartedAt, run.CompletedAt, run.CreatedAt)
+		dialect.BoolToInt(run.CatchUpTruncated), run.StartedAt, run.CompletedAt, run.CreatedAt)
 	return err
 }
 

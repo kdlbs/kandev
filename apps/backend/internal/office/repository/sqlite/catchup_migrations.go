@@ -103,7 +103,12 @@ func (r *Repository) routineCatchUpPolicyDefaultIsStale() bool {
 // ON DELETE CASCADE REFERENCES office_routines(id), and dropping the old
 // table with enforcement on would cascade every routine run and trigger out
 // of existence), then create/copy/drop/rename. Every column is mirrored
-// verbatim; only the DEFAULT clause changes.
+// verbatim; only the DEFAULT clause changes. The CREATE/INSERT/DROP/RENAME
+// sequence runs inside one transaction (unlike runTaskPriorityRecreate's
+// autocommitted steps): SQLite fully supports DDL inside a transaction, and
+// this table is dropped and recreated in place rather than alongside a
+// still-present sibling, so a crash between DROP and RENAME with no
+// transaction would leave neither the original nor the renamed table behind.
 func (r *Repository) migrateRoutineDefaultPolicyRebuild() error {
 	if !r.routineTableExists() {
 		return nil
@@ -124,10 +129,19 @@ func (r *Repository) migrateRoutineDefaultPolicyRebuild() error {
 	}
 	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`) }()
 
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin routine default-policy migration transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	for _, stmt := range routineDefaultPolicyMigrationStatements() {
-		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("routine default-policy migration step failed: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit routine default-policy migration: %w", err)
 	}
 	return nil
 }

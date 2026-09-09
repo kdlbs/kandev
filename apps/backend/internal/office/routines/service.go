@@ -396,9 +396,9 @@ const catchUpFallbackInterval = 24 * time.Hour
 
 // catchUpReclaimAfter is how stale a claimed-but-never-armed trigger's
 // updated_at must be before the reconciliation pass in TickScheduledTriggers
-// treats it as abandoned rather than a live claim still mid-tick — two
-// scheduler intervals, so a claim taken this tick or the previous one is
-// never reconciled (AC-OFFICE-ROUTINE-CATCHUP-001.9).
+// treats it as abandoned rather than a live claim still mid-tick — enough
+// headroom that a claim taken this tick or the previous one is never
+// reconciled (AC-OFFICE-ROUTINE-CATCHUP-001.9).
 const catchUpReclaimAfter = 60 * time.Second
 
 // TickScheduledTriggers queries due cron triggers, claims and dispatches
