@@ -42,6 +42,7 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 		}),
 		svcs.Skills,
 		svcs.Workspaces,
+		log,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)
