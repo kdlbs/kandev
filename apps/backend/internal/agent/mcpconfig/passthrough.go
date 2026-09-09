@@ -350,6 +350,7 @@ type piServerEntry struct {
 	Env       map[string]string `json:"env,omitempty"`
 	URL       string            `json:"url,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+	Lifecycle string            `json:"lifecycle,omitempty"`
 }
 
 func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error) {
@@ -362,9 +363,9 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 			continue
 		}
 		if isStdioServer(srv) {
-			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env}
+			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env, Lifecycle: "eager"}
 		} else {
-			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers}
+			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers, Lifecycle: "eager"}
 		}
 	}
 	if len(entries) == 0 {

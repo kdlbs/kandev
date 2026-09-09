@@ -65,6 +65,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Session MCP Attachment Observability](requirements/mcp-session-observability.md)
 - [Mid-Turn Steering](requirements/mid-turn-steering.md)
 - [Semantic Notifications](requirements/notifications.md)
+- [Apprise rescan](requirements/apprise-rescan.md)
 - [Required Persisted Store Parity](requirements/postgres-domain-store-parity.md)
 - [Provider Error Recovery](requirements/provider-error-recovery.md)
 - [Session Config Reconciliation Across Agent Types](requirements/session-config-cross-agent-reconcile.md)
@@ -86,6 +87,7 @@ retains ownership of its values, validation, authority, and persistence.
 
 - [Agent process exit and stderr drain](system-design/agent-process-exit-drain.md)
 - [Agentctl instance stop idempotency](system-design/agentctl-instance-stop.md)
+- [Apprise rescan](system-design/apprise-rescan.md)
 - [Background Work Liveness](system-design/background-work-liveness.md)
 - [Backend restart page recovery](system-design/backend-restart-page-recovery.md)
 - [Browser console retention](system-design/browser-console-retention.md)

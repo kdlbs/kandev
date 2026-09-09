@@ -468,6 +468,7 @@ function submit(message: string) {
   return { message };
 }
 
+// eslint-disable-next-line max-lines-per-function -- routing cases share one message submission harness.
 describe("useMessageHandler input routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -544,6 +545,15 @@ describe("useMessageHandler input routing", () => {
 
     expect(queueMock).toHaveBeenCalled();
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it("returns an unsuccessful result when queue admission cannot start", async () => {
+    selectedSession("STARTING");
+    queueMock.mockResolvedValueOnce(false);
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage(submit("keep this draft"))).resolves.toBe(false);
+    expect(addMessageMock).not.toHaveBeenCalled();
   });
 
   it("rejects a terminal selected session with the actionable ended-session copy", async () => {

@@ -811,13 +811,8 @@ func TestGetStatus(t *testing.T) {
 		assert.True(t, reserved.IsReservedLifecycleDelivery())
 		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
 
-		// A failed delivery requeues the same entry and it becomes visible again.
-		_, _, accepted, err = svc.RequeueLifecycleMessageWithCoalesceKey(
-			ctx, "s", "t", reserved.Content, "", QueuedByWorkflow, false, nil,
-			reserved.Metadata, "github-pr:repo:1:merged", true,
-		)
-		require.NoError(t, err)
-		require.True(t, accepted)
+		// A failed delivery releases the same entry and makes it visible again.
+		require.NoError(t, svc.RequeueAtHead(ctx, reserved))
 		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
 
 		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
@@ -849,7 +844,7 @@ func TestTransferSession(t *testing.T) {
 
 		_, err := svc.QueueMessage(ctx, "old", "task-1", "hand-off", "", "u", false, nil)
 		require.NoError(t, err)
-		svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+		require.NoError(t, svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"}))
 
 		require.NoError(t, svc.TransferSession(ctx, "old", "new"))
 
@@ -885,11 +880,11 @@ func TestRestoreSession(t *testing.T) {
 		{Type: "image", Data: "abc", MimeType: "image/png"},
 	}, map[string]interface{}{"sender": "task-a"})
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+	require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"}))
 
 	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+	require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"}))
 
 	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
 		TaskID:          "task-1",
@@ -917,7 +912,7 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"})
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"}))
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)
@@ -935,8 +930,8 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"})
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"})
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"}))
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"}))
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)

@@ -89,6 +89,35 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestParseResumeDelayFromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{name: "separate value", args: []string{"mock-agent", "--delay-resume", "2s"}, want: 2 * time.Second},
+		{name: "equals value", args: []string{"mock-agent", "--delay-resume=1500ms"}, want: 1500 * time.Millisecond},
+		{name: "missing value", args: []string{"mock-agent", "--delay-resume"}},
+		{name: "invalid value", args: []string{"mock-agent", "--delay-resume", "later"}},
+		{name: "negative value", args: []string{"mock-agent", "--delay-resume=-1s"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseResumeDelayFromArgs(tt.args); got != tt.want {
+				t.Fatalf("parseResumeDelayFromArgs() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseResumeDelayFlagUsesEnvironment(t *testing.T) {
+	t.Setenv("E2E_MOCK_AGENT_RESUME_DELAY", "3s")
+	if got := parseResumeDelayFlag(); got != 3*time.Second {
+		t.Fatalf("parseResumeDelayFlag() = %s, want 3s", got)
+	}
+}
+
 func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
 	const directive = savedPromptDeliveryDirective
 
