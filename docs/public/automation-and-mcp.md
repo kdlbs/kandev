@@ -596,11 +596,10 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `list_related_tasks_kandev`;
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`;
 - `show_rich_output_kandev`;
-- `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `transfer_task_kandev` is available only to a server-attested Office CEO session. It applies the atomic, audited transfer contract above.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, the restricted transfer operation, and the step-completion signal. Other Office state changes use the injected `$KANDEV_CLI kandev ...` commands. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. Other Office state changes use the injected `$KANDEV_CLI kandev ...` commands. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 

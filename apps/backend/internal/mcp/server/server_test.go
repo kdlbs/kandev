@@ -1054,12 +1054,12 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
 	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents
-	// + 1 rich-output + 1 decisions + 1 step_complete (ADR 0015) + 1 transfer = 13.
+	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer = 12.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
 	assert.Contains(t, tools, "transfer_task_kandev")
-	assert.Equal(t, 13, len(tools))
+	assert.Equal(t, 12, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1078,9 +1078,9 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	assert.NotContains(t, tools, "delegate_task_kandev")
 	assert.Contains(t, tools, "transfer_task_kandev")
 	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output
-	// + 1 decisions + 1 step_complete (ADR 0015) + 1 transfer = 12
+	// + 1 step_complete (ADR 0015) + 1 transfer = 11
 	// (no ask_user_question, no delegate, no list_task_comments)
-	assert.Equal(t, 12, len(tools))
+	assert.Equal(t, 11, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
