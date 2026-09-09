@@ -251,6 +251,14 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (no actionable tasks)",
 			zap.String("run_id", runID),
 			zap.String("agent", agent.Name))
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
+		wrote, _ := si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
+		if !wrote {
+			// Another writer already moved the run out of claimed; it did
+			// not actually end via an idle skip, so there is nothing to
+			// log.
+			return
+		}
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
 			"run_idle_skipped", "run", runID,
@@ -258,8 +266,6 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
-		si.svc.clearAgentWorking(ctx, agent.ID, runID)
-		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
 
@@ -913,15 +919,20 @@ func (si *SchedulerIntegration) checkBudget(
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
 		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
-		_, _ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
-		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
-			"scheduler", "office-scheduler",
-			"run_budget_blocked", "run", run.ID,
-			mustJSON(map[string]string{
-				"agent":    agent.Name,
-				"agent_id": agent.ID,
-				"reason":   reason,
-			}), run.ID, "")
+		wrote, _ := si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
+		if wrote {
+			// Only log when this write actually applied; another writer
+			// already ending the run means it did not end via a budget
+			// block.
+			si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
+				"scheduler", "office-scheduler",
+				"run_budget_blocked", "run", run.ID,
+				mustJSON(map[string]string{
+					"agent":    agent.Name,
+					"agent_id": agent.ID,
+					"reason":   reason,
+				}), run.ID, "")
+		}
 		return false
 	}
 	return true
