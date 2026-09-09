@@ -1909,11 +1909,11 @@ func (s *Service) applyWorkflowAndPlanMode(
 	)
 }
 
-// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt while
-// preserving a direct message's acceptance-time saved-prompt expansion. A
-// direct message already has canonical reference content, so resolving it
-// again would make persistence and ACP dispatch depend on mutable prompt
-// records. Workflow-only prompts still use the normal expansion path.
+// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt when
+// available and otherwise prepares the launch prompt directly. A direct
+// message already has canonical reference content, so resolving it again
+// would make persistence and ACP dispatch depend on mutable prompt records.
+// Workflow-only prompts still use the normal expansion path.
 func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	ctx context.Context,
 	prompt string,
@@ -1929,6 +1929,7 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	promptReferenceContext := ""
 
 	stepHasPlanMode := false
+	workflowPromptComposed := false
 	// Skip workflow step prompt injection for ephemeral tasks - they don't have workflows
 	if !isEphemeral && workflowStepID != "" && s.workflowStepGetter != nil {
 		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
@@ -1936,7 +1937,8 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 			s.logger.Warn("failed to get workflow step for prompt building",
 				zap.String("workflow_step_id", workflowStepID),
 				zap.Error(err))
-		} else {
+		} else if step != nil {
+			workflowPromptComposed = true
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 			if trustedPromptContext != "" {
 				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
@@ -1947,6 +1949,19 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
 				)
 			}
+		}
+	}
+	if !workflowPromptComposed {
+		if trustedPromptContext != "" {
+			trustedBlock := sysprompt.Wrap(trustedPromptContext)
+			if !strings.Contains(effectivePrompt, trustedBlock) {
+				effectivePrompt += "\n\n" + trustedBlock
+			}
+			promptReferenceContext = trustedPromptContext
+		} else {
+			effectivePrompt, promptReferenceContext = s.expandPromptReferencesWithContext(
+				ctx, effectivePrompt, isPassthrough,
+			)
 		}
 	}
 
