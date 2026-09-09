@@ -27,10 +27,10 @@ pull-request run.
 The backend mints a repository-scoped token from the workspace's verified
 GitHub App installation and requires Actions write. It never falls back to PAT,
 CLI, user, legacy, or caller-provided credentials. Rerun-failed-jobs is the
-first operation. Workflow dispatch is a narrow same-repository `pr_head`
-fallback selected from verified workflow metadata and fixed server inputs. The
-workflow at the live PR ref must byte-match the trusted base-branch copy;
-fork dispatch and unverifiable `current_merge` evidence fail closed.
+only recovery operation. Workflow dispatch cannot bind a request to the
+reviewed commit SHA through GitHub's mutable branch/tag ref API, so the server
+returns `dispatch_ref_unavailable` before mutation. Fork dispatch and
+unverifiable `current_merge` evidence fail closed.
 
 Provider mutations use a durable two-key ledger: the caller idempotency key is
 unique in its actor scope, while source run plus attempt is unique for the
