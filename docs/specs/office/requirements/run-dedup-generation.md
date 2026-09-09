@@ -75,15 +75,14 @@ coalescing window, or the run lifecycle.
 
 ### Our own recorded reasoning (wiki)
 
-**Searched:** resolved `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`
-and `QMD_WIKI_COLLECTION=wiki` from `~/.obsidian-wiki/config` (symlink to
-`config.henry`). The leg then **did not run**: neither `obsidian-wiki` nor `qmd`
-is on this executor's PATH, no qmd MCP server is exposed to this session, and
-the vault directory itself is unreadable here (`ls` returns `Operation not
-permitted` for `~/Documents` both inside and outside the sandbox, which is a
-macOS privacy restriction on this process, not a permission-gate denial). This
-is a skipped step, not an empty result: the vault is configured and may well
-hold relevant prior positions that this specification therefore did not consult.
+**Searched:** resolved a configured personal wiki vault path and collection
+name from the local `obsidian-wiki` config. The leg then **did not run**:
+neither `obsidian-wiki` nor `qmd` is on this executor's PATH, no qmd MCP server
+is exposed to this session, and the vault directory itself is unreadable here
+(a macOS privacy restriction on this process, not a permission-gate denial).
+This is a skipped step, not an empty result: the vault is configured and may
+well hold relevant prior positions that this specification therefore did not
+consult.
 
 ### What other products shipped (saas-kb)
 
