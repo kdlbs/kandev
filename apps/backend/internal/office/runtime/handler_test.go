@@ -32,6 +32,7 @@ type handlerHarness struct {
 	projects   *recordingProjectManager
 	tasks      *handlerTaskCreator
 	runEvents  *recordingRunEvents
+	decisions  *recordingDecisionRecorder
 	agentSvc   *agents.AgentService
 	repository *sqlite.Repository
 }
@@ -747,7 +748,7 @@ func TestRuntimeHandler_UpdateTaskStatusReturnsInternalErrorForOperationalFailur
 	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Error != "internal server error" {
+	if body.Error != runtimeInternalErrorMessage {
 		t.Fatalf("error = %q, want stable internal error", body.Error)
 	}
 }
@@ -785,7 +786,7 @@ func TestRuntimeHandler_LogsInternalErrorWithoutExposingCause(t *testing.T) {
 		t.Fatalf("error log entries = %d, want 1", len(entries))
 	}
 	entry := entries[0]
-	if entry.Message != "runtime action failed" {
+	if entry.Message != "office runtime action failed" {
 		t.Fatalf("log message = %q, want runtime action failure", entry.Message)
 	}
 	if got := fmt.Sprint(entry.ContextMap()["error"]); got != underlyingErr.Error() {
@@ -876,6 +877,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 		projectManager = projectManagerFactory(repo)
 	}
 	runEvents := &recordingRunEvents{}
+	decisions := &recordingDecisionRecorder{}
 	router := gin.New()
 	RegisterRoutes(router.Group(""), NewHandler(
 		agentSvc,
@@ -889,6 +891,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 		}),
 		nil,
 		runEvents,
+		decisions,
 		log,
 	))
 	return &handlerHarness{
@@ -899,6 +902,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 		projects:   projects,
 		tasks:      tasks,
 		runEvents:  runEvents,
+		decisions:  decisions,
 		agentSvc:   agentSvc,
 		repository: repo,
 	}

@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002
+  - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003
 created: 2026-08-23
 owners:
   - kandev
@@ -21,6 +22,7 @@ variation resolution.
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Risks & Open Questions](#risks--open-questions) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003` | [Risks & Open Questions](#risks--open-questions) |
 
 ## Migrated source detail
 
@@ -36,8 +38,8 @@ variation resolution.
   workspace routing configuration, not the execution profile — and is
   documented in the behavior matrix above.
 - **Probe staleness**: the advertised list can be stale (probe cached).
-  The profile picker uses it only as a hint. The executor session catalog owns
-  the launch decision.
+  The profile editor uses it only as a hint. Profile selectors do not render
+  host model advisories. The executor session catalog owns the launch decision.
 - **Cold Claude model lists**: a valid restricted model can be absent from a
   cold bridge's initial list. Pre-session exposure lets the bridge include and
   select the configured model. If the bridge still omits it, Kandev uses the
@@ -46,7 +48,7 @@ variation resolution.
   before the initial process starts. It does not restart a live ACP bridge to
   expose a newly selected hidden model during context reset.
 - **Office vs. kanban surfaces**: both share the same agent-profile rows.
-  The advisory picker behavior covers kanban task creation and Office setup.
+  The shared selector behavior covers kanban task creation and Office setup.
   Office run-detail routing surfaces are unchanged.
 - **Collapsed controls remain legible**: the disclosure header summarizes the
   effective mode, and dirty-state decoration is applied to the disclosure
@@ -65,3 +67,9 @@ variation resolution.
 - **Legacy automatic fallback remains unchanged**: when `auto_fallback` is
   enabled and the requested model is absent, Kandev does not apply an explicit
   fallback or infer a variation. It continues with the provider default.
+- **Removal must be narrow**: authentication, missing-CLI, and failed-probe
+  indicators remain. Profile-editor advisories and persisted task warnings
+  retain their existing behavior.
+- **Evidence has limits**: a model warning does not prove a cache defect.
+  Discovery refresh or normalization changes require separate root-cause
+  evidence; this amendment does not change those contracts.

@@ -17,7 +17,11 @@ import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type { AgentUpdateJob, InstallJob } from "./slices/settings/types";
+import type {
+  AgentUpdateJob,
+  InstallJob,
+  NotificationProvidersUpdate,
+} from "./slices/settings/types";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -47,7 +51,6 @@ import type {
   EditorsState,
   PromptsState,
   SecretsState,
-  NotificationProvidersState,
   SettingsDataState,
   SleepInhibitionStoreState,
   UserSettingsState,
@@ -88,6 +91,12 @@ import type {
   TodoEntry,
   UserShellInfo,
 } from "./slices/session-runtime/types";
+import type {
+  QueueMeta,
+  QueueMetaUpdateOptions,
+  QueueOperationToken,
+  QueuedMessage,
+} from "./slices/session/types";
 // Combined AppState type
 export type AppState = KanbanSlice & {
   // Workspace slice
@@ -307,7 +316,8 @@ export type AppState = KanbanSlice & {
   setSpritesInstances: (instances: import("@/lib/types/http-sprites").SpritesInstance[]) => void;
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProviders: (state: NotificationProvidersUpdate) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSleepInhibition: (response: NonNullable<SleepInhibitionStoreState["response"]>) => void;
   setSleepInhibitionLoading: (loading: boolean) => void;
@@ -526,11 +536,16 @@ export type AppState = KanbanSlice & {
   // Queue actions
   setQueueEntries: (
     sessionId: string,
-    entries: import("./slices/session/types").QueuedMessage[],
-    meta: import("./slices/session/types").QueueMeta,
+    entries: QueuedMessage[],
+    meta: QueueMeta,
+    options?: QueueMetaUpdateOptions,
   ) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;
-  setQueueLoading: (sessionId: string, loading: boolean) => void;
+  beginQueueOperation: (
+    sessionId: string,
+    sessionIncarnationId: string,
+  ) => QueueOperationToken | null;
+  finishQueueOperation: (sessionId: string, token: QueueOperationToken) => void;
   clearQueueStatus: (sessionId: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;

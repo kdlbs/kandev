@@ -1,11 +1,12 @@
 import { type Page, expect } from "@playwright/test";
-import type { ApiClient } from "../../helpers/api-client";
+import type { ApiClient, QueueSessionIdentityInput } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 type QueuedWorkflowScenario = {
   session: SessionPage;
   sessionId: string;
+  queueIdentity: QueueSessionIdentityInput;
 };
 
 const WORKFLOW_REVIEW_STEP = "Review";
@@ -61,7 +62,8 @@ export async function seedQueuedWorkflowMessageScenario(
 
   await apiClient.moveTask(task.id, workflow.id, reviewStep.id);
 
-  return { session, sessionId: task.session_id };
+  const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+  return { session, sessionId: task.session_id, queueIdentity };
 }
 
 export async function expectWorkflowQueueBadge(session: SessionPage) {
@@ -79,15 +81,15 @@ export async function expectWorkflowQueueBadge(session: SessionPage) {
 export async function expectDeliveredWorkflowMessage(
   apiClient: ApiClient,
   session: SessionPage,
-  sessionId: string,
+  queueIdentity: QueueSessionIdentityInput,
 ) {
   const chat = session.activeChat();
   await expect
     .poll(
       async () => {
         const [queue, { messages }] = await Promise.all([
-          apiClient.getQueueStatus(sessionId),
-          apiClient.listSessionMessages(sessionId),
+          apiClient.getQueueStatus(queueIdentity),
+          apiClient.listSessionMessages(queueIdentity.sessionId),
         ]);
         const workflowMessageExists = messages.some(
           (message) =>

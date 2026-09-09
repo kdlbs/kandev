@@ -4,19 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/logger"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
-const runtimeInternalErrorMessage = "internal server error"
+const runtimeInternalErrorMessage = "internal runtime error"
 
 // Handler exposes run-scoped runtime actions to agent processes.
 type Handler struct {
@@ -24,7 +25,8 @@ type Handler struct {
 	actions     *Actions
 	skillLister SkillLister
 	runEvents   RunEventAppender
-	logger      *logger.Logger
+	decisions   DecisionRecorder
+	logger      *commonlogger.Logger
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -38,13 +40,18 @@ func NewHandler(
 	actions *Actions,
 	skillLister SkillLister,
 	runEvents RunEventAppender,
-	log *logger.Logger,
+	decisions DecisionRecorder,
+	log *commonlogger.Logger,
 ) *Handler {
+	if log == nil {
+		log = commonlogger.Default()
+	}
 	return &Handler{
 		agentSvc:    agentSvc,
 		actions:     actions,
 		skillLister: skillLister,
 		runEvents:   runEvents,
+		decisions:   decisions,
 		logger:      log,
 	}
 }
@@ -52,6 +59,7 @@ func NewHandler(
 // RegisterRoutes mounts runtime syscall routes.
 func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/comments", h.postComment)
+	group.POST("/runtime/task/decision", h.recordAgentDecision)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
 	group.POST("/runtime/tasks", h.createTask)
@@ -65,6 +73,43 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.PUT("/runtime/memory/*path", h.putMemory)
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
+}
+
+type recordAgentDecisionRequest struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func (h *Handler) recordAgentDecision(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	if runCtx.TaskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decision requires a task-bound runtime"})
+		return
+	}
+	var req recordAgentDecisionRequest
+	if !bindClosedJSON(c, &req) {
+		return
+	}
+	if h.decisions == nil {
+		h.respondRuntimeError(c, runCtx, "record_agent_decision", "task", runCtx.TaskID, errDecisionRecorderMissing)
+		return
+	}
+	result, err := h.decisions.RecordAgentDecision(c.Request.Context(), RecordAgentDecisionInput{
+		TaskID:         runCtx.TaskID,
+		AgentProfileID: runCtx.AgentID,
+		SessionID:      runCtx.SessionID,
+		Decision:       req.Decision,
+		Reason:         req.Reason,
+	})
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "record_agent_decision", "task", runCtx.TaskID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "record_agent_decision", "task", runCtx.TaskID)
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) createTask(c *gin.Context) {
@@ -399,6 +444,24 @@ func bindJSON(c *gin.Context, target any) bool {
 	return true
 }
 
+func bindClosedJSON(c *gin.Context, target any) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = errors.New("request body must contain one JSON value")
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 func bearerToken(header string) string {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
@@ -420,22 +483,26 @@ func (h *Handler) respondRuntimeError(
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	var decisionValidation *DecisionValidationError
+	if errors.As(err, &decisionValidation) {
+		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, shared.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
-	if h.logger != nil {
-		h.logger.Error("runtime action failed",
-			zap.String("action", action),
-			zap.String("target_type", targetType),
-			zap.String("target_id", targetID),
-			zap.String("agent_id", runCtx.AgentID),
-			zap.String("run_id", runCtx.RunID),
-			zap.String("session_id", runCtx.SessionID),
-			zap.Error(err),
-		)
-	}
+	h.logger.Error("office runtime action failed",
+		zap.String("action", action),
+		zap.String("target_type", targetType),
+		zap.String("target_id", targetID),
+		zap.String("run_id", runCtx.RunID),
+		zap.String("agent_id", runCtx.AgentID),
+		zap.String("session_id", runCtx.SessionID),
+		zap.Error(err),
+	)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": runtimeInternalErrorMessage})
 }
 

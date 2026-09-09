@@ -79,6 +79,50 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	return []byte(raw), true, nil
 }
 
+func (s *Store) GetConsistent(ctx context.Context, key string) ([]byte, bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, s.db.Rebind(`SELECT value FROM settings WHERE key = ?`), key).Scan(&raw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return []byte(raw), true, nil
+}
+
+func (s *Store) CompareAndSwap(
+	ctx context.Context,
+	key string,
+	expected, value []byte,
+) (bool, error) {
+	now := time.Now().UTC()
+	var (
+		result sql.Result
+		err    error
+	)
+	if expected == nil {
+		result, err = s.db.ExecContext(ctx, s.db.Rebind(`
+			INSERT INTO settings (key, value, updated_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(key) DO NOTHING
+		`), key, string(value), now)
+	} else {
+		result, err = s.db.ExecContext(ctx, s.db.Rebind(`
+			UPDATE settings SET value = ?, updated_at = ?
+			WHERE key = ? AND value = ?
+		`), string(value), now, key, string(expected))
+	}
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // GetEntry reads one setting row, including its persisted update timestamp.
 func (s *Store) GetEntry(ctx context.Context, key string) (Entry, bool, error) {
 	var row struct {

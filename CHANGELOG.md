@@ -2,6 +2,205 @@
 
 All notable changes to Kandev.
 
+## 0.94.0 - 2026-09-09
+
+### Features
+
+- improve MCP discovery and canvas authoring prompts ([#3522](https://github.com/kdlbs/kandev/pull/3522))
+- move automation toggles to session scope ([#3465](https://github.com/kdlbs/kandev/pull/3465)) by @Fclem
+- show a distinct icon for tasks parked on background work ([#3402](https://github.com/kdlbs/kandev/pull/3402)) by @nova28
+- enforce required store parity ([#3459](https://github.com/kdlbs/kandev/pull/3459))
+- resolve unique advertised model variations ([#3472](https://github.com/kdlbs/kandev/pull/3472))
+- confirm saved view deletion ([#3461](https://github.com/kdlbs/kandev/pull/3461))
+- activate reviewed runtime defaults on startup ([#3471](https://github.com/kdlbs/kandev/pull/3471))
+- simplify launch-step destination ([#3466](https://github.com/kdlbs/kandev/pull/3466))
+- serve native HTML previews ([#3375](https://github.com/kdlbs/kandev/pull/3375))
+- preview task launch destination and prompt ([#3425](https://github.com/kdlbs/kandev/pull/3425))
+- add automatic task color rules ([#3180](https://github.com/kdlbs/kandev/pull/3180))
+- add progressive storage analysis ([#3429](https://github.com/kdlbs/kandev/pull/3429))
+- add DeepSeek API Balance to plugin registry ([#3452](https://github.com/kdlbs/kandev/pull/3452)) by @Fclem
+- add append mode to update_task_plan_kandev ([#3448](https://github.com/kdlbs/kandev/pull/3448)) by @nova28
+- add consent-aware repository discovery
+- per-profile opt-in for unprivileged user namespaces by @yattdev
+- expand task fields for integrations by @yattdev
+- add chat-submit-decoration plugin slot over the send button ([#2990](https://github.com/kdlbs/kandev/pull/2990))
+- add plugin-backed canvases ([#3111](https://github.com/kdlbs/kandev/pull/3111))
+- organization units, tenancy, roles and scopes for team access ([#2919](https://github.com/kdlbs/kandev/pull/2919))
+- add task manager to marketplace ([#3406](https://github.com/kdlbs/kandev/pull/3406))
+- show and set task priority on the kanban board ([#3333](https://github.com/kdlbs/kandev/pull/3333)) by @nova28
+- move shortcuts into plugin settings ([#3384](https://github.com/kdlbs/kandev/pull/3384))
+- resolve session hostnames ([#2741](https://github.com/kdlbs/kandev/pull/2741)) by @Fclem
+- show and move a task's workflow step from the kanban preview ([#3329](https://github.com/kdlbs/kandev/pull/3329)) by @nova28
+- add Goose ACP agent support ([#3313](https://github.com/kdlbs/kandev/pull/3313)) by @jelloeater-agent
+- edit task dependencies ([#3308](https://github.com/kdlbs/kandev/pull/3308)) ([#3323](https://github.com/kdlbs/kandev/pull/3323))
+- support right-click session actions in the kanban preview panel ([#3321](https://github.com/kdlbs/kandev/pull/3321)) by @nova28
+- split system data and storage pages ([#3348](https://github.com/kdlbs/kandev/pull/3348))
+- add Google Antigravity as a selectable coding agent ([#3324](https://github.com/kdlbs/kandev/pull/3324)) by @nova28
+- sync agents, projects, skills, and routines from GitHub or GitLab ([#3304](https://github.com/kdlbs/kandev/pull/3304)) by @nova28
+- let the dependency picker find tasks by PR or MR number ([#3311](https://github.com/kdlbs/kandev/pull/3311)) by @nova28
+- add a Plan tab to the kanban preview panel ([#3314](https://github.com/kdlbs/kandev/pull/3314)) by @nova28
+- distinguish archived command-panel task results ([#3298](https://github.com/kdlbs/kandev/pull/3298))
+- add Threads view for live agent conversations ([#3112](https://github.com/kdlbs/kandev/pull/3112)) by @jcoatelen-ledger
+- add manual file upload and download to the Files panel ([#3292](https://github.com/kdlbs/kandev/pull/3292)) by @Corey-Fogg
+- reject task plan saves over 256 KiB instead of growing unbounded ([#3297](https://github.com/kdlbs/kandev/pull/3297)) by @nova28
+- add workflow profile session lifecycle policies ([#3225](https://github.com/kdlbs/kandev/pull/3225))
+- support dual-era MCP protocol ([#3164](https://github.com/kdlbs/kandev/pull/3164))
+- surface stalled Office tasks without reclaiming them ([#3279](https://github.com/kdlbs/kandev/pull/3279)) by @nova28
+- filter issues by milestone ([#3278](https://github.com/kdlbs/kandev/pull/3278)) by @nova28
+- add Kubernetes executor ([#3261](https://github.com/kdlbs/kandev/pull/3261))
+- show char count, delta, and workflow step in plan history ([#3265](https://github.com/kdlbs/kandev/pull/3265)) by @nova28
+
+### Bug Fixes
+
+- restore MCP status after task switches ([#3547](https://github.com/kdlbs/kandev/pull/3547)) ([#3552](https://github.com/kdlbs/kandev/pull/3552))
+- recognize leading [canceled] in Cursor stream-reset errors ([#3544](https://github.com/kdlbs/kandev/pull/3544))
+- preserve queued turn state during workflow transitions ([#3542](https://github.com/kdlbs/kandev/pull/3542))
+- recover cleanup preparation for missing worktrees ([#3541](https://github.com/kdlbs/kandev/pull/3541))
+- expand saved prompts on workflow-free launches ([#3539](https://github.com/kdlbs/kandev/pull/3539))
+- stop multi-agent reviews from deadlocking by default ([#3515](https://github.com/kdlbs/kandev/pull/3515)) by @nova28
+- parse run-e2e.sh options after a leading -- and bound the docker info probe ([#3518](https://github.com/kdlbs/kandev/pull/3518)) by @nova28
+- reject empty slug on skill update ([#3509](https://github.com/kdlbs/kandev/pull/3509)) by @nova28
+- stop routine tasks from getting office skills they can't run ([#3502](https://github.com/kdlbs/kandev/pull/3502)) by @nova28
+- protect referenced secrets from deletion ([#3500](https://github.com/kdlbs/kandev/pull/3500)) ([#3503](https://github.com/kdlbs/kandev/pull/3503))
+- guard archived session recovery and preserve launch errors ([#3519](https://github.com/kdlbs/kandev/pull/3519))
+- remove host model warnings from profile selectors ([#3521](https://github.com/kdlbs/kandev/pull/3521))
+- stop agents showing idle while a successor run works ([#3516](https://github.com/kdlbs/kandev/pull/3516)) by @nova28
+- name the children in the children-completed wake prompt ([#3510](https://github.com/kdlbs/kandev/pull/3510)) by @nova28
+- retry SSH agentctl handshake rejection instead of failing the launch ([#3511](https://github.com/kdlbs/kandev/pull/3511)) by @nova28
+- stop discarding step_complete's handoff before the next step reads it ([#3446](https://github.com/kdlbs/kandev/pull/3446)) by @nova28
+- stop messages sent during a step move from vanishing ([#3494](https://github.com/kdlbs/kandev/pull/3494)) by @nova28
+- retract empty-turn notice once real agent output lands ([#3499](https://github.com/kdlbs/kandev/pull/3499)) by @nova28
+- stop DST fall-back from firing automations twice ([#3490](https://github.com/kdlbs/kandev/pull/3490)) by @nova28
+- stop routines from bricking after their first fire ([#3488](https://github.com/kdlbs/kandev/pull/3488)) by @nova28
+- tell the CEO which agent failed, not "Error: unknown" ([#3485](https://github.com/kdlbs/kandev/pull/3485)) by @nova28
+- prevent plan editor crash during task switches ([#3493](https://github.com/kdlbs/kandev/pull/3493))
+- recover managed runtime capability probes ([#3483](https://github.com/kdlbs/kandev/pull/3483))
+- address Dependabot vulnerabilities ([#3450](https://github.com/kdlbs/kandev/pull/3450))
+- recognize visible Dockview chat panels ([#3481](https://github.com/kdlbs/kandev/pull/3481))
+- grant record_step_decision capability to decision-seat holders ([#3463](https://github.com/kdlbs/kandev/pull/3463)) by @nova28
+- preserve pending git action ownership ([#3373](https://github.com/kdlbs/kandev/pull/3373)) by @yattdev
+- use trusted preview deploy command ([#3456](https://github.com/kdlbs/kandev/pull/3456)) by @yattdev
+- hide inactive repository providers ([#3470](https://github.com/kdlbs/kandev/pull/3470))
+- preserve scroll position across task switches ([#3474](https://github.com/kdlbs/kandev/pull/3474))
+- stabilize archive confirmation surface ([#3460](https://github.com/kdlbs/kandev/pull/3460))
+- stop Mark fixed from leaving an auto-paused agent stuck ([#3464](https://github.com/kdlbs/kandev/pull/3464)) by @nova28
+- stabilize failing main e2e runs ([#3462](https://github.com/kdlbs/kandev/pull/3462))
+- recover failed task launches safely ([#3437](https://github.com/kdlbs/kandev/pull/3437))
+- retry PR auto-fix turns without outcomes ([#3458](https://github.com/kdlbs/kandev/pull/3458))
+- stop restarts from leaving the API stuck in "starting" ([#3445](https://github.com/kdlbs/kandev/pull/3445)) by @nova28
+- stop a manual route retry from deadlocking against a context reset ([#3443](https://github.com/kdlbs/kandev/pull/3443)) by @nova28
+- stop workflow triggers from re-running actions right after a restart ([#3447](https://github.com/kdlbs/kandev/pull/3447)) by @nova28
+- stop reviewer and approver comments showing under the assignee's name ([#3444](https://github.com/kdlbs/kandev/pull/3444)) by @nova28
+- preserve PR status colors across reload ([#3454](https://github.com/kdlbs/kandev/pull/3454))
+- bound clarification response submissions ([#3439](https://github.com/kdlbs/kandev/pull/3439))
+- refine queued message row controls ([#3449](https://github.com/kdlbs/kandev/pull/3449)) by @Fclem
+- stabilize flaky e2e workflows ([#3453](https://github.com/kdlbs/kandev/pull/3453))
+- protect dirty worktree deletion ([#3426](https://github.com/kdlbs/kandev/pull/3426))
+- preserve Kanban column width while dragging ([#3345](https://github.com/kdlbs/kandev/pull/3345)) ([#3423](https://github.com/kdlbs/kandev/pull/3423))
+- suppress invalid task timestamps ([#3434](https://github.com/kdlbs/kandev/pull/3434))
+- keep PR walkthrough links canonical ([#3438](https://github.com/kdlbs/kandev/pull/3438))
+- break approver-first tie when neither quorum seat sits at the current step ([#3442](https://github.com/kdlbs/kandev/pull/3442)) by @nova28
+- stop Sprites prepare truncating git history and leaking the clone token ([#3411](https://github.com/kdlbs/kandev/pull/3411)) by @jmarbutt
+- keep draft PR icons muted ([#3424](https://github.com/kdlbs/kandev/pull/3424))
+- keep new-file input focused after menu close ([#3419](https://github.com/kdlbs/kandev/pull/3419))
+- auto-fix GitHub PR merge conflicts ([#3418](https://github.com/kdlbs/kandev/pull/3418))
+- hide human assignee when auth is disabled ([#3417](https://github.com/kdlbs/kandev/pull/3417))
+- classify backend reload diagnostics ([#3414](https://github.com/kdlbs/kandev/pull/3414))
+- stop dynamic agent handoffs from leaking secrets and mangling text ([#3407](https://github.com/kdlbs/kandev/pull/3407)) by @nova28
+- show agents as working while a run is in flight ([#3401](https://github.com/kdlbs/kandev/pull/3401)) by @nova28
+- stop manual Retry from starting a second agent when a route already resumed ([#3399](https://github.com/kdlbs/kandev/pull/3399)) by @nova28
+- read the stdin environment to EOF for bash on macOS ([#3385](https://github.com/kdlbs/kandev/pull/3385)) by @jmarbutt
+- brace refspec variables for zsh login shells ([#3383](https://github.com/kdlbs/kandev/pull/3383)) by @jmarbutt
+- harden prompt history and saved prompt aliases ([#3369](https://github.com/kdlbs/kandev/pull/3369)) by @Fclem
+- contain mobile Kanban archive confirmation ([#3430](https://github.com/kdlbs/kandev/pull/3430))
+- preserve remote OpenCode auth providers ([#3382](https://github.com/kdlbs/kandev/pull/3382)) ([#3421](https://github.com/kdlbs/kandev/pull/3421))
+- preserve latest task-create workflow ([#3413](https://github.com/kdlbs/kandev/pull/3413))
+- load and scroll to unloaded prompts ([#3412](https://github.com/kdlbs/kandev/pull/3412)) by @Fclem
+- preserve workflow move handoff prompts ([#3409](https://github.com/kdlbs/kandev/pull/3409)) ([#3415](https://github.com/kdlbs/kandev/pull/3415))
+- keep a usable agent selected when the executor changes ([#3388](https://github.com/kdlbs/kandev/pull/3388)) by @jmarbutt
+- stop a stale session snapshot from reverting a model switch ([#3379](https://github.com/kdlbs/kandev/pull/3379)) by @JnManso
+- preserve transcript position on task switch ([#3405](https://github.com/kdlbs/kandev/pull/3405))
+- stop a slow MCP server from stalling Claude for hours ([#3398](https://github.com/kdlbs/kandev/pull/3398)) by @nova28
+- stabilize immutable runtime image resolution ([#3397](https://github.com/kdlbs/kandev/pull/3397)) by @yattdev
+- align merge approval cleanup contract
+- repair stale approval merge-state query
+- restore PostgreSQL domain store parity ([#3372](https://github.com/kdlbs/kandev/pull/3372))
+- open registered repository links in file viewer ([#3400](https://github.com/kdlbs/kandev/pull/3400))
+- make passthrough composer touch-safe ([#2809](https://github.com/kdlbs/kandev/pull/2809)) ([#3303](https://github.com/kdlbs/kandev/pull/3303))
+- stop dynamic-route retries from double-launching the same prompt ([#3360](https://github.com/kdlbs/kandev/pull/3360)) by @nova28
+- support PostgreSQL task terminals ([#3371](https://github.com/kdlbs/kandev/pull/3371)) ([#3378](https://github.com/kdlbs/kandev/pull/3378))
+- preserve detached workspace ownership ([#3366](https://github.com/kdlbs/kandev/pull/3366)) ([#3374](https://github.com/kdlbs/kandev/pull/3374))
+- recover dynamic agent routes stuck in starting with no owner ([#3362](https://github.com/kdlbs/kandev/pull/3362)) by @nova28
+- use built-in token for runtime pin PRs ([#3365](https://github.com/kdlbs/kandev/pull/3365))
+- reject stale executor transition workspaces ([#3354](https://github.com/kdlbs/kandev/pull/3354)) by @WaleWangPW
+- stop disabled dynamic routing from resuming pending retries ([#3361](https://github.com/kdlbs/kandev/pull/3361)) by @nova28
+- backfill feeder pulls after task-tree lifecycle changes ([#3376](https://github.com/kdlbs/kandev/pull/3376))
+- make accordion menu the default ([#3368](https://github.com/kdlbs/kandev/pull/3368))
+- launch the dynamic fallback successor outside the agent.failed dispatch ([#3356](https://github.com/kdlbs/kandev/pull/3356)) by @iamapfelbaum
+- prevent silent internal bridge request loss ([#3364](https://github.com/kdlbs/kandev/pull/3364)) ([#3367](https://github.com/kdlbs/kandev/pull/3367))
+- compact TUI MCP strategy selector ([#3370](https://github.com/kdlbs/kandev/pull/3370))
+- make kanban boards recover from agent failures too ([#3315](https://github.com/kdlbs/kandev/pull/3315)) by @nova28
+- stop retries from hammering a failed credential after a restart ([#3357](https://github.com/kdlbs/kandev/pull/3357)) by @nova28
+- resolve Windows resume share-access violation ([#3353](https://github.com/kdlbs/kandev/pull/3353)) by @JnManso
+- keep change action spinners visible ([#3339](https://github.com/kdlbs/kandev/pull/3339))
+- detect backend restarts in open pages ([#3346](https://github.com/kdlbs/kandev/pull/3346))
+- quiet Claude passthrough by default ([#3305](https://github.com/kdlbs/kandev/pull/3305)) ([#3317](https://github.com/kdlbs/kandev/pull/3317))
+- classify OpenCode period usage limits so dynamic routing can advance ([#3320](https://github.com/kdlbs/kandev/pull/3320)) by @iamapfelbaum
+- restore compact coarse-pointer file tree rows ([#3326](https://github.com/kdlbs/kandev/pull/3326)) by @Fclem
+- keep model selector visible after model switches ([#3349](https://github.com/kdlbs/kandev/pull/3349))
+- recover pathless worktree failures ([#3335](https://github.com/kdlbs/kandev/pull/3335)) ([#3351](https://github.com/kdlbs/kandev/pull/3351))
+- recover SSH sessions after dead runtime ([#3330](https://github.com/kdlbs/kandev/pull/3330)) ([#3350](https://github.com/kdlbs/kandev/pull/3350))
+- stop superseded session worktrees claiming cutover slots ([#3328](https://github.com/kdlbs/kandev/pull/3328)) by @tito
+- registering a reviewer stops duplicating the auto-picked seat ([#3327](https://github.com/kdlbs/kandev/pull/3327)) by @nova28
+- stop workflow step transitions from leaking claude subprocesses ([#3338](https://github.com/kdlbs/kandev/pull/3338)) by @nova28
+- fixes MCP issue where auto_approve is silently ignored in agent profile create/update. ([#3331](https://github.com/kdlbs/kandev/pull/3331)) by @meanderix
+- stop clarification answers from timing out on large message tables ([#3322](https://github.com/kdlbs/kandev/pull/3322)) by @nova28
+- retain PR commit provenance across refreshes ([#3341](https://github.com/kdlbs/kandev/pull/3341))
+- restore chat scroll on env-changing task switch ([#3342](https://github.com/kdlbs/kandev/pull/3342))
+- enable coarse-pointer terminal scrolling ([#2808](https://github.com/kdlbs/kandev/pull/2808)) ([#3301](https://github.com/kdlbs/kandev/pull/3301))
+- stop chat from saying no utility agent is configured after you save one ([#3306](https://github.com/kdlbs/kandev/pull/3306)) by @nova28
+- deduplicate empty workflow prompts ([#3299](https://github.com/kdlbs/kandev/pull/3299))
+- stop the reject leg from waking the reviewer, not the assignee ([#3294](https://github.com/kdlbs/kandev/pull/3294)) by @nova28
+- guard session resumption across task navigation ([#3302](https://github.com/kdlbs/kandev/pull/3302))
+- contain a panicking subscriber so it stops crashing event delivery ([#3295](https://github.com/kdlbs/kandev/pull/3295)) by @nova28
+- stop a failing CEO agent from re-queuing itself forever ([#3296](https://github.com/kdlbs/kandev/pull/3296)) by @nova28
+- stop parent tasks waking twice when children finish ([#3271](https://github.com/kdlbs/kandev/pull/3271)) by @nova28
+- preserve qualified remote refs in watcher branches ([#3268](https://github.com/kdlbs/kandev/pull/3268))
+- preserve transcript scroll across session activation ([#3291](https://github.com/kdlbs/kandev/pull/3291))
+- cap the plan text pasted into every new agent session ([#3280](https://github.com/kdlbs/kandev/pull/3280)) by @nova28
+- recognize reviewer decisions from agents who also hold the approver seat ([#3270](https://github.com/kdlbs/kandev/pull/3270)) by @nova28
+- escalate reviewer and approver agent failures to the CEO ([#3275](https://github.com/kdlbs/kandev/pull/3275)) by @nova28
+- fire budget alerts when reassigning a task pushes a project over budget ([#3276](https://github.com/kdlbs/kandev/pull/3276)) by @nova28
+- materialize attachments sent into a generating turn ([#3277](https://github.com/kdlbs/kandev/pull/3277)) by @Corey-Fogg
+- allow typing while sessions start ([#3285](https://github.com/kdlbs/kandev/pull/3285))
+- preserve plan comments across session switches ([#3272](https://github.com/kdlbs/kandev/pull/3272))
+- stop idle-skip from swallowing manual wakeups queued behind a cron run ([#3281](https://github.com/kdlbs/kandev/pull/3281)) by @nova28
+- allow the stall watchdog to archive its own task ([#3260](https://github.com/kdlbs/kandev/pull/3260)) by @nova28
+- stop failed answer submits from vanishing silently ([#3263](https://github.com/kdlbs/kandev/pull/3263)) by @nova28
+- normalize skill slugs to canonical form on write and sync ([#3257](https://github.com/kdlbs/kandev/pull/3257)) by @nova28
+
+### Performance
+
+- stream frontend diagnostic captures ([#3540](https://github.com/kdlbs/kandev/pull/3540))
+- isolate task surface rendering ([#3226](https://github.com/kdlbs/kandev/pull/3226))
+- isolate sidebar task tree renders ([#3435](https://github.com/kdlbs/kandev/pull/3435))
+- isolate kanban task update renders ([#3436](https://github.com/kdlbs/kandev/pull/3436))
+
+### Refactoring
+
+- remove legacy websocket request API ([#3431](https://github.com/kdlbs/kandev/pull/3431))
+- remove unused recreator ([#3432](https://github.com/kdlbs/kandev/pull/3432))
+- remove deprecated model fetcher cache ([#3433](https://github.com/kdlbs/kandev/pull/3433))
+- stop hand-syncing the dispatcher's active-state list with the SQL filter ([#3274](https://github.com/kdlbs/kandev/pull/3274)) by @nova28
+
+### Documentation
+
+- correct stale unique-index precondition for office session identity ([#3513](https://github.com/kdlbs/kandev/pull/3513)) by @nova28
+- mark shared access features experimental ([#3428](https://github.com/kdlbs/kandev/pull/3428))
+- add branded diagram design guidance ([#3316](https://github.com/kdlbs/kandev/pull/3316))
+- document mobile remote access ([#2807](https://github.com/kdlbs/kandev/pull/2807)) ([#3300](https://github.com/kdlbs/kandev/pull/3300))
+- stop postgres and nats bugs from shipping green through verify ([#3273](https://github.com/kdlbs/kandev/pull/3273)) by @nova28
+
 ## 0.93.0 - 2026-09-02
 
 ### Features
