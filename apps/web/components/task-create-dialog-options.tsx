@@ -25,7 +25,6 @@ import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
-import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { branchOptionValue, buildBranchKeywords } from "./branch-picker-options";
 import {
   ensureAgentProfileRecentUseLoaded,
