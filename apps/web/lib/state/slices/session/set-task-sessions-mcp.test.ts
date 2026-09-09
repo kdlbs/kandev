@@ -117,6 +117,31 @@ describe("setTaskSessionsForTask MCP history freshness", () => {
     expect(store.getState().sessionMcpStatus.bySessionId[SESSION_ID]).toEqual(live);
   });
 
+  it("replaces older stored history with a strictly newer snapshot", () => {
+    const store = makeStore();
+    const stored = makeHistory({
+      attemptId: "attempt-stored",
+      startedAt: SESSION_TIMESTAMP,
+      updatedAt: MIDDLE_TIMESTAMP,
+    });
+    const incoming = makeHistory({
+      attemptId: "attempt-new",
+      startedAt: SESSION_TIMESTAMP,
+      updatedAt: LATEST_TIMESTAMP,
+    });
+    store.getState().setSessionMCPStatus(SESSION_ID, stored);
+
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession("session-1", { mcp_attachment_state: incoming })],
+        {},
+      );
+
+    expect(store.getState().sessionMcpStatus.bySessionId[SESSION_ID]).toEqual(incoming);
+  });
+
   it("replaces stored history when its freshness timestamp is invalid", () => {
     const store = makeStore();
     const stored = makeHistory({ attemptId: "attempt-invalid", startedAt: "not-a-timestamp" });

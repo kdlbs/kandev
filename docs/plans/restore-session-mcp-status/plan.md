@@ -89,10 +89,10 @@ Relevant existing files:
 
 ## Verification results
 
-- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts` passed (45 tests).
+- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts` passed (46 tests).
 - `cd apps/web && pnpm run typecheck` passed.
 - Targeted ESLint passed for the session slice, reconciliation helper, hydrator, and both regression tests.
-- Related session reconciliation tests passed (3 files, 55 tests).
+- Related session reconciliation tests passed (3 files, 57 tests).
 
 ## Risks
 

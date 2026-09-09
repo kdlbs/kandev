@@ -94,7 +94,7 @@ equal snapshots cannot replace newer live evidence.
 
 Verification passed:
 
-- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts` (45 tests)
+- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts` (46 tests)
 - `cd apps/web && pnpm run typecheck`
 - Targeted ESLint for the session slice, reconciliation helper, hydrator, and both regression tests.
-- Related session reconciliation tests (3 files, 55 tests)
+- Related session reconciliation tests (3 files, 57 tests)
