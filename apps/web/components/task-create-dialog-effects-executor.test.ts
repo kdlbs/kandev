@@ -98,7 +98,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
     expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_LOCAL);
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
     expect(fs.setExecutorId).not.toHaveBeenCalledWith(local.id);
@@ -113,7 +115,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 
   it("defaults repo-less tasks to a local profile because worktree needs a repo", async () => {
@@ -129,7 +133,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 
   it("defaults explicit local-path tasks to a local profile when no profile was saved", async () => {
@@ -149,7 +155,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 
   it("ignores a workspace-default worktree executor for explicit local-path tasks", async () => {
@@ -171,7 +179,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
     expect(fs.setExecutorId).not.toHaveBeenCalledWith(worktree.id);
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 
   it("does not fall back to a worktree profile for explicit local-path tasks", async () => {
@@ -187,7 +197,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_DOCKER));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_DOCKER),
+    );
     expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
   });
 });
@@ -204,7 +216,9 @@ describe("useDefaultSelectionsEffect - editing task's stored executor profile", 
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], PROFILE_LOCAL));
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
     expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
   });
 
@@ -224,7 +238,9 @@ describe("useDefaultSelectionsEffect - editing task's stored executor profile", 
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], null));
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 });
 
@@ -251,7 +267,9 @@ describe("useDefaultSelectionsEffect - executor profile restoration", () => {
     });
     rerender({ sel: selAfter });
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 });
 
@@ -267,7 +285,9 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE_B),
+    );
   });
 
   it("keeps an explicit local workspace default ahead of a saved worktree profile", async () => {
@@ -333,7 +353,9 @@ describe("useDefaultSelectionsEffect - launch preferences", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 });
 

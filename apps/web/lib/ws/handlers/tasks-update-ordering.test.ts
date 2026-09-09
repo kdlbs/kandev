@@ -21,7 +21,11 @@ describe("task.updated stale-event ordering guard", () => {
       updatedAt: OLDER_TIMESTAMP,
     };
     const store = makeStore({
-      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [existingTask] } as unknown as AppState["kanban"],
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
     });
 
     registerTasksHandlers(store)["task.updated"]!(
@@ -46,7 +50,11 @@ describe("task.updated stale-event ordering guard", () => {
       updatedAt: OLDER_TIMESTAMP,
     };
     const store = makeStore({
-      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [existingTask] } as unknown as AppState["kanban"],
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
     });
 
     registerTasksHandlers(store)["task.updated"]!(
@@ -70,7 +78,11 @@ describe("task.updated stale-event ordering guard", () => {
       position: 0,
     };
     const store = makeStore({
-      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [existingTask] } as unknown as AppState["kanban"],
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
     });
     const handlers = registerTasksHandlers(store);
 
