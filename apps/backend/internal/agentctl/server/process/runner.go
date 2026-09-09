@@ -312,21 +312,24 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	// Create new process group for clean shutdown (allows killing entire subprocess tree)
 	setManagedProcGroup(cmd)
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		if cancel != nil {
 			cancel()
 		}
 		return nil, fmt.Errorf("failed to attach stdout: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	cmd.Stdout = stdoutWriter
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		if cancel != nil {
 			cancel()
 		}
 		return nil, fmt.Errorf("failed to attach stderr: %w", err)
 	}
+	cmd.Stderr = stderrWriter
 
 	bufferMaxBytes := req.BufferMaxBytes
 	if bufferMaxBytes <= 0 {
@@ -392,7 +395,10 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 
 	r.publishStatus(proc)
 
-	if err := r.startAndActivate(proc, cmd, id, stdout, stderr, true, true); err != nil {
+	if err := r.startAndActivate(
+		proc, cmd, id, stdout, stderr,
+		[]io.Closer{stdoutWriter, stderrWriter}, true, true,
+	); err != nil {
 		return nil, err
 	}
 
@@ -430,9 +436,11 @@ func (r *ProcessRunner) startAndActivate(
 	cmd *exec.Cmd,
 	id string,
 	stdout, stderr io.ReadCloser,
+	outputWriters []io.Closer,
 	consumeStdout, consumeStderr bool,
 ) error {
 	if err := cmd.Start(); err != nil {
+		closeOutputWriters(outputWriters)
 		if proc.stdin != nil {
 			_ = proc.stdin.Close()
 		}
@@ -453,6 +461,7 @@ func (r *ProcessRunner) startAndActivate(
 		close(proc.done)
 		return fmt.Errorf("failed to start process: %w", err)
 	}
+	closeOutputWriters(outputWriters)
 	lifecycle, err := installProcessLifecycle(cmd)
 	if err != nil {
 		if proc.stdin != nil {
@@ -499,6 +508,12 @@ func (r *ProcessRunner) startOutputReader(proc *commandProcess, reader io.ReadCl
 		defer proc.outputReaders.Done()
 		r.readOutput(proc, reader, stream)
 	}()
+}
+
+func closeOutputWriters(writers []io.Closer) {
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
 }
 
 // Stop attempts to gracefully terminate a process, escalating to force-kill if needed.
