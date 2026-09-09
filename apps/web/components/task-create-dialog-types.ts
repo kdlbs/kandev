@@ -438,6 +438,13 @@ export type DialogFormState = {
   executorProfileId: string;
   setExecutorProfileId: (v: string) => void;
   /**
+   * Writes executorProfileId from an autopick/stored-profile seed effect
+   * only, never from the user's own picker. This is the sole writer
+   * seededExecutorProfileId tracks, so a user selection can never be
+   * mistaken for a seed regardless of which write lands first.
+   */
+  setExecutorProfileIdFromSeed: (v: string) => void;
+  /**
    * The executor profile id the dialog seeded for this open cycle (stored
    * value in edit mode, resolved default in create mode) — never a value the
    * user chose. Null until a value has been seeded. Submit flows compare the

@@ -30,21 +30,20 @@ vi.mock("@/hooks/domains/github/use-pr-info-by-url", async (importOriginal) => {
 const SEEDED_AUTOPICKED_PROFILE = "profile-autopicked";
 
 describe("useDialogFormState — seededExecutorProfileId", () => {
-  // AC-TASKS-RUNNER-SWITCH-004.5b: the submit flow decides whether the user
-  // "changed" the runner by comparing the final selection to whatever the
-  // dialog itself seeded — not to a touched flag — so a value set by
-  // autopick/stored-profile seeding must be captured once and held steady
-  // even as the user experiments with other selections.
-  it("is null until the first executorProfileId value is set", () => {
+  // The submit flow decides whether the user "changed" the runner by
+  // comparing the final selection to whatever the dialog itself seeded, so
+  // only a write that actually originated from autopick/stored-profile
+  // seeding may become that baseline — never a value the user picked.
+  it("is null until a value is seeded", () => {
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
     expect(result.current.seededExecutorProfileId).toBeNull();
   });
 
-  it("captures the first non-empty executorProfileId and keeps it despite later user changes", () => {
+  it("captures a seed write and keeps it despite later user changes", () => {
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
 
     act(() => {
-      result.current.setExecutorProfileId(SEEDED_AUTOPICKED_PROFILE);
+      result.current.setExecutorProfileIdFromSeed(SEEDED_AUTOPICKED_PROFILE);
     });
     expect(result.current.seededExecutorProfileId).toBe(SEEDED_AUTOPICKED_PROFILE);
 
@@ -60,6 +59,25 @@ describe("useDialogFormState — seededExecutorProfileId", () => {
     expect(result.current.seededExecutorProfileId).toBe(SEEDED_AUTOPICKED_PROFILE);
   });
 
+  // Regression: a user fast enough to pick a runner before the seed effect
+  // fires (e.g. an edit-mode stored profile that arrives a tick after open)
+  // must not have that pick mistaken for the seed. Racing the user's
+  // setExecutorProfileId ahead of setExecutorProfileIdFromSeed must not let
+  // the user's own choice masquerade as "what the dialog put there".
+  it("does not treat a user pick that arrives before the seed write as the seed", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+
+    act(() => {
+      result.current.setExecutorProfileId("profile-user-picked-first");
+    });
+    expect(result.current.seededExecutorProfileId).toBeNull();
+
+    act(() => {
+      result.current.setExecutorProfileIdFromSeed(SEEDED_AUTOPICKED_PROFILE);
+    });
+    expect(result.current.seededExecutorProfileId).toBe(SEEDED_AUTOPICKED_PROFILE);
+  });
+
   it("resets to null on the next open cycle", () => {
     const { result, rerender } = renderHook(
       ({ open }: { open: boolean }) => useDialogFormState(open, "ws-1", null),
@@ -67,7 +85,7 @@ describe("useDialogFormState — seededExecutorProfileId", () => {
     );
 
     act(() => {
-      result.current.setExecutorProfileId("profile-first-cycle");
+      result.current.setExecutorProfileIdFromSeed("profile-first-cycle");
     });
     expect(result.current.seededExecutorProfileId).toBe("profile-first-cycle");
 

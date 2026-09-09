@@ -101,6 +101,7 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       setExecutorProfileId,
       // The New Subtask dialog is create-only — there is no editing task to
       // seed a stored profile from, so nothing is ever "seeded" here.
+      setExecutorProfileIdFromSeed: NOOP,
       seededExecutorProfileId: null,
       autopilot,
       setAutopilot,

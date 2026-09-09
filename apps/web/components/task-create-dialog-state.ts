@@ -467,9 +467,9 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  const seededExecutorProfileId = useSeededExecutorProfileId(
+  const { seededExecutorProfileId, setExecutorProfileIdFromSeed } = useSeededExecutorProfileId(
     form.openCycle,
-    form.executorProfileId,
+    form.setExecutorProfileId,
   );
 
   return {
@@ -485,26 +485,34 @@ export function useDialogFormState(
     prInfoByUrl,
     clearDraft,
     seededExecutorProfileId,
+    setExecutorProfileIdFromSeed,
   };
 }
 
 /**
- * Captures the first non-empty executorProfileId value each open cycle,
- * whether it arrives via the create-mode autopick or the edit-mode stored-
- * profile seed effect. Resets on the next open cycle. This is "what the
- * dialog put there", independent of any later user selection.
+ * Tracks the executorProfileId value written through
+ * setExecutorProfileIdFromSeed each open cycle, whether it arrives via the
+ * create-mode autopick or the edit-mode stored-profile seed effect. Resets
+ * on the next open cycle. This is "what the dialog put there", independent
+ * of any later or earlier user selection: only a write through the
+ * returned setExecutorProfileIdFromSeed counts, never the plain
+ * setExecutorProfileId a user's own picker uses.
  */
-function useSeededExecutorProfileId(openCycle: number, executorProfileId: string) {
+function useSeededExecutorProfileId(openCycle: number, setExecutorProfileId: (v: string) => void) {
   const seededRef = useRef<string | null>(null);
   const lastOpenCycleRef = useRef(openCycle);
   if (lastOpenCycleRef.current !== openCycle) {
     lastOpenCycleRef.current = openCycle;
     seededRef.current = null;
   }
-  if (seededRef.current === null && executorProfileId) {
-    seededRef.current = executorProfileId;
-  }
-  return seededRef.current;
+  const setExecutorProfileIdFromSeed = useCallback(
+    (value: string) => {
+      seededRef.current = value;
+      setExecutorProfileId(value);
+    },
+    [setExecutorProfileId],
+  );
+  return { seededExecutorProfileId: seededRef.current, setExecutorProfileIdFromSeed };
 }
 
 /**

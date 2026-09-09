@@ -147,6 +147,7 @@ function makeFs(): DialogFormState {
     setExecutorId: () => {},
     executorProfileId: "",
     setExecutorProfileId: () => {},
+    setExecutorProfileIdFromSeed: () => {},
     seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => {},

@@ -463,7 +463,7 @@ export function useDefaultSelectionsEffect(
     executorId,
     executorProfileId,
     setExecutorId,
-    setExecutorProfileId,
+    setExecutorProfileIdFromSeed,
     noRepository,
     preferLocalExecutor: presetPrefersLocalExecutor,
     useRemote,
@@ -500,8 +500,8 @@ export function useDefaultSelectionsEffect(
   // cannot both compute a pick for the same render.
   useEffect(() => {
     if (!open || executorProfileId || !editingTaskExecutorProfileId) return;
-    setExecutorProfileId(editingTaskExecutorProfileId);
-  }, [open, executorProfileId, editingTaskExecutorProfileId, setExecutorProfileId]);
+    setExecutorProfileIdFromSeed(editingTaskExecutorProfileId);
+  }, [open, executorProfileId, editingTaskExecutorProfileId, setExecutorProfileIdFromSeed]);
 
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
   useExecutorIdAutopickEffect({
@@ -514,7 +514,7 @@ export function useDefaultSelectionsEffect(
     open: open && !hasStoredEditingExecutorProfile,
     executorProfileId,
     context: executorAutopickContext,
-    setExecutorProfileId,
+    setExecutorProfileId: setExecutorProfileIdFromSeed,
   });
 
   // Derive executorId from the selected executor profile
