@@ -1,7 +1,7 @@
 ---
 id: "04-wire-engine-routed-producers"
 title: "Wire engine-routed producers (P2, P3) onto wave identity"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-wave-identity-primitives", "02-wave-identity-persistence"]
 plan: "plan.md"
@@ -111,4 +111,20 @@ copied fields land somewhere real).
 
 ## Results
 
-Pending.
+Done, in `feat(office): wire the engine-routed producers onto wave
+identity`. `OnChildrenCompletedPayload`/`engine.QueueRunRequest` gained
+`WaveKey`/`WaveString`; `QueueRunCallback.Execute` copies them via a new
+`waveIdentityPayload` helper (empty for every trigger but
+`on_children_completed`); `runsServiceEngineAdapter.QueueRun` forwards them
+into `runs/service.QueueRunRequest.WakeWaveKey`/`WakeWaveString`. P2 and P3
+share a new `office/service.resolveWaveIdentity` helper (same terminality-
+confirming shape as Task 03's `office/scheduler` one — duplicated rather
+than shared across packages, consistent with this codebase's existing
+`runsServiceEngineAdapter` precedent for small intentional duplication
+across package boundaries).
+
+`go test ./internal/office/... ./internal/workflow/... ./internal/runs/...
+./internal/backendapp/...` and `golangci-lint run
+./internal/workflow/engine/... ./internal/office/service/...
+./internal/backendapp/... --new-from-rev=cd78236315f28982848de4938d56f7722c7f632f`
+both clean.
