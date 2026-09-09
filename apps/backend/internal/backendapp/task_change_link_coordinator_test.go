@@ -199,6 +199,22 @@ func TestTaskChangeCoordinatorUnlinkAbsentIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestTaskChangeCoordinatorReplaceSameIdentityIsANoOp(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	links := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{ID: "current", TaskID: "task-1", RepositoryID: "repo-1", MRIID: 42}}}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: links}
+	identity := mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 42}
+
+	got, err := coordinator.ReplaceTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{TaskID: "task-1", Link: identity, Old: &identity})
+	if err != nil || len(got) != 1 || got[0] != identity {
+		t.Fatalf("ReplaceTaskChange() = %#v, %v", got, err)
+	}
+	if len(links.unlinked) != 0 || links.linkedURL != "" {
+		t.Fatalf("same-identity replace mutated provider: unlinked=%#v linked=%q", links.unlinked, links.linkedURL)
+	}
+}
+
 func TestTaskChangeCoordinatorReplaceRollsBackNewLinkWhenOldUnlinkFails(t *testing.T) {
 	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
 	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")

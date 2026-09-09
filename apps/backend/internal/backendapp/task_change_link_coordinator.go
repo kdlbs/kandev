@@ -56,6 +56,11 @@ func (c taskChangeLinkCoordinator) ReplaceTaskChange(ctx context.Context, req mc
 	if req.Old == nil {
 		return nil, fmt.Errorf("current task change identity is required")
 	}
+	// Replacing an association with the exact same identity is already the
+	// requested final state. Do not detach it after the idempotent link.
+	if req.Link == *req.Old {
+		return c.list(ctx, req.TaskID)
+	}
 	before, err := c.list(ctx, req.TaskID)
 	if err != nil {
 		return nil, err
