@@ -24,6 +24,8 @@ const appStoreState = {
     showScrollToLastPrompt: false,
     showScrollToStart: false,
   },
+  kanban: { workflowId: null, steps: [], tasks: [] },
+  workspaces: { activeId: null },
   taskSessions: {
     items: {
       "prior-session": { name: null, agent_profile_id: null, last_read_message_id: null },
