@@ -113,6 +113,9 @@ func applyStartModelPolicy(
 	if policy.Model == "" {
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
 	}
+	if policy.AutoFallback {
+		policy.FallbackModel = ""
+	}
 
 	decision := ModelSelectionDecision{
 		RequestedModel: policy.Model,

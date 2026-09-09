@@ -88,6 +88,14 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantWarning: true,
 		},
 		{
+			name:        "auto fallback ignores configured fallback model",
+			state:       modelState("executor-default", "fallback"),
+			policy:      StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback", AutoFallback: true},
+			wantOutcome: ModelSelectionOutcomeProviderDefault,
+			wantReason:  ModelSelectionReasonRequestedNotAdvertised,
+			wantWarning: true,
+		},
+		{
 			name:          "advertised apply error is explicit",
 			state:         modelState("requested"),
 			policy:        StartModelPolicy{Model: "requested", FallbackModel: "fallback"},
@@ -138,6 +146,9 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			}
 			if decision.Warning != tt.wantWarning {
 				t.Errorf("warning = %v, want %v", decision.Warning, tt.wantWarning)
+			}
+			if tt.policy.AutoFallback && decision.FallbackModel != "" {
+				t.Errorf("auto-fallback fallback model = %q, want empty", decision.FallbackModel)
 			}
 		})
 	}
