@@ -1840,6 +1840,7 @@
   "runnerSwitchNotFound": "Ţĥĩś ţàśķ ćōũĺď ńōţ ƀē ƒōũńď.",
   "runnerSwitchInvalid": "Ţĥàţ ēxēćũţōŕ ƥŕōƒĩĺē ĩś ńōţ àvàĩĺàƀĺē.",
   "runnerSwitchPartiallySaved": "Ţĥē ŕũńńēŕ ŵàś śŵĩţćĥēď, ƀũţ ţĥē ŕēśţ ōƒ ŷōũŕ ćĥàńĝēś ćōũĺďń'ţ ƀē śàvēď. Ŷōũŕ ōţĥēŕ ēďĩţś àŕē śţĩĺĺ śĥōŵń ƀēĺōŵ: ţŕŷ śàvĩńĝ àĝàĩń.",
+  "launchFailedAfterTaskSaved": "Ŷōũŕ ćĥàńĝēś ŵēŕē śàvēď, ƀũţ ţĥē àĝēńţ ćōũĺď ńōţ ƀē śţàŕţēď. Ţŕŷ śţàŕţĩńĝ ĩţ àĝàĩń.",
   "failedToCreateFile": "Ƒàĩĺēď ţō ćŕēàţē ƒĩĺē",
   "failedToCreateSession": "Ƒàĩĺēď ţō ćŕēàţē śēśśĩōń",
   "failedToCreateTask": "Ƒàĩĺēď ţō ćŕēàţē ţàśķ",

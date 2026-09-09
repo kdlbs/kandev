@@ -1782,6 +1782,7 @@
   "runnerSwitchNotFound": "找不到此任务。",
   "runnerSwitchInvalid": "该执行器配置不可用。",
   "runnerSwitchPartiallySaved": "执行器配置已更改，但其余更改未能保存。您的其他编辑仍显示在下方，请重试保存。",
+  "launchFailedAfterTaskSaved": "您的更改已保存，但无法启动代理。请重试启动。",
   "failedToCreateFile": "创建文件失败",
   "failedToCreateSession": "创建会话失败",
   "failedToCreateTask": "创建任务失败",

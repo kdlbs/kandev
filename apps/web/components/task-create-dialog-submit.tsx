@@ -109,6 +109,18 @@ class TaskUpdateAfterRunnerSwitchError extends Error {
   }
 }
 
+/**
+ * Wraps a session-launch failure that follows an already-committed task
+ * save: the save is not rolled back, so this exists to tell that state
+ * apart from an ordinary save failure and keep the dialog reporting the
+ * truth (saved, but the agent didn't start) instead of a silent success.
+ */
+class LaunchAfterTaskUpdateError extends Error {
+  constructor(readonly cause: unknown) {
+    super("session launch failed after task update committed");
+  }
+}
+
 // Maps a rejected task.runner switch to outcome-specific text: a typed
 // mutability conflict reuses the same reason copy as the read-side
 // projection; an untyped outcome (invalid, not-found,
@@ -139,6 +151,7 @@ export function taskSubmitErrorMessage(error: unknown): string {
   if (error instanceof RunnerSwitchRejectedError) return runnerSwitchErrorMessage(error.cause);
   if (error instanceof TaskUpdateAfterRunnerSwitchError)
     return t("task:runnerSwitchPartiallySaved");
+  if (error instanceof LaunchAfterTaskUpdateError) return t("task:launchFailedAfterTaskSaved");
   if (error instanceof ApiError) {
     const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
     if (key) return t(key);
@@ -251,6 +264,7 @@ async function shouldKeepEditDialogOpen(
   // retry.
   if (error instanceof RunnerSwitchRejectedError) return true;
   if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
+  if (error instanceof LaunchAfterTaskUpdateError) return true;
   return refreshStaleBranchPolicies(error);
 }
 
@@ -603,7 +617,11 @@ export function useTaskSubmitHandlers({
             );
           }
         } catch (error) {
-          console.error("[TaskCreateDialog] failed to start agent:", error);
+          // The task save already committed by this point (performTaskUpdate
+          // resolved above); the launch is the last call in AC-004.4c's
+          // ordered sequence, so its failure must be reported as a partial
+          // save rather than swallowed into an apparent full success.
+          throw new LaunchAfterTaskUpdateError(error);
         }
       }
 

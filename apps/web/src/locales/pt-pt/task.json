@@ -1783,6 +1783,7 @@
   "runnerSwitchNotFound": "Esta tarefa não foi encontrada.",
   "runnerSwitchInvalid": "Esse perfil de executor não está disponível.",
   "runnerSwitchPartiallySaved": "O perfil de executor foi alterado, mas o resto das suas alterações não pôde ser guardado. As suas outras edições continuam visíveis abaixo: tente guardar novamente.",
+  "launchFailedAfterTaskSaved": "As suas alterações foram guardadas, mas não foi possível iniciar o agente. Tente iniciá-lo novamente.",
   "failedToCreateFile": "Falha ao criar o ficheiro",
   "failedToCreateSession": "Falha ao criar a sessão",
   "failedToCreateTask": "Falha ao criar a tarefa",

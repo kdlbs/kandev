@@ -636,6 +636,40 @@ describe("useTaskSubmitHandlers — runner switch (REQ-TASKS-RUNNER-SWITCH-004)"
       }),
     );
   });
+
+  it("reports a truthful partial save when the launch fails after the save committed (AC-004.4c/4d)", async () => {
+    const onOpenChange = vi.fn();
+    const onSuccess = vi.fn();
+    launchSessionMock.mockRejectedValueOnce(new Error("agent process crashed"));
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      agentProfileId: "agent-1",
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+      onOpenChange,
+      onSuccess,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(switchTaskRunnerMock).toHaveBeenCalledWith(TASK_ID, CHOSEN_PROFILE);
+    expect(updateTaskMock).toHaveBeenCalled();
+    expect(launchSessionMock).toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description:
+          "Your changes were saved, but the agent could not be started. Try starting it again.",
+      }),
+    );
+  });
 });
 
 describe("useTaskSubmitHandlers — repository selection edit failures", () => {

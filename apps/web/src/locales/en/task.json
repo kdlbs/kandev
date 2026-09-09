@@ -1840,6 +1840,7 @@
   "runnerSwitchNotFound": "This task could not be found.",
   "runnerSwitchInvalid": "That executor profile is not available.",
   "runnerSwitchPartiallySaved": "The runner was switched, but the rest of your changes couldn't be saved. Your other edits are still shown below: try saving again.",
+  "launchFailedAfterTaskSaved": "Your changes were saved, but the agent could not be started. Try starting it again.",
   "failedToCreateFile": "Failed to create file",
   "failedToCreateSession": "Failed to create session",
   "failedToCreateTask": "Failed to create task",
