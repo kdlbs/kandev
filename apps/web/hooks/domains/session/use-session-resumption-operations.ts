@@ -10,6 +10,7 @@ import {
   type TaskId,
   type TaskSessionState,
 } from "@/lib/types/http";
+import { isLaunchStateRegression } from "@/lib/session-state";
 import { t } from "@/lib/i18n";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
@@ -87,21 +88,68 @@ export type ResumeStateSetter = {
 
 export type SessionLike = { started_at?: string; updated_at?: string; state?: string } | null;
 
+const TASK_SESSION_STATES = new Set<TaskSessionState>([
+  "CREATED",
+  "STARTING",
+  "RUNNING",
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+function asTaskSessionState(state: string | undefined): TaskSessionState | null {
+  return state && TASK_SESSION_STATES.has(state as TaskSessionState)
+    ? (state as TaskSessionState)
+    : null;
+}
+
+export type ResumeStartingProjection = {
+  rollback: () => void;
+};
+
 /** Publish the persisted lifecycle state locally while the resume request is in flight. */
 export function markSessionStarting(
   taskId: string,
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-): void {
-  if (session?.state === "STARTING") return;
+): ResumeStartingProjection | null {
+  const liveSession = setters.getLiveSession?.(sessionId);
+  const previousSession = liveSession ?? session;
+  if (
+    previousSession?.state === "STARTING" ||
+    isLaunchStateRegression(previousSession?.state, "STARTING")
+  ) {
+    return null;
+  }
+
+  // Resume targets are existing sessions. If hydration has not supplied a
+  // prior state yet, FAILED is the safe recovery state after both launch
+  // attempts fail; do not leave the optimistic STARTING row stranded.
+  const previousState = asTaskSessionState(previousSession?.state) ?? "FAILED";
   setters.setTaskSession({
     id: toSessionId(sessionId),
     task_id: toTaskId(taskId),
     state: "STARTING",
-    started_at: session?.started_at ?? "",
-    updated_at: session?.updated_at ?? "",
+    started_at: previousSession?.started_at ?? "",
+    updated_at: previousSession?.updated_at ?? "",
   });
+
+  return {
+    rollback: () => {
+      const currentSession = setters.getLiveSession?.(sessionId);
+      if (setters.getLiveSession && currentSession?.state !== "STARTING") return;
+      setters.setTaskSession({
+        id: toSessionId(sessionId),
+        task_id: toTaskId(taskId),
+        state: previousState,
+        started_at: previousSession?.started_at ?? "",
+        updated_at: previousSession?.updated_at ?? "",
+      });
+    },
+  };
 }
 
 type ResumeResponse = {
@@ -251,21 +299,27 @@ export async function resumeWithSilentFallback(
   canContinue: () => boolean = () => true,
 ): Promise<boolean> {
   if (!canContinue()) return false;
-  markSessionStarting(taskId, sessionId, session, setters);
+  const startingProjection = markSessionStarting(taskId, sessionId, session, setters);
   setters.setResumptionState("resuming");
   setters.setRecoveryFailure?.(null);
   const context = { taskId, sessionId, session, setters, canContinue };
   const resumeAttempt = await tryLaunch(buildResumeRequest(taskId, sessionId).request, context);
-  if (!canContinue()) return false;
+  if (!canContinue()) {
+    startingProjection?.rollback();
+    return false;
+  }
   if (resumeAttempt.ok) {
     setters.setNotice?.(null);
     return true;
   }
   if (resumeAttempt.archived) {
     clearArchiveRecovery(setters);
+    startingProjection?.rollback();
     return false;
   }
-  return restoreAfterResumeFailure(context, resumeAttempt);
+  const restored = await restoreAfterResumeFailure(context, resumeAttempt);
+  if (!restored) startingProjection?.rollback();
+  return restored;
 }
 
 /** Run a single launch attempt and retain its failure for the fallback notice. */

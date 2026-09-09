@@ -39,12 +39,13 @@ import { t } from "@/lib/i18n";
 export type {
   ResumptionState,
   ResumeStateSetter,
+  ResumeStartingProjection,
   SessionLike,
   SessionRecoveryFailure,
   SessionStatus,
   TaskArchiveState,
 } from "./use-session-resumption-operations";
-export { resumeWithSilentFallback } from "./use-session-resumption-operations";
+export { markSessionStarting, resumeWithSilentFallback } from "./use-session-resumption-operations";
 type CheckAndResumeParams = {
   taskId: string;
   sessionId: string;
@@ -542,17 +543,30 @@ function useManualResumeSession({
     const canContinue = () => isCurrentRequest(captureRequest(), capturedRequest);
     const guardedSetters = buildGuardedSettersFor(capturedRequest);
     if (!canContinue()) return false;
-    markSessionStarting(taskId, sessionId, session, guardedSetters);
+    const startingProjection = markSessionStarting(taskId, sessionId, session, guardedSetters);
     guardedSetters.setResumptionState("resuming");
     guardedSetters.setError(null);
     guardedSetters.setNotice?.(null);
     guardedSetters.setRecoveryFailure?.(null);
     try {
       const response = await launchSession(buildResumeRequest(taskId, sessionId).request);
-      if (!canContinue()) return false;
-      return applyManualResumeResponse(response, taskId, sessionId, session, guardedSetters);
+      if (!canContinue()) {
+        startingProjection?.rollback();
+        return false;
+      }
+      const resumed = applyManualResumeResponse(
+        response,
+        taskId,
+        sessionId,
+        session,
+        guardedSetters,
+      );
+      if (!resumed) startingProjection?.rollback();
+      return resumed;
     } catch (error) {
-      return handleManualResumeError(error, guardedSetters, canContinue);
+      const handled = handleManualResumeError(error, guardedSetters, canContinue);
+      if (!handled) startingProjection?.rollback();
+      return handled;
     }
   }, [taskId, sessionId, taskArchiveState, session, captureRequest, buildGuardedSettersFor]);
 }

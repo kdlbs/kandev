@@ -149,6 +149,41 @@ describe("resumeWithSilentFallback", () => {
     await resume;
   });
 
+  it("does not project STARTING over a newer live session state", async () => {
+    mockRequest
+      .mockResolvedValueOnce({ success: false, error: RESUME_TRANSPORT_ERROR })
+      .mockResolvedValueOnce({ success: false, error: WORKSPACE_RESTORE_ERROR });
+    const { setters, calls } = createSetters();
+    setters.getLiveSession = () => ({ state: "RUNNING", updated_at: LATER_AT });
+
+    await resumeWithSilentFallback(TASK_ID, SESSION_ID, { state: "IDLE" }, setters);
+
+    expect(calls.taskSessionStates).toEqual([]);
+  });
+
+  it("rolls back the optimistic STARTING state when both launch attempts fail", async () => {
+    mockRequest
+      .mockResolvedValueOnce({ success: false, error: RESUME_TRANSPORT_ERROR })
+      .mockResolvedValueOnce({ success: false, error: WORKSPACE_RESTORE_ERROR });
+    let liveSession: { state: string; started_at: string; updated_at: string } = {
+      state: "IDLE",
+      started_at: STARTED_AT,
+      updated_at: STARTED_AT,
+    };
+    const { setters, calls } = createSetters();
+    setters.getLiveSession = () => liveSession;
+    const setTaskSession = setters.setTaskSession;
+    setters.setTaskSession = (next) => {
+      setTaskSession(next);
+      liveSession = next;
+    };
+
+    await resumeWithSilentFallback(TASK_ID, SESSION_ID, liveSession, setters);
+
+    expect(calls.taskSessionStates).toEqual(["STARTING", "IDLE"]);
+    expect(liveSession.state).toBe("IDLE");
+  });
+
   it("falls back to restore_workspace silently when resume returns success=false", async () => {
     // 1st call: resume fails. 2nd call: restore_workspace succeeds.
     mockRequest

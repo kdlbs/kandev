@@ -37,8 +37,8 @@ Design: [Resume prompt queue](../../specs/tasks/system-design/resume-prompt-queu
 
 ### Admission and dispatch
 
-`QueueHandlers.wsQueueMessage` currently persists and publishes without a
-readiness recheck. Add an internal automatic-dispatch collaborator and wire the
+Before this change, `QueueHandlers.wsQueueMessage` persisted and published
+without a readiness recheck. Add an internal automatic-dispatch collaborator and wire the
 orchestrator through the existing queue-handler registration.
 
 Reuse guarded identity-aware reservation and task admission. Preserve Auto-run

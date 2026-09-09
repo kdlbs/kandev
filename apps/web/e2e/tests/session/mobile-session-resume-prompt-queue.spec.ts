@@ -30,8 +30,8 @@ test.describe("mobile: Send during session resume", () => {
     const marker = "mobile resume queue marker";
 
     try {
-      await expect(apiClient.setQueueAutoRun(fixture.identity, true)).resolves.toMatchObject({
-        auto_run: true,
+      await expect(apiClient.setQueueAutoRun(fixture.identity, false)).resolves.toMatchObject({
+        auto_run: false,
       });
       const chat = fixture.session.activeChat();
       const editor = chat.getByTestId("chat-input-editor");
@@ -57,6 +57,10 @@ test.describe("mobile: Send during session resume", () => {
       await expect(fixture.session.activeChat().getByTestId("queue-chip")).toBeVisible();
 
       await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+      await expect(apiClient.setQueueAutoRun(fixture.identity, true)).resolves.toMatchObject({
+        auto_run: true,
+      });
+      await waitForQueuedCount(apiClient, fixture.identity, 0);
       const response = fixture.session
         .activeChat()
         .locator("[data-agent-message-body][data-message-id]")

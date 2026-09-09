@@ -67,7 +67,7 @@ test.describe("Send during session resume", () => {
   });
 
   test("uses the shared startup composer in Quick Chat", async ({ testPage, apiClient }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
 
     const dialog = await openQuickChatSetup(testPage);
     await selectAgentIfNeeded(dialog, testPage);
@@ -83,6 +83,10 @@ test.describe("Send during session resume", () => {
       session_id: string;
     };
 
+    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await expect(apiClient.setQueueAutoRun(identity, false)).resolves.toMatchObject({
+      auto_run: false,
+    });
     const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
     const submit = dialog.getByTestId("submit-message-button");
     const marker = "quick chat startup marker";
@@ -91,15 +95,22 @@ test.describe("Send during session resume", () => {
     await expect(submit).toBeEnabled({ timeout: 30_000 });
     await submit.click();
 
-    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
     await expect
       .poll(() => apiClient.getQueueStatus(identity).then((status) => status.count), {
         timeout: 30_000,
       })
-      .toBeLessThanOrEqual(1);
+      .toBe(1);
+    await expect(apiClient.setQueueAutoRun(identity, true)).resolves.toMatchObject({
+      auto_run: true,
+    });
     await expect(
       dialog.locator("[data-agent-message-body][data-message-id]").filter({ hasText: marker }),
     ).toHaveCount(1, { timeout: 60_000 });
+    await expect
+      .poll(() => apiClient.getQueueStatus(identity).then((status) => status.count), {
+        timeout: 30_000,
+      })
+      .toBe(0);
   });
 
   test("keeps the resumed desktop layout within its viewport", async ({
@@ -108,7 +119,7 @@ test.describe("Send during session resume", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const fixture = await seedDelayedResumeFixture(
       testPage,
       apiClient,

@@ -66,19 +66,20 @@ export async function waitForSessionReady(
 ): Promise<void> {
   await expect
     .poll(
-      async () => ({
-        api: await getSessionState(apiClient, taskId, sessionId),
-        browser: await getBrowserSessionState(page, sessionId),
-      }),
+      async () => {
+        const api = await getSessionState(apiClient, taskId, sessionId);
+        const browser = await getBrowserSessionState(page, sessionId);
+        return {
+          api: api !== null && api !== "STARTING",
+          browser: browser !== null && browser !== "STARTING",
+        };
+      },
       {
         timeout,
         message: `session ${sessionId} should leave startup after the delayed resume completes`,
       },
     )
-    .toEqual({
-      api: expect.not.stringMatching(/^STARTING$/),
-      browser: expect.not.stringMatching(/^STARTING$/),
-    });
+    .toEqual({ api: true, browser: true });
 }
 
 async function createDelayedResumeProfile(apiClient: ApiClient, delay = "30s"): Promise<string> {
