@@ -415,6 +415,64 @@ func TestSwitchTaskRunner_EvaluationUnavailableWhenRepositoryLinkChangedSinceRes
 	}
 }
 
+// TestSwitchTaskRunner_EvaluationUnavailableWhenCompatibilityBecameApplicableSinceResolution
+// covers the shape-changed-since-resolution race: the pre-transaction
+// resolution skipped the compatibility check because the task did not have
+// exactly one repository attachment at that moment, but the target executor
+// does require a clone URL and the task now has exactly one repository
+// attached (the only shape the mutability gate ever lets this codepath
+// reach). The skip cannot be trusted retroactively, so the switch must
+// reject as retriable rather than silently apply without ever validating
+// compatibility against the now-attached repository.
+func TestSwitchTaskRunner_EvaluationUnavailableWhenCompatibilityBecameApplicableSinceResolution(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	req := models.RunnerSwitchRequest{
+		TaskID:                  "task-1",
+		ExecutorProfileID:       "profile-new",
+		CompatibilityApplicable: true,
+		CompatibilityChecked:    false,
+	}
+
+	_, err := repo.SwitchTaskRunner(ctx, req)
+	if !errors.Is(err, repoerrors.ErrRunnerEvaluationUnavailable) {
+		t.Fatalf("SwitchTaskRunner error = %v, want ErrRunnerEvaluationUnavailable", err)
+	}
+}
+
+// TestSwitchTaskRunner_SkipsCompatibilityRecheckWhenGateInapplicable is the
+// control for the test above: when the target executor never requires a
+// clone URL, CompatibilityApplicable is false and the switch must proceed
+// normally even though the task has exactly one repository attached.
+func TestSwitchTaskRunner_SkipsCompatibilityRecheckWhenGateInapplicable(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	req := models.RunnerSwitchRequest{
+		TaskID:                  "task-1",
+		ExecutorProfileID:       "profile-new",
+		CompatibilityApplicable: false,
+		CompatibilityChecked:    false,
+	}
+
+	result, err := repo.SwitchTaskRunner(ctx, req)
+	if err != nil {
+		t.Fatalf("SwitchTaskRunner = %v, want success", err)
+	}
+	if !result.Changed {
+		t.Fatal("SwitchTaskRunner Changed = false, want true")
+	}
+}
+
 func assertRunnerMutabilityConflict(t *testing.T, err error, wantReason string) {
 	t.Helper()
 	var conflict *repoerrors.ErrRunnerMutabilityConflict

@@ -159,9 +159,14 @@ func runnerWorkspaceModeFromMetadata(metadata map[string]interface{}) string {
 type RunnerSwitchRequest struct {
 	TaskID            string
 	ExecutorProfileID string
-	// CompatibilityChecked is true when the target executor requires a
-	// clone URL at all (so a resolution actually ran). When false, the
-	// compatibility gate is inapplicable and ResolvedRepository* are unused.
+	// CompatibilityApplicable is true when the target executor requires a
+	// clone URL at all, independent of whether resolution could actually run.
+	CompatibilityApplicable bool
+	// CompatibilityChecked is true when resolution actually ran: the target
+	// executor required a clone URL and the task had exactly one repository
+	// attachment at resolution time. When false but CompatibilityApplicable
+	// is true, the gate was applicable but unresolved (the repository shape
+	// did not allow evaluation) and ResolvedRepository* are unused.
 	CompatibilityChecked bool
 	// CompatibilityCloneURLFound is meaningful only when CompatibilityChecked
 	// is true: whether resolution found a usable clone URL for

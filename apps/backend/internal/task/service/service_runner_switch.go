@@ -235,6 +235,7 @@ func (s *Service) SwitchTaskRunner(ctx context.Context, taskID, executorProfileI
 	req := models.RunnerSwitchRequest{
 		TaskID:                      taskID,
 		ExecutorProfileID:           executorProfileID,
+		CompatibilityApplicable:     compat.applicable,
 		CompatibilityChecked:        compat.checked,
 		CompatibilityCloneURLFound:  compat.cloneURLFound,
 		ResolvedRepositoryID:        compat.repositoryID,
@@ -293,6 +294,12 @@ func (s *Service) resolveExecutorForProfile(ctx context.Context, executorProfile
 // pre-transaction resolution into the request the repository layer
 // re-confirms inside the locked transaction.
 type runnerCompatibilityResolution struct {
+	// applicable is true whenever the target executor type requires a clone
+	// URL, independent of whether checked below is also true. The repository
+	// layer uses this to tell "the gate never applied to this executor" from
+	// "the gate applied but the repository shape did not allow resolution",
+	// which must be re-validated rather than silently skipped.
+	applicable          bool
 	checked             bool
 	cloneURLFound       bool
 	repositoryID        string
@@ -302,9 +309,11 @@ type runnerCompatibilityResolution struct {
 // resolveRunnerCompatibility resolves the compatibility gate's verdict: it
 // runs entirely outside any transaction, so a subprocess call here never
 // holds the task row lock. When the target executor does not require a
-// clone URL, or the task does not have exactly one repository attachment
-// right now, resolution is skipped and yields no verdict — the mutability
-// gate reports the correct code for that shape at its own ordered stage. A
+// clone URL, resolution is skipped and inapplicable — the mutability gate
+// reports the correct code for that shape at its own ordered stage. When the
+// task does not have exactly one repository attachment right now, resolution
+// is skipped but stays applicable, so the repository layer re-checks the
+// shape from inside the transaction rather than trusting a stale skip. A
 // candidate lookup that errors or times out aborts the whole switch as
 // evaluation_unavailable immediately, rather than being carried forward as a
 // "no URL found" verdict.
@@ -318,7 +327,7 @@ func (s *Service) resolveRunnerCompatibility(ctx context.Context, taskID string,
 		return runnerCompatibilityResolution{}, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
 	if len(links) != 1 {
-		return runnerCompatibilityResolution{}, nil
+		return runnerCompatibilityResolution{applicable: true}, nil
 	}
 	link := links[0]
 	repo, err := s.repoEntities.GetRepository(ctx, link.RepositoryID)
@@ -331,6 +340,7 @@ func (s *Service) resolveRunnerCompatibility(ctx context.Context, taskID string,
 		return runnerCompatibilityResolution{}, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
 	return runnerCompatibilityResolution{
+		applicable:          true,
 		checked:             true,
 		cloneURLFound:       found,
 		repositoryID:        link.RepositoryID,

@@ -46,10 +46,19 @@ func (r *Repository) SwitchTaskRunner(ctx context.Context, req models.RunnerSwit
 		return nil, &repoerrors.ErrRunnerMutabilityConflict{Reason: verdict.Reason}
 	}
 
-	if req.CompatibilityChecked {
+	switch {
+	case req.CompatibilityChecked:
 		if err := runnerSwitchConfirmCompatibility(req, repoSnapshot); err != nil {
 			return nil, err
 		}
+	case req.CompatibilityApplicable:
+		// The gate applies to this target but pre-transaction resolution
+		// skipped it because the repository shape didn't allow evaluation
+		// then. Reaching this point already means the mutability gate found
+		// exactly one repository now (its own RepositoryCount==0/>1 checks
+		// come first and would have rejected otherwise), so the shape did
+		// change since resolution and that stale skip cannot be trusted.
+		return nil, fmt.Errorf("%w: repository shape changed since compatibility resolution", repoerrors.ErrRunnerEvaluationUnavailable)
 	}
 
 	result, err := r.runnerSwitchApply(ctx, tx, task, req.ExecutorProfileID)
