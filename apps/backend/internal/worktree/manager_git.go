@@ -306,13 +306,28 @@ func (m *Manager) RecoverBranchStatus(ctx context.Context, wt *Worktree) string 
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
-	if exists, err := m.branchExists(ctx, wt.RepositoryPath, "refs/heads/"+wt.Branch); err == nil && exists {
-		return BranchStatusLocal
+	branchRef := "refs/heads/" + wt.Branch
+	if exists, err := m.branchExists(ctx, wt.RepositoryPath, branchRef); err == nil && exists {
+		return m.existingRecoveredBranchStatus(ctx, wt, branchRef)
 	}
 	if m.restoreManagedBranchFromRecoveryHeadLocked(ctx, wt) == nil && wt.RecoveryHeadSHA != "" {
 		return BranchStatusLocal
 	}
 	return m.BranchRecoveryStatus(ctx, wt.RepositoryPath, wt.Branch)
+}
+
+func (m *Manager) existingRecoveredBranchStatus(ctx context.Context, wt *Worktree, branchRef string) string {
+	if wt.RecoveryHeadSHA == "" {
+		return BranchStatusLocal
+	}
+	current, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
+	if err != nil || !strings.EqualFold(current, wt.RecoveryHeadSHA) {
+		return BranchStatusMissing
+	}
+	if wt.BranchCompactedAt != nil && m.finalizeRestoredManagedBranch(ctx, wt, current) != nil {
+		return BranchStatusMissing
+	}
+	return BranchStatusLocal
 }
 
 func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context, wt *Worktree) error {
@@ -330,6 +345,32 @@ func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, wt.RepositoryPath, "update-ref", branchRef, resolved, zeroOID)
 	if output, err := runGitCmdCombinedOutput(inspectCtx, cmd); err != nil {
 		return fmt.Errorf("restore managed branch: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	if err := m.finalizeRestoredManagedBranch(ctx, wt, resolved); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) finalizeRestoredManagedBranch(ctx context.Context, wt *Worktree, resolved string) error {
+	if wt.BranchCompactedAt != nil {
+		metadataStore, ok := m.store.(BranchMetadataStore)
+		if !ok {
+			return fmt.Errorf("persist restored compacted branch: metadata store is unavailable")
+		}
+		persisted, persistErr := metadataStore.PersistBranchRecoveryRestored(ctx, wt.ID, resolved)
+		if persistErr != nil || !persisted {
+			return fmt.Errorf("persist restored compacted branch: %w", persistErr)
+		}
+		if !m.deleteRecoveryRef(ctx, wt, resolved) {
+			return fmt.Errorf("remove managed branch recovery ref")
+		}
+		wt.RecoveryHeadSHA = ""
+		wt.BranchCompactedAt = nil
+		return nil
+	}
+	if wt.RecoveryHeadSHA != "" && !m.deleteRecoveryRef(ctx, wt, resolved) {
+		return fmt.Errorf("remove managed branch recovery ref")
 	}
 	return nil
 }

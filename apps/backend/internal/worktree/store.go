@@ -543,6 +543,26 @@ func (s *SQLiteStore) PersistBranchCompactionComplete(
 	return rows == 1, err
 }
 
+// PersistBranchRecoveryRestored clears the exact recovery state only after the
+// local branch has been recreated at its recorded head. This makes a later
+// archive eligible for bounded maintenance even if no session is launched.
+func (s *SQLiteStore) PersistBranchRecoveryRestored(
+	ctx context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_recovery_head_sha = '', worktree_branch_compacted_at = NULL, updated_at = ?
+		WHERE worktree_id = ?
+		  AND worktree_recovery_head_sha = ?
+		  AND worktree_branch_compacted_at IS NOT NULL
+	`), time.Now().UTC(), worktreeID, expectedRecoveryHead)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 func (s *SQLiteStore) ListArchivedBranchCandidates(
 	ctx context.Context, limit int,
 ) ([]*Worktree, error) {

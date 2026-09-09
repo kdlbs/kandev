@@ -142,19 +142,19 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## Archive cleanup disposition
 
-Direct and cascade archive share one disposition: stop runtimes, remove the
-physical worktree and mark its row deleted, but preserve the environment rows
-and recovery metadata. Duplicate snapshots cannot change that disposition.
-Unarchive reuses a retained branch or its exact compacted head; delete remains a
-separate operation that may remove owner rows.
+Direct and cascade archive stop runtimes, remove the worktree, mark its row
+deleted, and retain environment and recovery metadata. Duplicate snapshots do
+not change that disposition.
+Unarchive reuses a retained branch or its exact compacted head. Before deletion,
+compaction creates an opaque identity-derived recovery ref, preserving the
+commit through integration-ref rewrites or pruning. Recovery requires any
+same-named ref to equal the recorded head, then clears the marker and recovery
+ref after the restored branch protects it. Delete remains separate.
 
-Archive makes the first compaction attempt. Storage maintenance later selects
-at most 100 managed, deleted rows for still-archived tasks, without scanning
-branch names. The worktree manager alone owns safety policy and rechecks archive
-state before `git update-ref -d refs/heads/<branch> <expected-head-sha>`.
-Recovery and completion are separate: interrupted rows stay selectable until
-the completion timestamp. A post-delete live race restores the exact ref by
-zero-OID compare-and-set.
+Archive first attempts compaction; storage maintenance later selects at most 100
+managed, deleted rows for archived tasks without scanning names. The manager
+rechecks state before exact `git update-ref` deletion. Interrupted rows retry;
+a live race restores the exact ref by zero-OID compare-and-set.
 
 ## Data Model
 

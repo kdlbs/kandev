@@ -52,10 +52,14 @@ and safe when runtimes or task rows are already gone.
   environment-repository row owns it, and its exact head is contained in the
   persisted intended integration ref. Every other case shall retain the branch.
 - **AC-TASKS-RUNTIME-CLEANUP-001.14:** Before deleting an eligible integrated
-  branch, cleanup shall persist its exact head SHA. Unarchive and worktree
-  recreation shall restore a missing managed branch from that SHA before remote
-  recovery, while branches with unpublished commits shall retain their original
-  local ref and restore exactly.
+  branch, cleanup shall persist its exact head SHA and create an opaque,
+  worktree-identity-derived local recovery ref at that SHA before removing the
+  branch. Unarchive and worktree recreation shall restore a missing managed
+  branch from that SHA before remote recovery, then clear the compacted marker
+  and remove the recovery ref only after the exact local branch protects the
+  commit. An existing local branch must equal the recorded head or recovery
+  fails closed. Branches with unpublished commits retain their original local
+  ref and restore exactly.
 - **AC-TASKS-RUNTIME-CLEANUP-001.15:** Managed branch compaction shall delete only
   one explicit local ref with an atomic expected-head compare-and-delete. It shall never
   delete remote refs, protected/base refs, inferred branch globs, externally

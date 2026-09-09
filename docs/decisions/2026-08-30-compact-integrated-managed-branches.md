@@ -41,8 +41,10 @@ Delete it only when all of these conditions hold:
 3. The branch is not its base or integration ref and both exact commit refs
    resolve locally without fetching.
 4. `git merge-base --is-ancestor <branch-head> <integration-head>` succeeds.
-5. The exact branch head is persisted with compare-and-set and is unchanged when
-   re-read immediately before deletion.
+5. The exact branch head is persisted with compare-and-set, then an opaque
+   worktree-identity-derived local recovery ref is created at that head before
+   deletion. The recovery ref keeps the commit reachable if the integration ref
+   is rewritten or Git prunes unreachable objects.
 6. `git update-ref -d refs/heads/<branch> <expected-head-sha>` atomically removes
    the single explicit local ref only if its head is unchanged.
 7. A post-delete liveness probe restores the exact ref with zero-OID
@@ -56,9 +58,11 @@ Permanent task deletion keeps its separate explicit force-delete disposition.
 
 Unarchive and recreate use a retained local branch directly. When safe
 compaction removed the local ref, they recreate it from the persisted exact head
-before attempting remote or pull-request recovery. Because compaction requires
-the head to be reachable from the integration ref, the recovery commit remains
-reachable after the branch ref is removed.
+before attempting remote or pull-request recovery. Any existing same-named
+local ref must resolve to that exact head; a mismatch fails closed. Once the
+exact local branch exists, recovery clears the compaction marker and removes the
+opaque recovery ref, allowing a later archive without a session launch to be
+considered again.
 
 All terminal paths share the manager policy: single-repository cleanup,
 multi-repository cleanup, task archive, task-environment reset, handoff cleanup,

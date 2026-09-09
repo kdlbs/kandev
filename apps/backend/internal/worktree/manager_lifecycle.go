@@ -2065,6 +2065,17 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		// gone. Propagate so the caller can retry the recreate.
 		return nil, fmt.Errorf("cannot verify worktree branch %q: %w", existing.Branch, probeErr)
 	}
+	if exists && existing.RecoveryHeadSHA != "" {
+		currentHead, resolveErr := m.resolveCommit(ctx, req.RepositoryPath, "refs/heads/"+existing.Branch)
+		if resolveErr != nil || !strings.EqualFold(currentHead, existing.RecoveryHeadSHA) {
+			return nil, fmt.Errorf("existing worktree branch %q does not match its recovery head", existing.Branch)
+		}
+		if existing.BranchCompactedAt != nil {
+			if restoreErr := m.finalizeRestoredManagedBranch(ctx, existing, currentHead); restoreErr != nil {
+				return nil, fmt.Errorf("persist restored compacted worktree branch %q: %w", existing.Branch, restoreErr)
+			}
+		}
+	}
 	// Recovery metadata is authoritative once the local ref is confirmed
 	// missing. Restore it before any refreshed-origin or contribution
 	// materialization can select a different head.

@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"expvar"
 	"fmt"
@@ -256,6 +257,14 @@ func (m *Manager) persistRecoveryAndDeleteBranch(
 		return reason
 	}
 	wt.RecoveryHeadSHA = branchHead
+	if reason = m.createRecoveryRef(ctx, wt, branchHead); reason != "" {
+		// The recovery ref may belong to a conflicting claimant, so do not try
+		// to delete it. Roll back only this row's just-persisted SHA.
+		if cleared, err := metadataStore.PersistBranchRecoveryHead(ctx, wt.ID, branchHead, ""); err == nil && cleared {
+			wt.RecoveryHeadSHA = ""
+		}
+		return reason
+	}
 	if requireArchived && !m.archivedBranchMutationStillAllowed(ctx, metadataStore, wt, branchHead) {
 		return RetainedArchiveStateChanged
 	}
@@ -481,22 +490,8 @@ func (m *Manager) completeInterruptedArchivedCompaction(
 		}
 		return true, reason
 	}
-	if protectedBranchName(wt.Branch, wt.BaseBranch) ||
-		protectedBranchName(wt.Branch, wt.IntegrationRef) {
-		return true, RetainedProtectedRef
-	}
-	protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
+	branchHead, reason := m.interruptedRecoveryHeadIsSafe(ctx, wt)
 	if reason != "" {
-		return true, reason
-	}
-	if protected {
-		return true, RetainedProtectedRef
-	}
-	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
-	if err != nil || branchHead != strings.ToLower(wt.RecoveryHeadSHA) {
-		return true, RetainedMissingRef
-	}
-	if reason := m.verifyHeadAgainstIntegration(ctx, wt, branchHead); reason != "" {
 		return true, reason
 	}
 	maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
@@ -511,6 +506,33 @@ func (m *Manager) completeInterruptedArchivedCompaction(
 		return true, RetainedArchiveStateChanged
 	}
 	return true, ""
+}
+
+func (m *Manager) interruptedRecoveryHeadIsSafe(
+	ctx context.Context, wt *Worktree,
+) (string, BranchRetentionReason) {
+	if protectedBranchName(wt.Branch, wt.BaseBranch) || protectedBranchName(wt.Branch, wt.IntegrationRef) {
+		return "", RetainedProtectedRef
+	}
+	protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
+	if reason != "" {
+		return "", reason
+	}
+	if protected {
+		return "", RetainedProtectedRef
+	}
+	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
+	if err != nil || branchHead != strings.ToLower(wt.RecoveryHeadSHA) {
+		return "", RetainedMissingRef
+	}
+	recoveryHead, err := m.resolveCommit(ctx, wt.RepositoryPath, recoveryRefName(wt.ID))
+	if err != nil || !strings.EqualFold(recoveryHead, branchHead) {
+		return "", RetainedMissingRef
+	}
+	if reason := m.verifyHeadAgainstIntegration(ctx, wt, branchHead); reason != "" {
+		return "", reason
+	}
+	return branchHead, ""
 }
 
 func (m *Manager) localBranchRefExists(ctx context.Context, repoPath, branchRef string) (bool, error) {
@@ -528,10 +550,45 @@ func (m *Manager) localBranchRefExists(ctx context.Context, repoPath, branchRef 
 func (m *Manager) clearBranchRecoveryHead(
 	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
 ) {
+	if !m.deleteRecoveryRef(ctx, wt, branchHead) {
+		return
+	}
 	cleared, err := metadataStore.PersistBranchRecoveryHead(ctx, wt.ID, branchHead, "")
 	if err == nil && cleared {
 		wt.RecoveryHeadSHA = ""
 	}
+}
+
+// recoveryRefName is derived solely from the immutable worktree identity. It
+// keeps a compacted task's exact commit reachable without exposing a branch
+// name or accepting a caller-controlled ref path.
+func recoveryRefName(worktreeID string) string {
+	sum := sha256.Sum256([]byte(worktreeID))
+	return fmt.Sprintf("refs/kandev/recovery/%x", sum[:])
+}
+
+func (m *Manager) createRecoveryRef(ctx context.Context, wt *Worktree, branchHead string) BranchRetentionReason {
+	ref := recoveryRefName(wt.ID)
+	zeroOID := strings.Repeat("0", len(branchHead))
+	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", ref, branchHead, zeroOID)
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err == nil {
+		return ""
+	}
+	existing, err := m.resolveCommit(ctx, wt.RepositoryPath, ref)
+	if err == nil && strings.EqualFold(existing, branchHead) {
+		return ""
+	}
+	return RetainedRecoveryPersistFailed
+}
+
+func (m *Manager) deleteRecoveryRef(ctx context.Context, wt *Worktree, branchHead string) bool {
+	ref := recoveryRefName(wt.ID)
+	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", "-d", ref, branchHead)
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err == nil {
+		return true
+	}
+	exists, err := m.localBranchRefExists(ctx, wt.RepositoryPath, ref)
+	return err == nil && !exists
 }
 
 func protectedBranchName(branch, protectedRef string) bool {

@@ -148,6 +148,16 @@ func (s *mockStore) PersistBranchCompactionComplete(
 	return true, nil
 }
 
+func (s *mockStore) PersistBranchRecoveryRestored(_ context.Context, worktreeID, expectedRecoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead || wt.BranchCompactedAt == nil {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = ""
+	wt.BranchCompactedAt = nil
+	return true, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree

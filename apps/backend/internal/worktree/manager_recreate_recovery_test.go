@@ -601,6 +601,54 @@ func TestRestoreManagedBranchFromRecoveryHead_RefusesConcurrentCreator(t *testin
 	}
 }
 
+func TestRecoverBranchStatus_RejectsReusedBranchRefWithDifferentRecoveryHead(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	runGit(t, repoPath, "checkout", "main")
+	runGit(t, repoPath, "commit", "--allow-empty", "-m", "unrelated branch reuse")
+	unrelatedSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "HEAD"))
+	runGit(t, repoPath, "update-ref", "refs/heads/feature/pr-branch", unrelatedSHA, recoverySHA)
+
+	mgr := newRecreateTestManager(t)
+	status := mgr.RecoverBranchStatus(context.Background(), &Worktree{
+		RepositoryPath: repoPath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: recoverySHA,
+	})
+	if status != BranchStatusMissing {
+		t.Fatalf("recovery status = %q, want fail-closed missing", status)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/heads/feature/pr-branch")); got != unrelatedSHA {
+		t.Fatalf("reused branch changed to %q, want %q", got, unrelatedSHA)
+	}
+}
+
+func TestRecreate_RejectsReusedBranchRefWithDifferentRecoveryHead(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	runGit(t, repoPath, "checkout", "main")
+	runGit(t, repoPath, "commit", "--allow-empty", "-m", "unrelated recreate reuse")
+	unrelatedSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "HEAD"))
+	runGit(t, repoPath, "update-ref", "refs/heads/feature/pr-branch", unrelatedSHA, recoverySHA)
+
+	mgr := newRecreateTestManager(t)
+	_, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-reused-ref", SessionID: "session-reused-ref", TaskID: "task-reused-ref",
+		RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path:   filepath.Join(t.TempDir(), "task-reused-ref", "repo-1"),
+		Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged, RecoveryHeadSHA: recoverySHA,
+		Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-reused-ref", TaskID: "task-reused-ref", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, BaseBranch: "main", FallbackBaseBranch: "main",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match its recovery head") {
+		t.Fatalf("recreate error = %v, want reused-ref rejection", err)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/heads/feature/pr-branch")); got != unrelatedSHA {
+		t.Fatalf("reused branch changed to %q, want %q", got, unrelatedSHA)
+	}
+}
+
 func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
 	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
 	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")

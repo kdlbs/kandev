@@ -90,6 +90,69 @@ func TestMaintainArchivedBranches_RetriesAfterRecoveryPersistInterruption(t *tes
 	}
 }
 
+func TestMaintainArchivedBranches_KeepsCompactedRecoveryReachableThroughGC(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "gc-recovery")
+	receipt, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil || receipt.Deleted != 1 {
+		t.Fatalf("compact archived branch: receipt=%+v err=%v", receipt, err)
+	}
+	runGit(t, wt.RepositoryPath, "update-ref", "refs/heads/main", strings.Repeat("0", 40))
+	runGit(t, wt.RepositoryPath, "reflog", "expire", "--expire=now", "--all")
+	runGit(t, wt.RepositoryPath, "gc", "--prune=now")
+	persisted, err := store.GetWorktreeByID(context.Background(), wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted recovery metadata: %v", err)
+	}
+	if err := mgr.restoreManagedBranchFromRecoveryHeadLocked(context.Background(), persisted); err != nil {
+		t.Fatalf("restore after integration ref rewrite and gc: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
+		t.Fatalf("restored head = %q, want %q", got, wantHead)
+	}
+	if output, err := exec.Command("git", "-C", wt.RepositoryPath, "show-ref", "--verify", "--quiet", recoveryRefName(wt.ID)).CombinedOutput(); err == nil {
+		t.Fatalf("recovery ref remains after successful restoration: %s", output)
+	}
+	if persisted, err := store.GetWorktreeByID(context.Background(), wt.ID); err != nil || persisted.BranchCompactedAt != nil {
+		t.Fatalf("restored compaction state = %+v err=%v, want uncompacted", persisted, err)
+	}
+}
+
+func TestMaintainArchivedBranches_RearchivesRestoredBranchWithoutSessionLaunch(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "rearchive-restored")
+	first, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil || first.Deleted != 1 {
+		t.Fatalf("initial compaction: receipt=%+v err=%v", first, err)
+	}
+	persisted, err := store.GetWorktreeByID(context.Background(), wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted branch: %v", err)
+	}
+	if _, err := store.db.ExecContext(context.Background(), `UPDATE tasks SET archived_at = NULL WHERE id = ?`, wt.TaskID); err != nil {
+		t.Fatalf("unarchive task: %v", err)
+	}
+	if status := mgr.RecoverBranchStatus(context.Background(), persisted); status != BranchStatusLocal {
+		t.Fatalf("unarchive recovery status = %q, want local", status)
+	}
+	persisted, err = store.GetWorktreeByID(context.Background(), wt.ID)
+	if err != nil || persisted.BranchCompactedAt != nil || persisted.RecoveryHeadSHA != "" {
+		t.Fatalf("restored metadata = %+v err=%v, want uncompacted", persisted, err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
+		t.Fatalf("restored branch head = %q, want %q", got, wantHead)
+	}
+	if _, err := store.db.ExecContext(context.Background(), `UPDATE tasks SET archived_at = CURRENT_TIMESTAMP WHERE id = ?`, wt.TaskID); err != nil {
+		t.Fatalf("rearchive task: %v", err)
+	}
+
+	second, err := mgr.MaintainArchivedBranches(context.Background(), 1)
+	if err != nil || second.Attempted != 1 || second.Deleted != 1 {
+		t.Fatalf("rearchive maintenance: receipt=%+v err=%v", second, err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "branch", "--list", wt.Branch)); got != "" {
+		t.Fatalf("rearchived integrated branch remains: %q", got)
+	}
+}
+
 // Reviewer-requested contract coverage: production already reconciles an
 // absent ref whose recovery SHA persisted before its completion marker.
 func TestMaintainArchivedBranches_FinalizesAbsentRefAfterCompletionPersistFailure(t *testing.T) {

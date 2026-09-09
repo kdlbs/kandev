@@ -128,6 +128,7 @@ type BranchMetadataStore interface {
 	CountWorktreeBranchOwners(ctx context.Context, repositoryPath, branch string) (int, error)
 	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
 	PersistBranchCompactionComplete(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
+	PersistBranchRecoveryRestored(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
 }
 
 // ArchivedBranchMaintenanceStore supplies only durable archived worktree
