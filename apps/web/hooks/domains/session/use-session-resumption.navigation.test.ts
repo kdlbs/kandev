@@ -1,3 +1,5 @@
+/* eslint-disable max-lines-per-function -- navigation cases share one lifecycle harness. */
+
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,13 +7,16 @@ const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
 const mockSetSessionAgentctlStatus = vi.fn();
 const mockSetResumeSkipped = vi.fn();
-const sessionItems = {
-  s1: {
-    started_at: "2026-01-01T00:00:00.000Z",
-    updated_at: "2026-01-01T00:00:00.000Z",
-    state: "WAITING_FOR_INPUT",
-  },
-};
+let sessionItems: Record<
+  string,
+  {
+    started_at: string;
+    updated_at: string;
+    state: string;
+    queue_incarnation_id: string;
+    resume_projection_id?: string;
+  }
+>;
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
@@ -36,12 +41,27 @@ vi.mock("@/components/state-provider", () => ({
 const SESSION_ID = "s1";
 const TASK_ID = "t1";
 const PREVIOUS_TASK_ID = "previous-task";
+const STARTED_AT = "2026-01-01T00:00:00.000Z";
 
 import { useSessionResumption } from "./use-session-resumption";
 
 describe("useSessionResumption task navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        updated_at: STARTED_AT,
+        state: "IDLE",
+        queue_incarnation_id: "inc-1",
+      },
+      s2: {
+        started_at: STARTED_AT,
+        updated_at: STARTED_AT,
+        state: "IDLE",
+        queue_incarnation_id: "inc-2",
+      },
+    };
   });
 
   // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7
@@ -139,5 +159,75 @@ describe("useSessionResumption task navigation", () => {
     expect(mockSetTaskSession).toHaveBeenCalledWith(
       expect.objectContaining({ task_id: PREVIOUS_TASK_ID, state: "WAITING_FOR_INPUT" }),
     );
+  });
+
+  it("cleans the owned projection after navigation invalidates a failed resume", async () => {
+    const launchRequest = Promise.withResolvers<unknown>();
+    mockRequest
+      .mockResolvedValueOnce({
+        session_id: "s1",
+        task_id: TASK_ID,
+        state: "IDLE",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        updated_at: STARTED_AT,
+      })
+      .mockReturnValueOnce(launchRequest.promise)
+      .mockResolvedValueOnce({
+        session_id: "s2",
+        task_id: TASK_ID,
+        state: "IDLE",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        updated_at: STARTED_AT,
+      })
+      .mockResolvedValueOnce({
+        session_id: "s1",
+        task_id: TASK_ID,
+        state: "IDLE",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        updated_at: STARTED_AT,
+      });
+    mockSetTaskSession.mockImplementation((next) => {
+      const current = sessionItems[next.id as string];
+      const merged = { ...current, ...next };
+      if (!Object.prototype.hasOwnProperty.call(next, "resume_projection_id")) {
+        delete merged.resume_projection_id;
+      }
+      sessionItems[next.id as string] = merged;
+    });
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) => useSessionResumption(TASK_ID, sessionId),
+      { initialProps: { sessionId: "s1" } },
+    );
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    let resumePromise!: Promise<boolean>;
+    await act(async () => {
+      resumePromise = result.current.resumeSession();
+    });
+    await waitFor(() => expect(sessionItems.s1.state).toBe("STARTING"));
+
+    rerender({ sessionId: "s2" });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      launchRequest.reject(new Error("resume disconnected"));
+      await resumePromise;
+    });
+
+    expect(sessionItems.s1.state).toBe("IDLE");
+    expect(sessionItems.s1.resume_projection_id).toBeUndefined();
+    expect(sessionItems.s2.state).toBe("IDLE");
+
+    rerender({ sessionId: "s1" });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(4));
+    expect(sessionItems.s1.state).toBe("IDLE");
+    expect(sessionItems.s2.state).toBe("IDLE");
   });
 });

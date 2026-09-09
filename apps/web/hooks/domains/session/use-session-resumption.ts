@@ -606,6 +606,7 @@ export function useSessionResumption(
     setWorktreePath,
     setWorktreeBranch,
     setTaskSession,
+    setTaskSessionUnscoped: setTaskSession,
     setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
     setResumeSkipped,
     getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,

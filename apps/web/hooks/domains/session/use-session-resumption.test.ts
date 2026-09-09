@@ -161,6 +161,49 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.taskSessionStates).toEqual([]);
   });
 
+  it("does not roll back an authoritative STARTING update that arrives before rejection", async () => {
+    const launchRequest = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(launchRequest.promise).mockResolvedValueOnce({
+      success: false,
+      error: WORKSPACE_RESTORE_ERROR,
+    });
+    let liveSession: {
+      state: string;
+      started_at: string;
+      updated_at: string;
+      queue_incarnation_id: string;
+      resume_projection_id?: string;
+    } = {
+      state: "IDLE",
+      started_at: STARTED_AT,
+      updated_at: STARTED_AT,
+      queue_incarnation_id: "inc-1",
+    };
+    const { setters, calls } = createSetters();
+    setters.getLiveSession = () => liveSession;
+    const setTaskSession = setters.setTaskSession;
+    setters.setTaskSession = (next) => {
+      setTaskSession(next);
+      liveSession = { ...liveSession, ...next };
+    };
+
+    const resume = resumeWithSilentFallback(TASK_ID, SESSION_ID, liveSession, setters);
+    await waitFor(() => expect(calls.taskSessionStates).toContain("STARTING"));
+
+    liveSession = {
+      ...liveSession,
+      state: "STARTING",
+      updated_at: LATER_AT,
+      resume_projection_id: undefined,
+    };
+    launchRequest.resolve({ success: false, error: RESUME_TRANSPORT_ERROR });
+    await resume;
+
+    expect(calls.taskSessionStates).toEqual(["STARTING"]);
+    expect(liveSession.state).toBe("STARTING");
+    expect(liveSession.updated_at).toBe(LATER_AT);
+  });
+
   it("rolls back the optimistic STARTING state when both launch attempts fail", async () => {
     mockRequest
       .mockResolvedValueOnce({ success: false, error: RESUME_TRANSPORT_ERROR })

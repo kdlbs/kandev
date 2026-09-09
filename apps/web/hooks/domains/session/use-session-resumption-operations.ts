@@ -74,7 +74,11 @@ export type ResumeStateSetter = {
     state: TaskSessionState;
     started_at: string;
     updated_at: string;
+    queue_incarnation_id?: string;
+    resume_projection_id?: string;
   }) => void;
+  /** Updates the captured session row even when the active view has changed. */
+  setTaskSessionUnscoped?: ResumeStateSetter["setTaskSession"];
   setAgentctlReady?: (sessionId: string) => void;
   /** Records/clears the resume-skipped marker (prevent-auto-start-on-open). */
   setResumeSkipped?: (sessionId: string, skipped: boolean) => void;
@@ -86,7 +90,13 @@ export type ResumeStateSetter = {
   onTaskArchiveConflict?: () => void;
 };
 
-export type SessionLike = { started_at?: string; updated_at?: string; state?: string } | null;
+export type SessionLike = {
+  started_at?: string;
+  updated_at?: string;
+  state?: string;
+  queue_incarnation_id?: string;
+  resume_projection_id?: string;
+} | null;
 
 const TASK_SESSION_STATES = new Set<TaskSessionState>([
   "CREATED",
@@ -109,6 +119,8 @@ export type ResumeStartingProjection = {
   rollback: () => void;
 };
 
+let resumeProjectionSequence = 0;
+
 /** Publish the persisted lifecycle state locally while the resume request is in flight. */
 export function markSessionStarting(
   taskId: string,
@@ -129,24 +141,39 @@ export function markSessionStarting(
   // prior state yet, FAILED is the safe recovery state after both launch
   // attempts fail; do not leave the optimistic STARTING row stranded.
   const previousState = asTaskSessionState(previousSession?.state) ?? "FAILED";
+  const projectionId = `resume-projection-${++resumeProjectionSequence}`;
+  const sessionIncarnationId = previousSession?.queue_incarnation_id;
   setters.setTaskSession({
     id: toSessionId(sessionId),
     task_id: toTaskId(taskId),
     state: "STARTING",
     started_at: previousSession?.started_at ?? "",
     updated_at: previousSession?.updated_at ?? "",
+    ...(sessionIncarnationId ? { queue_incarnation_id: sessionIncarnationId } : {}),
+    resume_projection_id: projectionId,
   });
 
+  let rollbackAttempted = false;
   return {
     rollback: () => {
+      if (rollbackAttempted) return;
+      rollbackAttempted = true;
       const currentSession = setters.getLiveSession?.(sessionId);
-      if (setters.getLiveSession && currentSession?.state !== "STARTING") return;
-      setters.setTaskSession({
+      if (
+        setters.getLiveSession &&
+        (currentSession?.state !== "STARTING" ||
+          currentSession.resume_projection_id !== projectionId ||
+          currentSession.queue_incarnation_id !== sessionIncarnationId)
+      ) {
+        return;
+      }
+      (setters.setTaskSessionUnscoped ?? setters.setTaskSession)({
         id: toSessionId(sessionId),
         task_id: toTaskId(taskId),
         state: previousState,
         started_at: previousSession?.started_at ?? "",
         updated_at: previousSession?.updated_at ?? "",
+        ...(sessionIncarnationId ? { queue_incarnation_id: sessionIncarnationId } : {}),
       });
     },
   };
