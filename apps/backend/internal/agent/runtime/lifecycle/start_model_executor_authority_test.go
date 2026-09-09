@@ -34,6 +34,12 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantErr: `requested model "host-only-model" is unavailable (reason: catalog_empty)`,
 		},
 		{
+			name:    "exact model with nil catalog state fails without calling executor",
+			state:   nil,
+			policy:  StartModelPolicy{Model: "host-only-model"},
+			wantErr: `requested model "host-only-model" is unavailable (reason: catalog_empty)`,
+		},
+		{
 			name:          "advertised fallback is applied",
 			state:         modelState("fallback"),
 			policy:        StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback"},
