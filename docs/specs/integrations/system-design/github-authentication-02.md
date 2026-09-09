@@ -128,6 +128,10 @@ post-signature processing failures produce `failing`; a later valid successful d
   `contribution_destination` or `remote_contribution` on the same authorized task-repository
   attachment. Unknown binding versions, malformed URLs, cross-workspace rows, unrelated forks, and
   target mismatches fail closed.
+- Ordinary canonical-task compatibility uses the same destination and broker authorizer as the
+  dedicated contribution flow. Its only additional action is a read-only, pre-session lookup of an
+  existing workspace-actor fork; it cannot authorize a manually configured remote, create a fork,
+  replace an existing contribution binding, or run under executor-owned credentials.
 - Indexed Git configuration is validated and composed as a single ordered block at environment
   merge boundaries. Kandev never replaces a complete inherited block merely by assigning its own
   `GIT_CONFIG_COUNT`; managed helper reset semantics are expressed as later Git config entries.

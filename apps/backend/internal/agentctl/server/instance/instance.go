@@ -136,6 +136,9 @@ type CreateRequest struct {
 
 	// Env contains optional environment variables to pass to the agent process.
 	Env map[string]string `json:"env,omitempty"`
+	// ManagedGitPushEnv is retained only by the trusted managed Git operator.
+	// It is never inherited by the agent process or task shells.
+	ManagedGitPushEnv map[string]string `json:"managed_git_push_env,omitempty"`
 
 	// AutoStart indicates whether to start the agent automatically after creation.
 	AutoStart bool `json:"auto_start,omitempty"`

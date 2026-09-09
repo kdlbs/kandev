@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netutil"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -142,6 +143,13 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if err != nil {
 		return nil, fmt.Errorf("prepare agent environment: %w", err)
 	}
+	managedGitPushEnv := make([]string, 0, len(req.ManagedGitPushEnv))
+	for key, value := range req.ManagedGitPushEnv {
+		if key != githubauth.CredentialScopesEnv {
+			return nil, fmt.Errorf("unsupported managed Git push environment key %q", key)
+		}
+		managedGitPushEnv = append(managedGitPushEnv, key+"="+value)
+	}
 
 	id := req.ID
 	if id == "" {
@@ -171,6 +179,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		WorkDir:                    req.WorkspacePath,
 		AutoStart:                  &autoStart,
 		Env:                        agentEnv,
+		ManagedGitPushEnv:          managedGitPushEnv,
 		AutoApprovePermissions:     req.AutoApprovePermissions,
 		AgentType:                  req.AgentType,
 		McpServers:                 mcpServers,

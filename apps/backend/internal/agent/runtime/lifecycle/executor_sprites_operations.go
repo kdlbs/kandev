@@ -496,6 +496,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
 		Env:                        cloneStringMap(req.Env),
+		ManagedGitPushEnv:          cloneStringMap(req.ManagedGitPushEnv),
 	}
 }
 

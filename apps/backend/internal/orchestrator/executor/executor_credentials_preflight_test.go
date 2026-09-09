@@ -27,6 +27,99 @@ func seedPreflightTaskRepository(repo *mockRepository, taskID, repositoryID stri
 	repo.repositories[repositoryID] = repository
 }
 
+type recordingContributorForkLeasePreparer struct {
+	calls       int
+	workspaceID string
+	taskID      string
+	err         error
+}
+
+func (p *recordingContributorForkLeasePreparer) PrepareContributorForkLease(
+	_ context.Context, workspaceID, taskID string,
+) error {
+	p.calls++
+	p.workspaceID = workspaceID
+	p.taskID = taskID
+	return p.err
+}
+
+func TestPreflightManagedGitCredentialsPreparesContributorForkBeforeRepositoryValidation(t *testing.T) {
+	repo := newMockRepository()
+	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
+		ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev",
+	})
+	exec := newPreflightTestExecutor(t, repo)
+	preparer := &recordingContributorForkLeasePreparer{}
+	exec.SetContributorForkLeasePreparer(preparer)
+
+	if err := exec.PreflightManagedGitCredentials(context.Background(), "workspace-1", "task-1", "", ""); err != nil {
+		t.Fatalf("PreflightManagedGitCredentials() error = %v", err)
+	}
+	if preparer.calls != 1 || preparer.workspaceID != "workspace-1" || preparer.taskID != "task-1" {
+		t.Fatalf("preparer calls = %d (%q, %q), want 1 (workspace-1, task-1)",
+			preparer.calls, preparer.workspaceID, preparer.taskID)
+	}
+}
+
+func TestPreflightManagedGitCredentialsDoesNotPrepareForkForUnmanagedCredentials(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		policyMode string
+		profileEnv string
+	}{
+		{name: "executor policy", policyMode: taskGitCredentialsModeExecutor},
+		{name: "profile token", policyMode: taskGitCredentialsModeManaged, profileEnv: `{"gh_cli_env":"secret-id"}`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
+				ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev",
+			})
+			exec := newPreflightTestExecutor(t, repo)
+			exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+				policy: TaskGitCredentialPolicy{Mode: testCase.policyMode},
+			})
+			preparer := &recordingContributorForkLeasePreparer{}
+			exec.SetContributorForkLeasePreparer(preparer)
+			profileID := ""
+			executorID := ""
+			if testCase.profileEnv != "" {
+				profileID = "profile-1"
+				executorID = "exec-ssh"
+				repo.executors[executorID] = &models.Executor{ID: executorID, Type: models.ExecutorTypeSSH}
+				repo.executorProfiles[profileID] = &models.ExecutorProfile{
+					ID: profileID, ExecutorID: executorID,
+					Config: map[string]string{profileKeyRemoteAuthSecrets: testCase.profileEnv},
+				}
+			}
+
+			if err := exec.PreflightManagedGitCredentials(
+				context.Background(), "workspace-1", "task-1", executorID, profileID,
+			); err != nil {
+				t.Fatalf("PreflightManagedGitCredentials() error = %v", err)
+			}
+			if preparer.calls != 0 {
+				t.Fatalf("preparer calls = %d, want 0", preparer.calls)
+			}
+		})
+	}
+}
+
+func TestPreflightManagedGitCredentialsStopsBeforeRepositoryValidationWhenForkPreparationFails(t *testing.T) {
+	repo := newMockRepository()
+	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
+		ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev",
+	})
+	exec := newPreflightTestExecutor(t, repo)
+	preparer := &recordingContributorForkLeasePreparer{err: errors.New("provider verification failed")}
+	exec.SetContributorForkLeasePreparer(preparer)
+
+	err := exec.PreflightManagedGitCredentials(context.Background(), "workspace-1", "task-1", "", "")
+	if err == nil || !strings.Contains(err.Error(), "prepare contributor fork credential lease") {
+		t.Fatalf("PreflightManagedGitCredentials() error = %v, want preparation failure", err)
+	}
+}
+
 // TestPreflightManagedGitCredentialsAcceptsValidLegacyAndPluginGitHubRows
 // covers AC-1/AC-2: legacy rows with either GitHub HTTPS/SSH spellings and an
 // empty or plugin-specific provider must pass the preflight cleanly.

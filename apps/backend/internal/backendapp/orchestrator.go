@@ -145,6 +145,9 @@ func provideOrchestrator(
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
+		orchestratorSvc.SetContributorForkLeasePreparer(&githubContributionDestinationPreparer{
+			service: githubSvc, taskSvc: taskSvc, repo: taskRepo,
+		})
 		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)

@@ -582,8 +582,9 @@ func TestConfigureGitHubCredentialBrokerIncludesExactContributionDestination(t *
 		RepositoryID: "repo-1",
 		Repository:   &models.Repository{Provider: "github", ProviderRepoID: "100", ProviderOwner: "kdlbs", ProviderName: "kandev"},
 		ContributionDestination: &models.ContributionDestination{
-			Version:  models.ContributionDestinationVersion,
-			Provider: models.ContributionDestinationProviderGitHub,
+			Version:    models.ContributionDestinationVersion,
+			Provider:   models.ContributionDestinationProviderGitHub,
+			HeadBranch: "feature/task-1",
 			SourceRepository: models.ContributionDestinationRepository{
 				Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 			},
@@ -612,6 +613,12 @@ func TestConfigureGitHubCredentialBrokerIncludesExactContributionDestination(t *
 	if issuer.requests[1].IdentityProviderID != "200" || issuer.requests[1].ParentProviderID != "100" || destinationBinding.Source != "pat" {
 		t.Fatalf("destination lease identity = %+v", issuer.requests[1])
 	}
+	if strings.Contains(req.Env[githubauth.CredentialScopesEnv], "agent/kandev") {
+		t.Fatalf("agent credential scopes expose managed destination: %s", req.Env[githubauth.CredentialScopesEnv])
+	}
+	if !strings.Contains(req.ManagedGitPushEnv[githubauth.CredentialScopesEnv], "agent/kandev") {
+		t.Fatalf("managed push scopes omit exact destination: %s", req.ManagedGitPushEnv[githubauth.CredentialScopesEnv])
+	}
 }
 
 func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing.T) {
@@ -620,8 +627,9 @@ func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing
 	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
 	req := &LaunchAgentRequest{
 		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
-		ExecutorType: string(models.ExecutorTypeRemoteDocker),
-		Env:          map[string]string{envGHToken: "profile-token"},
+		ExecutorType:      string(models.ExecutorTypeRemoteDocker),
+		Env:               map[string]string{envGHToken: "profile-token"},
+		ManagedGitPushEnv: map[string]string{githubauth.CredentialScopesEnv: "stale-private-scope"},
 	}
 	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
 		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
@@ -638,6 +646,9 @@ func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing
 	}
 	if got := req.Env[envGitHubCredentialLease]; got != "" {
 		t.Fatalf("broker lease = %q, want none with explicit profile auth", got)
+	}
+	if req.ManagedGitPushEnv != nil {
+		t.Fatalf("explicit profile token retained managed push env: %#v", req.ManagedGitPushEnv)
 	}
 }
 
@@ -773,8 +784,9 @@ func TestConfigureGitHubCredentialBrokerDisablesDestinationForExecutorPolicy(t *
 
 func testCredentialDestination() models.ContributionDestination {
 	return models.ContributionDestination{
-		Version:  models.ContributionDestinationVersion,
-		Provider: models.ContributionDestinationProviderGitHub,
+		Version:    models.ContributionDestinationVersion,
+		Provider:   models.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/task-1",
 		SourceRepository: models.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},

@@ -37,6 +37,20 @@ func hasEnvValue(env []string, key string) bool {
 	return false
 }
 
+func TestManagerManagedGitPushEnvironmentIsNotAgentVisible(t *testing.T) {
+	manager := NewManager(&config.InstanceConfig{
+		AgentEnv:          []string{"KANDEV_GITHUB_CREDENTIAL_SCOPES=canonical"},
+		ManagedGitPushEnv: []string{"KANDEV_GITHUB_CREDENTIAL_SCOPES=canonical-and-destination"},
+	}, newTestLogger(t))
+
+	if got := lookupEnvValue(manager.agentEnvSnapshot(), "KANDEV_GITHUB_CREDENTIAL_SCOPES"); got != "canonical" {
+		t.Fatalf("agent credential scopes = %q, want canonical only", got)
+	}
+	if got := lookupEnvValue(manager.gitEnvironment(), "KANDEV_GITHUB_CREDENTIAL_SCOPES"); got != "canonical-and-destination" {
+		t.Fatalf("managed Git credential scopes = %q, want private destination scope", got)
+	}
+}
+
 func TestManager_BuildFinalCommandPreservesConfiguredTempEnvironment(t *testing.T) {
 	serviceTemp := setServiceTempTestEnv(t)
 	mgr := NewManager(&config.InstanceConfig{

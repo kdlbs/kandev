@@ -150,6 +150,16 @@ connection does not need a fork. An App connection without direct write access c
 automatic personal fork, so managed fork preparation fails closed; the Improve Kandev issue-only
 option remains available.
 
+An ordinary task attached to canonical `kdlbs/kandev` can reuse an existing contributor fork when a
+new managed session starts. Kandev verifies that fork through the workspace automation connection,
+stores the same task-bound destination used by Improve Kandev, and does not trust a manually added
+remote or create a fork. The managed push action sends the current branch and head to the same branch
+on that exact fork and rejects another branch, another refspec, force, or a history rewrite. The fork
+lease is not available to the agent's raw Git commands or task shell. Kandev supplies it only to the
+managed push subprocess after validating the exact task branch, destination remote, and refspec.
+Existing running sessions keep their original credential scopes, so start a fresh session after
+upgrading before publishing from an older task.
+
 - **Inherit executor Git credentials** is the default for newly created workspaces and does not
   install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).

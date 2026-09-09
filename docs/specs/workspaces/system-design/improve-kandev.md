@@ -248,7 +248,8 @@ the user's own agent picks up immediately — turning every report into a contri
   automation actor cannot push to `kdlbs/kandev`, **WHEN** an implementation
   task is created, **THEN** Kandev resolves or creates the actor's exact fork,
   persists it as the task-bound contribution destination, and launches the
-  task with credential scopes for only `kdlbs/kandev` and that fork.
+  task with canonical `kdlbs/kandev` scopes in its general environment and a
+  separate fork scope available only to the exact-branch managed push path.
 
 - **GIVEN** the user has verified the change works, **WHEN** they move the task
   to **PR**, **THEN** the agent invokes the `pr` skill and opens a pull request

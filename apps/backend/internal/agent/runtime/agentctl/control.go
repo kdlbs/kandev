@@ -49,6 +49,7 @@ type CreateInstanceRequest struct {
 	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
 	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env                    map[string]string   `json:"env,omitempty"`
+	ManagedGitPushEnv      map[string]string   `json:"managed_git_push_env,omitempty"`
 	AutoStart              bool                `json:"auto_start,omitempty"`
 	AutoApprovePermissions *bool               `json:"auto_approve_permissions,omitempty"`
 	McpServers             []McpServerConfig   `json:"mcp_servers,omitempty"`

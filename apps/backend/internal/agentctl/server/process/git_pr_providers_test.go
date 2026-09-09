@@ -83,8 +83,6 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	}
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
-	targetDir := t.TempDir()
-	runGit(t, targetDir, "init", "--bare", "--initial-branch=main")
 	runGit(t, repoDir, "checkout", "-b", "feature/managed-destination")
 	runGit(t, repoDir, "remote", "set-url", "origin", "https://github.com/kdlbs/kandev.git")
 	writeFile(t, repoDir, "managed-destination.txt", "managed destination\n")
@@ -92,8 +90,9 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	runGit(t, repoDir, "commit", "-m", "managed destination")
 
 	destination := &taskmodels.ContributionDestination{
-		Version:  taskmodels.ContributionDestinationVersion,
-		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/managed-destination",
 		SourceRepository: taskmodels.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},
@@ -104,9 +103,9 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	if err := destination.Validate(); err != nil {
 		t.Fatalf("destination.Validate() = %v", err)
 	}
-	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
 	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
 	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	_, pushArgsPath := installManagedPushGitWrapper(t)
 
 	scriptDir := t.TempDir()
 	ghArgsPath := filepath.Join(scriptDir, "gh-args.txt")
@@ -119,8 +118,8 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	if err != nil || !result.Success {
 		t.Fatalf("CreatePR = %+v, err = %v", result, err)
 	}
-	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/managed-destination")); got == "" {
-		t.Fatal("managed destination branch was not pushed")
+	if got := readGitTestFile(t, pushArgsPath); !strings.Contains(got, "HEAD:refs/heads/feature/managed-destination") {
+		t.Fatalf("managed push args = %q, want exact fork head refspec", got)
 	}
 	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
 		t.Fatal("canonical origin was removed or rewritten")
@@ -152,8 +151,9 @@ func TestGitOperatorCreatePR_ContributionDestinationRejectsNonGitHubOrigin(t *te
 	runGit(t, repoDir, "commit", "-m", "managed destination")
 
 	destination := &taskmodels.ContributionDestination{
-		Version:  taskmodels.ContributionDestinationVersion,
-		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/managed-destination",
 		SourceRepository: taskmodels.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},

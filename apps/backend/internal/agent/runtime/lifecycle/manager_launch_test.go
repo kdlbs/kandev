@@ -310,8 +310,9 @@ func TestCollectContributionDestinationsRejectsDistinctIdentitiesWithSamePath(t 
 
 func lifecycleTestContributionDestination(providerID string) models.ContributionDestination {
 	return models.ContributionDestination{
-		Version:  models.ContributionDestinationVersion,
-		Provider: models.ContributionDestinationProviderGitHub,
+		Version:    models.ContributionDestinationVersion,
+		Provider:   models.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/task-1",
 		SourceRepository: models.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},

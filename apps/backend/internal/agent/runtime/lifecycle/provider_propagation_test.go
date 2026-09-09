@@ -45,6 +45,23 @@ func TestAgentctlProviderMappingsPreserveProviderCapabilities(t *testing.T) {
 	}
 }
 
+func TestAgentctlMappingsKeepManagedPushEnvironmentSeparate(t *testing.T) {
+	want := map[string]string{"KANDEV_GITHUB_CREDENTIAL_SCOPES": "private-fork-scope"}
+	req := &ExecutorCreateRequest{ManagedGitPushEnv: want}
+	requests := map[string]map[string]string{
+		"standalone":    buildStandaloneCreateInstanceRequest(req, nil, "", false, false, false, false, nil).ManagedGitPushEnv,
+		"container":     buildContainerCreateInstanceRequest(ContainerConfig{ManagedGitPushEnv: want}, "", false, false, false, false, nil).ManagedGitPushEnv,
+		"docker":        buildReconnectCreateInstanceRequest(req, "previous-execution").ManagedGitPushEnv,
+		"sprites":       spriteCreateInstanceRequest(req).ManagedGitPushEnv,
+		executorTypeSSH: buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl").ManagedGitPushEnv,
+	}
+	for backend, got := range requests {
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s managed push env = %#v, want %#v", backend, got, want)
+		}
+	}
+}
+
 func TestAgentctlMCPToolNamePresentationCapabilityPropagatesThroughExecutors(t *testing.T) {
 	agent := &fakeRuntimeAgent{
 		MockAgent:          agents.NewMockAgent(),
