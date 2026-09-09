@@ -137,8 +137,8 @@ func TestApplyOrphanReapOwnershipBlocksRootInsideOtherTaskLiveWorktree(t *testin
 	}
 }
 
-// F20 safe reading: an executor status not in {failed, stopped, completed} is
-// treated as live, so "starting" still blocks the root.
+// An executor status not in {failed, stopped, completed} is treated as live,
+// so "starting" still blocks the root.
 func TestApplyOrphanReapOwnershipTreatsStartingExecutorAsLive(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -165,7 +165,7 @@ func TestApplyOrphanReapOwnershipTreatsStartingExecutorAsLive(t *testing.T) {
 	}
 }
 
-// F20 safe reading: a "stopped" executor is not live and must not block a root.
+// A "stopped" executor is not live and must not block a root.
 func TestApplyOrphanReapOwnershipAllowsRootFromStoppedExecutor(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
