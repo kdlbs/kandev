@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // sqliteRepository persists queued messages and pending moves.
@@ -29,7 +30,8 @@ type sqliteRepository struct {
 	// the legacy textual methods, while every identity-bound method fails
 	// closed when session authority is unavailable. Detection happens outside
 	// transactions because a missing-table statement aborts PostgreSQL txs.
-	tasksTablePresent bool
+	tasksTablePresent      bool
+	taskStateColumnPresent bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -53,6 +55,11 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 	}
 	r.tasksTablePresent = present
 	if present {
+		hasState, columnErr := internaldb.ColumnExists(writer, "tasks", "state")
+		if columnErr != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task state column: %w", columnErr)
+		}
+		r.taskStateColumnPresent = hasState
 		if err := r.migratePendingMoveIdentities(); err != nil {
 			return nil, fmt.Errorf("messagequeue: migrate pending move identities: %w", err)
 		}
@@ -119,10 +126,13 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	if !r.tasksTablePresent {
 		return nil
 	}
-	res, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET updated_at = updated_at
-		WHERE id = ? AND archived_at IS NULL
-	`), taskID)
+	query := `UPDATE tasks SET updated_at = updated_at WHERE id = ? AND archived_at IS NULL`
+	args := []interface{}{taskID}
+	if r.taskStateColumnPresent {
+		query += ` AND state NOT IN (?, ?, ?)`
+		args = append(args, v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled)
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return fmt.Errorf("guard active task for queue admission: %w", err)
 	}

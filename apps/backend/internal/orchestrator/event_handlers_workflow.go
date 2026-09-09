@@ -158,9 +158,20 @@ func (s *Service) renewRouteEffectClaim(ctx context.Context, effects routeEffect
 }
 
 func (s *Service) claimRouteEffectForStepEnter(ctx context.Context, taskID, targetStepID string, transitionID int64) (string, bool, error) {
+	effect, token, claimed, err := s.claimRouteEffect(ctx, taskID, targetStepID, transitionID)
+	if err != nil || !claimed || effect.ID == "" {
+		return token, claimed, err
+	}
+	return token, true, nil
+}
+
+// claimRouteEffect reserves the durable destination effect before lifecycle
+// work begins. A missing effect preserves compatibility with routes written by
+// older callers; a present effect is the sole owner token for side effects.
+func (s *Service) claimRouteEffect(ctx context.Context, taskID, targetStepID string, transitionID int64) (routing.Effect, string, bool, error) {
 	effects, ok := s.repo.(routeEffectRepository)
 	if !ok {
-		return "", true, nil
+		return routing.Effect{}, "", true, nil
 	}
 	var effect routing.Effect
 	var found bool
@@ -171,11 +182,11 @@ func (s *Service) claimRouteEffectForStepEnter(ctx context.Context, taskID, targ
 		effect, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
 	}
 	if err != nil || !found {
-		return "", found, err
+		return effect, "", found, err
 	}
 	token := uuid.NewString()
 	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
-	return token, claimed, err
+	return effect, token, claimed, err
 }
 
 type taskMovedLifecyclePrerequisites struct {
@@ -2296,6 +2307,25 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if task.WorkflowStepID != toStepID {
 		return
 	}
+	effect, token, claimed, err := s.claimRouteEffect(ctx, taskID, toStepID, task.WorkflowStepTransitionID)
+	if err != nil {
+		s.logger.Warn("manual move lifecycle could not claim route effect", zap.String("task_id", taskID), zap.Error(err))
+		s.scheduleTaskLifecycleRetry(taskID)
+		return
+	}
+	if !claimed {
+		return
+	}
+	if effect.ID != "" {
+		effects := s.repo.(routeEffectRepository)
+		begun, beginErr := effects.BeginWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC())
+		if beginErr != nil || !begun {
+			if beginErr != nil {
+				s.logger.Warn("manual move lifecycle could not begin route effect", zap.String("task_id", taskID), zap.Error(beginErr))
+			}
+			return
+		}
+	}
 	if s.onManualMoveLifecycleStart != nil {
 		s.onManualMoveLifecycleStart()
 	}
@@ -2307,6 +2337,19 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
 			zap.String("to_step_id", toStepID), zap.Error(err))
 		return
+	}
+	if effect.ID != "" {
+		effects := s.repo.(routeEffectRepository)
+		completed, completeErr := effects.CompleteWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC())
+		if completeErr != nil {
+			completed, completeErr = effects.CompleteWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC())
+		}
+		if completeErr != nil || !completed {
+			if completeErr != nil {
+				s.logger.Warn("manual move lifecycle could not complete route effect", zap.String("task_id", taskID), zap.Error(completeErr))
+			}
+			return
+		}
 	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
 		return

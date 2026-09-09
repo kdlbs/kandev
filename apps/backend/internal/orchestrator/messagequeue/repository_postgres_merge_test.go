@@ -44,7 +44,14 @@ func TestPostgresRepository_ReplaceSessionRejectsSnapshotAfterTerminalSettlement
 			archived_at TIMESTAMP NULL,
 			updated_at TIMESTAMP NOT NULL
 		);
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			queue_incarnation_id TEXT NOT NULL DEFAULT ''
+		);
 		INSERT INTO tasks VALUES ('task-route', 'step-done', 'COMPLETED', NULL, CURRENT_TIMESTAMP);
+		INSERT INTO task_sessions (id, task_id, queue_incarnation_id)
+		VALUES ('session-route', 'task-route', 'route-incarnation');
 	`)
 	if err != nil {
 		t.Fatalf("create terminal task: %v", err)
@@ -61,8 +68,8 @@ func TestPostgresRepository_ReplaceSessionRejectsSnapshotAfterTerminalSettlement
 		WorkflowStepID:         "step-done",
 		ExpectedWorkflowStepID: "step-review",
 	})
-	if !errors.Is(err, ErrPendingMoveGenerationConflict) {
-		t.Fatalf("ReplaceSession error = %v, want ErrPendingMoveGenerationConflict", err)
+	if !errors.Is(err, ErrTaskInactive) {
+		t.Fatalf("ReplaceSession error = %v, want ErrTaskInactive", err)
 	}
 	pending, err := repo.GetPendingMove(ctx, "session-route")
 	if err != nil {

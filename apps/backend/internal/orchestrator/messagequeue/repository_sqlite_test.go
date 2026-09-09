@@ -1039,6 +1039,48 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_SetPendingMoveRejectsTerminalTask(t *testing.T) {
+	raw, err := sql.Open("sqlite3", "file:terminal-pending-move?mode=memory&cache=shared&_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			archived_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			queue_incarnation_id TEXT NOT NULL
+		);
+		INSERT INTO tasks (id, state, updated_at) VALUES ('terminal-task', 'COMPLETED', CURRENT_TIMESTAMP);
+		INSERT INTO task_sessions (id, task_id, queue_incarnation_id)
+		VALUES ('terminal-session', 'terminal-task', 'terminal-incarnation');
+	`)
+	if err != nil {
+		t.Fatalf("seed terminal task: %v", err)
+	}
+	repo, err := NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	err = repo.SetPendingMove(context.Background(), "terminal-session", &PendingMove{
+		TaskID:               "terminal-task",
+		SessionIncarnationID: "terminal-incarnation",
+		WorkflowStepID:       "obsolete-target",
+	})
+	if !errors.Is(err, ErrTaskInactive) {
+		t.Fatalf("SetPendingMove error = %v, want ErrTaskInactive", err)
+	}
+}
+
 func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	raw, err := sql.Open("sqlite3", "file:pending-move-migration?mode=memory&cache=shared")
 	if err != nil {

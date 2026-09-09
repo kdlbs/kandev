@@ -370,7 +370,8 @@ func TestManualMoveLifecycleLostClaimDoesNotRepeatExitOrEnter(t *testing.T) {
 			"source-step", "destination-step", task.Description, 0,
 		)
 		require.Equal(t, 1, countingRepo.disableCount())
-		require.Equal(t, 1, countingRepo.destinationEntryCount())
+		require.Zero(t, countingRepo.destinationEntryCount(),
+			"an executing effect cannot be reclaimed for destination entry")
 		close(blockedRepo.successorDone)
 		time.Sleep(routeEffectLease / 3)
 		close(blockedRepo.release)
