@@ -313,7 +313,12 @@ func TestHandleTaskCreatedRestoresAutoStartOnCreateOnPreSessionFailure(t *testin
 	}
 
 	// Clear the injected failure and let a subsequent startup sweep retry
-	// using the restored token.
+	// using the restored token. Locked because the first launch attempt's
+	// detached goroutine (see autoStartTaskForLoadedStep) can still be
+	// finishing unrelated work on taskRepo after waitForAutoStartFailedMarker
+	// observes the marker on the separate repo above; GetTask takes the same
+	// lock on its read side.
+	taskRepo.mu.Lock()
 	taskRepo.getTaskErr = nil
 	taskRepo.tasks["t-pre-session-failure"] = &v1.Task{
 		ID:          "t-pre-session-failure",
@@ -323,6 +328,7 @@ func TestHandleTaskCreatedRestoresAutoStartOnCreateOnPreSessionFailure(t *testin
 		State:       v1.TaskStateCreated,
 		Metadata:    metadata,
 	}
+	taskRepo.mu.Unlock()
 
 	svc.reconcileTaskLifecycleTokens(ctx)
 
