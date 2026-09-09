@@ -92,6 +92,53 @@ func TestCanvasFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
 	}
 }
 
+// TestOfficeSessionIdentityFeatureFlagIsEnabledInEveryProfile pins
+// AC-OFFICE-IDENTITY-GRADUATION-004.1 and -004.2: the default-on release
+// ships "true" for KANDEV_FEATURES_OFFICE_SESSION_IDENTITY in prod, dev and
+// e2e alike, flipping together rather than only in prod.
+func TestOfficeSessionIdentityFeatureFlagIsEnabledInEveryProfile(t *testing.T) {
+	for _, profile := range []struct {
+		name     string
+		selector map[string]string
+	}{{
+		name: "prod",
+	}, {
+		name: "dev",
+		selector: map[string]string{
+			"KANDEV_DEBUG_DEV_MODE": "true",
+		},
+	}, {
+		name: "e2e",
+		selector: map[string]string{
+			"KANDEV_E2E_MOCK": "true",
+		},
+	}} {
+		t.Run(profile.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for key, value := range profile.selector {
+				t.Setenv(key, value)
+			}
+
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatalf("EnvironmentDefaults: %v", err)
+			}
+			if got := defaults["KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"]; got != "true" {
+				t.Fatalf("KANDEV_FEATURES_OFFICE_SESSION_IDENTITY = %q in %s, want true", got, profile.name)
+			}
+
+			featureDefaults, err := FeatureFlagDefaults()
+			if err != nil {
+				t.Fatalf("FeatureFlagDefaults: %v", err)
+			}
+			if got := featureDefaults["office_session_identity"]; got != "true" {
+				t.Fatalf("office_session_identity = %q in %s, want true", got, profile.name)
+			}
+		})
+	}
+}
+
 func TestEnvironmentDefaultsSelectsProfileWithoutMutatingEnvironment(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)

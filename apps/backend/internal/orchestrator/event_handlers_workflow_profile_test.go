@@ -223,7 +223,7 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	)
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
-	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
+	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "office tasks must be started through Office") {
 		t.Fatalf("autoStartStepPrompt error = %v, want Office scheduler guard", err)
 	}
@@ -277,8 +277,9 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.SetCanvasesEnabled(true)
 	svc.messageCreator = messages
-	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false)
+	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false, nil)
 	if err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
@@ -287,6 +288,17 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	}
 	if len(agentMgr.capturedPromptCalls) != 1 || !strings.Contains(agentMgr.capturedPromptCalls[0].Prompt, "step_complete_kandev") {
 		t.Fatalf("executor prompt lacks completion contract: %#v", agentMgr.capturedPromptCalls)
+	}
+	for _, prompt := range []string{messages.userMessages[0].content, agentMgr.capturedPromptCalls[0].Prompt} {
+		for _, tool := range []string{
+			"create_canvas_kandev",
+			"read_canvas_authoring_skill_kandev",
+			"publish_canvas_kandev",
+		} {
+			if !strings.Contains(prompt, tool) {
+				t.Fatalf("reset-context prompt lacks %s: %s", tool, prompt)
+			}
+		}
 	}
 	if !strings.Contains(messages.userMessages[0].content, "ask_parent_question_kandev") || strings.Contains(messages.userMessages[0].content, "ask_user_question_kandev") {
 		t.Fatalf("reused autopilot prompt has the wrong question contract: %s", messages.userMessages[0].content)
@@ -321,7 +333,7 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	svc.messageCreator = messages
-	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false); err != nil {
+	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false, nil); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
 	if len(messages.userMessages) != 1 {
@@ -329,6 +341,9 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	}
 	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
 		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
+	}
+	if strings.Contains(messages.userMessages[0].content, "create_canvas_kandev") {
+		t.Fatalf("reused Office prompt must not advertise canvas authoring: %s", messages.userMessages[0].content)
 	}
 }
 func TestResolveStepAgentProfile(t *testing.T) {
@@ -909,7 +924,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1023,7 +1038,7 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 		taskEvents:         publisher,
@@ -1112,7 +1127,7 @@ func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBefore
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	svc := &Service{
 		logger: log, workflowStepGetter: newMockStepGetter(), taskRepo: taskRepo, agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		messageQueue: newAuthoritativeMemoryQueue(repo, log), executor: exec,
 		scheduler: scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{}),
 	}
 	barrierRepo := &terminalizeCandidateBeforePromotionRepo{
@@ -1243,7 +1258,7 @@ func TestSwitchSessionForStep_CompletedSessionNotReused(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1406,7 +1421,7 @@ func TestSwitchSessionForStep_FailedSessionNotReused(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1520,7 +1535,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			workflowStepGetter: sg,
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1799,7 +1814,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			workflowStepGetter: sg,
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -1876,7 +1891,7 @@ func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewServiceMemory(log),
+			messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 			executor:           exec,
 			scheduler:          sched,
 		}

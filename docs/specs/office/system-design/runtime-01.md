@@ -19,6 +19,12 @@ This design preserves the technical source detail for `REQ-OFFICE-RUNTIME-001` d
 | --- | --- |
 | `REQ-OFFICE-RUNTIME-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Related decisions
+
+[Keep MCP availability separate from runtime permissions](../../../decisions/2026-09-07-separate-runtime-permissions-and-advisory-actions.md)
+defines the boundary between enforced runtime permissions and seat-derived
+prompt metadata.
+
 ## Migrated source detail
 
 > **Amendment (2026-08-17):** The provider-classification and automatic
@@ -255,7 +261,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Mark fixed (inbox dismiss + retry)** and **Resume session**: any workspace user. There is no agent-role gating on these affordances; they are explicit human-driven recovery actions surfaced in the inbox and per-task chat.
 - **Reassignment** (`PATCH /tasks/:id` with new `assignee_agent_instance_id`): workspace user. Agent JWTs cannot reassign tasks via the runtime action surface in v1; there is no `CapabilityReassignTask`.
 - **Manual unpause** (clearing `pause_reason` from the agent detail page): workspace admin / CEO role only, enforced by `isAdminRole` in `internal/office/agents/handler.go`.
-- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`).
+- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`). The seat-derived `record_step_decision` CLI affordance is not a runtime capability. `runtime.ContextBuilder.Build` stores it in `RunContext.AvailableActions` when the agent holds the current workflow participant seat. The scheduler uses this advisory action to inject `kandev-step-decision` and add the command to the prompt, but does not add it to JWT capability claims. The task-bound runtime decision handler derives task, session, and agent identity from the signed run context and performs live authorization through `DashboardService.RecordAgentDecision` and `ResolveParticipantRole`.
 - **Task scope**: `RunContext.CanMutateTask(taskID)` returns true only when `taskID == runCtx.TaskID` or `taskID` (or wildcard `*`) appears in `Capabilities.AllowedTaskIDs`. Out-of-scope mutations return `ErrTaskOutOfScope`.
 - **Workspace scope**: every action that touches another entity (target agent, target skill, target task) is rejected with `ErrWorkspaceOutOfScope` when the target's `workspace_id` does not match the run's.
 - **Memory namespaces**: `CanAccessMemory` enforces workspace match plus, for `kind=agent`, that the namespace ID matches `runCtx.AgentID`. Agents cannot read or write another agent's memory.

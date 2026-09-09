@@ -44,8 +44,10 @@ func TestSSHBuildResumedInstanceRecordsProcessReuse(t *testing.T) {
 				TaskID:     "task-1",
 				SessionID:  "session-1",
 				Metadata: map[string]interface{}{
-					MetadataKeySSHRemoteAgentctlPort: "43123",
-					MetadataKeySSHRemoteTaskDir:      "/remote/task",
+					MetadataKeySSHRemoteAgentctlPort:   "43123",
+					MetadataKeySSHRemoteTaskDir:        "/remote/task",
+					MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:38429/api/v1",
+					MetadataKeySSHRuntimeAPIRemotePort: "41234",
 				},
 			}, &sshSessionState{
 				target:         &SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
@@ -60,7 +62,33 @@ func TestSSHBuildResumedInstanceRecordsProcessReuse(t *testing.T) {
 			if !ok || reusingProcess != tc.reusingProcess {
 				t.Fatalf("reuse_existing_process = (%v, %v), want (%v, true)", reusingProcess, ok, tc.reusingProcess)
 			}
+			if got := instance.Metadata[MetadataKeySSHRuntimeAPILocalURL]; got != "http://127.0.0.1:38429/api/v1" {
+				t.Fatalf("local API URL metadata = %v", got)
+			}
+			if got := instance.Metadata[MetadataKeySSHRuntimeAPIRemotePort]; got != "41234" {
+				t.Fatalf("remote API port metadata = %v", got)
+			}
 		})
+	}
+}
+
+func TestSSHBuildInstanceCarriesRuntimeAPITunnelMetadata(t *testing.T) {
+	executor := &SSHExecutor{logger: newNopLogger(t)}
+	instance := executor.buildInstance(
+		&ExecutorCreateRequest{InstanceID: "instance-1", Metadata: map[string]interface{}{
+			MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:38429/api/v1",
+			MetadataKeySSHRuntimeAPIRemotePort: "41234",
+		}},
+		&SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
+		&SSHPortForwarder{localPort: 43124},
+		"/remote/task", "/remote/session", 43123, 99, "/home/agent/.kandev", "token",
+	)
+
+	if got := instance.Metadata[MetadataKeySSHRuntimeAPILocalURL]; got != "http://127.0.0.1:38429/api/v1" {
+		t.Fatalf("local API URL metadata = %v", got)
+	}
+	if got := instance.Metadata[MetadataKeySSHRuntimeAPIRemotePort]; got != "41234" {
+		t.Fatalf("remote API port metadata = %v", got)
 	}
 }
 

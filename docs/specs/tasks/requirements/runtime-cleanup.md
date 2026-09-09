@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-09-05
+updated: 2026-09-09
 owners:
   - cfl
 ---
@@ -46,3 +46,11 @@ and safe when runtimes or task rows are already gone.
   reference exists, and all ownership, path, registration, branch, and commit
   identity checks pass. The existing unique branch preservation rule shall
   remain active.
+- **AC-TASKS-RUNTIME-CLEANUP-001.13:** When a recorded worktree directory and
+  its local branch are absent, cleanup preparation shall permit task archive
+  or deletion. This applies to direct and cascade operations, including tasks
+  with other healthy repositories. Remaining resources shall retain their
+  ownership checks and cleanup guarantees. If the omitted identity's path or
+  registration reappears before execution, cleanup shall remain retryable and
+  shall not adopt the live checkout without an immutable identity captured
+  during preparation.

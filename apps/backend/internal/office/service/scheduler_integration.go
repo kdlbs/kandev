@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -279,18 +278,10 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID string, execCfg *ExecutorConfig,
 ) {
-	// ADR 0005 Wave E: skill + instruction file delivery moved into the
-	// runtime (internal/agent/runtime/lifecycle/skill). We still build
-	// the manifest here to extract AGENTS.md content for the prompt and
-	// to compute the deterministic instructionsDir path the runtime
-	// will write to. No filesystem side effects from this call.
-	manifest := si.buildSkillManifest(ctx, agent, defaultWorkspaceName)
-	instructionsDir, agentsMD := si.resolveInstructionsForPrompt(manifest, execCfg.Type)
-	si.snapshotRunSkills(ctx, run.ID, manifest, instructionsDir)
-
 	runCtx, err := (&officeruntime.ContextBuilder{
 		Agents: si.svc,
 		Runs:   si.svc.repo,
+		Seats:  si.svc,
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
@@ -307,6 +298,14 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		"workspace_id": runCtx.WorkspaceID,
 		"wake_reason":  runCtx.Reason,
 	})
+	// ADR 0005 Wave E: skill + instruction file delivery moved into the
+	// runtime (internal/agent/runtime/lifecycle/skill). We still build
+	// the manifest here to extract AGENTS.md content for the prompt and
+	// to compute the deterministic instructionsDir path the runtime
+	// will write to. No filesystem side effects from this call.
+	manifest := si.buildSkillManifest(ctx, agent, defaultWorkspaceName, runCtx.AvailableActions...)
+	instructionsDir, agentsMD := si.resolveInstructionsForPrompt(manifest, execCfg.Type)
+	si.snapshotRunSkills(ctx, run.ID, manifest, instructionsDir)
 
 	token, err := si.mintRuntimeToken(run, agent, runCtx)
 	if err != nil {
@@ -333,9 +332,10 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.Int("env_count", len(env)))
 
 	launchCtx := LaunchContext{
-		Prompt:    prompt,
-		Env:       env,
-		ProfileID: profileID,
+		Prompt:               prompt,
+		Env:                  env,
+		ProfileID:            profileID,
+		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
 	}
 	// launchAgent returns true only when the adapter was actually invoked.
 	// When it was, leave the run `claimed` and let the AgentCompleted/
@@ -377,7 +377,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
 	pc.TaskScope = append([]string(nil), runCtx.Capabilities.AllowedTaskIDs...)
-	pc.AllowedActions = runCtx.Capabilities.AllowedKeys()
+	pc.AllowedActions = append(runCtx.Capabilities.AllowedKeys(), runCtx.AvailableActions...)
 	wakeContext := BuildPrompt(pc)
 
 	// Resume = the (task, agent_instance) session has run before. On resume
@@ -591,7 +591,9 @@ func (si *SchedulerIntegration) launchAgent(
 		return launched
 	}
 	var err error
-	if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
+	if starter, ok := si.svc.taskStarter.(TaskStarterWithLaunchContext); ok {
+		err = starter.StartTaskWithLaunchContext(ctx, taskID, launch.ProfileID, launch)
+	} else if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
 		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil, launch.Env)
 	} else {
@@ -937,15 +939,14 @@ func (si *SchedulerIntegration) buildPromptContext(
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
 		si.enrichHandoffContext(ctx, pc, taskID)
+		if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
+			si.enrichChildrenContext(ctx, pc, taskID)
+		}
 	}
 
 	if reason == RunReasonApprovalResolved {
 		pc.ApprovalStatus = parsed["status"]
 		pc.ApprovalNote = parsed["decision_note"]
-	}
-
-	if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
-		si.enrichChildrenContext(pc, payload)
 	}
 
 	if reason == RunReasonTaskAssigned || reason == RunReasonTaskReviewRequested ||
@@ -969,6 +970,12 @@ func (si *SchedulerIntegration) buildPromptContext(
 
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
+	if reason == RunReasonAgentError {
+		pc.FailedAgentID = parsed["failed_agent_id"]
+		pc.FailedSessionID = parsed["failed_session_id"]
+		pc.AgentErrorMessage = parsed["error"]
 	}
 
 	return pc
@@ -1044,29 +1051,45 @@ func (si *SchedulerIntegration) enrichBuilderComments(ctx context.Context, pc *P
 	}
 }
 
-// enrichChildrenContext parses child summaries from the run payload.
-func (si *SchedulerIntegration) enrichChildrenContext(pc *PromptContext, payload string) {
-	var data struct {
-		Children []struct {
-			Identifier  string `json:"identifier"`
-			Title       string `json:"title"`
-			State       string `json:"state"`
-			LastComment string `json:"last_comment"`
-		} `json:"children"`
-		Truncated bool `json:"truncated"`
-	}
-	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+// enrichChildrenContext populates the child list section from the parent's
+// children as they are now, not from anything the producer recorded.
+//
+// Four producers can queue a children-completed run and exactly one survives a
+// completion wave, a race none of them can observe. Reading here, after that
+// race has been decided, is what makes the section identical whichever producer
+// won: there is no per-producer path left to render differently. It also means
+// the section reports a child's state and last comment as of this moment rather
+// than as of queue time, which matters because a child's concluding comment is
+// frequently written after the state change that queued the wake.
+//
+// Failures leave the section empty and never fail the run: the list is context,
+// not the reason the parent is being woken.
+func (si *SchedulerIntegration) enrichChildrenContext(
+	ctx context.Context, pc *PromptContext, parentTaskID string,
+) {
+	children, truncated, err := si.svc.repo.GetChildSummaries(ctx, parentTaskID)
+	if err != nil {
+		// Warn, not debug: an empty section is indistinguishable from a parent
+		// with no children, so a silent failure looks like correct output.
+		si.logger.Warn("load child summaries for prompt failed",
+			zap.String("task_id", parentTaskID), zap.Error(err))
 		return
 	}
-	for _, c := range data.Children {
+	if len(children) == 0 {
+		return
+	}
+
+	prsByTask := si.svc.lookupChildPRLinks(ctx, children)
+	for _, c := range children {
 		pc.ChildSummaries = append(pc.ChildSummaries, ChildSummaryPrompt{
 			Identifier:  c.Identifier,
 			Title:       c.Title,
 			State:       c.State,
 			LastComment: c.LastComment,
+			PRLinks:     prsByTask[c.TaskID],
 		})
 	}
-	pc.ChildSummariesTruncated = data.Truncated
+	pc.ChildSummariesTruncated = truncated
 }
 
 // enrichTaskContext populates task-related fields on the PromptContext.

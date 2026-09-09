@@ -45,6 +45,12 @@ type TaskStarterWithEnv interface {
 		planMode bool, attachments []v1.MessageAttachment, env map[string]string) error
 }
 
+// TaskStarterWithLaunchContext optionally carries the complete Office launch
+// context into the agent runtime, including per-run skill additions.
+type TaskStarterWithLaunchContext interface {
+	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -53,15 +59,16 @@ type TaskStarterWithEnv interface {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
-	ProfileID         string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	ProfileID            string
+	AdditionalSkillSlugs []string
 }
 
 // RoutingDispatcher is the seam the office scheduler integration uses to
@@ -167,6 +174,46 @@ func (f TaskStarterWithEnvFunc) StartTaskWithEnv(ctx context.Context, taskID, ag
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
 	return f(ctx, taskID, agentProfileID, executorID, executorProfileID,
 		priority, prompt, workflowStepID, planMode, attachments, env)
+}
+
+// TaskStarterWithLaunchContextFunc adapts a complete launch-context function
+// to the TaskStarter interfaces used by the Office scheduler.
+type TaskStarterWithLaunchContextFunc func(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error
+
+// StartTask implements TaskStarter.
+func (f TaskStarterWithLaunchContextFunc) StartTask(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+	})
+}
+
+// StartTaskWithEnv implements TaskStarterWithEnv.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithEnv(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+		Env:               env,
+	})
+}
+
+// StartTaskWithLaunchContext implements TaskStarterWithLaunchContext.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithLaunchContext(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error {
+	return f(ctx, taskID, agentProfileID, launch)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -281,7 +328,27 @@ type Service struct {
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
 	// delegate to it.
 	budgetChecker BudgetEvaluator
+
+	// routineRunSyncer closes out a heavy routine run when its linked
+	// task reaches a terminal step. Wired to the routines.RoutineService
+	// at startup; nil in tests that don't exercise routines.
+	routineRunSyncer RoutineRunSyncer
 }
+
+// RoutineRunSyncer is the surface the office service needs from the
+// routines feature to close out a routine run once its linked task
+// finishes. Implemented by *routines.RoutineService.SyncRunStatus —
+// declared here so tests can supply fakes without pulling the routines
+// package. terminalStatus is "done" or "cancelled".
+type RoutineRunSyncer interface {
+	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
+// used to close out a heavy routine run when its linked task reaches a
+// terminal step. Without this wired, a heavy routine's run stays in
+// task_created until routines.activeRunMaxAge lets a later fire through.
+func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by

@@ -522,20 +522,25 @@ func TestSSHTaskDirName(t *testing.T) {
 
 func TestClearSSHResumeRuntimeMetadata(t *testing.T) {
 	metadata := map[string]interface{}{
-		MetadataKeySSHRemoteSessionDir:   "/remote/session",
-		MetadataKeySSHRemoteAgentctlPort: "41234",
-		MetadataKeySSHRemoteAgentctlPID:  "4242",
-		MetadataKeySSHLocalForwardPort:   "5000",
-		MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:5000",
-		MetadataKeySSHRemoteTaskDir:      "/remote/task",
-		MetadataKeySSHHost:               "build.example",
+		MetadataKeySSHRemoteSessionDir:     "/remote/session",
+		MetadataKeySSHRemoteAgentctlPort:   "41234",
+		MetadataKeySSHRemoteAgentctlPID:    "4242",
+		MetadataKeySSHLocalForwardPort:     "5000",
+		MetadataKeySSHRemoteAgentctlURL:    "http://127.0.0.1:5000",
+		MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:3456/api/v1",
+		MetadataKeySSHRuntimeAPIRemotePort: "45678",
+		MetadataKeySSHRemoteTaskDir:        "/remote/task",
+		MetadataKeySSHHost:                 "build.example",
 	}
 	clearSSHResumeRuntimeMetadata(metadata)
-	if len(metadata) != 2 {
-		t.Fatalf("remaining metadata = %+v, want only the durable keys", metadata)
+	if len(metadata) != 3 {
+		t.Fatalf("remaining metadata = %+v, want durable keys plus the local API URL", metadata)
 	}
 	if metadata[MetadataKeySSHRemoteTaskDir] != "/remote/task" || metadata[MetadataKeySSHHost] != "build.example" {
 		t.Fatalf("durable metadata was cleared: %+v", metadata)
+	}
+	if metadata[MetadataKeySSHRuntimeAPILocalURL] != "http://127.0.0.1:3456/api/v1" {
+		t.Fatalf("local API URL was cleared: %+v", metadata)
 	}
 	clearSSHResumeRuntimeMetadata(nil) // must not panic
 }

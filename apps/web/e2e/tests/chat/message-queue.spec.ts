@@ -7,12 +7,17 @@ import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
 
 registerSeparateQueueRows(test);
+
+test("Send Now keeps a workflow transition running", async ({ testPage, apiClient, seedData }) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, false);
+});
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -196,8 +201,9 @@ async function queueMessages(
   sessionId: string,
   messages: string[],
 ): Promise<void> {
+  const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
   for (const message of messages) {
-    await apiClient.queueMessage(taskId, sessionId, message);
+    await apiClient.queueMessage(identity, message);
   }
 }
 
@@ -257,10 +263,11 @@ test.describe("Task session queue", () => {
       state: "RUNNING",
       agentProfileId: seedData.agentProfileId,
     });
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
 
-    await apiClient.queueMessage(task.id, sessionId, "automatic first");
-    await apiClient.queueMessage(task.id, sessionId, "automatic second");
+    await apiClient.queueMessage(queueIdentity, "automatic first");
+    await apiClient.queueMessage(queueIdentity, "automatic second");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -268,12 +275,19 @@ test.describe("Task session queue", () => {
     const panel = session.activeChat().getByTestId("queued-ghost-list");
     const entries = panel.getByTestId("queue-entry-text");
     await expect(entries).toHaveCount(1);
+    const autoMerge = panel.getByTestId("queue-auto-merge");
+    await expect(autoMerge).toHaveAttribute("data-state", "checked");
+    await autoMerge.click();
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+
     await expect(entries.first()).toContainText("automatic first");
     await expect(entries.first()).toContainText("automatic second");
 
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: false });
-    await apiClient.queueMessage(task.id, sessionId, "separate third");
-    await apiClient.queueMessage(task.id, sessionId, "separate fourth");
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+    await apiClient.queueMessage(queueIdentity, "separate third");
+    await apiClient.queueMessage(queueIdentity, "separate fourth");
     await expect(entries).toHaveCount(3, { timeout: 10_000 });
     await expect(entries.nth(1)).toHaveText("separate third");
     await expect(entries.nth(2)).toHaveText("separate fourth");
@@ -295,7 +309,8 @@ test.describe("Task session queue", () => {
     // isolation). Enabling automatic merge must fold the next compatible
     // message into the tail instead of rejecting it as "queue full".
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
-    await apiClient.queueMessage(taskId, sessionId, "folded while full");
+    const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await apiClient.queueMessage(queueIdentity, "folded while full");
 
     const chat = session.activeChat();
     const chip = chat.getByTestId("queue-chip");
@@ -789,12 +804,13 @@ test.describe("Queued row controls", () => {
       .first();
     await expect(chatMaximize).toBeVisible();
     await chatMaximize.click();
-    const autoRunResponse = await apiClient.setQueueAutoRun(sessionId, false);
+    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
     expect(autoRunResponse).toMatchObject({ session_id: sessionId, auto_run: false });
     await waitForComposerQueueMode(testPage);
-    await apiClient.queueMessage(taskId, sessionId, fixture);
+    await apiClient.queueMessage(identity, fixture);
     await expect
-      .poll(() => apiClient.getQueueStatus(sessionId))
+      .poll(() => apiClient.getQueueStatus(identity))
       .toMatchObject({ count: 1, auto_run: false });
 
     const chat = session.activeChat();
