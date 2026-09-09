@@ -21,6 +21,8 @@ import {
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
+import { isRoutineFiring } from "../../lib/routine-status";
+import { routineNotFiringMessage } from "../../lib/routine-not-firing";
 import { useTranslation } from "react-i18next";
 
 // Lift the form state out of the component so the file stays under the
@@ -113,7 +115,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       await runRoutine(routine.id);
       toast.success(t("office:routineFired"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToRunRoutine"));
+      toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
     }
   }, [routine.id]);
 
@@ -139,7 +141,10 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     <div className="p-6 space-y-6 max-w-3xl">
       <DetailGeneralCard draft={draft} update={update} agents={agents} />
       <DetailTriggerCard draft={draft} update={update} />
-      <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
+      <DetailReadOnlyCard
+        lastFiredAt={lastFired}
+        nextRunAt={isRoutineFiring(routine.status) ? (cronTrigger?.nextRunAt ?? null) : null}
+      />
     </div>
   );
 }

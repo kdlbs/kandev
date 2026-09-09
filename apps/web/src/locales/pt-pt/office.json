@@ -693,6 +693,7 @@
   "routineCreated": "Rotina criada",
   "routineDeleted": "Rotina eliminada",
   "routineFired": "Rotina disparada",
+  "routineNotFiring": "Não é possível executar: o estado da rotina é {{status}}",
   "routinePaused": "Rotina pausada",
   "routines": "Rotinas",
   "routinesAutomaticallyCreateTasksOnA": "As rotinas criam tarefas automaticamente com base num agendamento ou num acionador de webhook.",

@@ -27,6 +27,7 @@ import { RoutineRow } from "./routine-row";
 import { RunRow } from "./run-row";
 import { CreateRoutineDialog } from "./create-routine-dialog";
 import { EmptyState } from "../components/shared/empty-state";
+import { routineNotFiringMessage } from "../lib/routine-not-firing";
 import { useTranslation } from "react-i18next";
 
 type RoutineFormData = {
@@ -204,7 +205,7 @@ export function RoutinesContent() {
         setRuns(await fetchRuns());
         toast.success(t("office:routineStarted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("office:failedToRunRoutine"));
+        toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
       }
     },
     [fetchRuns, setRuns],

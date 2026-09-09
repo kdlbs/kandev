@@ -106,6 +106,35 @@ func (p RoutineCatchUpPolicy) Valid() bool {
 	return false
 }
 
+// RoutineStatus is the operator-set lifecycle state of a Routine. It gates
+// every fire path: a routine only dispatches while it holds a firing status.
+// See docs/specs/office/requirements/routine-status-gating.md.
+type RoutineStatus string
+
+// Routine status values. The `Routine.Status` struct field stays a bare
+// string (no migration, no write-side validation); these constants are for
+// comparison, not storage.
+const (
+	RoutineStatusActive   RoutineStatus = "active"
+	RoutineStatusPaused   RoutineStatus = "paused"
+	RoutineStatusArchived RoutineStatus = "archived"
+)
+
+// String implements fmt.Stringer.
+func (s RoutineStatus) String() string { return string(s) }
+
+// CanFire reports whether a routine holding this status may dispatch a run.
+// Allowlist, not denylist: only "active" and the empty string (the
+// NOT NULL DEFAULT 'active' column's "no writer set one" case) fire.
+// Comparison is byte-exact — no case folding, no trimming — so "Active" and
+// " active" do not fire, and any value outside the three declared constants
+// suppresses along with them. There is deliberately no Valid() counterpart:
+// nothing here validates a status on write, so a write-side predicate would
+// have no caller.
+func (s RoutineStatus) CanFire() bool {
+	return s == RoutineStatusActive || s == ""
+}
+
 // BudgetScopeType selects what a BudgetPolicy applies to.
 type BudgetScopeType string
 

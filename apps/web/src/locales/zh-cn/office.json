@@ -693,6 +693,7 @@
   "routineCreated": "例行程序已创建",
   "routineDeleted": "例行程序已删除",
   "routineFired": "例行程序已触发",
+  "routineNotFiring": "无法运行：例行程序状态为 {{status}}",
   "routinePaused": "例行程序已暂停",
   "routines": "例行程序",
   "routinesAutomaticallyCreateTasksOnA": "例行程序按计划或 webhook 触发自动创建任务。",
