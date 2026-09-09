@@ -3916,13 +3916,10 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", taskID))
 
-	// Block until user responds or context is cancelled (agent MCP timeout).
-	// This survives the CLI's per-tool-call idle watchdog only because
-	// internal/mcp/server/handlers.go's askQuestionKeepAliveInterval streams
-	// a progress notification well inside that watchdog's window; see
-	// docs/specs/agents/system-design/mcp-timeout-budgets.md. If the agent
-	// times out, the entry is cleaned up and the event-based fallback in the
-	// orchestrator handles resuming with a new turn.
+	// WaitForResponse can outlast the agent client's idle watchdog because the
+	// MCP server emits progress while this call is blocked. If the agent
+	// cancels, cleanup and the event fallback resume the interaction on a new
+	// turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
 		if h.inputPauser != nil {

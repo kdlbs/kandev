@@ -123,11 +123,10 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
-			// MCP_TIMEOUT must stay at the CLI's own default: it also governs
-			// the first-turn MCP prewait. MCP_TOOL_TIMEOUT bounds call
-			// duration, but the keepalive in
-			// internal/mcp/server/handlers.go, not this value, is what keeps
-			// a blocking tool call alive. See
+			// MCP_TIMEOUT remains at the CLI default because it also controls the
+			// first-turn MCP wait. MCP_TOOL_TIMEOUT provides the long budget for
+			// blocking calls. ask_user_question stays active through the MCP
+			// server's progress keepalive. See
 			// docs/specs/agents/system-design/mcp-timeout-budgets.md.
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",

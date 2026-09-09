@@ -15,15 +15,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
-// notification to the agent while waiting for the user's answer. Two independent
-// clients enforce a ~300s idle ceiling on the in-flight tool-call request if no
-// bytes arrive: auggie runs on Node, whose fetch/undici applies a 300s idle
-// timeout and aborts with "fetch failed"; Claude Code's CLI runs its own
-// per-tool-call idle watchdog on non-stdio MCP transports and aborts with "sent
-// no response or progress for 300s; aborting". Emitting a progress notification
-// well inside that window keeps the streamed POST/SSE response alive so the call
-// survives until the user responds. Declared as a var so tests can shorten it.
+// askQuestionKeepAliveInterval controls progress notifications during the
+// blocking ask_user_question call. Managed defaults keep it below client idle
+// deadlines. Tests can shorten it for fast transport tests.
 var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
