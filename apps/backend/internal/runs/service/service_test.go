@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -708,11 +709,13 @@ func TestQueueRun_WakeWaveKey_DifferentAgentBothQueued(t *testing.T) {
 	}
 }
 
-// TestQueueRun_WakeCarryingRequest_NotCoalesced pins .002.14: a request
-// carrying a wave identity is never merged into an existing queued run, and
-// a queued run carrying one is never merged into by a later request for a
-// different parent addressed to the same agent inside the coalescing
-// window. Two independent rows must exist afterward.
+// TestQueueRun_WakeCarryingRequest_NotCoalesced pins half of .002.14 — the
+// request side: a request carrying a wave identity is never merged into an
+// existing queued run, even one for a different parent addressed to the
+// same agent inside the coalescing window. Two independent rows must exist
+// afterward. (Both requests here also carry their own wave identity, so
+// this does not exercise CoalesceRun's row-side guard — see
+// TestQueueRun_ExistingWaveCarryingRow_NotMergedInto for that direction.)
 func TestQueueRun_WakeCarryingRequest_NotCoalesced(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
@@ -751,6 +754,78 @@ func TestQueueRun_WakeCarryingRequest_NotCoalesced(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("runs for a1 = %d, want 2 (no coalescing across distinct waves)", count)
+	}
+}
+
+// TestQueueRun_ExistingWaveCarryingRow_NotMergedInto pins the other half of
+// .002.14 — the row side: a *non*-wave-carrying request must not merge into
+// an existing queued row that carries a wave identity, even though the
+// request itself would otherwise be coalescible (shouldCoalesceRun returns
+// true — no wave key of its own, no task_comment prefix) and the
+// (agent, reason) pair matches. This is CoalesceRun's "AND wake_wave_key =
+// ”" guard on the target row, which TestQueueRun_WakeCarryingRequest_
+// NotCoalesced does not reach because both of its requests carry a wave
+// key and so never call shouldCoalesceRun's true branch. Deleting the
+// guard would let this test's second request silently overwrite the
+// first row's payload and identity.
+func TestQueueRun_ExistingWaveCarryingRow_NotMergedInto(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    "task_children_completed:parent-1:aaaa",
+		WakeWaveString: "parent-1|child-1",
+		Payload:        map[string]any{"agent_profile_id": "a1", "task_id": "parent-1"},
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", first, runsservice.QueueOutcomeQueued)
+	}
+
+	// Same agent and reason as the first row, but no wave identity of its
+	// own — an ordinary request that would coalesce into a plain queued
+	// row for the same (agent, reason) inside the window.
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:  "task_children_completed",
+		Payload: map[string]any{"agent_profile_id": "a1", "task_id": "parent-2"},
+	})
+	if err != nil {
+		t.Fatalf("queue second run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeQueued {
+		t.Fatalf("second outcome = %q, want %q (must not merge into the wave-carrying row)",
+			second, runsservice.QueueOutcomeQueued)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE agent_profile_id = 'a1' AND reason = 'task_children_completed'`,
+	); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("runs for a1 = %d, want 2 (the second request must not merge into the first)", count)
+	}
+
+	var firstRow struct {
+		Payload        string `db:"payload"`
+		WakeWaveKey    string `db:"wake_wave_key"`
+		CoalescedCount int    `db:"coalesced_count"`
+	}
+	if err := repo.Reader().GetContext(ctx, &firstRow,
+		`SELECT payload, wake_wave_key, coalesced_count FROM runs WHERE wake_wave_key = ?`,
+		"task_children_completed:parent-1:aaaa",
+	); err != nil {
+		t.Fatalf("read first row: %v", err)
+	}
+	if firstRow.CoalescedCount != 1 {
+		t.Fatalf("first row coalesced_count = %d, want 1 (unmerged)", firstRow.CoalescedCount)
+	}
+	if !strings.Contains(firstRow.Payload, "parent-1") || strings.Contains(firstRow.Payload, "parent-2") {
+		t.Fatalf("first row payload = %s, want unchanged (still parent-1, never parent-2)", firstRow.Payload)
 	}
 }
 

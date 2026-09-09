@@ -501,6 +501,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
 	reason := queueRunForEachParticipantReason(in)
+	waveKey, waveString := waveIdentityPayload(in.Payload)
 	// Collect-and-continue (AC-C1): one participant's QueueRun failure must
 	// not abort the fan-out to their siblings — a reviewer whose queue is
 	// briefly unavailable should not silently block every other reviewer's
@@ -512,10 +513,18 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	// participant list with roleSeatsForFanOut, which already filters by
 	// role and canonicalizes the slate, so #2907's inline `p.Role != cfg.Role`
 	// guard is redundant here and is dropped rather than duplicated.
+	//
+	// waveKey/waveString (parent-wake-wave-identity): this is the second
+	// on_children_completed action callback alongside QueueRunCallback, and
+	// both must attach the trigger's wave identity to every request they
+	// queue — idx_run_wake_wave, not this loop, is what collapses two
+	// participant roles resolving to the same agent profile into one run.
 	var errs []error
 	for _, p := range seats {
 		req := QueueRunRequest{
 			AgentProfileID: p.AgentProfileID,
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 			TaskID:         taskID,
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,

@@ -380,9 +380,18 @@ func (ss *SchedulerService) QueueRunCtx(
 
 // encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output
 // is a plain struct marshal, byte-identical to before ExtraPayload existed.
-// Otherwise ExtraPayload's keys are overlaid onto the encoded object —
-// workflow-authored keys win, matching engine.queueRunPayload's
-// precedence.
+// Otherwise ExtraPayload's keys are overlaid onto the encoded object, then
+// c's own envelope fields are re-applied on top — workflow-authored content
+// keys win, but a workflow-authored payload can never redirect the run's
+// identity. This mirrors runs/service.runPayload's precedence, which copies
+// the caller's payload and then unconditionally re-asserts task_id,
+// workflow_step_id and agent_profile_id from the typed request: P1 never
+// goes through that function (it inserts via ss.repo.CreateRun directly),
+// so encodeRunContext is the only place that guarantee can be enforced for
+// the cascade path. Without it, a queue_run action's payload.task_id would
+// silently override task.ParentID and misdirect the wake to a foreign task
+// — task_id is what SchedulerIntegration.extractTaskID reads to check out
+// and budget the run.
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
@@ -397,6 +406,18 @@ func encodeRunContext(c RunContext) (string, error) {
 	}
 	for k, v := range c.ExtraPayload {
 		m[k] = v
+	}
+	m["task_id"] = c.TaskID
+	m["reason"] = c.Reason
+	if c.WorkspaceID != "" {
+		m["workspace_id"] = c.WorkspaceID
+	} else {
+		delete(m, "workspace_id")
+	}
+	if c.ChildTaskID != "" {
+		m["child_task_id"] = c.ChildTaskID
+	} else {
+		delete(m, "child_task_id")
 	}
 	merged, err := json.Marshal(m)
 	if err != nil {

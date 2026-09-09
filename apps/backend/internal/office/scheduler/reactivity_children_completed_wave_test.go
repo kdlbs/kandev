@@ -63,6 +63,70 @@ func TestResolveWaveIdentity_NonTerminalMember_ReturnsNotOK(t *testing.T) {
 	}
 }
 
+// TestResolveWaveIdentity_NonTerminalMember_ThenTerminal_RecoversWaveIdentity
+// is AC-...-002.15's recovery half: skipping a wave for a member the read
+// observed non-terminal must not permanently suppress that parent's real
+// wave once every member genuinely is terminal. resolveWaveIdentity itself
+// is stateless (a read confirming false today says nothing about a later
+// read), so this pins that guarantee end to end — including through the
+// full cascadeChildrenCompleted path, so a run is actually queued, not
+// just a non-empty identity returned.
+func TestResolveWaveIdentity_NonTerminalMember_ThenTerminal_RecoversWaveIdentity(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+	insertChildTask(t, ss, "child-2", "parent-1", "IN_PROGRESS")
+
+	if _, _, ok := ss.resolveWaveIdentity(ctx, "parent-1"); ok {
+		t.Fatalf("resolveWaveIdentity ok = true, want false while child-2 is non-terminal")
+	}
+
+	var queuedTo string
+	var captured RunContext
+	queued := false
+	queue := func(agentID string, c RunContext) {
+		queuedTo = agentID
+		captured = c
+		queued = true
+	}
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+	if queued {
+		t.Fatalf("cascade queued a run while child-2 was still non-terminal")
+	}
+
+	// The wave genuinely completes: child-2 reaches a terminal state too.
+	if _, err := ss.repo.ExecRaw(ctx, `UPDATE tasks SET state = 'COMPLETED' WHERE id = 'child-2'`); err != nil {
+		t.Fatalf("complete child-2: %v", err)
+	}
+
+	waveKey, waveString, ok := ss.resolveWaveIdentity(ctx, "parent-1")
+	if !ok {
+		t.Fatalf("resolveWaveIdentity ok = false, want true once every member is terminal")
+	}
+	wantIDs := []string{"child-1", "child-2"}
+	if wantKey := waveidentity.WaveKey("parent-1", wantIDs); waveKey != wantKey {
+		t.Fatalf("waveKey = %q, want %q", waveKey, wantKey)
+	}
+	if wantString := waveidentity.WaveString("parent-1", wantIDs); waveString != wantString {
+		t.Fatalf("waveString = %q, want %q", waveString, wantString)
+	}
+
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-2", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+	if !queued {
+		t.Fatalf("cascade queued nothing once the wave genuinely completed")
+	}
+	if queuedTo != "agent-1" {
+		t.Fatalf("cascade queued to %q, want agent-1", queuedTo)
+	}
+	if captured.WaveKey != waveKey {
+		t.Fatalf("queued WaveKey = %q, want %q", captured.WaveKey, waveKey)
+	}
+}
+
 // TestResolveWaveIdentity_NoWaveMembers_ReturnsNotOK is AC-...-001.7: a
 // parent with no wave members has no wave.
 func TestResolveWaveIdentity_NoWaveMembers_ReturnsNotOK(t *testing.T) {
@@ -191,6 +255,68 @@ func TestCascadeChildrenCompleted_PayloadParity_MergesWorkflowAuthoredPayload(t 
 
 	if !strings.Contains(payload, `"escalate_to":"lead-agent"`) {
 		t.Fatalf("payload = %s, want it to contain the workflow-authored escalate_to key", payload)
+	}
+}
+
+// TestCascadeChildrenCompleted_PayloadParity_IgnoresNonPrimaryTargetedAction
+// is AC-OFFICE-WAKE-WAVE-IDENTITY-002.10's target-matching half: a step
+// authoring two queue_run actions on one on_children_completed trigger —
+// one targeted elsewhere, one implicit-primary — must only ever carry the
+// primary-targeted action's payload into the cascade wake, which always
+// wakes the parent's assignee. Picking the first non-empty payload
+// regardless of target would leak a foreign recipient's content onto this
+// wake.
+func TestCascadeChildrenCompleted_PayloadParity_IgnoresNonPrimaryTargetedAction(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	if _, err := ss.repo.ExecRaw(ctx,
+		`UPDATE tasks SET workflow_step_id = 'step-x' WHERE id = 'parent-1'`); err != nil {
+		t.Fatalf("bind parent step: %v", err)
+	}
+	ss.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-x": {
+			ID: "step-x",
+			Events: wfmodels.StepEvents{
+				OnChildrenCompleted: []wfmodels.GenericAction{
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"target":  "workspace.ceo_agent",
+							"payload": map[string]any{"escalate_to": "ceo-agent"},
+						},
+					},
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"payload": map[string]any{"escalate_to": "lead-agent"},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+
+	var payload string
+	queue := func(_ string, c RunContext) {
+		encoded, err := encodeRunContext(c)
+		if err != nil {
+			t.Fatalf("encode run context: %v", err)
+		}
+		payload = encoded
+	}
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+
+	if !strings.Contains(payload, `"escalate_to":"lead-agent"`) {
+		t.Fatalf("payload = %s, want it to contain the primary-targeted action's escalate_to key", payload)
+	}
+	if strings.Contains(payload, "ceo-agent") {
+		t.Fatalf("payload = %s, must not contain the non-primary-targeted action's payload", payload)
 	}
 }
 

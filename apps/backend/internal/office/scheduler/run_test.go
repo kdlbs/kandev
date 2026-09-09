@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -107,5 +108,52 @@ func TestQueueRunCtx_NonWaveRequest_StillCoalesces(t *testing.T) {
 
 	if got := runsCountForReason(t, ss, RunReasonTaskBlockersResolved); got != 1 {
 		t.Fatalf("runs = %d, want 1 (non-wave requests must still coalesce)", got)
+	}
+}
+
+// runPayloadForReason returns the JSON payload of the sole persisted run
+// matching reason, decoded into a map for field assertions.
+func runPayloadForReason(t *testing.T, ss *SchedulerService, reason string) map[string]any {
+	t.Helper()
+	var payload string
+	row := ss.repo.ReaderDB().QueryRowx(
+		ss.repo.ReaderDB().Rebind(`SELECT payload FROM runs WHERE reason = ?`), reason)
+	if err := row.Scan(&payload); err != nil {
+		t.Fatalf("scan payload: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(payload), &m); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return m
+}
+
+// TestQueueRunCtx_ExtraPayloadTaskID_CannotRedirectRun is the regression
+// guard for encodeRunContext's envelope re-assertion: a workflow-authored
+// queue_run action's payload.task_id must never override the persisted
+// run's task_id away from the cascade's own task.ParentID, since task_id
+// is what SchedulerIntegration.extractTaskID reads to check out and
+// budget the run.
+func TestQueueRunCtx_ExtraPayloadTaskID_CannotRedirectRun(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	ctx := context.Background()
+
+	c := RunContext{
+		Reason:         RunReasonTaskChildrenCompleted,
+		TaskID:         "parent-1",
+		IdempotencyKey: "k1",
+		ExtraPayload: map[string]any{
+			"task_id": "foreign-task-99",
+		},
+	}
+	if err := ss.QueueRunCtx(ctx, "agent-1", c); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	payload := runPayloadForReason(t, ss, RunReasonTaskChildrenCompleted)
+	if got := payload["task_id"]; got != "parent-1" {
+		t.Fatalf("payload task_id = %v, want %q (workflow-authored payload must not redirect the run)", got, "parent-1")
 	}
 }

@@ -469,6 +469,16 @@ func (ss *SchedulerService) resolveWaveIdentity(
 // no step bound, lookup error, no matching action, no payload — returns
 // nil and logs the omission at debug: the wake itself is unconditional,
 // an optional payload is not worth skipping it for.
+//
+// Cascade always wakes the parent's assignee, so only an action whose
+// resolved Target is the implicit-default or explicit "primary" collides
+// with it (QueueRunCallback.resolveTarget's own default case). A step
+// authoring more than one queue_run action on this trigger — one to
+// "workspace.ceo_agent", say, one implicit-primary — must not have its
+// non-primary action's payload attached here: AC-002.10 only requires
+// parity between producers waking the *same* target, and the first
+// non-empty payload regardless of target would silently carry the wrong
+// recipient's content.
 func (ss *SchedulerService) resolveWaveActionPayload(ctx context.Context, parentID string) map[string]any {
 	if ss.workflowStepGetter == nil {
 		return nil
@@ -487,7 +497,11 @@ func (ss *SchedulerService) resolveWaveActionPayload(ctx context.Context, parent
 	}
 	spec := engine.CompileStep(step)
 	for _, action := range spec.Events[engine.TriggerOnChildrenCompleted] {
-		if action.Kind == engine.ActionQueueRun && action.QueueRun != nil && len(action.QueueRun.Payload) > 0 {
+		if action.Kind != engine.ActionQueueRun || action.QueueRun == nil || len(action.QueueRun.Payload) == 0 {
+			continue
+		}
+		target := strings.TrimSpace(action.QueueRun.Target)
+		if target == "" || target == engine.TargetPrimary {
 			return action.QueueRun.Payload
 		}
 	}
