@@ -169,6 +169,54 @@ describe("session subscription readiness", () => {
   });
 });
 
+describe("connection generations", () => {
+  it("ignores notifications delivered by a replaced socket", () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
+    const handler = vi.fn();
+    client.on("message.queue.status_changed", handler);
+
+    socket.close();
+    vi.advanceTimersByTime(0);
+    const reconnectedSocket = FakeWebSocket.latest();
+    reconnectedSocket.open();
+
+    socket.receive({
+      id: "stale-status",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        status_epoch: "old-backend",
+        status_generation: 99,
+        count: 1,
+        max: 10,
+        merge_enabled: true,
+      },
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    reconnectedSocket.receive({
+      id: "current-status",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        status_epoch: "current-backend",
+        status_generation: 1,
+        count: 0,
+        max: 10,
+        merge_enabled: true,
+      },
+    });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
 describe("request errors", () => {
   it("retains the backend code and details when a request fails", async () => {
     const { client, socket } = connectClient();

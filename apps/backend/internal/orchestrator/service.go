@@ -66,9 +66,12 @@ type ServiceConfig struct {
 	ClaudeMidTurnSteering bool
 
 	// OfficeSessionIdentity keys an Office task's session identity on the
-	// run's own agent instead of the task's runner seat. Off by default;
-	// enabling it exposes pre-existing duplicate (task_id, agent_profile_id)
-	// rows until the companion unique-index fix has shipped.
+	// run's own agent instead of the task's runner seat. Off by default
+	// because it is an experimental, high-risk, path-scoped change to durable
+	// session identity and existing rows are not migrated. A live
+	// (task_id, agent_profile_id) pair is guarded in-transaction on the
+	// office session creation path, and pre-existing duplicate rows are
+	// deliberately retained and resolved by selection.
 	OfficeSessionIdentity bool
 }
 
@@ -78,6 +81,14 @@ type ServiceConfig struct {
 // concrete package while preserving the same structural contract.
 type AttachmentReader interface {
 	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
+}
+
+type sessionAttachmentDeleter interface {
+	DeleteTaskSessionWithAttachments(context.Context, *models.TaskSession) ([]*models.TaskMessageAttachment, error)
+}
+
+type attachmentBytesRemover interface {
+	RemoveBytes([]*models.TaskMessageAttachment)
 }
 
 // LaunchAttachmentClaimer is the narrow task-service seam used to bind staged
@@ -222,7 +233,10 @@ type StepHistoryRecorder interface {
 }
 
 type asyncStepHistoryRecorder interface {
-	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+	// EnqueueStepTransition returns false when the bounded worker cannot accept
+	// the row. Signal-bearing callers can then use their bounded synchronous
+	// fallback instead of silently losing the audit payload.
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) bool
 }
 
 // AgentFamilyResolver maps a hand-written agent family reference onto the
@@ -326,6 +340,16 @@ type sessionExecutorStore interface {
 	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
+	ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx context.Context,
+		taskID, id, incarnationID string,
+	) (models.PromptableTaskSessionClaim, error)
+	UpdateTaskSessionStateIfCurrentIdentity(
+		ctx context.Context,
+		taskID, id, incarnationID string,
+		expected, status models.TaskSessionState,
+		errorMessage string,
+	) (bool, time.Time, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
@@ -379,7 +403,7 @@ type sessionExecutorStore interface {
 	// Session listing + delete
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
@@ -542,6 +566,10 @@ func (o *reservedPromptCallbackOwner) stop() {
 	o.workers.Wait()
 }
 
+type passthroughDispatchToken struct {
+	cancel context.CancelFunc
+}
+
 // Service is the main orchestrator service
 type Service struct {
 	config        ServiceConfig
@@ -559,7 +587,9 @@ type Service struct {
 	watcher   *watcher.Watcher
 
 	// Message queue service for queueing messages while agent is running
-	messageQueue *messagequeue.Service
+	messageQueue          *messagequeue.Service
+	passthroughDispatchMu sync.Mutex
+	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
@@ -588,6 +618,7 @@ type Service struct {
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
 	launchAttachmentClaimer LaunchAttachmentClaimer
+	attachmentReader        AttachmentReader
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -979,6 +1010,10 @@ type Service struct {
 	// arbitrated through cancelInFlight.
 	dispatchingQueued      sync.Map
 	acceptedQueuedDispatch sync.Map
+	// queuedDispatchDrainPending records a boot-ready event that arrived while
+	// another queued dispatch still owned the session. The worker consumes the
+	// marker after it clears that reservation and starts one deferred drain.
+	queuedDispatchDrainPending sync.Map // map[sessionID]struct{}
 
 	// afterReadyLifecycleReservation is a deterministic test seam for the
 	// narrow interval after handleAgentReady releases its per-session guard
@@ -1484,6 +1519,13 @@ func NewService(
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
 	}
+	if registrar, ok := repo.(interface {
+		SetTaskQueuePurgePreparer(func(context.Context, string))
+	}); ok {
+		registrar.SetTaskQueuePurgePreparer(func(_ context.Context, taskID string) {
+			s.cancelPassthroughDispatches(taskID)
+		})
+	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
 	// ephemeral purger above, this must never call PurgeTask on the SQLite
@@ -1577,6 +1619,46 @@ func NewService(
 	return s
 }
 
+func (s *Service) beginPassthroughDispatch(
+	parent context.Context,
+	taskID string,
+) (context.Context, func()) {
+	dispatchCtx, cancel := context.WithCancel(parent)
+	token := &passthroughDispatchToken{cancel: cancel}
+	s.passthroughDispatchMu.Lock()
+	if s.passthroughDispatches == nil {
+		s.passthroughDispatches = make(map[string]map[*passthroughDispatchToken]struct{})
+	}
+	tokens := s.passthroughDispatches[taskID]
+	if tokens == nil {
+		tokens = make(map[*passthroughDispatchToken]struct{})
+		s.passthroughDispatches[taskID] = tokens
+	}
+	tokens[token] = struct{}{}
+	s.passthroughDispatchMu.Unlock()
+	return dispatchCtx, func() {
+		s.passthroughDispatchMu.Lock()
+		if tokens := s.passthroughDispatches[taskID]; tokens != nil {
+			delete(tokens, token)
+			if len(tokens) == 0 {
+				delete(s.passthroughDispatches, taskID)
+			}
+		}
+		s.passthroughDispatchMu.Unlock()
+		cancel()
+	}
+}
+
+func (s *Service) cancelPassthroughDispatches(taskID string) {
+	s.passthroughDispatchMu.Lock()
+	tokens := s.passthroughDispatches[taskID]
+	delete(s.passthroughDispatches, taskID)
+	s.passthroughDispatchMu.Unlock()
+	for token := range tokens {
+		token.cancel()
+	}
+}
+
 // SetMessageCreator sets the message creator for saving agent responses to the database.
 //
 // This must be called before starting the orchestrator if you want agent messages, tool calls,
@@ -1612,6 +1694,7 @@ func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
 // SetAttachmentReader wires the backend attachment store into passthrough
 // prompt delivery so claimed descriptors can be streamed into the workspace.
 func (s *Service) SetAttachmentReader(reader AttachmentReader) {
+	s.attachmentReader = reader
 	s.executor.SetAttachmentReader(reader)
 }
 
@@ -3413,6 +3496,29 @@ func (s *Service) GetMessageQueue() *messagequeue.Service {
 	return s.messageQueue
 }
 
+type sessionPromptAdmissionContextKey struct{}
+
+func (s *Service) withSessionPromptAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	if fn == nil {
+		return errors.New("session prompt admission callback is nil")
+	}
+	if sessionID != "" {
+		if heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string); heldSessionID == sessionID {
+			return fn(ctx)
+		}
+	}
+	if s.messageQueue == nil {
+		return fn(ctx)
+	}
+	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
+	})
+}
+
 // QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
 // The user message row is already written by the WebSocket handler, so the
 // queue marker prevents the drain path from creating a duplicate row.
@@ -3434,18 +3540,30 @@ func (s *Service) QueueUserPrompt(
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
-	if _, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		sessionID,
-		taskID,
-		prompt,
-		model,
-		messagequeue.QueuedByUser,
-		planMode,
-		toQueuedAttachments(attachments),
-		queueMetadata,
-	); err != nil {
-		return fmt.Errorf("queue user prompt: %w", err)
+	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
+		if err != nil {
+			return fmt.Errorf("load session before queueing user prompt: %w", err)
+		}
+		if session == nil || isTerminalSessionState(session.State) {
+			return ErrSessionNotPromptable
+		}
+		if _, err := s.messageQueue.QueueMessageWithMetadata(
+			admittedCtx,
+			sessionID,
+			taskID,
+			prompt,
+			model,
+			messagequeue.QueuedByUser,
+			planMode,
+			toQueuedAttachments(attachments),
+			queueMetadata,
+		); err != nil {
+			return fmt.Errorf("queue user prompt: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 

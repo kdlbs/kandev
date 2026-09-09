@@ -468,7 +468,7 @@ func TestUpsertSubagentContextCascadeDeletesWithSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, "session-12"); err != nil {
+	if err := deleteTaskSessionForTest(t, repo, ctx, "session-12"); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 

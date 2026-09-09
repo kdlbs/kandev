@@ -373,6 +373,7 @@ describe("MessageQueueSettings — automatic merge toggle", () => {
     const toggle = await screen.findByRole("button", { name: AUTO_MERGE_TOGGLE_LABEL });
     expect(toggle.getAttribute(ARIA_PRESSED)).toBe("true");
     expect(screen.getByText(/stays as a separate queued message/)).toBeTruthy();
+    expect(screen.getByText(/follows this value until you change Auto-merge/)).toBeTruthy();
     const touchTarget = screen.getByTestId("message-queue-auto-merge-touch-target");
     expect(touchTarget.className).toContain("min-h-11");
     expect(touchTarget.className).toContain("min-w-11");
@@ -416,7 +417,9 @@ describe("MessageQueueSettings — automatic merge toggle", () => {
       auto_merge_enabled: false,
     });
   });
+});
 
+describe("MessageQueueSettings — automatic merge permissions and recovery", () => {
   it("stays editable for admins under a capacity environment lock", async () => {
     fetchSettingsMock.mockResolvedValueOnce(
       response({ configured: 25, effective: 50, source: "environment", locked: true }),
