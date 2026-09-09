@@ -18,6 +18,12 @@ vi.mock("@/app/actions/workspaces", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(updateWorkflowStepAction).mockImplementation(async (_stepID, payload) => {
+    if (payload.session_target != null && payload.agent_profile_id) {
+      throw new Error("session_target cannot be combined with agent_profile_id");
+    }
+    return {} as WorkflowStep;
+  });
 });
 
 const workflow = {

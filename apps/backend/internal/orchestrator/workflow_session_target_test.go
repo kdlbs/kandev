@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -13,6 +14,32 @@ import (
 type failWorkflowRouteMetadataRepo struct {
 	repoStore
 	fail bool
+}
+
+type revisitedWorkflowBindingBarrierRepo struct {
+	repoStore
+	bindingStore workflowSessionBindingStore
+	firstReady   chan struct{}
+	releaseFirst chan struct{}
+	firstOnce    sync.Once
+}
+
+func (r *revisitedWorkflowBindingBarrierRepo) UpsertWorkflowSessionBinding(
+	ctx context.Context,
+	binding *models.WorkflowSessionBinding,
+) (bool, error) {
+	if binding.OperationID == "workflow-step-entry-v2:entry:00000000000000000041" {
+		r.firstOnce.Do(func() { close(r.firstReady) })
+		<-r.releaseFirst
+	}
+	return r.bindingStore.UpsertWorkflowSessionBinding(ctx, binding)
+}
+
+func (r *revisitedWorkflowBindingBarrierRepo) GetWorkflowSessionBinding(
+	ctx context.Context,
+	taskID, targetKey string,
+) (*models.WorkflowSessionBinding, error) {
+	return r.bindingStore.GetWorkflowSessionBinding(ctx, taskID, targetKey)
 }
 
 func (r *failWorkflowRouteMetadataRepo) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
@@ -137,6 +164,42 @@ func TestRecordWorkflowSourceBindingDoesNotOverwriteRevisitedSourceEntry(t *test
 	require.NoError(t, err)
 	require.Equal(t, second.ID, binding.SessionID)
 	require.Equal(t, "workflow-step-entry-v2:entry:00000000000000000042", binding.OperationID)
+}
+
+func TestRevisitedSourceBindingBarrierPreservesLaterTargetSelection(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	source := &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a",
+	}
+	target := &wfmodels.WorkflowStep{
+		ID: "step-review", WorkflowID: "wf1", Position: 1,
+		SessionTarget: &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	second := &models.TaskSession{ID: "session-a-revisit-barrier", TaskID: "t1", AgentProfileID: "profile-a"}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, second))
+
+	barrierRepo := &revisitedWorkflowBindingBarrierRepo{
+		repoStore:    fixture.repo,
+		bindingStore: fixture.repo,
+		firstReady:   make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	fixture.svc.repo = barrierRepo
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- fixture.svc.recordWorkflowSourceBinding(ctx, "t1", source, fixture.current, 41)
+	}()
+	<-barrierRepo.firstReady
+	secondErr := fixture.svc.recordWorkflowSourceBinding(ctx, "t1", source, second, 42)
+	close(barrierRepo.releaseFirst)
+	require.NoError(t, secondErr)
+	require.NoError(t, <-firstErr)
+
+	resolution, err := fixture.svc.resolveWorkflowSessionTarget(ctx, "t1", target)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, resolution.session.ID)
 }
 
 func TestLoadRecordedWorkflowSessionRouteReturnsCommittedDestination(t *testing.T) {
