@@ -128,7 +128,8 @@ by this feature.
 
 Task-detail boot state restores attachment history during initial navigation.
 Later task switches use `ListTaskSessionSummariesResponse`, which includes
-public session metadata. Both paths supply the same persisted history.
+public session metadata. Both paths supply the same persisted history, and
+forced task-detail route hydration uses the same freshness-aware merge.
 
 `setTaskSessionsForTask` reads `metadata.mcp_attachment_state` in its existing
 Immer transaction. A runtime guard accepts only the known frontend projection:
@@ -136,7 +137,8 @@ Immer transaction. A runtime guard accepts only the known frontend projection:
 - The value is an object with schema version `1`.
 - The current attempt has a nonempty `attachment_attempt_id`.
 - Each attempt has a valid RFC3339 `started_at` value.
-- Optional `updated_at` and `tools_listed_at` values are valid RFC3339 values.
+- Optional `updated_at` and `tools_listed_at` values are valid RFC3339 values
+  when present. A JSON `null` value is treated as absent.
 - Each server has a nonempty name and a known attachment status.
 - Optional previous attempts satisfy the same attempt and server rules.
 
@@ -150,8 +152,11 @@ A valid incoming history initializes an empty store entry. It also replaces
 stored history with an invalid freshness value. For two valid values, only a
 strictly newer incoming value replaces the stored history. Equal values retain
 the stored history because it can contain live evidence from a WebSocket event.
+The same comparator applies when a forced task-detail route hydration merges a
+snapshot into the active session, so an equal or older route response cannot
+regress live evidence.
 
-The reconciliation loop changes only `sessionMcpStatus.bySessionId` for the
+The reconciliation paths change only `sessionMcpStatus.bySessionId` for the
 session that owns the accepted history. Invalid or absent metadata does not
 clear live evidence. It does not change a sibling session.
 

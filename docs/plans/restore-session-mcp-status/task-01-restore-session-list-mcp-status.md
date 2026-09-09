@@ -19,9 +19,9 @@ system_design:
 
 ## Summary
 
-Restore persisted MCP attachment history during task session-list
-reconciliation. Reject invalid metadata and prevent delayed snapshots from
-replacing newer live evidence.
+Restore persisted MCP attachment history during task session-list and forced
+task-detail route reconciliation. Reject invalid metadata and prevent delayed
+snapshots from replacing newer live evidence.
 
 ## In scope
 
@@ -29,9 +29,11 @@ replacing newer live evidence.
   `metadata.mcp_attachment_state`.
 - Compare incoming and stored current-attempt timestamps with the strict
   RFC3339 parser.
+- Reuse the validation and freshness comparator during forced task-detail
+  route hydration.
 - Update only the MCP status entry for the owning session.
-- Add focused regression tests for restoration, rejection, freshness, and
-  sibling isolation.
+- Add focused regression tests for restoration, rejection, freshness, route
+  ordering, JSON null optionals, and sibling isolation.
 
 ## Out of scope
 
@@ -48,15 +50,18 @@ replacing newer live evidence.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts
+cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts
 cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web exec eslint lib/state/slices/session/session-slice.ts lib/state/slices/session/set-task-sessions-mcp.test.ts
+cd apps && pnpm --filter @kandev/web exec eslint lib/state/slices/session/session-slice.ts lib/state/slices/session-runtime/mcp-attachment-reconciliation.ts lib/state/hydration/hydrator.ts lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts
 ```
 
 ## Files likely touched
 
 - `apps/web/lib/state/slices/session/session-slice.ts`
+- `apps/web/lib/state/slices/session-runtime/mcp-attachment-reconciliation.ts`
+- `apps/web/lib/state/hydration/hydrator.ts`
 - `apps/web/lib/state/slices/session/set-task-sessions-mcp.test.ts`
+- `apps/web/lib/state/hydration/hydrator.test.ts`
 
 ## Dependencies
 
@@ -81,14 +86,15 @@ None.
 
 ## Results
 
-Implemented validated hydration of `metadata.mcp_attachment_state` during
-session-list reconciliation. Valid version-1 histories restore the owning
-session, additive fields remain supported, malformed histories are ignored,
-and older or equal snapshots cannot replace newer live evidence.
+Implemented shared validated hydration of `metadata.mcp_attachment_state` during
+session-list reconciliation and freshness-guarded forced route hydration.
+Valid version-1 histories restore the owning session, additive fields and JSON
+null optionals remain supported, malformed histories are ignored, and older or
+equal snapshots cannot replace newer live evidence.
 
 Verification passed:
 
-- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts` (17 tests)
+- `cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/session/set-task-sessions-mcp.test.ts lib/state/hydration/hydrator.test.ts` (45 tests)
 - `cd apps/web && pnpm run typecheck`
-- `cd apps && pnpm --filter @kandev/web exec eslint lib/state/slices/session/session-slice.ts lib/state/slices/session/set-task-sessions-mcp.test.ts`
+- Targeted ESLint for the session slice, reconciliation helper, hydrator, and both regression tests.
 - Related session reconciliation tests (3 files, 55 tests)

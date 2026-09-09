@@ -191,6 +191,45 @@ describe("setTaskSessionsForTask MCP history isolation", () => {
 });
 
 describe("setTaskSessionsForTask MCP history validation", () => {
+  it("treats null optional fields as absent", () => {
+    const store = makeStore();
+    const base = makeHistory();
+    const history = {
+      ...base,
+      current: {
+        ...base.current,
+        updated_at: null,
+        servers: [
+          {
+            ...base.current.servers![0],
+            source: null,
+            transport: null,
+            target: null,
+            reason_code: null,
+            summary: null,
+            connection_id: null,
+            tools_listed_at: null,
+            tool_count: null,
+            tools: null,
+            tool_catalog_truncated: null,
+            tool_token_estimator: null,
+          },
+        ],
+      },
+      previous: null,
+    };
+
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession("session-1", { mcp_attachment_state: history })],
+        {},
+      );
+
+    expect(store.getState().sessionMcpStatus.bySessionId[SESSION_ID]).toEqual(history);
+  });
+
   it.each([
     ["unsupported version", { ...makeHistory(), version: 2 }],
     ["missing current attempt", { version: 1 }],
