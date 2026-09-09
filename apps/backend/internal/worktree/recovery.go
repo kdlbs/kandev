@@ -2,15 +2,11 @@ package worktree
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -124,23 +120,53 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	replacement.Branch = replacementBranch
 	replacement.UpdatedAt = time.Now().UTC()
 	if cas, ok := m.store.(CompareAndSwapWorktreeStore); ok {
-		ok, err := cas.CompareAndSwapWorktree(ctx, wt, &replacement)
-		if err != nil || !ok {
-			return nil, blockRecovery(jobPath, record, fmt.Errorf("recovery compare-and-swap rejected"))
+		swapped, casErr := cas.CompareAndSwapWorktree(ctx, wt, &replacement)
+		if casErr != nil {
+			return nil, fmt.Errorf("%w: recovery compare-and-swap failed: %w", ErrWorktreeCorrupted, casErr)
+		}
+		if !swapped {
+			persisted, lookupErr := m.persistedRecoveryReplacement(ctx, wt, &replacement)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("%w: inspect recovery compare-and-swap result: %w", ErrWorktreeCorrupted, lookupErr)
+			}
+			if persisted == nil {
+				return nil, blockRecovery(jobPath, record, fmt.Errorf("recovery compare-and-swap rejected"))
+			}
+			return m.completeRecovery(jobPath, record, wt, persisted)
 		}
 	} else if err := m.store.UpdateWorktree(ctx, &replacement); err != nil {
 		return nil, blockRecovery(jobPath, record, err)
 	}
-	if replacement.SessionID != "" {
-		m.mu.Lock()
-		m.worktrees[cacheKey(replacement.SessionID, replacement.RepositoryID, replacement.BranchSlug)] = &replacement
-		m.mu.Unlock()
+	return m.completeRecovery(jobPath, record, wt, &replacement)
+}
+
+func (m *Manager) persistedRecoveryReplacement(ctx context.Context, expected, replacement *Worktree) (*Worktree, error) {
+	worktrees, err := m.store.GetWorktreesByTaskID(ctx, expected.TaskID)
+	if err != nil {
+		return nil, err
 	}
-	record.Replacement, record.State, record.UpdatedAt = replacementPath, RecoveryStateComplete, time.Now().UTC()
+	for _, current := range worktrees {
+		if current == nil || current.Status != StatusActive ||
+			current.TaskEnvironmentID != expected.TaskEnvironmentID ||
+			current.RepositoryID != expected.RepositoryID || current.BranchSlug != expected.BranchSlug ||
+			current.Path != replacement.Path || current.Branch != replacement.Branch {
+			continue
+		}
+		if !m.IsValid(current.Path) {
+			return nil, fmt.Errorf("persisted recovery replacement failed integrity validation")
+		}
+		return current, nil
+	}
+	return nil, nil
+}
+
+func (m *Manager) completeRecovery(jobPath string, record recoveryRecord, expected, replacement *Worktree) (*Worktree, error) {
+	m.refreshRecoveredWorktreeCache(expected, replacement)
+	record.Replacement, record.State, record.UpdatedAt = replacement.Path, RecoveryStateComplete, time.Now().UTC()
 	if err := writeRecoveryRecord(jobPath, record); err != nil {
 		return nil, err
 	}
-	return &replacement, nil
+	return replacement, nil
 }
 
 // ensureRecoveryReplacementWorktree resumes the deterministic replacement
@@ -206,8 +232,11 @@ func adoptRecoveryRecord(wt *Worktree, existing recoveryRecord) (recoveryRecord,
 	if existing.TaskID != wt.TaskID || existing.WorktreeID != wt.ID {
 		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record ownership is ambiguous")
 	}
-	if existing.Original != wt.Path || existing.Snapshot == "" || existing.OperationID == "" {
+	if existing.Original != wt.Path || existing.Snapshot == "" {
 		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record identity is incomplete")
+	}
+	if _, err := uuid.Parse(existing.OperationID); err != nil {
+		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record operation ID is invalid")
 	}
 	if existing.State == RecoveryStateBlocked || existing.State == RecoveryStateComplete {
 		return recoveryRecord{}, "", recoveryStateError(wt, existing.State)
@@ -244,7 +273,7 @@ func createRecoveryRecord(path string, record recoveryRecord) error {
 	if err := os.Link(tmpPath, path); err != nil {
 		return err
 	}
-	return syncFile(filepath.Dir(path))
+	return syncRecoveryDirectory(filepath.Dir(path))
 }
 
 func recoveryStateError(wt *Worktree, state RecoveryState) error {
@@ -266,6 +295,9 @@ func prepareRecoverySnapshot(source, snapshot, recordPath string, record recover
 	case RecoveryStateSnapshotting:
 		return rebuildRecoverySnapshot(source, snapshot, recordPath, record)
 	case RecoveryStateRematerializing:
+		if err := validateRecoverySnapshotPath(source, snapshot); err != nil {
+			return "", blockRecovery(recordPath, record, err)
+		}
 		manifest, err := checkoutManifest(snapshot)
 		if err != nil {
 			return "", blockRecovery(recordPath, record, err)
@@ -321,6 +353,13 @@ func validateRecoverySnapshotPath(source, snapshot string) error {
 	if !strings.HasPrefix(cleanSnapshot, prefix) {
 		return fmt.Errorf("recovery snapshot path is outside the task-owned snapshot namespace")
 	}
+	info, err := os.Lstat(cleanSnapshot)
+	if err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+		return fmt.Errorf("recovery snapshot path is not a task-owned directory")
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("inspect recovery snapshot path: %w", err)
+	}
 	return nil
 }
 
@@ -351,423 +390,27 @@ func writeRecoveryRecord(path string, record recoveryRecord) error {
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return fmt.Errorf("write recovery state: %w", err)
 	}
-	if err := syncFile(tmp); err != nil {
+	if err := syncRecoveryFile(tmp); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("commit recovery state: %w", err)
 	}
-	return syncFile(filepath.Dir(path))
+	return syncRecoveryDirectory(filepath.Dir(path))
 }
 
-func syncFile(path string) error {
-	file, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return fmt.Errorf("open recovery state for sync: %w", err)
+func (m *Manager) refreshRecoveredWorktreeCache(expected, replacement *Worktree) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, cached := range m.worktrees {
+		if cached == nil || cached.ID != expected.ID {
+			continue
+		}
+		updated := *replacement
+		updated.SessionID = cached.SessionID
+		m.worktrees[key] = &updated
 	}
-	defer func() { _ = file.Close() }()
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("sync recovery state: %w", err)
+	if replacement.SessionID != "" {
+		m.worktrees[cacheKey(replacement.SessionID, replacement.RepositoryID, replacement.BranchSlug)] = replacement
 	}
-	return nil
-}
-
-//nolint:cyclop,gocognit // Filesystem entry handling must remain fail-closed in one walk.
-func snapshotCheckout(source, destination string) error {
-	if err := os.MkdirAll(destination, 0700); err != nil {
-		return fmt.Errorf("create recovery snapshot: %w", err)
-	}
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil || rel == "." {
-			return nil
-		}
-		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		target := filepath.Join(destination, rel)
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeNamedPipe != 0 || info.Mode()&os.ModeSocket != 0 || info.Mode()&os.ModeDevice != 0 {
-			return fmt.Errorf("unsupported recovery entry %q", rel)
-		}
-		if entry.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return err
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			_ = in.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		_ = in.Close()
-		syncErr := out.Sync()
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if syncErr != nil {
-			return syncErr
-		}
-		return closeErr
-	})
-}
-
-//nolint:cyclop // The manifest must record every supported filesystem entry explicitly.
-func checkoutManifest(root string) (string, error) {
-	var entries []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		entryValue := rel + "|" + info.Mode().String()
-		if entry.IsDir() {
-			entries = append(entries, entryValue)
-			return nil
-		}
-		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-			return fmt.Errorf("unsupported recovery entry %q", rel)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			entryValue += "|" + target
-		} else {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			hash := sha256.New()
-			_, copyErr := io.Copy(hash, file)
-			_ = file.Close()
-			if copyErr != nil {
-				return copyErr
-			}
-			entryValue += "|" + hex.EncodeToString(hash.Sum(nil))
-		}
-		entries = append(entries, entryValue)
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	sort.Strings(entries)
-	hash := sha256.Sum256([]byte(strings.Join(entries, "\n")))
-	return hex.EncodeToString(hash[:]), nil
-}
-
-func restoreSnapshot(source, destination, expectedManifest string) error {
-	if current, err := checkoutManifest(source); err != nil || current != expectedManifest {
-		return fmt.Errorf("recovery snapshot changed during rematerialization")
-	}
-	if err := copySnapshotEntries(source, destination); err != nil {
-		return err
-	}
-	if current, err := checkoutManifest(destination); err != nil || current != expectedManifest {
-		return fmt.Errorf("recovery replacement does not match verified snapshot")
-	}
-	if current, err := checkoutManifest(source); err != nil || current != expectedManifest {
-		return fmt.Errorf("recovery snapshot changed during restoration")
-	}
-	return nil
-}
-
-//nolint:cyclop // The copy walk handles each filesystem type explicitly.
-func copySnapshotEntries(source, destination string) error {
-	if err := removeDestinationTypeMismatches(source, destination); err != nil {
-		return err
-	}
-	if err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == destination || entry.IsDir() || entry.Name() == recoveryGitDirName {
-			return nil
-		}
-		rel, err := filepath.Rel(destination, path)
-		if err != nil {
-			return err
-		}
-		if _, statErr := os.Lstat(filepath.Join(source, rel)); os.IsNotExist(statErr) {
-			return os.Remove(path)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := removeDestinationDirectoriesAbsentFromSnapshot(source, destination); err != nil {
-		return err
-	}
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		return copySnapshotEntry(source, destination, path, entry)
-	})
-}
-
-type recoveryEntryType uint8
-
-const (
-	recoveryEntryDirectory recoveryEntryType = iota
-	recoveryEntryFile
-	recoveryEntrySymlink
-)
-
-// removeDestinationTypeMismatches clears only entries which the verified
-// snapshot proves must change type. This runs before the absence cleanup so a
-// fresh tracked directory cannot make a snapshot file appear as an invalid
-// descendant, and no copy operation can follow a replaced symlink.
-func removeDestinationTypeMismatches(source, destination string) error {
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == source {
-			return nil
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		sourceType, err := recoveryTypeForDirEntry(entry)
-		if err != nil {
-			return fmt.Errorf("inspect recovery snapshot entry %q: %w", rel, err)
-		}
-		target := filepath.Join(destination, rel)
-		existing, err := os.Lstat(target)
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		destinationType, err := recoveryTypeForFileInfo(existing)
-		if err != nil {
-			return fmt.Errorf("unsupported recovery destination entry %q: %w", target, err)
-		}
-		if sourceType == destinationType {
-			return nil
-		}
-		if err := os.RemoveAll(target); err != nil {
-			return fmt.Errorf("replace recovery destination entry %q: %w", target, err)
-		}
-		return nil
-	})
-}
-
-func recoveryTypeForDirEntry(entry os.DirEntry) (recoveryEntryType, error) {
-	if entry.IsDir() {
-		return recoveryEntryDirectory, nil
-	}
-	if entry.Type()&os.ModeSymlink != 0 {
-		return recoveryEntrySymlink, nil
-	}
-	info, err := entry.Info()
-	if err != nil {
-		return 0, err
-	}
-	return recoveryTypeForFileInfo(info)
-}
-
-func recoveryTypeForFileInfo(info os.FileInfo) (recoveryEntryType, error) {
-	if info.IsDir() {
-		return recoveryEntryDirectory, nil
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return recoveryEntrySymlink, nil
-	}
-	if info.Mode().IsRegular() {
-		return recoveryEntryFile, nil
-	}
-	return 0, fmt.Errorf("entry mode %s", info.Mode())
-}
-
-func removeDestinationDirectoriesAbsentFromSnapshot(source, destination string) error {
-	var directories []string
-	if err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == destination || !entry.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(destination, path)
-		if err != nil {
-			return err
-		}
-		if rel == recoveryGitDirName {
-			return filepath.SkipDir
-		}
-		if _, err := os.Lstat(filepath.Join(source, rel)); os.IsNotExist(err) {
-			directories = append(directories, path)
-			return nil
-		} else if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	sort.Slice(directories, func(i, j int) bool {
-		return len(directories[i]) > len(directories[j])
-	})
-	for _, directory := range directories {
-		if err := os.Remove(directory); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copySnapshotEntry(source, destination, path string, entry os.DirEntry) error {
-	if path == source {
-		return nil
-	}
-	rel, err := filepath.Rel(source, path)
-	if err != nil {
-		return err
-	}
-	target := filepath.Join(destination, rel)
-	entryType, err := recoveryTypeForDirEntry(entry)
-	if err != nil {
-		return err
-	}
-	if entry.IsDir() {
-		return copySnapshotDirectory(entry, target)
-	}
-	if entry.Type()&os.ModeSymlink != 0 {
-		return copySnapshotSymlink(path, target)
-	}
-	if entryType != recoveryEntryFile {
-		return fmt.Errorf("unsupported recovery snapshot entry %q", rel)
-	}
-	return copySnapshotFile(path, target, entry)
-}
-
-func copySnapshotSymlink(source, target string) error {
-	link, err := os.Readlink(source)
-	if err != nil {
-		return err
-	}
-	if err := removeExistingRecoverySymlink(target); err != nil {
-		return err
-	}
-	return os.Symlink(link, target)
-}
-
-func removeExistingRecoverySymlink(target string) error {
-	existing, err := os.Lstat(target)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if existing.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("recovery destination type changed before symlink restore: %q", target)
-	}
-	return os.Remove(target)
-}
-
-func copySnapshotDirectory(entry os.DirEntry, target string) error {
-	info, err := entry.Info()
-	if err != nil {
-		return err
-	}
-	if existing, err := os.Lstat(target); err == nil && !existing.IsDir() {
-		return fmt.Errorf("recovery destination type changed before directory restore: %q", target)
-	} else if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Chmod(target, info.Mode().Perm())
-}
-
-func copySnapshotFile(source, target string, entry os.DirEntry) error {
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return err
-	}
-	info, err := entry.Info()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-		return err
-	}
-	if existing, err := os.Lstat(target); err == nil {
-		if !existing.Mode().IsRegular() {
-			return fmt.Errorf("recovery destination type changed before file restore: %q", target)
-		}
-		if err := os.Remove(target); err != nil {
-			return err
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(target, info.Mode().Perm())
 }

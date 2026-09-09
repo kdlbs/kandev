@@ -780,6 +780,9 @@ func (e *Executor) resumeSession(
 		return nil, err
 	}
 	defer unlock()
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return nil, err
+	}
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)

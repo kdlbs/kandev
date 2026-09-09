@@ -331,8 +331,13 @@ func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 	if err != nil {
 		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, actualBacklink: backlinkTarget, reason: "cannot resolve expected checkout backlink"}
 	}
+	resolvedExpectedBacklink, err := filepath.EvalSymlinks(expectedBacklink)
+	if err != nil {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, actualBacklink: backlinkTarget, reason: "cannot resolve expected checkout backlink"}
+	}
 	actualBacklink, err := filepath.Abs(backlinkTarget)
-	if err != nil || actualBacklink != expectedBacklink {
+	resolvedActualBacklink, resolveErr := filepath.EvalSymlinks(actualBacklink)
+	if err != nil || resolveErr != nil || resolvedActualBacklink != resolvedExpectedBacklink {
 		return linkedWorktreeInspection{class: linkedWorktreeBacklinkMismatch, adminPath: adminPath, expectedBacklink: expectedBacklink, actualBacklink: backlinkTarget, reason: fmt.Sprintf("linked-worktree admin target %q backlink mismatch", adminPath)}
 	}
 
@@ -350,8 +355,11 @@ func linkedWorktreeCommonDir(adminPath string) (string, error) {
 		return "", fmt.Errorf("cannot read linked-worktree commondir")
 	}
 	commonDir := strings.TrimSpace(string(contents))
-	if commonDir == "" || filepath.IsAbs(commonDir) {
+	if commonDir == "" {
 		return "", fmt.Errorf("linked-worktree commondir is invalid")
+	}
+	if filepath.IsAbs(commonDir) {
+		return filepath.Clean(commonDir), nil
 	}
 	resolved, err := filepath.Abs(filepath.Join(adminPath, commonDir))
 	if err != nil {

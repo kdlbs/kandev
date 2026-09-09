@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -212,39 +213,88 @@ func (m *Manager) AdmitTaskRecovery(ctx context.Context, taskID string) error {
 		if wt == nil || wt.Status != StatusActive || wt.Path == "" {
 			continue
 		}
-		if _, statErr := os.Lstat(wt.Path); statErr != nil {
-			continue
-		}
-		inspection := inspectLinkedWorktree(wt.Path)
-		if inspection.class != linkedWorktreeHealthy {
-			if inspection.class != linkedWorktreeMissingAdmin {
-				return &WorktreeRecoveryError{
-					TaskID: wt.TaskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
-					ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
-					State: string(inspection.class), Reason: inspection.reason,
-				}
-			}
-			lockValue, _ := m.recoveryLocks.LoadOrStore(wt.ID, &sync.Mutex{})
-			lock := lockValue.(*sync.Mutex)
-			lock.Lock()
-			if inspectLinkedWorktree(wt.Path).class == linkedWorktreeHealthy {
-				lock.Unlock()
-				continue
-			}
-			recovered, recoveryErr := m.RecoverWorktree(ctx, wt, CreateRequest{
-				TaskID: taskID, RepositoryID: wt.RepositoryID,
-				RepositoryPath: wt.RepositoryPath, BaseBranch: wt.BaseBranch,
-			})
-			lock.Unlock()
-			if recoveryErr != nil {
-				return recoveryErr
-			}
-			if recovered == nil || !m.IsValid(recovered.Path) {
-				return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, Reason: "rematerialized checkout failed integrity validation"}
-			}
+		if err := m.admitPersistedWorktreeRecovery(ctx, taskID, wt); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (m *Manager) admitPersistedWorktreeRecovery(ctx context.Context, taskID string, stale *Worktree) error {
+	lockValue, _ := m.recoveryLocks.LoadOrStore(stale.ID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	wt, err := m.currentRecoveryWorktree(ctx, stale)
+	if err != nil {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: stale.Path, Reason: err.Error()}
+	}
+	if wt == nil {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: stale.Path, Reason: "durable worktree identity changed during recovery admission"}
+	}
+	if _, statErr := os.Lstat(wt.Path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil
+		}
+		return &WorktreeRecoveryError{
+			TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous),
+			Reason: fmt.Sprintf("cannot inspect persisted checkout: %v", statErr),
+		}
+	}
+	handle, err := m.validateWorktreePathSafe(wt.Path)
+	if err != nil || handle == nil {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: fmt.Sprintf("cannot pin persisted checkout: %v", err)}
+	}
+	defer func() { _ = handle.Close() }()
+	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: err.Error()}
+	}
+	inspection := inspectLinkedWorktree(wt.Path)
+	if inspection.class == linkedWorktreeHealthy {
+		return handle.VerifyPath(filepath.Clean(wt.Path))
+	}
+	if inspection.class != linkedWorktreeMissingAdmin {
+		return &WorktreeRecoveryError{
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
+			State: string(inspection.class), Reason: inspection.reason,
+		}
+	}
+	if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: err.Error()}
+	}
+	recovered, err := m.RecoverWorktree(ctx, wt, CreateRequest{
+		TaskID: taskID, RepositoryID: wt.RepositoryID,
+		RepositoryPath: wt.RepositoryPath, BaseBranch: wt.BaseBranch,
+	})
+	if err != nil {
+		return err
+	}
+	if recovered == nil || !m.IsValid(recovered.Path) {
+		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, Reason: "rematerialized checkout failed integrity validation"}
+	}
+	return nil
+}
+
+func (m *Manager) currentRecoveryWorktree(ctx context.Context, stale *Worktree) (*Worktree, error) {
+	worktrees, err := m.store.GetWorktreesByTaskID(ctx, stale.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("refresh durable worktree identity: %w", err)
+	}
+	for _, current := range worktrees {
+		if current != nil && current.ID == stale.ID {
+			return current, nil
+		}
+	}
+	for _, current := range worktrees {
+		if current != nil && current.Status == StatusActive &&
+			current.TaskEnvironmentID == stale.TaskEnvironmentID &&
+			current.RepositoryID == stale.RepositoryID && current.BranchSlug == stale.BranchSlug {
+			return current, nil
+		}
+	}
+	return nil, nil
 }
 
 // getRepoLock returns a mutex for the given repository path and increments its reference count.
