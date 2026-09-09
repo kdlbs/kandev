@@ -2953,6 +2953,27 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListLiveWorkspaceSessions returns every session across all tasks whose state
+// is one of the five live states AC-TASKS-ORPHAN-REAP-003.2 names, with each
+// session's effective workspace_path (taskSessionSelectCols already prefers
+// the linked task environment's path over the possibly-stale session column).
+// It exists only for the orphan-reap ownership check: ListActiveTaskSessions
+// omits IDLE deliberately for its own unrelated callers, and does not batch
+// worktrees, which this check does not need.
+func (r *Repository) ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListLiveWorkspaceSessions")
+	defer span.End()
+	rows, err := r.ro.QueryContext(ctx,
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+
+			` WHERE ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTaskSessions(ctx, rows)
+}
+
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
