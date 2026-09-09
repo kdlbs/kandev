@@ -37,10 +37,16 @@ func newBudgetClaimsRepoWithFK(t *testing.T) (*sqlite.Repository, *sqlx.DB) {
 	}
 	// office_task_tree_holds and friends carry an FK to the task-package
 	// owned "tasks" table; with foreign_keys=ON that table must exist (even
-	// empty) for a workspace-wide DELETE to validate the constraint.
+	// empty) for a workspace-wide DELETE to validate the constraint. title/
+	// description/identifier are included so migrateTaskFTS's backfill (which
+	// selects them unconditionally once a "tasks" table exists) doesn't fail
+	// schema init on this minimal fixture.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL DEFAULT ''
+		workspace_id TEXT NOT NULL DEFAULT '',
+		title TEXT DEFAULT '',
+		description TEXT DEFAULT '',
+		identifier TEXT DEFAULT ''
 	)`); err != nil {
 		t.Fatalf("create tasks: %v", err)
 	}
