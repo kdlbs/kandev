@@ -100,6 +100,7 @@ import (
 	officepause "github.com/kandev/kandev/internal/office/pause"
 	officeprojects "github.com/kandev/kandev/internal/office/projects"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/retention"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
 	"github.com/kandev/kandev/internal/office/routing"
 	officescheduler "github.com/kandev/kandev/internal/office/scheduler"
@@ -1181,6 +1182,16 @@ func startGatewayAndServe(
 	})
 	systemSvc.Storage = storageComposition.handler
 	systemSvc.StorageRuntime = storageComposition.runtime
+
+	// Office run history retention: bounds office_routine_runs, runs, and
+	// their satellites on its own interval, separate from the 5s Office
+	// tick. Kept regardless of the Office feature flag — see Services.Retention.
+	services.Retention = retention.NewRuntime(dbPool, repos.SystemSettings,
+		func(message string, err error) { log.Error(message, zap.Error(err)) })
+	if err := services.Retention.Start(ctx); err != nil {
+		log.Warn("office run retention scheduler failed to start", zap.Error(err))
+	}
+	addCleanup(func() error { services.Retention.Stop(); return nil })
 	if systemSvc.LogBundles != nil {
 		systemSvc.LogBundles.SetNotifier(gateway.Hub)
 		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
