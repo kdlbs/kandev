@@ -123,6 +123,10 @@ var (
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	// ErrPendingMoveGenerationConflict means a queue mutation observed a
+	// different pending-row generation than the one it was authorized to
+	// create, restore, or transfer. The newer row is preserved unchanged.
+	ErrPendingMoveGenerationConflict = errors.New("pending move generation changed")
 	// ErrAutoMergePolicyChanged means admission's immutable policy snapshot no
 	// longer matches the durable session override. The caller must re-resolve
 	// policy before deciding whether to fold.
@@ -290,16 +294,24 @@ type QueueStatus struct {
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
+	// ID identifies the immutable pending_moves row generation. A replacement
+	// receives a new ID while a snapshot restore or transfer preserves it.
+	ID string `json:"id"`
 	// MoveID is the durable effect token for one deferred move request across
 	// queue snapshots. Rollback can restore a consumed snapshot, so replay uses
 	// this token to suppress a second workflow effect.
-	MoveID               string    `json:"move_id"`
-	SessionIncarnationID string    `json:"session_incarnation_id,omitempty"`
-	TaskID               string    `json:"task_id"`
-	WorkflowID           string    `json:"workflow_id"`
-	WorkflowStepID       string    `json:"workflow_step_id"`
-	Position             int       `json:"position"`
-	QueuedAt             time.Time `json:"queued_at"`
+	MoveID               string `json:"move_id"`
+	SessionIncarnationID string `json:"session_incarnation_id,omitempty"`
+	TaskID               string `json:"task_id"`
+	WorkflowID           string `json:"workflow_id"`
+	WorkflowStepID       string `json:"workflow_step_id"`
+	// ExpectedWorkflowStepID is the immutable source step at admission.
+	// Empty values identify legacy rows and must fail closed during replay.
+	ExpectedWorkflowStepID string `json:"expected_workflow_step_id,omitempty"`
+	// InitiatingTurnID records the immutable initiating turn when available.
+	InitiatingTurnID string    `json:"initiating_turn_id,omitempty"`
+	Position         int       `json:"position"`
+	QueuedAt         time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`

@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -27,6 +29,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -92,6 +95,87 @@ type taskMetadataCarryTaker interface {
 
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
+}
+
+type routeEffectRepository interface {
+	GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error)
+	GetCurrentWorkflowRouteEffect(context.Context, string, string) (routing.Effect, bool, error)
+	ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	BeginWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	RenewWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	CompleteWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+}
+
+const routeEffectLease = time.Minute
+
+var errRouteEffectClaimLost = errors.New("workflow route effect claim was lost")
+
+func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx == nil || s.taskLifecycleRetryCtx.Err() != nil {
+		return
+	}
+	if _, exists := s.taskLifecycleRetryTimers[taskID]; exists {
+		return
+	}
+	s.taskLifecycleRetryWorkers.Add(1)
+	s.taskLifecycleRetryTimers[taskID] = time.AfterFunc(routeEffectLease, func() {
+		defer s.taskLifecycleRetryWorkers.Done()
+		s.taskLifecycleRetryMu.Lock()
+		ctx := s.taskLifecycleRetryCtx
+		delete(s.taskLifecycleRetryTimers, taskID)
+		s.taskLifecycleRetryMu.Unlock()
+		if ctx != nil && ctx.Err() == nil {
+			s.recoverTaskLifecycleToken(ctx, taskID)
+		}
+	})
+}
+
+func (s *Service) renewRouteEffectClaim(ctx context.Context, effects routeEffectRepository, effectID, token string, stop <-chan struct{}, stopped chan<- struct{}, result chan<- error) {
+	defer close(stopped)
+	defer close(result)
+	ticker := time.NewTicker(routeEffectLease / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case now := <-ticker.C:
+			renewed, err := effects.RenewWorkflowRouteEffect(ctx, effectID, token, now.UTC())
+			if err != nil {
+				continue
+			}
+			if !renewed {
+				result <- errRouteEffectClaimLost
+				return
+			}
+		}
+	}
+}
+
+func (s *Service) claimRouteEffectForStepEnter(ctx context.Context, taskID, targetStepID string, transitionID int64) (string, bool, error) {
+	effects, ok := s.repo.(routeEffectRepository)
+	if !ok {
+		return "", true, nil
+	}
+	var effect routing.Effect
+	var found bool
+	var err error
+	if transitionID != 0 {
+		effect, found, err = effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+	} else {
+		effect, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
+	}
+	if err != nil || !found {
+		return "", found, err
+	}
+	token := uuid.NewString()
+	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
+	return token, claimed, err
 }
 
 type taskMovedLifecyclePrerequisites struct {
@@ -2195,7 +2279,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string,
+	fromStepID, toStepID, taskDescription string, _ ...int64,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2245,7 +2329,7 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
 // sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
 // already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) error {
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, _ ...int64) error {
 	// Process on_exit for the step we're leaving
 	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, nil); err != nil {
 		s.logger.Warn("step exit and enter lifecycle failed",
@@ -6198,8 +6282,14 @@ func (s *Service) launchProcessOnEnter(
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
 	entryID int64,
-	sourceStep *wfmodels.WorkflowStep,
+	args ...interface{},
 ) {
+	var sourceStep *wfmodels.WorkflowStep
+	for _, arg := range args {
+		if step, ok := arg.(*wfmodels.WorkflowStep); ok {
+			sourceStep = step
+		}
+	}
 	go func() {
 		defer func() {
 			if s.onProcessOnEnterComplete != nil {
@@ -6208,6 +6298,35 @@ func (s *Service) launchProcessOnEnter(
 		}()
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
 	}()
+}
+
+func (s *Service) startTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx != nil && s.taskLifecycleRetryCtx.Err() == nil {
+		return
+	}
+	s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+}
+
+func (s *Service) stopTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	if s.taskLifecycleRetryCancel != nil {
+		s.taskLifecycleRetryCancel()
+	}
+	for taskID, timer := range s.taskLifecycleRetryTimers {
+		if timer.Stop() {
+			s.taskLifecycleRetryWorkers.Done()
+		}
+		delete(s.taskLifecycleRetryTimers, taskID)
+	}
+	s.taskLifecycleRetryCtx = nil
+	s.taskLifecycleRetryCancel = nil
+	s.taskLifecycleRetryMu.Unlock()
+	s.taskLifecycleRetryWorkers.Wait()
 }
 
 // processOnTurnStartViaEngine uses the workflow engine to evaluate on_turn_start

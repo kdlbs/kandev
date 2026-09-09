@@ -792,7 +792,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmission(
 		ctx, task, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID,
+		expectedStepID, expectedWorkflowID, nil,
 	)
 }
 
@@ -868,7 +868,7 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	if err != nil {
 		return false, err
 	}
-	if _, err := r.updateTaskTx(ctx, tx, task, metadata, ""); err != nil {
+	if _, err := r.updateTaskTx(ctx, tx, task, metadata, "", ""); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -886,7 +886,7 @@ func (r *Repository) validateDeferredMoveGuardTx(
 	record messagequeue.PendingMoveRecord,
 ) error {
 	move := record.Move
-	if record.SessionID == "" || move.SessionIncarnationID == "" || move.TaskID == "" {
+	if record.SessionID == "" || move.ID == "" || move.SessionIncarnationID == "" || move.TaskID == "" || move.ExpectedWorkflowStepID == "" {
 		return messagequeue.ErrSessionIdentityMismatch
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -901,13 +901,15 @@ func (r *Repository) validateDeferredMoveGuardTx(
 		  FROM task_sessions s
 		  JOIN pending_moves p ON p.session_id = s.id
 		 WHERE s.id = ? AND s.task_id = ? AND s.queue_incarnation_id = ?
-		   AND p.move_id = ? AND p.session_incarnation_id = ?
+		   AND p.id = ? AND p.move_id = ? AND p.session_incarnation_id = ?
 		   AND p.task_id = ? AND p.workflow_id = ? AND p.workflow_step_id = ?
 		   AND p.step_position = ? AND p.queued_at = ?
 		   AND p.actor = ? AND p.sender_session_id = ?
+		   AND p.expected_workflow_step_id = ? AND p.initiating_turn_id = ?
 	`), record.SessionID, move.TaskID, move.SessionIncarnationID,
-		move.MoveID, move.SessionIncarnationID, move.TaskID, move.WorkflowID,
+		move.ID, move.MoveID, move.SessionIncarnationID, move.TaskID, move.WorkflowID,
 		move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor, move.SenderSessionID,
+		move.ExpectedWorkflowStepID, move.InitiatingTurnID,
 	).Scan(&matched)
 	if err != nil {
 		return fmt.Errorf("validate deferred move identity: %w", err)
@@ -926,11 +928,11 @@ func (r *Repository) deleteDeferredMoveGuardTx(
 	move := record.Move
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM pending_moves
-		 WHERE session_id = ? AND move_id = ? AND session_incarnation_id = ?
+		 WHERE session_id = ? AND id = ? AND move_id = ? AND session_incarnation_id = ?
 		   AND task_id = ? AND workflow_id = ? AND workflow_step_id = ?
 		   AND step_position = ? AND queued_at = ?
 		   AND actor = ? AND sender_session_id = ?
-	`), record.SessionID, move.MoveID, move.SessionIncarnationID, move.TaskID,
+	`), record.SessionID, move.ID, move.MoveID, move.SessionIncarnationID, move.TaskID,
 		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt,
 		move.Actor, move.SenderSessionID,
 	)

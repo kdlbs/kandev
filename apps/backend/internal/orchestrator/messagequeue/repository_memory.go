@@ -1919,6 +1919,11 @@ func (r *memoryRepository) transferSessionLocked(
 	if oldSessionID == newSessionID {
 		return nil
 	}
+	if move, ok := r.pendingMoves[oldSessionID]; ok {
+		if destination, exists := r.pendingMoves[newSessionID]; exists && destination.ID != move.ID {
+			return ErrPendingMoveGenerationConflict
+		}
+	}
 	for _, entry := range r.entries[oldSessionID] {
 		if entry.IsReservedInFlight() {
 			return ErrQueueChanged
@@ -1993,6 +1998,9 @@ func (r *memoryRepository) ReplaceSessionForIdentity(_ context.Context, identity
 }
 
 func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if current, exists := r.pendingMoves[sessionID]; exists && pendingMove != nil && pendingMove.ID != "" && pendingMove.ID != current.ID {
+		return ErrPendingMoveGenerationConflict
+	}
 	if len(entries) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
@@ -2015,6 +2023,10 @@ func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []Queu
 		return nil
 	}
 	clone := *pendingMove
+	if clone.ID == "" {
+		clone.ID = uuid.NewString()
+		pendingMove.ID = clone.ID
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
 }
@@ -2051,6 +2063,19 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 	}
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()
+	}
+	if current, exists := r.pendingMoves[sessionID]; exists {
+		switch {
+		case move.MoveID != "" && current.MoveID == move.MoveID:
+			move.ID = current.ID
+			return nil
+		case move.ID == "" || move.ID == current.ID:
+			move.ID = uuid.NewString()
+		default:
+			return ErrPendingMoveGenerationConflict
+		}
+	} else if move.ID == "" {
+		move.ID = uuid.NewString()
 	}
 	clone := *move
 	r.pendingMoves[sessionID] = &clone
