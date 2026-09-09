@@ -350,11 +350,20 @@ func (g *GitOperator) buildPushPlan(ctx context.Context, opts PushOptions, remot
 			baselineEligible: remote == defaultPushRemote,
 		}, nil
 	}
-	// The paths below name no explicit target and must behave exactly as they
-	// do today, including reading the branch through getCurrentBranch.
-	branch, err := g.getCurrentBranch(ctx)
-	if err != nil {
-		return nil, &pushRefusal{message: err.Error()}
+	// The paths below name no explicit target. With no expected branch they
+	// must behave exactly as they do today, including reading the branch
+	// through getCurrentBranch. With an expected branch, that value is used
+	// directly instead of a separate read: verifyExpectedBranch confirms HEAD
+	// is still on it immediately before the push runs, and a refspec built
+	// from an earlier, independent read could name a branch that check never
+	// saw.
+	branch := opts.ExpectedBranch
+	if branch == "" {
+		var err error
+		branch, err = g.getCurrentBranch(ctx)
+		if err != nil {
+			return nil, &pushRefusal{message: err.Error()}
+		}
 	}
 	switch {
 	case g.contributionDestination != nil:

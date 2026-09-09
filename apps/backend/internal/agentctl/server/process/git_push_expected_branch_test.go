@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"os"
 	osExec "os/exec"
 	"path/filepath"
@@ -470,7 +471,9 @@ func TestGitOperatorPushNeverCreatesRemote(t *testing.T) {
 }
 
 func TestGitOperatorPushResultAndLogsCarryNoRemoteURL(t *testing.T) {
-	_, _, backupDir, operator := setupPushRemotesRepo(t)
+	repoDir, _, backupDir, _ := setupPushRemotesRepo(t)
+	log, observed := newObservedTestLogger(t)
+	operator := NewGitOperator(repoDir, log, nil)
 
 	result, err := operator.Push(context.Background(), PushOptions{Remote: backupDir})
 	if err != nil {
@@ -485,6 +488,11 @@ func TestGitOperatorPushResultAndLogsCarryNoRemoteURL(t *testing.T) {
 	}
 	if strings.Contains(result.Error, backupDir) {
 		t.Errorf("error carries the remote URL: %q", result.Error)
+	}
+	for _, entry := range observed.All() {
+		if strings.Contains(entry.Message, backupDir) || strings.Contains(fmt.Sprint(entry.ContextMap()), backupDir) {
+			t.Errorf("log entry carries the remote URL: message=%q context=%v", entry.Message, entry.ContextMap())
+		}
 	}
 }
 
@@ -748,5 +756,60 @@ func TestGitOperatorPushReportsPlainMismatchWhenBaselineWasAlreadyPublished(t *t
 	}
 	if got := remoteBranchSHA(t, originDir, "feature/empty"); got != "" {
 		t.Errorf("task branch published as %q, want unpublished", got)
+	}
+}
+
+// TestGitOperatorPushUsesExpectedBranchNotARaceableRereadForNoTargetRefspec
+// covers the no-explicit-target path (the default-remote and
+// contribution-destination cases in buildPushPlan both build a bare-name
+// refspec off a branch value). That value must come from the same identity
+// verifyExpectedBranch confirms immediately before the push, not from a
+// separate read: a separate read can observe a different branch if HEAD
+// moves and moves back between the first verification and this one, letting
+// the second verification pass while the push publishes unrelated content
+// under an unverified name and leaves the intended branch unpublished.
+func TestGitOperatorPushUsesExpectedBranchNotARaceableRereadForNoTargetRefspec(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git PATH shim is a POSIX shell script")
+	}
+	repoDir, originDir, _, operator := setupPushRemotesRepo(t)
+	runGit(t, repoDir, "branch", "feature/other", "main")
+
+	realGit, err := osExec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git) = %v", err)
+	}
+	// Move HEAD to feature/other around the rev-parse call that would decide
+	// the push's branch/refspec independently of the first verification, then
+	// move it back before the push runs, so only a re-read would observe the
+	// switch.
+	shimDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1 $2 $3\" = 'rev-parse --abbrev-ref HEAD' ]; then\n" +
+		"  " + realGit + " -C " + repoDir + " checkout feature/other >/dev/null 2>&1\n" +
+		"  " + realGit + " \"$@\"; rc=$?\n" +
+		"  " + realGit + " -C " + repoDir + " checkout feature/work >/dev/null 2>&1\n" +
+		"  exit $rc\n" +
+		"fi\n" +
+		"exec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	wantSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "feature/work"))
+
+	result, err := operator.Push(context.Background(), PushOptions{ExpectedBranch: "feature/work"})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Push() = %+v, want success", result)
+	}
+	if got := remoteBranchSHA(t, originDir, "feature/work"); got != wantSHA {
+		t.Errorf("origin feature/work = %q, want %q: the verified branch was not what got pushed", got, wantSHA)
+	}
+	if got := remoteBranchSHA(t, originDir, "feature/other"); got != "" {
+		t.Errorf("origin gained feature/other (%q): the push targeted a branch never verified", got)
 	}
 }

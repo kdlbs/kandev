@@ -247,6 +247,19 @@ func TestPushPreflightRedactsCredentialsInRemoteOutput(t *testing.T) {
 	}
 }
 
+func TestPushPreflightReportsOperationInProgress(t *testing.T) {
+	_, _, _, operator := setupPushRemotesRepo(t)
+	if !operator.tryLock("test") {
+		t.Fatal("tryLock() = false, want the lock")
+	}
+	defer operator.unlock()
+
+	_, err := operator.PushPreflight(context.Background(), PushOptions{Remote: "backup"})
+	if err != ErrOperationInProgress {
+		t.Fatalf("PushPreflight() error = %v, want ErrOperationInProgress", err)
+	}
+}
+
 func TestPushPreflightAppliesSameRefusalOrdering(t *testing.T) {
 	_, _, backupDir, operator := setupPushRemotesRepo(t)
 
