@@ -546,6 +546,14 @@ describe("useMessageHandler input routing", () => {
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 
+  it("returns an unsuccessful result when queue admission cannot start", async () => {
+    selectedSession("STARTING");
+    queueMock.mockResolvedValueOnce(false);
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage(submit("keep this draft"))).resolves.toBe(false);
+  });
+
   it("rejects a terminal selected session with the actionable ended-session copy", async () => {
     selectedSession("COMPLETED");
     const { result } = renderMessageHandler();

@@ -11,8 +11,8 @@ owners:
 ## Overview
 
 The chat composer has separate editing and submission readiness. An operator
-can prepare a draft while a session starts or resumes. The operator cannot
-submit the draft before the session can accept it.
+can prepare a draft while a session starts or resumes. The operator can submit
+once the session accepts direct or queued prompts.
 
 The UI system owns this interaction contract. The task system continues to own
 the session lifecycle and message admission rules.
@@ -40,7 +40,7 @@ I can prepare my message before the session is ready.
   starts or resumes, the composer shall accept focus and draft text during the
   startup state.
 - **AC-UI-SESSION-START-COMPOSER-READINESS-001.2:** When regular message
-  submission is unsafe during startup, the send action and submission shortcut
+  submission and queue admission are unavailable during startup, the send action and submission shortcut
   shall remain disabled. These actions shall not create a message request.
 - **AC-UI-SESSION-START-COMPOSER-READINESS-001.3:** When the session becomes
   ready, the composer shall keep the draft. The composer shall enable
@@ -58,6 +58,7 @@ I can prepare my message before the session is ready.
 ## Out of scope
 
 - Changing session lifecycle states or message admission rules.
-- Queuing a regular message before the session is ready.
+- Deferred prompt admission and dispatch belong to the task system's
+  [resume prompt queue](../../tasks/requirements/resume-prompt-queue.md).
 - Changing failure, recovery, movement, upload, or executor-availability gates.
 - Changing composer layout, touch targets, copy, or responsive composition.

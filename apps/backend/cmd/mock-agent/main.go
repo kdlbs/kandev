@@ -288,10 +288,20 @@ func ptr(s string) *string {
 // LoadSession restores a previous session for resume.
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
-func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
+	}
+	if delay := parseResumeDelayFlag(); delay > 0 {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: delaying resume for session %s by %s\n", os.Getpid(), req.SessionId, delay)
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return acp.LoadSessionResponse{}, ctx.Err()
+		}
 	}
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
@@ -614,6 +624,41 @@ func parseFailOnResumeFlag() bool {
 // parseFailOnResumeFromArgs reports whether --fail-on-resume is in args.
 func parseFailOnResumeFromArgs(args []string) bool {
 	return slices.Contains(args[1:], "--fail-on-resume")
+}
+
+// parseResumeDelayFlag returns the positive duration from --delay-resume. This
+// is a mock-agent-only readiness fixture used by E2E resume tests.
+func parseResumeDelayFlag() time.Duration {
+	if delay := parseResumeDelayFromArgs(os.Args); delay > 0 {
+		return delay
+	}
+	return parseResumeDelayFromValue(os.Getenv("E2E_MOCK_AGENT_RESUME_DELAY"))
+}
+
+func parseResumeDelayFromArgs(args []string) time.Duration {
+	for i, arg := range args[1:] {
+		var raw string
+		if arg == "--delay-resume" && i+1 < len(args)-1 {
+			raw = args[i+2]
+		} else if value, ok := strings.CutPrefix(arg, "--delay-resume="); ok {
+			raw = value
+		}
+		if raw == "" {
+			continue
+		}
+		if delay := parseResumeDelayFromValue(raw); delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func parseResumeDelayFromValue(raw string) time.Duration {
+	delay, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err == nil && delay > 0 {
+		return delay
+	}
+	return 0
 }
 
 // mcpConfigPayload is the JSON structure for --mcp-config.

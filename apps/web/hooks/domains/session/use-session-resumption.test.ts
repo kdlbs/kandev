@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- session resumption cases share one lifecycle harness. */
+
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -128,6 +130,23 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.resumptionStates).toContain("resumed");
     expect(calls.errors).not.toContain(expect.any(String));
     expect(calls.worktreePaths).toContain("/wt/foo");
+  });
+
+  it("publishes STARTING before a delayed resume request resolves", async () => {
+    const launchRequest = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(launchRequest.promise);
+    const { setters, calls } = createSetters();
+
+    const resume = resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
+    await waitFor(() => expect(calls.taskSessionStates).toContain("STARTING"));
+
+    launchRequest.resolve({
+      success: true,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: "WAITING_FOR_INPUT",
+    });
+    await resume;
   });
 
   it("falls back to restore_workspace silently when resume returns success=false", async () => {
@@ -667,6 +686,13 @@ describe("useSessionResumption stale-callback guard after navigation", () => {
       ({ sid }: { sid: string }) => useSessionResumption(TASK_ID, sid),
       { initialProps: { sid: SESSION_ID } },
     );
+
+    await waitFor(() => {
+      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+      });
+    });
 
     // Navigate to another session before the first status response resolves.
     rerender({ sid: "s2" });

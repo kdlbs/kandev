@@ -10,6 +10,7 @@ import {
   clearArchiveRecovery,
   decideResumeAction,
   isTaskArchivedConflict,
+  markSessionStarting,
   resumeViaLaunch,
   resumeWithSilentFallback,
   TASK_ARCHIVED_KIND,
@@ -541,6 +542,7 @@ function useManualResumeSession({
     const canContinue = () => isCurrentRequest(captureRequest(), capturedRequest);
     const guardedSetters = buildGuardedSettersFor(capturedRequest);
     if (!canContinue()) return false;
+    markSessionStarting(taskId, sessionId, session, guardedSetters);
     guardedSetters.setResumptionState("resuming");
     guardedSetters.setError(null);
     guardedSetters.setNotice?.(null);

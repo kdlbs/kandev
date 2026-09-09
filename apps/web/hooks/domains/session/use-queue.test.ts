@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- queue lifecycle cases share one authoritative hook harness. */
+
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueuedMessage, QueueOperationToken } from "@/lib/state/slices/session/types";
@@ -135,7 +137,39 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// eslint-disable-next-line max-lines-per-function -- queue admission and lifecycle cases share one hook contract.
 describe("useQueue", () => {
+  it("reports queue readiness only when the session has a complete identity", async () => {
+    const { result, rerender } = renderHook(() => useQueue(SESSION_ID));
+
+    await waitFor(() => expect(result.current.isQueueReady).toBe(true));
+
+    mockState.taskSessions.items[SESSION_ID].queue_incarnation_id = undefined;
+    rerender();
+
+    expect(result.current.isQueueReady).toBe(false);
+  });
+
+  it("reports unsuccessful admission when the queue identity is unavailable", async () => {
+    mockState.taskSessions.items[SESSION_ID].queue_incarnation_id = undefined;
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+
+    await expect(result.current.queue({ taskId: TASK_ID, content: "preserve me" })).resolves.toBe(
+      false,
+    );
+    expect(queueApiMock.queueMessage).not.toHaveBeenCalled();
+  });
+
+  it("reports unsuccessful admission when an operation token cannot be acquired", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    mockState.beginQueueOperation.mockReturnValue(undefined);
+
+    await expect(result.current.queue({ taskId: TASK_ID, content: "preserve me" })).resolves.toBe(
+      false,
+    );
+    expect(queueApiMock.queueMessage).not.toHaveBeenCalled();
+  });
+
   it("refetches the queue snapshot when the WebSocket reconnects", async () => {
     mockState.connection.status = "disconnected";
     const { rerender } = renderHook(() => useQueue(SESSION_ID));

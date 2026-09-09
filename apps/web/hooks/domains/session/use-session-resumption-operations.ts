@@ -87,6 +87,23 @@ export type ResumeStateSetter = {
 
 export type SessionLike = { started_at?: string; updated_at?: string; state?: string } | null;
 
+/** Publish the persisted lifecycle state locally while the resume request is in flight. */
+export function markSessionStarting(
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+): void {
+  if (session?.state === "STARTING") return;
+  setters.setTaskSession({
+    id: toSessionId(sessionId),
+    task_id: toTaskId(taskId),
+    state: "STARTING",
+    started_at: session?.started_at ?? "",
+    updated_at: session?.updated_at ?? "",
+  });
+}
+
 type ResumeResponse = {
   success: boolean;
   state?: string;
@@ -234,6 +251,7 @@ export async function resumeWithSilentFallback(
   canContinue: () => boolean = () => true,
 ): Promise<boolean> {
   if (!canContinue()) return false;
+  markSessionStarting(taskId, sessionId, session, setters);
   setters.setResumptionState("resuming");
   setters.setRecoveryFailure?.(null);
   const context = { taskId, sessionId, session, setters, canContinue };

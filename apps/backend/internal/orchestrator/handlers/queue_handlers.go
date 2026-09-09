@@ -133,6 +133,13 @@ type QueueIdentityDrainer interface {
 	DrainQueuedMessageForSession(context.Context, messagequeue.QueueSessionIdentity) (bool, error)
 }
 
+// QueueAdmissionReadinessChecker rechecks automatic dispatch after a queue
+// entry is durably admitted. The check is best-effort: admission remains
+// successful when the session is not ready yet or the dispatch check fails.
+type QueueAdmissionReadinessChecker interface {
+	CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity)
+}
+
 // QueueAutoRunController persists queue policy and may immediately dispatch
 // one FIFO head when enabling an eligible session.
 type QueueAutoRunController interface {
@@ -194,6 +201,7 @@ type queueEntryTaker interface {
 type QueueHandlers struct {
 	queueService        QueueService
 	queueDrainer        QueueDrainer
+	queueReadiness      QueueAdmissionReadinessChecker
 	queueAutoRun        QueueAutoRunController
 	queueDispatcher     QueueSendNowDispatcher
 	accessAuthorizer    QueueAccessAuthorizer
@@ -237,6 +245,9 @@ func NewQueueHandlers(
 	}
 	if dispatcher, ok := queueDrainer.(QueueSendNowDispatcher); ok {
 		handlers.queueDispatcher = dispatcher
+	}
+	if readinessChecker, ok := queueDrainer.(QueueAdmissionReadinessChecker); ok {
+		handlers.queueReadiness = readinessChecker
 	}
 	if controller, ok := queueDrainer.(QueueAutoRunController); ok {
 		handlers.queueAutoRun = controller
@@ -346,7 +357,15 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	h.publishStatusForIdentity(ctx, messagequeue.QueueSessionIdentity{TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID}, queued)
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		SessionIncarnationID: req.SessionIncarnationID,
+	}
+	h.publishStatusForIdentity(ctx, identity, queued)
+	if h.queueReadiness != nil {
+		h.queueReadiness.CheckQueueAdmissionReadiness(ctx, identity)
+	}
 	return ws.NewResponse(msg.ID, msg.Action, queued)
 }
 
