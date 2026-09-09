@@ -111,7 +111,8 @@ or add a second canvas flag owner.
 
 ## Results
 
-- Compacted `kandev-context.md` to a 2,743-byte UTF-8 template while retaining
+- Compacted `kandev-context.md` to a 2,743-byte loaded UTF-8 template (2,744
+  bytes on disk) while retaining
   task/session identity, question barriers, title ownership, completion gates,
   autopilot, delegation, plan, rich-output, and coordinator guidance.
 - Added conditional canvas authoring guidance and reused the executor's typed
@@ -119,9 +120,13 @@ or add a second canvas flag owner.
   context reset, and the first direct message path. Office, configuration,
   automation, and passthrough sessions remain excluded.
 - Added discovery, profile, prepared-launch, reset, and prompt-rendering
-  regression coverage. Recorded and dispatched reset prompts use the same
-  resolved canvas capability.
-- Rendered sizes are 4,758 bytes for the ordinary task context and 5,231 bytes
-  with canvas guidance enabled.
+  regression coverage. StartTask and StartCreatedSession now test the real
+  producer paths, and direct-message admission passes one server-resolved
+  canvas projection to both persistence and launch. Lookup failure, pair
+  mismatch, and excluded Office/configuration surfaces are covered.
+- Replaced inline rich-output schemas and examples with a discovery routing
+  rule. The ordinary rendered context is 4,394 bytes, a 410-byte reduction
+  from the recorded 4,804-byte pre-compaction baseline. Canvas-enabled context
+  is 4,867 bytes. These measurements are bytes, not model tokens.
 - Verification: focused backend packages passed with 5,396 tests across seven
   packages; `rtk make lint` reported 0 issues; `rtk git diff --check` passed.

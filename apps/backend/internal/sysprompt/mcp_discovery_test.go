@@ -35,6 +35,8 @@ func TestFormatKandevContext_CanvasGuidanceFollowsCapability(t *testing.T) {
 	assert.Contains(t, withCanvas, "on failure, report the failure")
 	assert.Contains(t, withCanvas, "do not claim publication")
 	assert.Contains(t, withCanvas, "Files or a successful local build do not create a published Kandev canvas.")
+	assert.Contains(t, withCanvas, "Get the schema and examples from tool discovery.")
+	assert.NotContains(t, withCanvas, `"chart_type":"bar"`)
 }
 
 func TestKandevContextTemplate_IsCompactEnoughForEveryTask(t *testing.T) {
@@ -44,19 +46,25 @@ func TestKandevContextTemplate_IsCompactEnoughForEveryTask(t *testing.T) {
 	assert.True(t, utf8.ValidString(template))
 }
 
-func TestKandevContext_RenderedSizesStayWithinRecordedBudgets(t *testing.T) {
+func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 	ordinary := FormatKandevContext("task", "session", false)
 	canvas := FormatKandevContextWithOptions("task", "session", KandevContextOptions{
 		IncludeCoordinatorTaskControls: true,
 		IncludeCanvasGuidance:          true,
 	})
 
-	// The 2,800-byte contract applies to the reusable raw template. Rendered
-	// contexts also contain dynamic capability sections and identifiers, so
-	// these ceilings detect growth without conflating the two measurements.
-	require.LessOrEqual(t, len([]byte(ordinary)), 4800)
-	require.LessOrEqual(t, len([]byte(canvas)), 5300)
+	const (
+		recordedOrdinaryPromptBytesBeforeCompaction = 4804
+		minimumRenderedReductionBytes               = 400
+	)
+	// This baseline is a recorded rendered prompt from before rich-output
+	// examples moved behind tool discovery. Keep the assertion on rendered
+	// bytes, not the reusable raw template, so interpolation cannot hide prompt
+	// growth or make a prompt-reduction claim from source-file size alone.
+	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes)
 	assert.True(t, utf8.ValidString(ordinary))
 	assert.True(t, utf8.ValidString(canvas))
-	t.Logf("rendered prompt sizes: ordinary=%d bytes, canvas=%d bytes", len([]byte(ordinary)), len([]byte(canvas)))
+	t.Logf("rendered prompt sizes: ordinary=%d bytes, canvas=%d bytes, baseline=%d bytes, reduction=%d bytes",
+		len([]byte(ordinary)), len([]byte(canvas)), recordedOrdinaryPromptBytesBeforeCompaction,
+		recordedOrdinaryPromptBytesBeforeCompaction-len([]byte(ordinary)))
 }

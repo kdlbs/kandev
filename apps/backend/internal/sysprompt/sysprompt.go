@@ -239,7 +239,7 @@ const canvasGuidanceSection = `CANVAS AUTHORING:
 For a requested Kandev canvas, discover create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create the draft in Kandev before writing application files. Read the authoring skill once and edit only inside the returned source directory. Publish through MCP and report its release status; on failure, report the failure and do not claim publication. Files or a successful local build do not create a published Kandev canvas.
 `
 
-const richOutputSection = `- show_rich_output_kandev: When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now. Do not implement the display as ASCII/SVG/HTML or with another app. Else prose; small text table: Markdown. Send version=1,title,blocks (1-4). Inline: {"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}. CSV line: {"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Metrics: {"type":"metrics","items":[{"label":"Passed","value":"38"}]}. Paths workspace-relative. Kandev owns axes/legends/tooltips/layout. Label series with units.
+const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Otherwise use prose or a small Markdown table. Get the schema and examples from tool discovery. Paths are workspace-relative; Kandev owns layout, axes, legends, and tooltips. Label series with units.
 `
 
 // stepCompleteSection is the description + instruction block for the

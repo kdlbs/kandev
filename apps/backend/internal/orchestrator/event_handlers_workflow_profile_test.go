@@ -342,6 +342,9 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
 		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
 	}
+	if strings.Contains(messages.userMessages[0].content, "create_canvas_kandev") {
+		t.Fatalf("reused Office prompt must not advertise canvas authoring: %s", messages.userMessages[0].content)
+	}
 }
 func TestResolveStepAgentProfile(t *testing.T) {
 	t.Run("returns step profile when set", func(t *testing.T) {

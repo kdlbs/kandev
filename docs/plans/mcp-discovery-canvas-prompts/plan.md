@@ -103,8 +103,10 @@ Implementation verification is complete. The new prompt producers and locale
 contract tests pass, and focused desktop and mobile E2E coverage confirms the
 editable preset reaches the task creation flow and retains user edits.
 
-The raw template is 2,743 UTF-8 bytes. Rendered context is 4,758 bytes for an
-ordinary task and 5,179 bytes when canvas authoring guidance is enabled.
+The prompt file is 2,744 bytes, or 2,743 bytes after loading its trailing
+newline. The rendered ordinary context is 4,394 bytes, versus the recorded
+4,804-byte pre-compaction baseline, for a 410-byte reduction. Canvas-enabled
+context is 4,867 bytes. These measurements are bytes, not model tokens.
 
 ## Risks
 

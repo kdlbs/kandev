@@ -493,6 +493,29 @@ func (s *Service) StartCreatedSessionWithPromptContext(
 	)
 }
 
+// StartCreatedSessionWithPromptContextAndCanvasGuidance starts a prepared
+// direct-message session with the exact server-side canvas capability decision
+// made while the user message was admitted. This prevents the launch-time
+// canonicalizer from producing a prompt that differs from the persisted row.
+func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{
+			canvasGuidanceResolved: canvasGuidanceResolved,
+			includeCanvasGuidance:  includeCanvasGuidance,
+		},
+	)
+}
+
 // startCreatedSessionWithComposedPrompt launches a prepared session from an
 // auto-start path whose prompt was already composed and recorded by the
 // orchestrator. The ordinary public entry point intentionally applies the
@@ -522,6 +545,11 @@ type startCreatedSessionOptions struct {
 	skipTaskDescriptionFallback bool
 	promptAlreadyComposed       bool
 	retryPrompt                 string
+	// canvasGuidanceResolved carries the server-side capability projection
+	// from message admission. When false, this launch resolves the capability
+	// locally because no earlier producer has made a trusted decision.
+	canvasGuidanceResolved bool
+	includeCanvasGuidance  bool
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -736,9 +764,13 @@ func (s *Service) startCreatedSession(
 	// MCP-tool boilerplate prepended to "hello".
 	includeCanvasGuidance := false
 	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
-		includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+		if options.canvasGuidanceResolved {
+			includeCanvasGuidance = options.includeCanvasGuidance
+		} else {
+			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+			}
 		}
 	}
 	if effectivePrompt != "" || len(attachments) > 0 {
