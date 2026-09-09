@@ -18,21 +18,21 @@ import (
 // clamps, and the office_routines table rebuild that fixes the column's
 // stored DEFAULT for upgraded installs (AC-003.3).
 func (r *Repository) migrateRoutineCatchUp() {
-	r.migrate.Apply("office_routine_runs.catch_up_missed_ticks",
+	_ = r.migrate.Apply("office_routine_runs.catch_up_missed_ticks",
 		`ALTER TABLE office_routine_runs ADD COLUMN catch_up_missed_ticks INTEGER`)
-	r.migrate.Apply("office_routine_runs.catch_up_first_missed_at",
+	_ = r.migrate.Apply("office_routine_runs.catch_up_first_missed_at",
 		`ALTER TABLE office_routine_runs ADD COLUMN catch_up_first_missed_at TIMESTAMP`)
-	r.migrate.Apply("office_routine_runs.catch_up_truncated",
+	_ = r.migrate.Apply("office_routine_runs.catch_up_truncated",
 		`ALTER TABLE office_routine_runs ADD COLUMN catch_up_truncated INTEGER NOT NULL DEFAULT 0`)
 
-	r.migrate.Apply("office_routines.catch_up_policy_rename",
+	_ = r.migrate.Apply("office_routines.catch_up_policy_rename",
 		fmt.Sprintf(
 			`UPDATE office_routines SET catch_up_policy = '%s' WHERE catch_up_policy = '%s'`,
 			models.CatchUpPolicySummarizeMissed, models.CatchUpPolicyEnqueueMissedWithCap,
 		))
-	r.migrate.Apply("office_routines.catch_up_max_floor",
+	_ = r.migrate.Apply("office_routines.catch_up_max_floor",
 		fmt.Sprintf(`UPDATE office_routines SET catch_up_max = %d WHERE catch_up_max < 1`, models.CatchUpMaxDefault))
-	r.migrate.Apply("office_routines.catch_up_max_ceiling",
+	_ = r.migrate.Apply("office_routines.catch_up_max_ceiling",
 		fmt.Sprintf(`UPDATE office_routines SET catch_up_max = %d WHERE catch_up_max > %d`,
 			models.CatchUpMaxCeiling, models.CatchUpMaxCeiling))
 
