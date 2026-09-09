@@ -1,6 +1,6 @@
 ---
 created: 2026-09-09
-status: draft
+status: implemented
 requirements:
   - REQ-OFFICE-WAKE-WAVE-IDENTITY-001
   - REQ-OFFICE-WAKE-WAVE-IDENTITY-002
@@ -379,9 +379,22 @@ provisioned in this environment, so the gated Postgres twins (Task 06's
 skipped rather than ran — consistent with the card's instruction not to
 provision Docker/Postgres here.
 
-Remaining before this card closes: the Definition of Done gauntlet
-(`make fmt`, `make typecheck test lint`, `make lint-format`,
-`pnpm run i18n:ratchet`) has not yet been run.
+Definition of Done gauntlet: `make fmt`, `make typecheck`, `make lint`
+(backend 0 issues repo-wide, web eslint clean, lint-architecture clean;
+lint-harness/lint-specs required Python 3.10+ — this environment's
+default `python3` is 3.9.6, incompatible with the scripts' `X | None`
+type-hint syntax; ran clean under `/opt/homebrew/bin/python3.14`
+instead), `make lint-format`, and `pnpm run i18n:ratchet` (no UI change,
+as expected for a backend-only card) all pass. `make test` passes for
+every package this initiative touched; pre-existing failures in
+unrelated subsystems (npm cache path resolution, worktree/git
+provisioning, agentctl process management, the dev launcher) reproduce
+against unmodified code in this sandboxed environment and are unrelated
+to this change.
+
+A final pass removed every AC-NN/task-order reference this initiative's
+comments had accumulated, restating each as a direct invariant per the
+repo's comment convention.
 
 ## Risks
 
