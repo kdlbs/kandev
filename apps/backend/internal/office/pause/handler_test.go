@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -242,6 +243,39 @@ func TestPostResume_Success(t *testing.T) {
 	}
 	if body["pause"] != nil {
 		t.Fatalf("pause = %v, want nil", body["pause"])
+	}
+}
+
+// oversizedPauseRequestBody builds a JSON body whose "reason" field alone
+// exceeds maxPauseRequestBodyBytes (64KiB), so it exercises the
+// http.MaxBytesReader limit regardless of the surrounding JSON structure.
+func oversizedPauseRequestBody() string {
+	return `{"reason":"` + strings.Repeat("a", 70*1024) + `"}`
+}
+
+// TestPostPause_OversizedBodyReturns413 proves SEC-001: pause/resume had no
+// request-size limit, unlike the established http.MaxBytesReader pattern
+// used elsewhere in this package group (agents/handler.go,
+// channels/handler.go). An oversized body must be rejected before it
+// reaches JSON decoding, not silently accepted.
+func TestPostPause_OversizedBodyReturns413(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/pause", oversizedPauseRequestBody())
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPostResume_OversizedBodyReturns413 is the postResume twin.
+func TestPostResume_OversizedBodyReturns413(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/resume", oversizedPauseRequestBody())
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413: %s", rec.Code, rec.Body.String())
 	}
 }
 

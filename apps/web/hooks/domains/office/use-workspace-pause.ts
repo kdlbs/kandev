@@ -97,13 +97,13 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
         return { ok: true };
       } catch (err) {
         const activeWorkspaceId = storeApi.getState().workspaces.activeId;
-        const applied = applyPauseResponse(tag, workspaceId, activeWorkspaceId, {
-          kind: "mutate-failure",
-        });
-        // A superseded response (guard failed) surfaces no error: the
-        // operator has moved on to another workspace or a newer request
-        // already answered, so a stale failure would misattribute.
-        if (!applied) return { ok: false };
+        // Whether the guard applies this outcome to the shared store is a
+        // separate question from whether this specific caller's request
+        // failed: this call genuinely errored, so its direct caller (still
+        // awaiting this promise, e.g. an open dialog) must learn that,
+        // regardless of whether a newer request or a workspace switch means
+        // the shared store no longer reflects it.
+        applyPauseResponse(tag, workspaceId, activeWorkspaceId, { kind: "mutate-failure" });
         const message = err instanceof ApiError ? err.message : t("office:pauseRequestFailed");
         return { ok: false, error: message };
       } finally {
