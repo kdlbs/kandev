@@ -189,6 +189,64 @@ func TestResolveTaskSessionMCPProfile_GrantsHandoffCapabilityOnlyForOfficeSessio
 	}
 }
 
+func TestResolveTaskSessionMCPProfile_CanvasCapabilityFollowsFeatureAndSurface(t *testing.T) {
+	tests := []struct {
+		name          string
+		task          *models.Task
+		expectCanvas  bool
+		expectSurface mcpprofile.Surface
+	}{
+		{
+			name:          "kanban task",
+			task:          &models.Task{ID: "task-kanban"},
+			expectCanvas:  true,
+			expectSurface: mcpprofile.SurfaceKanbanTask,
+		},
+		{
+			name:          "office task",
+			task:          &models.Task{ID: "task-office", IsFromOffice: true},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceOfficeTask,
+		},
+		{
+			name:          "configuration session",
+			task:          &models.Task{ID: "task-config"},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceConfiguration,
+		},
+		{
+			name:          "automation task",
+			task:          &models.Task{ID: "task-automation", Origin: models.TaskOriginAutomationRun},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceAutomation,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session", TaskID: tt.task.ID}
+			if tt.expectSurface == mcpprofile.SurfaceConfiguration {
+				session.Metadata = map[string]interface{}{"config_mode": true}
+			}
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[session.ID] = session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetCanvasesEnabled(true)
+
+			profile, err := exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectSurface, profile.Surface)
+			require.Equal(t, tt.expectCanvas, profile.HasCapability(mcpprofile.CapabilityCanvas))
+
+			exec.SetCanvasesEnabled(false)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityCanvas))
+		})
+	}
+}
+
 func TestResolveTaskSessionMCPMode_TitlePendingIsTaskModeVariant(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()

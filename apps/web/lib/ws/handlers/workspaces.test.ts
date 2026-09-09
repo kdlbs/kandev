@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createStore } from "zustand";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -72,5 +72,51 @@ describe("workspace.updated placement", () => {
     dispatch(handlers, "workspace.created", { id: "ws-2", name: "Runtime", unit_id: "unit-new" });
 
     expect(store.getState().workspaces.items[0].unit_id).toBe("unit-new");
+  });
+});
+
+describe("workspace.deleted queue cleanup", () => {
+  const WORKSPACE_ID = "workspace-1";
+
+  it("clears normalized task sessions without relying on queue metadata", () => {
+    const clearQueueStatus = vi.fn();
+    let state = {
+      workspaces: {
+        items: [{ id: WORKSPACE_ID }, { id: "workspace-2" }],
+        activeId: WORKSPACE_ID,
+      },
+      workflows: { items: [], activeId: null },
+      kanban: {
+        workflowId: "workflow-1",
+        steps: [],
+        tasks: [{ id: "task-1", workspaceId: WORKSPACE_ID }],
+      },
+      kanbanMulti: { snapshots: {} },
+      taskSessions: {
+        items: {
+          "session-1": {
+            id: "session-1",
+            task_id: "task-1",
+            queue_incarnation_id: "incarnation-1",
+          },
+        },
+      },
+      clearQueueStatus,
+    } as unknown as AppState;
+    const store = {
+      getState: () => state,
+      setState: (updater: AppState | Partial<AppState> | ((value: AppState) => AppState)) => {
+        state = (
+          typeof updater === "function" ? updater(state) : { ...state, ...updater }
+        ) as AppState;
+      },
+    } as StoreApi<AppState>;
+
+    registerWorkspacesHandlers(store)["workspace.deleted"]!({
+      payload: { id: WORKSPACE_ID },
+    } as never);
+
+    expect(clearQueueStatus).toHaveBeenCalledOnce();
+    expect(clearQueueStatus).toHaveBeenCalledWith("session-1");
   });
 });

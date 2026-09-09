@@ -238,6 +238,8 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
+		"canvas_guidance_section":          "",
+		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
@@ -252,6 +254,13 @@ const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct pare
 
 const autopilotSection = `AUTOPILOT MODE:
 This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. The question tool ends the current turn, so do not make another tool call or continue working after you ask it. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
+`
+
+const canvasGuidanceSection = `CANVAS AUTHORING:
+Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
+`
+
+const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Otherwise use prose or a small Markdown table. Get the schema and examples from tool discovery. Paths are workspace-relative; Kandev owns layout, axes, legends, and tooltips. Label series with units.
 `
 
 // stepCompleteSection is the description + instruction block for the
@@ -313,6 +322,7 @@ type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
+	IncludeCanvasGuidance          bool
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
@@ -356,12 +366,18 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.Autopilot {
 		autopilot = autopilotSection
 	}
+	canvasGuidance := ""
+	if options.IncludeCanvasGuidance {
+		canvasGuidance = canvasGuidanceSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
+		"canvas_guidance_section":          canvasGuidance,
+		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
 	})

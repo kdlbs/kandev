@@ -12,6 +12,19 @@ export interface SecretListItem {
   updated_at: string;
 }
 
+/** A configuration resource that binds an environment key to a secret. */
+export interface SecretReference {
+  kind: "agent_profile" | "executor_profile" | "repository";
+  id?: string;
+  name?: string;
+  key?: string;
+}
+
+/** Response from the read-only secret-reference preflight endpoint. */
+export interface SecretReferencesResponse {
+  references: SecretReference[] | null;
+}
+
 /** Request payload for creating a secret. */
 export interface CreateSecretRequest {
   name: string;
