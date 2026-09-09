@@ -3,7 +3,9 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -244,6 +246,30 @@ func TestPushPreflightRedactsCredentialsInRemoteOutput(t *testing.T) {
 	}
 	if strings.Contains(result.Output, secret) || strings.Contains(result.Error, secret) {
 		t.Errorf("credential leaked: output=%q error=%q", result.Output, result.Error)
+	}
+}
+
+func TestPushPreflightDoesNotRunLocalPrePushHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("pre-push hook is a POSIX shell script")
+	}
+	repoDir, _, _, operator := setupPushRemotesRepo(t)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-push")
+	hookScript := "#!/bin/sh\ntouch " + marker + "\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := operator.PushPreflight(context.Background(), PushOptions{Remote: "backup"})
+	if err != nil {
+		t.Fatalf("PushPreflight() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("PushPreflight() = %+v, want success", result)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("PushPreflight() ran the local pre-push hook, want it bypassed")
 	}
 }
 

@@ -605,7 +605,10 @@ func (g *GitOperator) PushPreflight(ctx context.Context, opts PushOptions) (*Git
 		return result, nil
 	}
 
-	output, err := g.runGitCommand(ctx, "push", "--dry-run", plan.remote, plan.refspec)
+	// --no-verify: a dry-run push still invokes the local pre-push hook, which
+	// can mutate the worktree or perform arbitrary side effects. Preflight must
+	// not mutate anything, so the hook must not run.
+	output, err := g.runGitCommand(ctx, "push", "--dry-run", "--no-verify", plan.remote, plan.refspec)
 	result.Output = output
 	if err != nil {
 		if destinationRef, ok := strings.CutPrefix(plan.refspec, "HEAD:"); ok &&
