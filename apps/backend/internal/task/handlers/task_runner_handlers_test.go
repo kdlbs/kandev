@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,15 +255,44 @@ func assertWSErrorCode(t *testing.T, resp *ws.Message, want string) {
 
 func TestRunnerSwitchWSErrorMapsEvaluationUnavailable(t *testing.T) {
 	msg := &ws.Message{ID: "msg-1", Action: ws.ActionTaskRunner}
-	resp, err := runnerSwitchWSError(msg, errors.New("wrapped: "+repoerrors.ErrRunnerEvaluationUnavailable.Error()))
+	log := newTestLogger(t)
+	resp, err := runnerSwitchWSError(msg, errors.New("wrapped: "+repoerrors.ErrRunnerEvaluationUnavailable.Error()), log)
 	if err != nil {
 		t.Fatalf("runnerSwitchWSError: %v", err)
 	}
 	assertWSErrorCode(t, resp, ws.ErrorCodeInternalError)
 
-	resp, err = runnerSwitchWSError(msg, repoerrors.ErrRunnerEvaluationUnavailable)
+	resp, err = runnerSwitchWSError(msg, repoerrors.ErrRunnerEvaluationUnavailable, log)
 	if err != nil {
 		t.Fatalf("runnerSwitchWSError: %v", err)
 	}
 	assertWSErrorCode(t, resp, ws.ErrorCodeUnavailable)
+}
+
+// TestRunnerSwitchWSErrorSanitizesEvaluationUnavailableMessage regression-tests
+// that a wrapped internal error (a DB failure, a transaction abort, ...)
+// reaches the WS client as a fixed generic message, not the wrapped detail
+// verbatim — mirroring wsUpdateTaskRepository's existing sanitization for
+// opaque internal errors.
+func TestRunnerSwitchWSErrorSanitizesEvaluationUnavailableMessage(t *testing.T) {
+	msg := &ws.Message{ID: "msg-1", Action: ws.ActionTaskRunner}
+	log := newTestLogger(t)
+	sensitive := "pq: connection to 10.0.0.5:5432 refused by remote host"
+	wrapped := fmt.Errorf("%w: %s", repoerrors.ErrRunnerEvaluationUnavailable, sensitive)
+
+	resp, err := runnerSwitchWSError(msg, wrapped, log)
+	if err != nil {
+		t.Fatalf("runnerSwitchWSError: %v", err)
+	}
+	assertWSErrorCode(t, resp, ws.ErrorCodeUnavailable)
+
+	var body struct {
+		Message string `json:"message"`
+	}
+	if unmarshalErr := json.Unmarshal(resp.Payload, &body); unmarshalErr != nil {
+		t.Fatalf("unmarshal error payload: %v", unmarshalErr)
+	}
+	if strings.Contains(body.Message, sensitive) {
+		t.Fatalf("error message leaked internal detail: %q", body.Message)
+	}
 }

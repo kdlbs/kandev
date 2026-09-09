@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -535,7 +536,7 @@ func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) 
 
 	task, err := h.service.SwitchTaskRunner(ctx, req.ID, req.ExecutorProfileID)
 	if err != nil {
-		return runnerSwitchWSError(msg, err)
+		return runnerSwitchWSError(msg, err, h.logger)
 	}
 
 	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, []*models.Task{task})
@@ -549,8 +550,12 @@ func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) 
 // runnerSwitchWSError maps SwitchTaskRunner's outcome vocabulary onto WS
 // error codes, attaching the machine-readable reason under
 // errorDetailKeyErrorCode so a client can present per-outcome copy without
-// parsing the human-readable message.
-func runnerSwitchWSError(msg *ws.Message, err error) (*ws.Message, error) {
+// parsing the human-readable message. evaluation_unavailable can wrap an
+// opaque internal error (a DB failure, a transaction abort), so its message
+// is a fixed generic string with the real error logged server-side instead
+// — the same sanitization wsUpdateTaskRepository applies to its own opaque
+// internal errors.
+func runnerSwitchWSError(msg *ws.Message, err error, log *logger.Logger) (*ws.Message, error) {
 	switch {
 	case errors.Is(err, service.ErrRunnerSwitchMalformed):
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -564,7 +569,8 @@ func runnerSwitchWSError(msg *ws.Message, err error) (*ws.Message, error) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(),
 			map[string]interface{}{errorDetailKeyErrorCode: models.RunnerConflictTargetCannotMaterializeRepository})
 	case errors.Is(err, repoerrors.ErrRunnerEvaluationUnavailable):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, err.Error(), nil)
+		log.Warn("runner switch evaluation unavailable", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "Unable to evaluate the runner switch right now, try again", nil)
 	}
 	var mutabilityErr *repoerrors.ErrRunnerMutabilityConflict
 	if errors.As(err, &mutabilityErr) {
