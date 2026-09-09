@@ -47,6 +47,46 @@ beforeEach(() => {
   mocks.listNotificationProviders.mockReset();
 });
 
+async function assertStaleRescanAfterUnmountIsIgnored() {
+  let resolveA: (value: ReturnType<typeof providerResponse>) => void = () => undefined;
+  let resolveB: (value: ReturnType<typeof providerResponse>) => void = () => undefined;
+  const requestA = new Promise<ReturnType<typeof providerResponse>>((resolve) => {
+    resolveA = resolve;
+  });
+  const requestB = new Promise<ReturnType<typeof providerResponse>>((resolve) => {
+    resolveB = resolve;
+  });
+  mocks.listNotificationProviders.mockReturnValueOnce(requestA).mockReturnValueOnce(requestB);
+
+  const first = renderHook(() => useNotificationProviders());
+  act(() => {
+    void first.result.current.rescanApprise();
+  });
+  await waitFor(() => expect(first.result.current.appriseRescanPending).toBe(true));
+
+  first.unmount();
+  const second = renderHook(() => useNotificationProviders());
+  act(() => {
+    void second.result.current.rescanApprise();
+  });
+  await waitFor(() => expect(mocks.listNotificationProviders).toHaveBeenCalledTimes(2));
+
+  await act(async () => {
+    resolveB(providerResponse(true));
+    await requestB;
+  });
+  expect(mocks.setAppriseAvailable).toHaveBeenCalledWith(true);
+  expect(second.result.current.appriseRescanResult).toBe(true);
+
+  await act(async () => {
+    resolveA(providerResponse(false));
+    await requestA;
+  });
+  expect(mocks.setAppriseAvailable).toHaveBeenCalledTimes(1);
+  expect(mocks.setAppriseAvailable).toHaveBeenLastCalledWith(true);
+  expect(second.result.current.appriseRescanResult).toBe(true);
+}
+
 describe("useNotificationProviders Apprise rescan", () => {
   it.each([
     [false, true],
@@ -138,4 +178,9 @@ describe("useNotificationProviders Apprise rescan", () => {
     expect(mocks.setAppriseAvailable).toHaveBeenCalledWith(true);
     expect(mocks.setNotificationProviders).not.toHaveBeenCalled();
   });
+
+  it(
+    "ignores a stale rescan after the owning hook unmounts",
+    assertStaleRescanAfterUnmountIsIgnored,
+  );
 });

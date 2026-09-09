@@ -202,7 +202,7 @@ function AppriseRescanControls({
     <div className="flex min-w-0 flex-col items-start gap-1 md:items-end">
       <Button
         variant="outline"
-        className="min-h-11 cursor-pointer md:min-h-9"
+        className="min-h-11 cursor-pointer md:min-h-9 [@media(pointer:coarse)]:min-h-11"
         data-testid="apprise-rescan"
         disabled={
           !notificationProvidersLoaded || notificationProvidersLoading || appriseRescanPending

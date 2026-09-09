@@ -24,6 +24,16 @@ vi.mock("@/lib/api", () => ({
 // compares them by reference, so a fresh array per render re-hydrates forever.
 const PROVIDERS: NotificationProvider[] = [];
 const EVENTS = ["session.turn_finished"];
+const APPRISE_PROVIDER: NotificationProvider = {
+  id: "apprise-provider",
+  name: "Saved Apprise",
+  type: "apprise",
+  config: { urls: ["json://saved"] },
+  enabled: true,
+  events: EVENTS,
+  created_at: "",
+  updated_at: "",
+};
 let appriseAvailable = false;
 let appriseRescanPending = false;
 let appriseRescanError = false;
@@ -56,6 +66,7 @@ vi.mock("@/lib/desktop/native-notification-client", () => ({
 
 afterEach(() => {
   cleanup();
+  PROVIDERS.length = 0;
   appriseAvailable = false;
   appriseRescanPending = false;
   appriseRescanError = false;
@@ -161,5 +172,28 @@ describe("NotificationsSettings", () => {
     expect(screen.getByText("Could not check Apprise. Try again.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Rescan Apprise" })).toBeTruthy();
     expect(screen.getByText(/Apprise is not installed yet/)).toBeTruthy();
+  });
+
+  it("routes edit Cancel through the draft rollback handler", () => {
+    PROVIDERS.push(APPRISE_PROVIDER);
+    appriseAvailable = true;
+    render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("Saved Apprise"), {
+      target: { value: "Changed Apprise" },
+    });
+    fireEvent.change(screen.getByDisplayValue("json://saved"), {
+      target: { value: "json://changed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getAllByText("Saved Apprise").length).toBeGreaterThan(0);
+    expect(screen.queryByDisplayValue("Changed Apprise")).toBeNull();
+    expect(screen.queryByDisplayValue("json://changed")).toBeNull();
   });
 });

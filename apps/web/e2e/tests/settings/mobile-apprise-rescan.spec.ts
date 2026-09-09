@@ -33,4 +33,20 @@ test.describe("Mobile Apprise rescan", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);
   });
+
+  test("keeps the rescan action touch-sized on a coarse tablet", async ({ tabletTestPage }) => {
+    await routeAppriseRescans(tabletTestPage, [true]);
+    await tabletTestPage.goto("/settings/preferences/notifications");
+
+    await expect.poll(() => tabletTestPage.evaluate(() => window.innerWidth)).toBe(900);
+    await expect
+      .poll(() => tabletTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches))
+      .toBe(true);
+
+    const rescan = tabletTestPage.getByTestId("apprise-rescan");
+    await expect(rescan).toBeVisible();
+    const box = await rescan.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  });
 });
