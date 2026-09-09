@@ -137,6 +137,15 @@ func TestClassifyCursorRetriableLeadingCanceled(t *testing.T) {
 	if got := Decide(ContextKanban, e, time.Time{}); got != DecisionShortRetry {
 		t.Fatalf("Decide(ContextKanban, ...) = %q, want %q", got, DecisionShortRetry)
 	}
+	if e.Class != ClassTransient {
+		t.Fatalf("Class = %q, want %q", e.Class, ClassTransient)
+	}
+	if e.Confidence != ConfHigh {
+		t.Fatalf("Confidence = %q, want %q", e.Confidence, ConfHigh)
+	}
+	if e.UserAction {
+		t.Fatal("UserAction = true, want false")
+	}
 }
 
 func TestClassifyCursorRetriableCancellationRemainsManual(t *testing.T) {
