@@ -222,16 +222,54 @@ describe("shouldRestoreFocusOnEnable", () => {
 // predicate above -- a mock editor stands in for TipTap's `Editor` since
 // jsdom cannot reproduce the browser's disable-blurs-the-element behavior
 // the effect exists to work around.
+//
+// requestAnimationFrame is stubbed with a queue the test drives one frame at
+// a time (rather than firing synchronously), so a test can interleave a
+// browser-driven blur landing *between* retry attempts -- the scenario that
+// made the real fix necessary (a same-tick restore raced a queued blur and
+// lost).
+let frameQueue: FrameRequestCallback[];
+
+function stubAnimationFrame() {
+  frameQueue = [];
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    frameQueue.push(cb);
+    return frameQueue.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+    frameQueue[handle - 1] = () => {};
+  });
+}
+
+function flushFrame() {
+  const cb = frameQueue.shift();
+  cb?.(0);
+}
+
+/** Stateful stand-in for TipTap's `Editor`: `view.hasFocus()` reflects
+ *  whatever last happened to it, `setEditable(false)` simulates the real
+ *  browser's disable-blurs-the-element behavior, and `commands.focus`
+ *  simulates a successful restore -- so a test can also simulate a
+ *  *delayed* external blur landing after a restore already ran. */
+function makeEditor(hasFocusInitially: boolean) {
+  let focused = hasFocusInitially;
+  return {
+    view: { hasFocus: () => focused },
+    setEditable: vi.fn((editable: boolean) => {
+      if (!editable) focused = false;
+    }),
+    commands: { focus: vi.fn(() => void (focused = true)) },
+    simulateExternalBlur: () => void (focused = false),
+  };
+}
+
 describe("useSyncDisabledState", () => {
-  function makeEditor(hasFocus: boolean) {
-    return {
-      view: { hasFocus: () => hasFocus },
-      setEditable: vi.fn(),
-      commands: { focus: vi.fn() },
-    };
-  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it("captures focus before disabling, then restores it on re-enable", () => {
+    stubAnimationFrame();
     const editor = makeEditor(true);
     const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
       initialProps: { disabled: false },
@@ -243,10 +281,39 @@ describe("useSyncDisabledState", () => {
 
     rerender({ disabled: false });
     expect(editor.setEditable).toHaveBeenLastCalledWith(true);
+    expect(editor.commands.focus).not.toHaveBeenCalled();
+
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+    // The retry loop re-checks on the next frame that focus stuck; since it
+    // did, it must not call focus() again.
+    flushFrame();
     expect(editor.commands.focus).toHaveBeenCalledOnce();
   });
 
-  it("does not steal focus back when another control has since claimed it", () => {
+  it("retries on the next frame when a queued browser blur lands after the first restore", () => {
+    stubAnimationFrame();
+    const editor = makeEditor(true);
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    rerender({ disabled: false });
+
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+
+    // A blur Chromium queued for the earlier disable lands only now,
+    // discarding the restore that already ran.
+    editor.simulateExternalBlur();
+
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops retrying once another control has since claimed focus", () => {
+    stubAnimationFrame();
     const editor = makeEditor(true);
     const claimant = document.createElement("input");
     document.body.append(claimant);
@@ -258,11 +325,14 @@ describe("useSyncDisabledState", () => {
     claimant.focus();
     rerender({ disabled: false });
 
+    flushFrame();
     expect(editor.commands.focus).not.toHaveBeenCalled();
+    expect(frameQueue).toHaveLength(0);
     claimant.remove();
   });
 
   it("does not focus on re-enable when the editor never had focus before disabling", () => {
+    stubAnimationFrame();
     const editor = makeEditor(false);
     const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
       initialProps: { disabled: false },
@@ -272,6 +342,26 @@ describe("useSyncDisabledState", () => {
     rerender({ disabled: false });
 
     expect(editor.commands.focus).not.toHaveBeenCalled();
+    expect(frameQueue).toHaveLength(0);
+  });
+
+  it("gives up after the retry budget instead of polling forever", () => {
+    stubAnimationFrame();
+    const editor = makeEditor(true);
+    // Focus never sticks and nothing else claims it either -- simulates a
+    // pathological case where the editor keeps losing focus every frame.
+    editor.commands.focus = vi.fn();
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    rerender({ disabled: false });
+
+    for (let i = 0; i < 10; i += 1) flushFrame();
+
+    expect(editor.commands.focus).toHaveBeenCalledTimes(5);
+    expect(frameQueue).toHaveLength(0);
   });
 });
 

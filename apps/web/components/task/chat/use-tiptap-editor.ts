@@ -347,6 +347,18 @@ type DisabledStateEditor = {
   commands: { focus: () => void };
 };
 
+/** How many animation frames to retry the focus restore across. A browser
+ *  can apply the blur caused by `contenteditable` flipping to `false` on a
+ *  queued task rather than synchronously, so a same-tick restore can race
+ *  that queued blur and be silently discarded once it lands (Chromium is
+ *  known to let contenteditable focus/blur state settle a frame or more
+ *  after the triggering DOM change:
+ *  https://issues.chromium.org/issues/41134847). Retrying across a few
+ *  frames gives that queued blur time to land before the restore is
+ *  considered final, while stopping as soon as focus sticks or something
+ *  else visibly claims it. */
+const FOCUS_RESTORE_MAX_ATTEMPTS = 5;
+
 /** Sync disabled state onto the editor. ProseMirror maps `editable` onto the
  *  DOM `contenteditable` attribute, and a real browser blurs the element when
  *  that attribute flips to `false` without restoring focus when it flips
@@ -363,10 +375,21 @@ export function useSyncDisabledState(editor: DisabledStateEditor | null, disable
       return;
     }
     editor.setEditable(true);
-    if (shouldRestoreFocusOnEnable(hadFocusBeforeDisableRef.current)) {
-      editor.commands.focus();
-    }
+    const hadFocus = hadFocusBeforeDisableRef.current;
     hadFocusBeforeDisableRef.current = false;
+    if (!hadFocus) return;
+
+    let frame = 0;
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      if (editor.view.hasFocus()) return;
+      if (!shouldRestoreFocusOnEnable(true)) return;
+      editor.commands.focus();
+      if (attempts < FOCUS_RESTORE_MAX_ATTEMPTS) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [editor, disabled]);
 }
 
