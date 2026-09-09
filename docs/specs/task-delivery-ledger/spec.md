@@ -32,11 +32,11 @@ is consumed only by the automation engine
 `GitHubPushReceived` subscription), never for merge inference.
 
 Separately, Kandev's own success metric is wrong in a way that lands in the same
-analysis. `FinishRun` writes `status='finished'` on six terminal call sites,
-**four** of which did no work, and `agent_summary.go` counts every `finished` row as
-a success. Only two of the six — the agent-completed subscribers — follow an agent
-actually running. The four scheduler guards record the reason that work did not
-run, as spelled out under **Office run outcome**.
+analysis. `FinishRun` writes `status='finished'` on eight terminal call sites,
+**six** of which did no work, and `agent_summary.go` counts every `finished` row as
+a success. Only two of the eight — the agent-completed subscribers — follow an agent
+actually running. The remaining scheduler guards record the reason that work did
+not run, as spelled out under **Office run outcome**.
 
 This spec defines a **delivery ledger** that records how, and whether, each
 `(task, repository)` pair delivered; and a **run outcome** that stops Office from
@@ -148,7 +148,7 @@ This spec defines two contracts that share no build-order dependency. They are
 specified together because they are the same defect at two grains, and they are
 **built in this order**, each closing on its own:
 
-- **Slice A — Office run outcome.** One nullable column, six call sites, **one new
+- **Slice A — Office run outcome.** One nullable column, eight call sites, **one new
   field on `models.Run`**, one reshaped repository query and the two dashboard response
   shapes it feeds. Depends on nothing in Slice B.
 
@@ -314,11 +314,12 @@ evidence** relies on.
 ### `runs.outcome` (new column)
 
 Nullable TEXT on the existing `runs` table:
-`processed | budget_blocked | budget_unmeasurable | idle_skipped | agent_inactive | task_tree_held`.
+`processed | budget_blocked | budget_unmeasurable | idle_skipped | agent_inactive |
+task_tree_held | workspace_paused`.
 
 `NULL` for every row written before activation, for any run that never reaches a terminal
 status, and for every run that reaches `status = 'failed'` (see **Office run outcome**,
-the `FailRun` bullet). On the **finished** path the writer writes one of the six values
+the `FailRun` bullet). On the **finished** path the writer writes one of the seven values
 above; it never writes `''`. No database constraint is added —
 the reader is total over every possible value (see **Office run outcome**), so
 an unrecognised value degrades to `skipped` rather than breaking a query.
@@ -1486,15 +1487,17 @@ line number is a pointer (see **Citation convention**).
 | Call site | Outcome |
 |---|---|
 | `office/service/scheduler_integration.go:218` — agent not active | `agent_inactive` |
+| `office/service/scheduler_integration.go:233` — pause gate (early check) | `workspace_paused` |
 | `office/service/scheduler_integration.go:247` — idle skip | `idle_skipped` |
+| `office/service/scheduler_integration.go:384` — pause gate (final check) | `workspace_paused` |
 | `office/service/scheduler_integration.go:517` — task-tree hold | `task_tree_held` |
 | `office/service/budget_admission.go:120` — admission | `budget_blocked`/`budget_unmeasurable` |
 | `office/service/event_subscribers.go:408` — agent-completed for a task-bearing run | `processed` |
 | `office/service/event_subscribers.go:512` — `handleTasklessAgentCompleted` | `processed` |
 
-Checkout errors and checkout contention do not finish a run. A checkout error
-uses the normal retry and failure path. A contention result requeues the run
-and retries it. Neither path reports work that did not run.
+Checkout errors and checkout contention do not finish a run: a checkout error
+uses the normal retry/failure path, and a contention result requeues and
+retries. Neither reports work that did not run.
 
 **Reachability of `:512`.** `handleTasklessAgentCompleted` resolves its run through
 `GetClaimedTasklessRunForAgent`, which requires `status = 'claimed'` and an empty
@@ -1515,15 +1518,13 @@ transaction or a guard, because it must not change `runs.status` semantics:
   hold a terminal status with a stale outcome from a different transition.
 - **Where that statement actually lives, stated precisely, because the obvious answer is
   wrong.** `transitionRunTerminal` (`office/service/scheduler_runs.go:52`) contains **no**
-  `UPDATE`. It pre-fetches the run, calls `s.repo.FinishRun(ctx, id, status)`, and
-  publishes `OfficeRunProcessed`. The single `UPDATE runs SET status = ?, finished_at = ?
-  WHERE id = ?` lives one layer down, in
-  `internal/runs/repository/sqlite`, `func (r *Repository) FinishRun(ctx context.Context,
-  id, status string) error` — which is the only implementation of that method in the
-  repository. Per **Citation convention** the semantic label is authoritative: the statement
-  to extend is *the one inside the runs repository's `FinishRun`*, not a statement inside
-  `transitionRunTerminal`, which does not exist. This distinction is not pedantic, because
-  the statement's real home has a caller the service layer does not.
+  `UPDATE`; it pre-fetches the run, calls `s.repo.FinishRun(ctx, id, status)`, and publishes
+  `OfficeRunProcessed`. The single `UPDATE runs SET status = ?, finished_at = ? WHERE id = ?`
+  lives one layer down, in `internal/runs/repository/sqlite`'s `func (r *Repository)
+  FinishRun(ctx context.Context, id, status string) error` — the only implementation of that
+  method in the repository. Per **Citation convention** the statement to extend is the one
+  inside the repository's `FinishRun`, because that statement's real home has a caller the
+  service layer does not.
 - **`outcome` becomes a parameter of both layers.** The runs repository's `FinishRun` gains
   an outcome parameter alongside `status` and writes both in its one `UPDATE`;
   `transitionRunTerminal` gains the same parameter and forwards it. `FinishRun`
@@ -1531,17 +1532,16 @@ transaction or a guard, because it must not change `runs.status` semantics:
   (`:44`) passes `NULL`. `NULL` is correct rather than a placeholder — a run that reached
   `status = 'failed'` is bucketed by `RunCountsByDayForAgent` on its status alone and never
   reaches the `succeeded` / `skipped` / `unclassified` buckets, so no value from the
-  six-value vocabulary would ever be read, and inventing one would assert a classification
-  nothing consumes. This also makes the sentence under `### runs.outcome` exact: the
-  six-value claim describes the **finished** path; the failed path writes `NULL` in the
-  same statement.
+  seven-value vocabulary is ever read, and inventing one asserts a classification
+  nothing consumes. This matches `### runs.outcome`: the seven-value claim describes the
+  **finished** path; the failed path writes `NULL` in the same statement.
 - **The second caller pair of the shared repository method, and what it passes.** Changing
   that signature necessarily reaches
   `office/scheduler.SchedulerService.FinishRun` and `.FailRun`
   (`internal/office/scheduler/run_processing.go`), which call the same
-  `repo.FinishRun` **without** going through `transitionRunTerminal` or the six-site table.
-  Both **pass `NULL`**, and neither is added to the call-site table. The reasoning, so a
-  builder does not have to guess and does not "improve" it into a vocabulary value:
+  `repo.FinishRun` **without** going through `transitionRunTerminal` or the eight-site table.
+  Both **pass `NULL`** and neither is added to the call-site table, so a builder does not
+  need to guess or "improve" it into a vocabulary value:
   - `SchedulerService.FailRun` writes `RunStatusFailed`. It is reached in production (via
     that package's own retry path), and `NULL` is the same value `FailRun` passes at the
     service layer, for the same reason — a failed run is bucketed on status alone.
@@ -1552,7 +1552,7 @@ transaction or a guard, because it must not change `runs.status` semantics:
     remove — a run in which nothing is known to have happened counted as a success. `NULL`
     routes it to `unclassified`, which is the honest bucket for a path whose meaning is
     unestablished.
-  - Consequently the activation guarantee below is scoped to the six sites and is **not**
+  - Consequently the activation guarantee below is scoped to the eight sites and is **not**
     weakened by these two: neither is a terminal site this card classifies, and if
     `SchedulerService.FinishRun` is ever wired to something real, the card that wires it
     owns choosing its outcome and adding it to the table. Deleting the dormant method is
@@ -1562,13 +1562,13 @@ transaction or a guard, because it must not change `runs.status` semantics:
   If two terminal callers ever reach the same row, **last writer wins** for status and
   outcome together. This is the existing contract for `status`, extended unchanged.
 - A zero-row update (the run was deleted) is **not** an error and is not retried.
-- Four of the six sites discard `FinishRun`'s error (`_ = si.svc.FinishRun(...)`). That
-  is unchanged by this card. A discarded failure leaves the row non-terminal with
+- Six of the eight sites discard `FinishRun`'s error (`_ = si.svc.FinishRun(...)`),
+  unchanged by this card. A discarded failure leaves the row non-terminal with
   `outcome` `NULL`; if it later reaches `finished` by another path it is bucketed by
   whatever that path wrote, and if it never does it is not `finished` and so never
   reaches the `succeeded` / `skipped` / `unclassified` buckets at all.
 - Consequently the activation guarantee is stated precisely: after activation,
-  `unclassified` stops growing **for runs that reach `finished` through one of the six
+  `unclassified` stops growing **for runs that reach `finished` through one of the eight
   sites above**. It is not a claim that no `finished` row can ever carry a `NULL`
   outcome, because this card does not add error handling to paths that discard errors
   today.
@@ -2112,7 +2112,7 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
 - **GIVEN** a run that fails, **WHEN** `FailRun` transitions it through the shared
   `transitionRunTerminal` statement, **THEN** `runs.status = 'failed'` and
   `runs.outcome IS NULL` — the failed path writes `NULL` in the same statement, and no
-  value from the six-value vocabulary is invented for it.
+  value from the seven-value vocabulary is invented for it.
 - **GIVEN** a day containing one failed run written that way, **WHEN**
   `RunCountsByDayForAgent` reports that day, **THEN** it counts in `failed` and in
   neither `unclassified` nor `skipped` — the `NULL` outcome is never read, because the
@@ -2134,7 +2134,7 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
   **WHEN** `RunCountsByDayForAgent` reports that day, **THEN** it returns
   `succeeded = 1`, `skipped = 1`, `unclassified = 1`, `failed = 1` and
   `other = 0`.
-- **GIVEN** a `finished` run whose `outcome` holds a value outside the six
+- **GIVEN** a `finished` run whose `outcome` holds a value outside the seven
  named ones, **WHEN** that day is reported, **THEN** it counts in `skipped` —
   the bucketing is total and no query errors.
 - **GIVEN** that same day, **WHEN** the agent dashboard renders it, **THEN**

@@ -153,10 +153,13 @@ describe("useWorkspacePause: mutations", () => {
     expect(mocks.postWorkspaceResume).toHaveBeenCalledWith("ws-1", "");
   });
 
-  it("a superseded mutation failure (guard rejects) surfaces no error message", async () => {
+  it("a superseded mutation failure (guard rejects) still surfaces an error to its own caller", async () => {
+    // The guard result only decides whether this outcome updates the shared
+    // store (AC-006.6's F51 supersession guard); it must not swallow the
+    // failure from the caller who is still awaiting this specific promise.
     applyPauseResponse.mockReturnValueOnce(true); // the read on mount
     applyPauseResponse.mockReturnValueOnce(false); // the superseded mutate-failure
-    mocks.postWorkspacePause.mockRejectedValueOnce(new Error("stale request"));
+    mocks.postWorkspacePause.mockRejectedValueOnce(new ApiError("stale request", 409, null));
     const { result } = renderHook(() => useWorkspacePause("ws-1"));
     await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledTimes(1));
 
@@ -165,7 +168,8 @@ describe("useWorkspacePause: mutations", () => {
       outcome = await result.current.pause("incident");
     });
 
-    expect(outcome).toEqual({ ok: false });
+    expect(outcome?.ok).toBe(false);
+    expect((outcome as { ok: false; error?: string }).error).toBe("stale request");
   });
 
   it("a non-superseded mutation failure surfaces an error message", async () => {

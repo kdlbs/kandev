@@ -20,6 +20,13 @@ const (
 	fieldError       = "error"
 )
 
+// maxPauseRequestBodyBytes bounds the pause/resume request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded.
+// pauseRequestBody carries only a short reason string, so this is generous
+// relative to any legitimate payload — matching the established pattern at
+// agents/handler.go's maxUpdateAgentBodyBytes and channels/handler.go.
+const maxPauseRequestBodyBytes = 64 * 1024
+
 // Handler exposes the pause/resume HTTP surface under the Office route group.
 type Handler struct {
 	svc *Service
@@ -86,7 +93,9 @@ func (h *Handler) postPause(c *gin.Context) {
 	}
 	workspaceID := c.Param("wsId")
 	var body pauseRequestBody
-	_ = c.ShouldBindJSON(&body)
+	if !h.bindPauseRequestBody(c, &body) {
+		return
+	}
 
 	result, err := h.svc.Pause(c.Request.Context(), workspaceID, body.Reason, actorID(c), actorKind(c))
 	if err != nil {
@@ -108,7 +117,9 @@ func (h *Handler) postResume(c *gin.Context) {
 	}
 	workspaceID := c.Param("wsId")
 	var body pauseRequestBody
-	_ = c.ShouldBindJSON(&body)
+	if !h.bindPauseRequestBody(c, &body) {
+		return
+	}
 
 	if _, err := h.svc.Resume(c.Request.Context(), workspaceID, body.Reason, actorID(c), actorKind(c)); err != nil {
 		h.writeMutationError(c, workspaceID, err)
@@ -119,6 +130,23 @@ func (h *Handler) postResume(c *gin.Context) {
 		fieldPaused:      false,
 		fieldPause:       nil,
 	})
+}
+
+// bindPauseRequestBody decodes the request body into body, bounded by
+// maxPauseRequestBodyBytes. Reports false (and has already written the
+// response) only when the body exceeded the limit; any other bind error
+// (malformed JSON, empty body) is ignored here exactly as before — Reason
+// validation happens downstream in the service layer.
+func (h *Handler) bindPauseRequestBody(c *gin.Context, body *pauseRequestBody) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPauseRequestBodyBytes)
+	if err := c.ShouldBindJSON(body); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{fieldError: "request body too large"})
+			return false
+		}
+	}
+	return true
 }
 
 // writeMutationError maps a Pause/Resume error to its HTTP status. The

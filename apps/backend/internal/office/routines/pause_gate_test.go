@@ -357,8 +357,14 @@ func TestProcessCronTrigger_BlockedByPause_SwallowsErrorForTickScheduledTriggers
 	gate := &fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
 	svc.SetPauseGate(gate)
 
-	if err := svc.TickScheduledTriggers(context.Background(), time.Now().UTC()); err != nil {
-		t.Fatalf("TickScheduledTriggers: %v", err)
+	// Asserting TickScheduledTriggers's own return proves nothing here: its
+	// per-trigger loop only logs processCronTrigger's error and always
+	// returns nil itself, regardless of whether the swallow below actually
+	// ran. Call processCronTrigger directly so a regression (returning err
+	// instead of nil on a confirmed pause) fails this test.
+	now := time.Now().UTC()
+	if err := svc.processCronTrigger(context.Background(), trigger, now); err != nil {
+		t.Fatalf("processCronTrigger: %v", err)
 	}
 
 	runs, err := repo.ListAllRuns(context.Background(), "ws-1", 10)
