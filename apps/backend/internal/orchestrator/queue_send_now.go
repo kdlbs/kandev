@@ -160,6 +160,7 @@ func (s *Service) sendNowRestoreClaimForReservation(
 	restore := &messagequeue.SendNowClaim{
 		Sources:           []messagequeue.QueuedMessage{*reservation.source},
 		SourceGenerations: make(map[string]int64),
+		Identity:          reservation.source.ReservationIdentity(),
 	}
 	if reservation.source.TaskID == "" {
 		return restore, nil
@@ -293,7 +294,15 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 }
 
 func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
-	claim, err := s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("load session for send now claim: %w", err)
+	}
+	if session == nil {
+		return false, ErrSessionNotPromptable
+	}
+	identity := messagequeue.QueueSessionIdentity{TaskID: session.TaskID, SessionID: session.ID, SessionIncarnationID: session.AgentExecutionID}
+	claim, err := s.messageQueue.ClaimSendNowForSession(ctx, identity, entries)
 	if err != nil {
 		return false, mapSendNowClaimError(scope, err)
 	}

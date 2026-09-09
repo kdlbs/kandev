@@ -3792,7 +3792,19 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 			return queueDrainSkipped
 		}
 	}
-	queuedMsg, ok, autoRun := s.messageQueue.ReserveQueuedWithAutoRun(ctx, sessionID)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session before identity-bound queue reservation", zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: session.TaskID, SessionID: session.ID, SessionIncarnationID: session.AgentExecutionID,
+	}
+	queuedMsg, ok, autoRun, reserveErr := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	if reserveErr != nil {
+		s.logger.Warn("failed to reserve identity-bound queue entry", zap.String("session_id", sessionID), zap.Error(reserveErr))
+		return queueDrainSkipped
+	}
 	if !autoRun {
 		return queueDrainPaused
 	}

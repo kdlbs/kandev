@@ -189,7 +189,14 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
+	identity := queuedMsg.ReservationIdentity()
+	var err error
+	if identity.SessionIncarnationID != "" {
+		err = s.messageQueue.RequeueAtHeadForSession(ctx, identity, queuedMsg)
+	} else {
+		err = s.messageQueue.RequeueAtHead(ctx, queuedMsg)
+	}
+	if err != nil {
 		s.logger.Error("failed to requeue message at head",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("task_id", queuedMsg.TaskID),
@@ -712,7 +719,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
 	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
-		queuedMsg, exists := s.messageQueue.ReserveQueued(ctx, data.SessionID)
+		identity := messagequeue.QueueSessionIdentity{
+			TaskID: data.TaskID, SessionID: data.SessionID, SessionIncarnationID: session.AgentExecutionID,
+		}
+		queuedMsg, exists, _, reserveErr := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+		if reserveErr != nil {
+			s.logger.Warn("failed to reserve identity-bound passthrough queue entry", zap.String("session_id", data.SessionID), zap.Error(reserveErr))
+			return
+		}
 		if !exists {
 			return
 		}
@@ -1111,7 +1125,14 @@ func (s *Service) acknowledgeDurableQueueEntry(
 	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableQueueDelivery() {
 		return
 	}
-	if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
+	identity := queuedMsg.ReservationIdentity()
+	var err error
+	if identity.SessionIncarnationID != "" {
+		err = s.messageQueue.AcknowledgeQueuedForSession(ctx, identity, queuedMsg.ID)
+	} else {
+		err = s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID)
+	}
+	if err != nil {
 		s.logger.Error("failed to acknowledge accepted durable queue message",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", queuedMsg.TaskID),

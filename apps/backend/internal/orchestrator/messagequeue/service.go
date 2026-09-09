@@ -442,6 +442,17 @@ func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
 	})
 }
 
+// RequeueAtHeadForSession releases a durable reservation only when the
+// execution that reserved it is still current.
+func (s *Service) RequeueAtHeadForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.RequeuePreservingFIFOForSession(admittedCtx, identity, msg)
+	})
+}
+
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
@@ -593,6 +604,26 @@ func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedM
 	return msg, exists
 }
 
+// ReserveQueuedForSession reserves a durable head for one exact session
+// execution. A later execution cannot acknowledge this reservation.
+func (s *Service) ReserveQueuedForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
+	msg, exists, _, err := s.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	return msg, exists, err
+}
+
+// ReserveQueuedWithAutoRunForSession reserves a head and records the exact
+// execution that owns a durable acknowledgement.
+func (s *Service) ReserveQueuedWithAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, bool, error) {
+	var msg *QueuedMessage
+	autoRun := true
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var reserveErr error
+		msg, autoRun, reserveErr = s.repo.ReserveHeadIfAutoRunForSession(admittedCtx, identity)
+		return reserveErr
+	})
+	return msg, msg != nil, autoRun, err
+}
+
 // ReserveQueuedWithAutoRun also reports the policy decision. Nil/false/true
 // means enabled but empty (or a logged storage error); nil/false/false means
 // Auto-run is OFF.
@@ -640,6 +671,13 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID stri
 		return nil
 	}
 	return err
+}
+
+// AcknowledgeQueuedForSession removes only a reservation made by identity.
+func (s *Service) AcknowledgeQueuedForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) error {
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, entryID)
+	})
 }
 
 // IsCurrentLifecycleReservation verifies that msg is still the durable row
@@ -835,6 +873,21 @@ func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected [
 	s.logger.Info("claimed queued messages for send now",
 		zap.String("session_id", sessionID),
 		zap.Int("source_count", len(claim.Sources)))
+	return claim, nil
+}
+
+// ClaimSendNowForSession binds durable source reservations to one current
+// task-session execution.
+func (s *Service) ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
+	var claim *SendNowClaim
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		claim, err = s.repo.ClaimSendNowForSession(admittedCtx, identity, expected)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
 	return claim, nil
 }
 

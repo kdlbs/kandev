@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -120,6 +121,40 @@ func TestRoutineWakeReservationCannotBeClaimedTwice(t *testing.T) {
 			}
 			if second != nil {
 				t.Fatalf("in-flight routine was reserved twice: %#v", second)
+			}
+		})
+	}
+}
+
+func TestRoutineWakeReservationRejectsStaleIncarnationAcknowledgement(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := censusTestService(t, tt.new(t))
+			ctx := context.Background()
+			identity := QueueSessionIdentity{TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "run-1"}
+			entry, _, err := svc.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "wake", "", QueuedByAgent, false, nil,
+				canonicalRoutineMetadata("fence-1", "dirty-1"), "routine-wake:key-1", true)
+			if err != nil {
+				t.Fatalf("queue: %v", err)
+			}
+			reserved, exists, err := svc.ReserveQueuedForSession(ctx, identity)
+			if err != nil || !exists || reserved == nil || reserved.ID != entry.ID {
+				t.Fatalf("reserve = (%#v, %t, %v)", reserved, exists, err)
+			}
+			stale := identity
+			stale.SessionIncarnationID = "run-0"
+			if err := svc.AcknowledgeQueuedForSession(ctx, stale, entry.ID); !errors.Is(err, ErrEntryNotFound) {
+				t.Fatalf("stale acknowledgement = %v, want ErrEntryNotFound", err)
+			}
+			if err := svc.AcknowledgeQueuedForSession(ctx, identity, entry.ID); err != nil {
+				t.Fatalf("current acknowledgement: %v", err)
 			}
 		})
 	}

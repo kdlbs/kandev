@@ -66,6 +66,12 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // compatibility.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
+// MetadataLifecycleReservationIncarnation ties a durable reservation to the
+// exact session execution that claimed it. It is deliberately metadata on the
+// retained row so acknowledgement from a replaced execution cannot remove a
+// wake that belongs to its successor.
+const MetadataLifecycleReservationIncarnation = "lifecycle_reservation_incarnation_id"
+
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
@@ -138,6 +144,14 @@ var (
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
 )
 
+// QueueSessionIdentity is the task/session execution that owns a guarded
+// queue delivery. Empty incarnation is reserved for legacy callers.
+type QueueSessionIdentity struct {
+	TaskID               string
+	SessionID            string
+	SessionIncarnationID string
+}
+
 // QueuedMessage represents a single FIFO entry queued for a session.
 type QueuedMessage struct {
 	ID          string                 `json:"id"`
@@ -156,6 +170,15 @@ type QueuedMessage struct {
 	// this durable lifecycle or routine row for acknowledgement. It is not
 	// persisted in metadata, where a restart could leak it into a retry.
 	reservedQueueDelivery bool
+	reservationIdentity   QueueSessionIdentity
+}
+
+// ReservationIdentity returns the execution that reserved this durable row.
+func (m *QueuedMessage) ReservationIdentity() QueueSessionIdentity {
+	if m == nil {
+		return QueueSessionIdentity{}
+	}
+	return m.reservationIdentity
 }
 
 // IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
@@ -223,12 +246,20 @@ func markReservedMetadata(metadata map[string]interface{}) map[string]interface{
 	return marked
 }
 
+func markReservedMetadataForIncarnation(metadata map[string]interface{}, incarnationID string) map[string]interface{} {
+	marked := markReservedMetadata(metadata)
+	if incarnationID != "" {
+		marked[MetadataLifecycleReservationIncarnation] = incarnationID
+	}
+	return marked
+}
+
 // clearReservedMetadata removes the transient in-process delivery marker from
 // copies returned to dispatch or written back for retry.
 func clearReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
 	cleared := make(map[string]interface{}, len(metadata))
 	for k, v := range metadata {
-		if k != MetadataLifecycleReserved {
+		if k != MetadataLifecycleReserved && k != MetadataLifecycleReservationIncarnation {
 			cleared[k] = v
 		}
 	}

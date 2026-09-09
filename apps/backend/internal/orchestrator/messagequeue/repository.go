@@ -49,6 +49,9 @@ type Repository interface {
 	// positions up before inserting. Queue positions stay positive so session
 	// transfer and later queue mutations keep their ordering invariants.
 	RequeuePreservingFIFO(ctx context.Context, msg *QueuedMessage) error
+	// RequeuePreservingFIFOForSession releases a durable reservation only when
+	// it still belongs to the supplied execution incarnation.
+	RequeuePreservingFIFOForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error
 
 	// LifecycleGeneration returns the current archive/delete generation for a
 	// task. Lifecycle insertion verifies this generation atomically.
@@ -90,6 +93,7 @@ type Repository interface {
 	// routine entries remain stored until AcknowledgeByID is called after
 	// executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
+	ReserveHeadForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, error)
 
 	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
 	// state defaults to true so existing sessions retain their current behavior.
@@ -107,10 +111,12 @@ type Repository interface {
 	// per-session transaction. The returned bool is false only when Auto-run is
 	// OFF; nil with true means the enabled queue is empty.
 	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)
+	ReserveHeadIfAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error)
 
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// durable entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error
+	AcknowledgeByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) error
 
 	// TakeByID atomically returns and deletes the entry identified by entryID
 	// for sessionID, regardless of its FIFO position. Unlike DeleteByID, it has
@@ -127,6 +133,7 @@ type Repository interface {
 	// lifecycle rows are reserved until AcknowledgeSendNowClaim or
 	// RestoreSendNowClaim.
 	ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error)
+	ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error)
 
 	// RestoreSendNowClaim puts every source back at its original position and
 	// clears durable lifecycle reservations. It must restore the complete claim

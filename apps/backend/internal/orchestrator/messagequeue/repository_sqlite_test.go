@@ -83,6 +83,53 @@ func TestSQLiteRepository_InsertList(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_SessionIdentityRejectsReplacedExecution(t *testing.T) {
+	raw, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, archived_at DATETIME, updated_at DATETIME NOT NULL)`); err != nil {
+		t.Fatalf("create tasks: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE task_sessions (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent_execution_id TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create task_sessions: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasks (id, updated_at) VALUES ('task-1', CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO task_sessions (id, task_id, agent_execution_id) VALUES ('session-1', 'task-1', 'run-1')`); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	repo, err := NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+	ctx := context.Background()
+	entry := &QueuedMessage{SessionID: "session-1", TaskID: "task-1", Content: "wake", QueuedBy: QueuedByWorkflow, Metadata: map[string]interface{}{MetadataLifecycleDurable: true}}
+	if err := repo.Insert(ctx, entry, 0); err != nil {
+		t.Fatalf("insert queue entry: %v", err)
+	}
+	identity := QueueSessionIdentity{TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "run-1"}
+	reserved, err := repo.ReserveHeadForSession(ctx, identity)
+	if err != nil || reserved == nil {
+		t.Fatalf("reserve: %#v, %v", reserved, err)
+	}
+	if _, err := db.Exec(`UPDATE task_sessions SET agent_execution_id = 'run-2' WHERE id = 'session-1'`); err != nil {
+		t.Fatalf("replace execution: %v", err)
+	}
+	if err := repo.AcknowledgeByIDForSession(ctx, identity, reserved.ID); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("stale acknowledgement = %v, want ErrEntryNotFound", err)
+	}
+	remaining, err := repo.ListBySession(ctx, "session-1")
+	if err != nil || len(remaining) != 1 || !remaining[0].IsReservedInFlight() {
+		t.Fatalf("reserved entry after stale acknowledgement = %#v, %v", remaining, err)
+	}
+}
+
 func TestSQLiteRepository_ListDurableLifecycleEntries(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

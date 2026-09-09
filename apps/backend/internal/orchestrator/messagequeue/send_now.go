@@ -49,6 +49,9 @@ type SendNowClaim struct {
 	Sources           []QueuedMessage  `json:"sources"`
 	Dispatch          QueuedMessage    `json:"dispatch"`
 	SourceGenerations map[string]int64 `json:"source_generations,omitempty"`
+	// Identity binds durable-source settlement to the execution that claimed it.
+	// It is internal state and intentionally not exposed by the queue API.
+	Identity QueueSessionIdentity `json:"-"`
 }
 
 func sendNowSourceGenerationChanged(claim *SendNowClaim, source QueuedMessage, current int64) bool {

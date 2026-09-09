@@ -102,6 +102,31 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	return nil
 }
 
+// validateSessionIdentityTx binds a durable queue mutation to the session row
+// that is still current in the same database. AgentExecutionID changes when a
+// session is replaced, so an old delivery cannot acknowledge or reserve work
+// for its replacement.
+func (r *sqliteRepository) validateSessionIdentityTx(ctx context.Context, tx *sqlx.Tx, identity *QueueSessionIdentity) error {
+	if identity == nil || identity.SessionIncarnationID == "" || !r.tasksTablePresent {
+		return nil
+	}
+	var executionID string
+	query := `SELECT agent_execution_id FROM task_sessions WHERE id = ? AND task_id = ?`
+	if r.db.DriverName() == "pgx" {
+		query += ` FOR UPDATE`
+	}
+	if err := tx.GetContext(ctx, &executionID, r.db.Rebind(query), identity.SessionID, identity.TaskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		return fmt.Errorf("validate queue session identity: %w", err)
+	}
+	if executionID != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	return nil
+}
+
 // lockSessionTxIn takes the per-session cross-process lock inside an existing
 // transaction (see lockSessionTx). It is the shared core used by the
 // repository methods and by PurgeTaskInTransaction, which runs inside the task
@@ -284,6 +309,17 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 // insert. This keeps positions positive for TransferSession and future queue
 // mutations while preserving the current order.
 func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *QueuedMessage) error {
+	return r.requeuePreservingFIFO(ctx, nil, msg)
+}
+
+func (r *sqliteRepository) RequeuePreservingFIFOForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error {
+	return r.requeuePreservingFIFO(ctx, &identity, msg)
+}
+
+func (r *sqliteRepository) requeuePreservingFIFO(ctx context.Context, identity *QueueSessionIdentity, msg *QueuedMessage) error {
+	if msg == nil || (identity != nil && (msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID)) {
+		return ErrEntryNotFound
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin requeue-fifo tx: %w", err)
@@ -293,6 +329,12 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
+		return err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if err := r.removeReservedRequeueEntry(ctx, tx, identity, msg); err != nil {
 		return err
 	}
 
@@ -316,6 +358,29 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 		return r.applyCoalesceReplaceTx(ctx, tx, msg, existingID)
 	}
 	return r.applyHeadInsertTx(ctx, tx, msg)
+}
+
+func (r *sqliteRepository) removeReservedRequeueEntry(ctx context.Context, tx *sqlx.Tx, identity *QueueSessionIdentity, msg *QueuedMessage) error {
+	if identity == nil {
+		return nil
+	}
+	var raw string
+	if err := tx.GetContext(ctx, &raw, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?`), msg.ID, msg.SessionID); err != nil {
+		return ErrEntryNotFound
+	}
+	metadata := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata[MetadataLifecycleReserved] != true || metadataString(metadata, MetadataLifecycleReservationIncarnation) != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?`), msg.ID, msg.SessionID, raw)
+	if err != nil {
+		return fmt.Errorf("remove reserved requeue entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		return ErrEntryNotFound
+	}
+	return nil
 }
 
 // applyCoalesceReplaceTx UPDATEs the existing entry in place,
@@ -1176,7 +1241,12 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 
 // ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
-	msg, _, err := r.reserveHead(ctx, sessionID, false)
+	msg, _, err := r.reserveHead(ctx, nil, sessionID, false)
+	return msg, err
+}
+
+func (r *sqliteRepository) ReserveHeadForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, error) {
+	msg, _, err := r.reserveHead(ctx, &identity, identity.SessionID, false)
 	return msg, err
 }
 
@@ -1294,10 +1364,14 @@ func (r *sqliteRepository) getAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessio
 
 // ReserveHeadIfAutoRun reads policy and reserves the FIFO head under one lock.
 func (r *sqliteRepository) ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error) {
-	return r.reserveHead(ctx, sessionID, true)
+	return r.reserveHead(ctx, nil, sessionID, true)
 }
 
-func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, requireAutoRun bool) (*QueuedMessage, bool, error) {
+func (r *sqliteRepository) ReserveHeadIfAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
+	return r.reserveHead(ctx, &identity, identity.SessionID, true)
+}
+
+func (r *sqliteRepository) reserveHead(ctx context.Context, identity *QueueSessionIdentity, sessionID string, requireAutoRun bool) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
@@ -1307,6 +1381,9 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, true, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, true, err
 	}
 	if requireAutoRun {
@@ -1351,7 +1428,7 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		return nil, true, nil
 	}
 	if msg.IsDurableQueueDelivery() {
-		reserved, err := r.reserveDurableHead(ctx, tx, msg, storedMetadataJSON)
+		reserved, err := r.reserveDurableHead(ctx, tx, msg, storedMetadataJSON, identity)
 		return reserved, true, err
 	}
 	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
@@ -1363,12 +1440,17 @@ func (r *sqliteRepository) reserveDurableHead(
 	tx *sqlx.Tx,
 	msg *QueuedMessage,
 	storedMetadataJSON string,
+	identity *QueueSessionIdentity,
 ) (*QueuedMessage, error) {
 	// Keep the row for crash recovery but stop reporting it as pending.
 	// Strip a marker persisted by an interrupted prior process from the
 	// returned copy so a failed retry becomes visible again.
 	msg.Metadata = clearReservedMetadata(msg.Metadata)
-	reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
+	reservedMetadata := markReservedMetadata(msg.Metadata)
+	if identity != nil && identity.SessionIncarnationID != "" {
+		reservedMetadata = markReservedMetadataForIncarnation(msg.Metadata, identity.SessionIncarnationID)
+	}
+	reservedJSON, err := marshalMetadata(reservedMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -1390,6 +1472,9 @@ func (r *sqliteRepository) reserveDurableHead(
 		return nil, err
 	}
 	msg.reservedQueueDelivery = true
+	if identity != nil {
+		msg.reservationIdentity = *identity
+	}
 	r.markLocallyReserved(msg.SessionID, msg.ID)
 	return msg, nil
 }
@@ -1469,6 +1554,47 @@ func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entry
 	return nil
 }
 
+func (r *sqliteRepository) AcknowledgeByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) error {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin identity acknowledge: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, &identity); err != nil {
+		return err
+	}
+	var metadataJSON string
+	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?`), entryID, identity.SessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		return fmt.Errorf("read identity acknowledgement: %w", err)
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return fmt.Errorf("decode identity acknowledgement: %w", err)
+	}
+	incarnation, _ := metadata[MetadataLifecycleReservationIncarnation].(string)
+	reserved, _ := metadata[MetadataLifecycleReserved].(bool)
+	if !reserved || incarnation != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?`), entryID, identity.SessionID, metadataJSON)
+	if err != nil {
+		return fmt.Errorf("acknowledge identity-bound queue entry: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil || affected == 0 {
+		return ErrEntryNotFound
+	}
+	return tx.Commit()
+}
+
 // TakeByID atomically returns and deletes the entry identified by entryID,
 // regardless of its FIFO position. Mirrors TakeHead's race handling: if a
 // concurrent take already removed the row between the SELECT and DELETE,
@@ -1523,6 +1649,14 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 
 // ClaimSendNow atomically claims the exact ordered source snapshot for a send-now dispatch.
 func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	return r.claimSendNow(ctx, nil, sessionID, expected)
+}
+
+func (r *sqliteRepository) ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
+	return r.claimSendNow(ctx, &identity, identity.SessionID, expected)
+}
+
+func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSessionIdentity, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
 	if len(expected) == 0 {
 		return nil, ErrSendNowEmpty
 	}
@@ -1540,6 +1674,9 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
 	}
 
@@ -1567,7 +1704,7 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 		generations[source.TaskID] = generation
 	}
 
-	if err := r.applySQLiteSendNowClaim(ctx, tx, sessionID, sources, storedByID); err != nil {
+	if err := r.applySQLiteSendNowClaim(ctx, tx, identity, sessionID, sources, storedByID); err != nil {
 		return nil, err
 	}
 	if err := r.setAutoRunTx(ctx, tx, sessionID, true); err != nil {
@@ -1576,7 +1713,11 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+	claim := &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}
+	if identity != nil {
+		claim.Identity = *identity
+	}
+	return claim, nil
 }
 
 // RestoreSendNowClaim puts every claimed source back at its original position.
@@ -1661,6 +1802,11 @@ func (r *sqliteRepository) beginSendNowClaimTx(
 		// `defer tx.Rollback()` only after this function succeeds, so an
 		// abandoned tx would keep the pooled connection inside an open
 		// transaction.
+		_ = tx.Rollback()
+		unlock()
+		return nil, "", nil, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, &claim.Identity); err != nil {
 		_ = tx.Rollback()
 		unlock()
 		return nil, "", nil, err
@@ -1751,6 +1897,7 @@ func selectSQLiteSendNowSources(
 func (r *sqliteRepository) applySQLiteSendNowClaim(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
 	sessionID string,
 	sources []QueuedMessage,
 	storedByID map[string]storedQueueEntry,
@@ -1758,7 +1905,7 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 	for _, source := range sources {
 		storedEntry := storedByID[source.ID]
 		if source.IsDurableQueueDelivery() {
-			if err := r.reserveSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
+			if err := r.reserveSQLiteSendNowSource(ctx, tx, identity, sessionID, source, storedEntry); err != nil {
 				return err
 			}
 			continue
@@ -1774,11 +1921,16 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 func (r *sqliteRepository) reserveSQLiteSendNowSource(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
 	sessionID string,
 	source QueuedMessage,
 	stored storedQueueEntry,
 ) error {
-	metadataJSON, err := marshalMetadata(markReservedMetadata(source.Metadata))
+	metadata := markReservedMetadata(source.Metadata)
+	if identity != nil {
+		metadata = markReservedMetadataForIncarnation(source.Metadata, identity.SessionIncarnationID)
+	}
+	metadataJSON, err := marshalMetadata(metadata)
 	if err != nil {
 		return err
 	}
@@ -1846,6 +1998,9 @@ func validateSQLiteSendNowRestore(
 			continue
 		}
 		if entry.message.IsReservedInFlight() && !source.IsDurableQueueDelivery() {
+			return ErrSendNowClaimChanged
+		}
+		if source.IsDurableQueueDelivery() && entry.message.IsReservedInFlight() && claim.Identity.SessionIncarnationID != "" && metadataString(entry.message.Metadata, MetadataLifecycleReservationIncarnation) != claim.Identity.SessionIncarnationID {
 			return ErrSendNowClaimChanged
 		}
 	}
@@ -1919,6 +2074,9 @@ func validateSQLiteSendNowAcknowledge(claim *SendNowClaim, sessionID string, sto
 			continue
 		}
 		if entry, ok := stored[source.ID]; ok && !entry.message.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+		if entry, ok := stored[source.ID]; ok && claim.Identity.SessionIncarnationID != "" && metadataString(entry.message.Metadata, MetadataLifecycleReservationIncarnation) != claim.Identity.SessionIncarnationID {
 			return ErrSendNowClaimChanged
 		}
 	}

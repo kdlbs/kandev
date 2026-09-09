@@ -83,6 +83,60 @@ func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
 	}
 }
 
+func TestSessionIdentityGuardsDurableRequeueAndSendNowSettlement(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			current := QueueSessionIdentity{TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "run-2"}
+			stale := current
+			stale.SessionIncarnationID = "run-1"
+			durable := insertTestEntry(t, repo, "session-1", "task-1", "durable", QueuedByWorkflow, nil,
+				map[string]interface{}{MetadataLifecycleDurable: true})
+
+			reserved, err := repo.ReserveHeadForSession(ctx, current)
+			if err != nil || reserved == nil || reserved.ID != durable.ID {
+				t.Fatalf("reserve with identity = %#v, %v", reserved, err)
+			}
+			if err := repo.RequeuePreservingFIFOForSession(ctx, stale, reserved); !errors.Is(err, ErrEntryNotFound) {
+				t.Fatalf("stale requeue error = %v, want ErrEntryNotFound", err)
+			}
+			if err := repo.RequeuePreservingFIFOForSession(ctx, current, reserved); err != nil {
+				t.Fatalf("current requeue: %v", err)
+			}
+
+			snapshot, err := repo.ListBySession(ctx, "session-1")
+			if err != nil || len(snapshot) != 1 {
+				t.Fatalf("snapshot after requeue = %#v, %v", snapshot, err)
+			}
+			claim, err := repo.ClaimSendNowForSession(ctx, current, snapshot)
+			if err != nil {
+				t.Fatalf("identity claim: %v", err)
+			}
+			staleClaim := *claim
+			staleClaim.Identity = stale
+			if err := repo.AcknowledgeSendNowClaim(ctx, &staleClaim); !errors.Is(err, ErrSendNowClaimChanged) {
+				t.Fatalf("stale acknowledge error = %v, want ErrSendNowClaimChanged", err)
+			}
+			if err := repo.RestoreSendNowClaim(ctx, &staleClaim); !errors.Is(err, ErrSendNowClaimChanged) {
+				t.Fatalf("stale restore error = %v, want ErrSendNowClaimChanged", err)
+			}
+			if err := repo.AcknowledgeSendNowClaim(ctx, claim); err != nil {
+				t.Fatalf("current acknowledge: %v", err)
+			}
+		})
+	}
+}
+
 func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name string
