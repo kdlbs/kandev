@@ -126,6 +126,123 @@ func TestChannelBackendClientTerminalFailureLogIncludesConfiguredSession(t *test
 	require.Equal(t, "session-log", entries[0].ContextMap()["session_id"])
 }
 
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.1
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.2
+func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	client := NewChannelBackendClient(log)
+	t.Cleanup(client.Close)
+
+	var result map[string]interface{}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", map[string]any{"secret": "value"}, &result)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	response.Payload = nil
+	client.HandleResponse(response)
+
+	respErr := <-errCh
+	require.Error(t, respErr)
+	require.ErrorIs(t, respErr, ErrEmptyBackendPayload)
+	require.Contains(t, respErr.Error(), "test.action")
+	require.NotContains(t, respErr.Error(), "secret")
+
+	entries := observed.FilterMessage(emptyBackendPayloadLogMessage).All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	require.Equal(t, request.ID, fields["request_id"])
+	require.Equal(t, "test.action", fields["action"])
+	require.Contains(t, fields, "session_id")
+	require.Contains(t, fields, "duration")
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3
+func TestChannelBackendClientEmptyPayloadWithNilResultSucceeds(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	response.Payload = nil
+	client.HandleResponse(response)
+
+	require.NoError(t, <-errCh)
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.4
+func TestChannelBackendClientErrorTypeWithEmptyPayloadKeepsBackendErrorBehavior(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	var result map[string]interface{}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, &result)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response := &ws.Message{ID: request.ID, Action: request.Action, Type: ws.MessageTypeError, Payload: nil}
+	client.HandleResponse(response)
+
+	respErr := <-errCh
+	require.Error(t, respErr)
+	require.NotErrorIs(t, respErr, ErrEmptyBackendPayload)
+	require.Contains(t, respErr.Error(), "backend error")
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5
+func TestChannelBackendClientEmptyObjectPayloadDecodesToNonNilEmptyMap(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	result := make(map[string]interface{})
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, &result)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewResponse(request.ID, request.Action, map[string]interface{}{})
+	require.NoError(t, err)
+	client.HandleResponse(response)
+
+	require.NoError(t, <-errCh)
+	require.NotNil(t, result)
+	require.Empty(t, result)
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.6
+func TestChannelBackendClientNullPayloadStillDecodesWithoutError(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	result := map[string]interface{}{"stale": "value"}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, &result)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	client.HandleResponse(response)
+
+	require.NoError(t, <-errCh)
+	require.Nil(t, result)
+}
+
 func TestChannelBackendClientRedactsPluginInvocationPayload(t *testing.T) {
 	core, observed := observer.New(zap.DebugLevel)
 	log, err := logger.NewFromZap(zap.New(core))

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +13,16 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// ErrEmptyBackendPayload is returned when a backend client's success branch
+// sees a non-nil result sink but a zero-byte response payload. ws.NewResponse
+// marshals every payload, so a well-formed response can never be zero bytes;
+// zero length always means the body was dropped or truncated in transit.
+var ErrEmptyBackendPayload = errors.New("mcp backend response payload was empty")
+
+// emptyBackendPayloadLogMessage is shared by both backend clients so a
+// log-based alert can match the same message across transports.
+const emptyBackendPayloadLogMessage = "mcp backend response payload was empty"
 
 // MCPRequest represents an MCP request to be sent to the backend.
 type MCPRequest struct {
@@ -236,10 +247,19 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			}
 			return fmt.Errorf("backend error: %s", string(resp.Payload))
 		}
-		if result != nil && len(resp.Payload) > 0 {
-			if err := json.Unmarshal(resp.Payload, result); err != nil {
-				return fmt.Errorf("failed to unmarshal response: %w", err)
-			}
+		if result == nil {
+			return nil
+		}
+		if len(resp.Payload) == 0 {
+			c.logger.Warn(emptyBackendPayloadLogMessage,
+				zap.String("request_id", id),
+				zap.String("action", action),
+				zap.String("session_id", response.sessionID),
+				zap.Duration("duration", time.Since(start)))
+			return fmt.Errorf("empty response payload for action %q: %w", action, ErrEmptyBackendPayload)
+		}
+		if err := json.Unmarshal(resp.Payload, result); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
 		}
 		return nil
 	case <-ctx.Done():
