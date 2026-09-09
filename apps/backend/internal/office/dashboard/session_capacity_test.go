@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/office/dashboard"
 )
 
 // The retained-capacity determination is unexported, so these tests drive it
@@ -224,7 +225,12 @@ func TestRemoveParticipant_EmptyIdentifiersReportSuccess(t *testing.T) {
 
 // AC-OFFICE-SESSION-TERM-002.12: a capacity granted between the guarded
 // path's commit and the determination's read is observed, because the read
-// asks about the present.
+// asks about the present. The seat is seeded from inside
+// SetSessionCapacityReadHook, which fires after RemoveTaskReviewer's own
+// removal has committed and immediately before the determination reads
+// capacity — the exact window the AC names — so this only passes for an
+// implementation whose read genuinely happens after that window, not one
+// that decided from state captured earlier.
 func TestRemoveParticipant_CapacityRegainedBeforeReadSuppresses(t *testing.T) {
 	deps, rt := newCapacityDeps(t, "task-regained")
 	ctx := context.Background()
@@ -235,9 +241,14 @@ func TestRemoveParticipant_CapacityRegainedBeforeReadSuppresses(t *testing.T) {
 	if err := deps.repo.UpdateTaskAssignee(ctx, "task-regained", "agent-runner"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
-	// Re-seated in a different role before the removal runs.
-	seedSeat(t, deps.db, "seat-back", "step-task-regained", "task-regained",
-		"approver", "agent-back", 1)
+
+	restore := dashboard.SetSessionCapacityReadHook(func(taskID, agentProfileID string) {
+		if taskID == "task-regained" && agentProfileID == "agent-back" {
+			seedSeat(t, deps.db, "seat-back", "step-task-regained", "task-regained",
+				"approver", "agent-back", 1)
+		}
+	})
+	t.Cleanup(restore)
 
 	if got := removeReviewer(t, deps, rt, "task-regained", "agent-back"); got != 0 {
 		t.Errorf("re-seated agent is addressed on the task: want 0 terminations, got %d", got)
