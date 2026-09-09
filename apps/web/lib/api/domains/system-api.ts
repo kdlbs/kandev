@@ -24,6 +24,8 @@ import type {
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
   UpdatesChannel,
+  RetentionSettings,
+  RetentionStatus,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -413,6 +415,29 @@ export function purgeStorageQuarantine(
         scope,
         confirm: scope === "eligible" ? "DELETE ELIGIBLE" : "DELETE ALL NOW",
       }),
+    },
+  });
+}
+
+// --- Office run history retention ----------------------------------------
+
+export function fetchRetentionStatus(options?: ApiRequestOptions): Promise<RetentionStatus> {
+  return fetchJson<RetentionStatus>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function saveRetentionSettings(
+  settings: RetentionSettings,
+  options?: ApiRequestOptions,
+): Promise<RetentionSettings> {
+  return fetchJson<RetentionSettings>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify(settings),
     },
   });
 }

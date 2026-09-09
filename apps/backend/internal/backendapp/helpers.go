@@ -65,6 +65,7 @@ import (
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/retention"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/org"
@@ -1517,6 +1518,7 @@ func registerSecondaryRoutes(
 
 	registerHealthRoutes(p)
 	registerSystemRoutes(p)
+	registerRetentionRoutes(p)
 	if p.runtimeFlagsSvc != nil {
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
 	}
@@ -1718,6 +1720,20 @@ func registerSystemRoutes(p routeParams) {
 	p.systemSvc.RegisterRoutes(p.router, p.log)
 }
 
+// registerRetentionRoutes mounts GET/PUT /api/v1/system/retention. It is a
+// separate admin-scoped group from systemSvc's own /api/v1/system group
+// (rather than a field on system.Service) because internal/office/retention
+// cannot be imported by internal/system without inverting the existing
+// system -> office dependency direction; gin allows two RouterGroups to
+// share a path prefix as long as no route collides, and none does here.
+func registerRetentionRoutes(p routeParams) {
+	if p.services == nil || p.services.Retention == nil {
+		return
+	}
+	admin := p.router.Group("/api/v1/system", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	retention.RegisterRoutes(admin, p.services.Retention.Handler)
+}
+
 // registerHealthRoutes sets up the system health endpoint with all health checkers.
 func registerHealthRoutes(p routeParams) {
 	var githubProvider health.GitHubStatusProvider
@@ -1742,6 +1758,9 @@ func registerHealthRoutes(p routeParams) {
 	}
 	if p.systemSvc != nil && p.systemSvc.StorageRuntime != nil {
 		checkers = append(checkers, p.systemSvc.StorageRuntime)
+	}
+	if p.services != nil && p.services.Retention != nil {
+		checkers = append(checkers, p.services.Retention.Checker)
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)

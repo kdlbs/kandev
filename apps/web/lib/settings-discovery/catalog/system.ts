@@ -9,6 +9,7 @@ export const SYSTEM_STORAGE_SETTINGS_HREF = `${SYSTEM_SETTINGS_HREF}/storage`;
 export const SYSTEM_ABOUT_SETTINGS_HREF = `${SYSTEM_SETTINGS_HREF}/about`;
 export const SYSTEM_SETTINGS_TARGETS = {
   database: "setting-system-database",
+  retention: "setting-system-retention",
   backups: "setting-system-backups",
   logs: "setting-system-logs",
   licenses: "setting-system-licenses",
@@ -60,6 +61,16 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     order: 621,
   },
   {
+    id: "system-retention",
+    kind: "section",
+    labelKey: "system:navRetention",
+    parentId: SYSTEM_DATA_STORAGE_DISCOVERY_ID,
+    groupId: "system",
+    href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
+    targetId: SYSTEM_SETTINGS_TARGETS.retention,
+    order: 622,
+  },
+  {
     id: "system-backups",
     kind: "section",
     labelKey: "system:navBackups",
@@ -67,7 +78,7 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     groupId: "system",
     href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
     targetId: SYSTEM_SETTINGS_TARGETS.backups,
-    order: 622,
+    order: 623,
   },
   {
     id: "system-logs",
@@ -77,7 +88,7 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     groupId: "system",
     href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
     targetId: SYSTEM_SETTINGS_TARGETS.logs,
-    order: 623,
+    order: 624,
   },
   {
     id: "system-storage",
