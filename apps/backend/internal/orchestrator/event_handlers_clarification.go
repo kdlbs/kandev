@@ -588,14 +588,18 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 		// silently the way a bare false return did.
 		return fmt.Errorf("cannot resume clarification: message queue is not configured")
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
+	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, data.TaskID, data.SessionID)
+	if err != nil {
+		return fmt.Errorf("resolve clarification resume session: %w", err)
+	}
+	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
 		map[string]interface{}{metaKeyUserMessageRecorded: true},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
-	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
+	dispatched, err := s.takeAndDispatchEntryLocked(ctx, identity, queued.ID)
 	if err != nil {
 		return fmt.Errorf("dispatch clarification resume prompt: %w", err)
 	}

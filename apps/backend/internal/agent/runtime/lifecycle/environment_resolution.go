@@ -45,6 +45,10 @@ func (m *Manager) resolveStrictEnvironment(
 
 	resolved, records, err := runtimeenv.Resolve(ctx, definitions, m.resolveEnvironmentDefinition)
 	if err != nil {
+		var secretErr *runtimeenv.SecretError
+		if errors.As(err, &secretErr) && secretErr.Origin == runtimeenv.OriginAgentProfile && profileInfo != nil && profileInfo.ProfileName != "" {
+			err = fmt.Errorf("agent profile %q: %w", profileInfo.ProfileName, err)
+		}
 		return nil, fmt.Errorf("resolve task environment: %w", err)
 	}
 	m.logEnvironmentOverrides(req, records)

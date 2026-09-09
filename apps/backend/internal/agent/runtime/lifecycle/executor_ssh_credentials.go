@@ -290,7 +290,7 @@ func (u *sshFileUploader) ReadFile(ctx context.Context, path string) ([]byte, er
 	data, err := readSFTPFileContext(ctx, c, path)
 	if err != nil {
 		if isSFTPNotExist(err) {
-			return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+			return nil, &fs.PathError{Op: fileReadOperation, Path: path, Err: fs.ErrNotExist}
 		}
 		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
 	}

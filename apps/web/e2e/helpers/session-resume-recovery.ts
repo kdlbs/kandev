@@ -4,6 +4,7 @@ import type { CreateTaskResponse } from "../../lib/types/http";
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
+import { waitForSessionState } from "./session";
 
 type TaskEnvironmentRepository = {
   repository_id?: string;
@@ -75,6 +76,23 @@ export async function seedWorktreeRecoveryFixture(
     throw new Error("worktree recovery fixture did not expose a repository worktree");
   }
   return { task, session, environment, repository };
+}
+
+/** Use the fixture's active primary session as the archive recovery session. */
+export async function prepareArchiveRecoverySession(
+  apiClient: ApiClient,
+  fixture: WorktreeRecoveryFixture,
+): Promise<string> {
+  const sessionId = fixture.task.session_id;
+  if (!sessionId) throw new Error("worktree recovery fixture has no primary session");
+  await waitForSessionState(apiClient, {
+    taskId: fixture.task.id,
+    sessionId,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "Waiting for the archive recovery session to become active",
+    timeout: 60_000,
+  });
+  return sessionId;
 }
 
 /** Remove the branch from both the local repository and its disposable origin. */
