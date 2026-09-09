@@ -2182,6 +2182,12 @@ func taskArchived(task *models.Task) bool {
 	return task != nil && task.ArchivedAt != nil
 }
 
+// writeTaskReviewState moves taskID out of IN_PROGRESS/SCHEDULING once
+// completedSessionID has settled into WAITING_FOR_INPUT with no other session
+// still working. It lands on TaskStateWaitingForInput instead of
+// TaskStateReview when the session has a genuine pending clarification or
+// permission request, so the UI shows "needs your decision" rather than
+// "ready to review" for a turn that isn't actually finished.
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
 	// Task lookup errors fail closed so office/archived guards cannot be bypassed
 	// by a transient repository failure.

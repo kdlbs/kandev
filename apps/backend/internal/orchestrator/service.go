@@ -3203,6 +3203,13 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
 }
 
+// reconcileActiveSessionOnStartup repairs an active (STARTING/RUNNING/
+// WAITING_FOR_INPUT) session found on backend boot: it flips the session to
+// WAITING_FOR_INPUT for lazy resume and, if the owning task is stuck
+// IN_PROGRESS, moves it forward. The task lands on TaskStateWaitingForInput
+// rather than TaskStateReview when sessionID has a genuine pending
+// clarification or permission request outstanding, so a decision the agent
+// was waiting on before the restart doesn't silently read as "done" after it.
 func (s *Service) reconcileActiveSessionOnStartup(
 	ctx context.Context,
 	running *models.ExecutorRunning,
