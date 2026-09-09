@@ -184,6 +184,63 @@ function areEditDependenciesReady(
   return !isEditMode || editDependencies?.ready !== false;
 }
 
+// AC-TASKS-RUNNER-SWITCH-004.5/5b: only a final selection that differs from
+// what the dialog seeded (stored profile or resolved default) counts as a
+// user change; reverting back to the seeded value issues no switch.
+function computeRunnerChanged(
+  seededExecutorProfileId: string | null,
+  executorProfileId: string,
+): boolean {
+  return (
+    seededExecutorProfileId !== null &&
+    executorProfileId !== "" &&
+    executorProfileId !== seededExecutorProfileId
+  );
+}
+
+// AC-TASKS-RUNNER-SWITCH-004.4a: issued first. A rejection here must leave
+// every other field unsaved, so the caller never reaches the rest of the
+// save sequence.
+async function issueRunnerSwitchIfChanged(
+  runnerChanged: boolean,
+  taskId: string,
+  executorProfileId: string,
+): Promise<void> {
+  if (!runnerChanged) return;
+  try {
+    await switchTaskRunner(taskId, executorProfileId);
+  } catch (error) {
+    throw new RunnerSwitchRejectedError(error);
+  }
+}
+
+type SaveEditedTaskFieldsArgs = {
+  editingTask: { id: string };
+  updatePayload: Parameters<typeof updateTask>[1];
+  trimmedDescription: string;
+  runnerChanged: boolean;
+} & Omit<EditDependencySaveArgs, "updatedTask">;
+
+// AC-TASKS-RUNNER-SWITCH-004.4c: a runner switch that already committed is
+// never rolled back; tag a failure here so the caller can report the true
+// partial state instead of implying the whole save was rejected.
+async function saveEditedTaskFields({
+  editingTask,
+  updatePayload,
+  trimmedDescription,
+  runnerChanged,
+  ...dependencySaveArgs
+}: SaveEditedTaskFieldsArgs) {
+  try {
+    const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
+    return { updatedTask, trimmedDescription };
+  } catch (error) {
+    if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
+    throw error;
+  }
+}
+
 async function shouldKeepEditDialogOpen(
   error: unknown,
   refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
@@ -477,23 +534,8 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
 
-    // AC-TASKS-RUNNER-SWITCH-004.5/5b: only a final selection that differs
-    // from what the dialog seeded (stored profile or resolved default) counts
-    // as a user change; reverting back to the seeded value issues no switch.
-    const runnerChanged =
-      seededExecutorProfileId !== null &&
-      executorProfileId !== "" &&
-      executorProfileId !== seededExecutorProfileId;
-
-    if (runnerChanged) {
-      // AC-TASKS-RUNNER-SWITCH-004.4a: issued first. A rejection here must
-      // leave every other field unsaved, so nothing below runs.
-      try {
-        await switchTaskRunner(editingTask.id, executorProfileId);
-      } catch (error) {
-        throw new RunnerSwitchRejectedError(error);
-      }
-    }
+    const runnerChanged = computeRunnerChanged(seededExecutorProfileId, executorProfileId);
+    await issueRunnerSwitchIfChanged(runnerChanged, editingTask.id, executorProfileId);
 
     const description = isStartedEdit
       ? (editingTask.description ?? "")
@@ -508,24 +550,17 @@ export function useTaskSubmitHandlers({
       ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
-    try {
-      const updatedTask = await updateTask(editingTask.id, updatePayload);
-      await saveEditedTaskDependencies({
-        editDependencies,
-        updatedTask,
-        isStartedEdit,
-        descriptionInputRef,
-        setTaskName,
-        setHasDescription,
-      });
-      return { updatedTask, trimmedDescription };
-    } catch (error) {
-      // AC-TASKS-RUNNER-SWITCH-004.4c: a runner switch that already
-      // committed is never rolled back; tag the failure so the caller
-      // reports the true partial state instead of implying total rejection.
-      if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
-      throw error;
-    }
+    return saveEditedTaskFields({
+      editingTask,
+      updatePayload,
+      trimmedDescription,
+      runnerChanged,
+      editDependencies,
+      isStartedEdit,
+      descriptionInputRef,
+      setTaskName,
+      setHasDescription,
+    });
   }, [
     editingTask,
     taskName,

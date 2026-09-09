@@ -1,108 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
-
-const SESS_OTHER = "sess-other";
-const SESS_DRIFTED = "sess-drifted";
-const SESS_PINNED = "sess-pinned";
-
-type Listener = (state: AppState) => void;
-
-/**
- * Minimal in-memory store for the tasks WS handler tests.
- * The handler reads kanban tasks, kanbanMulti snapshots, and tasks.activeTaskId/activeSessionId,
- * and calls setActiveSession; everything else can stay default.
- */
-function makeStore(initial: Partial<AppState> = {}) {
-  let state = {
-    kanban: { workflowId: "wf1", steps: [], tasks: [] },
-    kanbanMulti: { snapshots: {}, isLoading: false },
-    tasks: {
-      activeTaskId: null,
-      activeSessionId: null,
-      pinnedSessionId: null,
-      lastSessionByTaskId: {},
-    },
-    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
-    environmentIdBySessionId: {},
-    setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
-      state = {
-        ...state,
-        tasks: {
-          ...state.tasks,
-          activeTaskId: taskId,
-          activeSessionId: sessionId,
-          pinnedSessionId: sessionId,
-          lastSessionByTaskId: sessionId
-            ? { ...state.tasks.lastSessionByTaskId, [taskId]: sessionId }
-            : state.tasks.lastSessionByTaskId,
-        },
-      };
-    }),
-    setActiveSessionAuto: vi.fn((taskId: string, sessionId: string | null) => {
-      state = {
-        ...state,
-        tasks: {
-          ...state.tasks,
-          activeTaskId: taskId,
-          activeSessionId: sessionId,
-        },
-      };
-    }),
-    removeTaskFromSidebarPrefs: vi.fn(),
-    setTaskDeletedNotification: vi.fn(),
-    ...initial,
-  } as unknown as AppState;
-
-  const listeners = new Set<Listener>();
-  return {
-    getState: () => state,
-    setState: (updater: AppState | ((s: AppState) => AppState)) => {
-      const next =
-        typeof updater === "function" ? (updater as (s: AppState) => AppState)(state) : updater;
-      state = { ...state, ...next };
-      for (const l of listeners) l(state);
-    },
-    subscribe: (l: Listener) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    destroy: vi.fn(),
-    getInitialState: vi.fn(),
-  } as unknown as StoreApi<AppState> & { getState: () => AppState };
-}
-
-function makeTask(id: string, primarySessionId: string | null, workflowId = "wf1") {
-  return {
-    task_id: id,
-    workflow_id: workflowId,
-    workflow_step_id: "step1",
-    title: "Test",
-    description: "",
-    state: "IN_PROGRESS",
-    primary_session_id: primarySessionId,
-    is_ephemeral: false,
-  } as Record<string, unknown>;
-}
-
-function makeMessage(payload: Record<string, unknown>) {
-  return {
-    id: "msg-1",
-    type: "notification" as const,
-    action: "task.updated" as const,
-    payload,
-  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
-}
-
-function makeStateChangedMessage(payload: Record<string, unknown>) {
-  return {
-    id: "msg-1",
-    type: "notification" as const,
-    action: "task.state_changed" as const,
-    payload,
-  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.state_changed"]>>[0];
-}
+import {
+  makeStore,
+  makeTask,
+  makeMessage,
+  makeStateChangedMessage,
+  SESS_OTHER,
+  SESS_DRIFTED,
+  SESS_PINNED,
+} from "./tasks.test-helpers";
 
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
@@ -611,56 +518,6 @@ describe("task.updated executor preservation", () => {
       primaryExecutorName: undefined,
       isRemoteExecutor: false,
     });
-  });
-});
-
-describe("task.updated runner mutability projection", () => {
-  // AC-TASKS-RUNNER-SWITCH-001.9: unlike executor identity, an omitted
-  // runner_editable/runner_ineligible_reason must NOT fall back to the cached
-  // task's last-known reading — a permission-shaped flag going stale-open is
-  // worse than going stale-closed.
-  it("does not gap-fill a cached editable=true when a lightweight update omits the projection", () => {
-    const existingTask = {
-      id: "t1",
-      workflowStepId: "step1",
-      title: "Old title",
-      position: 0,
-      runnerEditable: true,
-      runnerIneligibleReason: "eligible",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [existingTask],
-      } as unknown as AppState["kanban"],
-    });
-
-    registerTasksHandlers(store)["task.updated"]!(
-      makeMessage({ ...makeTask("t1", null), title: "Renamed task" }),
-    );
-
-    const task = store.getState().kanban.tasks.find((item) => item.id === "t1");
-    expect(task?.runnerEditable).toBe(false);
-    expect(task?.runnerIneligibleReason).toBe("evaluation_unavailable");
-  });
-
-  it("carries an explicit projection through to the store", () => {
-    const store = makeStore({
-      kanban: { workflowId: "wf1", steps: [], tasks: [] } as unknown as AppState["kanban"],
-    });
-
-    registerTasksHandlers(store)["task.updated"]!(
-      makeMessage({
-        ...makeTask("t1", null),
-        runner_editable: false,
-        runner_ineligible_reason: "session_exists",
-      }),
-    );
-
-    const task = store.getState().kanban.tasks.find((item) => item.id === "t1");
-    expect(task?.runnerEditable).toBe(false);
-    expect(task?.runnerIneligibleReason).toBe("session_exists");
   });
 });
 
