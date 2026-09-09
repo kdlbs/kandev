@@ -11,7 +11,8 @@ import (
 // is Task 06's core wave-comparison regression test
 // (AC-OFFICE-WAKE-WAVE-IDENTITY-003): a delivered wave keeps blocking across
 // a child-set change that doesn't touch wave membership (an automation-origin
-// child completing), and only a real wave-member change (a genuine,
+// child completing, or a non-state edit to an existing wave member — symptom
+// B, AC-002.15/AC-003.2), and only a real wave-member change (a genuine,
 // non-automation, non-archived, non-ephemeral child) makes the parent a
 // candidate again.
 func TestListStuckParents_WaveMatchBlocksAcrossNonMemberChildEdit_UnblockedOnWaveMemberChange(t *testing.T) {
@@ -68,6 +69,26 @@ func TestListStuckParents_WaveMatchBlocksAcrossNonMemberChildEdit_UnblockedOnWav
 			if len(afterNonMemberEdit) != 0 {
 				t.Fatalf("status %q: a non-wave-member child edit must not unblock a matched wave: %#v",
 					status, afterNonMemberEdit)
+			}
+
+			// The wave MEMBER itself is edited (a title/priority/label change
+			// in production, simulated here as a bare updated_at bump) without
+			// touching its state or id: this is symptom B's literal scenario
+			// (AC-002.15/AC-003.2). Wave membership is unchanged, so the wave
+			// string is unchanged, and the parent must stay blocked.
+			if _, err := repo.ExecRaw(ctx,
+				`UPDATE tasks SET updated_at = datetime('now', '+2 seconds') WHERE id = ?`, child0,
+			); err != nil {
+				t.Fatalf("edit wave-member child0's updated_at: %v", err)
+			}
+
+			afterWaveMemberEdit, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+			if err != nil {
+				t.Fatalf("ListStuckParents (after wave-member non-state edit): %v", err)
+			}
+			if len(afterWaveMemberEdit) != 0 {
+				t.Fatalf("status %q: editing a wave member's non-state field must not unblock a matched wave: %#v",
+					status, afterWaveMemberEdit)
 			}
 
 			// A real wave member joins: wave membership itself changes.
@@ -165,6 +186,42 @@ func TestListStuckParents_ExcludesParentWithOnlyNonWaveMemberChildren(t *testing
 	}
 	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-normal" {
 		t.Fatalf("candidates = %#v, want exactly [parent-normal] (no other parent has a wave member)", candidates)
+	}
+}
+
+// TestListStuckParents_QueuedRunWithStaleWaveStillBlocksCandidacy is
+// AC-OFFICE-WAKE-WAVE-IDENTITY-003.4's regression test: a queued or claimed
+// task_children_completed run blocks its parent from candidacy regardless
+// of which wave that run was queued for — unlike the finished/failed/
+// cancelled arm, the in-flight arm is not compared against the parent's
+// current wave string at all, because a delivery already in flight must not
+// be raced by a second one for what SQL currently reads as the parent's
+// wave, however that wave has since moved.
+func TestListStuckParents_QueuedRunWithStaleWaveStillBlocksCandidacy(t *testing.T) {
+	for _, status := range []string{"queued", "claimed"} {
+		t.Run(status, func(t *testing.T) {
+			repo := newSearchTestRepo(t)
+			ctx := context.Background()
+
+			const parentID = "parent-1"
+			seedWakeCandidate(t, repo, ctx, "ws-1", parentID)
+
+			// The in-flight run carries a wave identity for a completely
+			// different (stale) wave, not the parent's current one.
+			staleWaveString := waveidentity.WaveString(parentID, []string{"some-other-child"})
+			staleWaveKey := waveidentity.WaveKey(parentID, []string{"some-other-child"})
+			seedWakeRunWithWave(t, repo, ctx, "run-1", parentID, "task_children_completed",
+				status, "datetime('now')", staleWaveKey, staleWaveString)
+
+			candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+			if err != nil {
+				t.Fatalf("ListStuckParents: %v", err)
+			}
+			if len(candidates) != 0 {
+				t.Fatalf("status %q: a queued/claimed run must block candidacy regardless of its wave: %#v",
+					status, candidates)
+			}
+		})
 	}
 }
 
