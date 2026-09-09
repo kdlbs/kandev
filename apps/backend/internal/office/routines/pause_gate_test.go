@@ -40,7 +40,12 @@ func (f *fakePauseGate) PauseState(_ context.Context, workspaceID string) (*mode
 // newGatedTestRoutineService mirrors service_test.go's newTestRoutineService
 // but returns the internal *RoutineService type (this file is in package
 // routines, not routines_test) so tests can reach unexported members like
-// processCronTrigger.
+// processCronTrigger. It wires a workflow ensurer + task creator so the
+// heavy TaskTemplate carried by createGatedTestRoutine /
+// createUnattributedTestRoutine actually reaches materialiseHeavyRoutineRun
+// (and its task_created terminal status) instead of silently falling back
+// to the lightweight path, which — since office-heartbeat-rework — no
+// longer shares that terminal status (it ends in done/failed).
 func newGatedTestRoutineService(t *testing.T) (*RoutineService, *sqlite.Repository) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -53,13 +58,34 @@ func newGatedTestRoutineService(t *testing.T) (*RoutineService, *sqlite.Reposito
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	return NewRoutineService(repo, logger.Default(), &noopGateActivity{}), repo
+	svc := NewRoutineService(repo, logger.Default(), &noopGateActivity{})
+	svc.SetWorkflowEnsurer(&fakeGateWorkflowEnsurer{})
+	svc.SetTaskCreator(&fakeGateTaskCreator{})
+	return svc, repo
 }
 
 type noopGateActivity struct{}
 
 func (n *noopGateActivity) LogActivity(_ context.Context, _, _, _, _, _, _, _ string) {}
 func (n *noopGateActivity) LogActivityWithRun(_ context.Context, _, _, _, _, _, _, _, _, _ string) {
+}
+
+// fakeGateWorkflowEnsurer and fakeGateTaskCreator are minimal
+// RoutineWorkflowEnsurer/RoutineTaskCreator doubles local to this package
+// (service_test.go's equivalents live in the external routines_test
+// package and aren't reachable from here).
+type fakeGateWorkflowEnsurer struct{}
+
+func (f *fakeGateWorkflowEnsurer) EnsureRoutineWorkflow(_ context.Context, _ string) (string, error) {
+	return "wf-gated-routine", nil
+}
+
+type fakeGateTaskCreator struct{}
+
+func (f *fakeGateTaskCreator) CreateOfficeTaskInWorkflow(
+	_ context.Context, _, _, _, _, _, _ string,
+) (string, error) {
+	return "task-gated-routine", nil
 }
 
 func createGatedTestRoutine(t *testing.T, repo *sqlite.Repository, policy string) *Routine {

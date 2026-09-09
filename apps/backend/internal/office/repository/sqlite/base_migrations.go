@@ -74,11 +74,11 @@ func (r *Repository) runMigrations() error {
 // partial unique index runs after both ADD COLUMNs so it never executes
 // against a schema that lacks pause_id.
 func (r *Repository) migrateWorkspacePauseSkipAttribution() {
-	r.migrate.Apply("office_routine_runs.skip_reason",
+	_ = r.migrate.Apply("office_routine_runs.skip_reason",
 		`ALTER TABLE office_routine_runs ADD COLUMN skip_reason TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("office_routine_runs.pause_id",
+	_ = r.migrate.Apply("office_routine_runs.pause_id",
 		`ALTER TABLE office_routine_runs ADD COLUMN pause_id TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("idx_office_routine_run_pause_once",
+	_ = r.migrate.Apply("idx_office_routine_run_pause_once",
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_office_routine_run_pause_once
 			ON office_routine_runs(routine_id, pause_id) WHERE pause_id != ''`)
 }
