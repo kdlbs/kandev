@@ -529,6 +529,7 @@ export type SettingsSliceActions = {
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setSleepInhibition: (response: SleepInhibitionResponse) => void;

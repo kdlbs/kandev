@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listNotificationProviders } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 
@@ -14,6 +14,11 @@ export function useNotificationProviders() {
   const setNotificationProvidersLoading = useAppStore(
     (state) => state.setNotificationProvidersLoading,
   );
+  const setAppriseAvailable = useAppStore((state) => state.setAppriseAvailable);
+  const [appriseRescanPending, setAppriseRescanPending] = useState(false);
+  const [appriseRescanError, setAppriseRescanError] = useState(false);
+  const [appriseRescanResult, setAppriseRescanResult] = useState<boolean | null>(null);
+  const appriseRescanInFlight = useRef(false);
 
   useEffect(() => {
     if (loaded || loading) return;
@@ -42,11 +47,33 @@ export function useNotificationProviders() {
       });
   }, [loaded, loading, setNotificationProviders, setNotificationProvidersLoading]);
 
+  const rescanApprise = useCallback(async () => {
+    if (loading || appriseRescanInFlight.current) return;
+    appriseRescanInFlight.current = true;
+    setAppriseRescanPending(true);
+    setAppriseRescanError(false);
+    try {
+      const response = await listNotificationProviders({ cache: "no-store" });
+      const available = response.apprise_available ?? false;
+      setAppriseAvailable(available);
+      setAppriseRescanResult(available);
+    } catch {
+      setAppriseRescanError(true);
+    } finally {
+      appriseRescanInFlight.current = false;
+      setAppriseRescanPending(false);
+    }
+  }, [loading, setAppriseAvailable]);
+
   return {
     providers,
     events,
     appriseAvailable,
     loaded,
     loading,
+    rescanApprise,
+    appriseRescanPending,
+    appriseRescanError,
+    appriseRescanResult,
   };
 }

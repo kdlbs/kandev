@@ -349,6 +349,7 @@ function createSecretAndSpriteActions(
   | "setSpritesLoading"
   | "removeSpritesInstance"
   | "setNotificationProviders"
+  | "setAppriseAvailable"
   | "setNotificationProvidersLoading"
 > {
   return {
@@ -402,6 +403,10 @@ function createSecretAndSpriteActions(
         draft.notificationProviders.appriseAvailable = state.appriseAvailable;
         draft.notificationProviders.loaded = state.loaded;
         draft.notificationProviders.loading = state.loading;
+      }),
+    setAppriseAvailable: (available) =>
+      set((draft) => {
+        draft.notificationProviders.appriseAvailable = available;
       }),
     setNotificationProvidersLoading: (loading) =>
       set((draft) => {

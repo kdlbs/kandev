@@ -314,6 +314,7 @@ export type AppState = KanbanSlice & {
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSleepInhibition: (response: NonNullable<SleepInhibitionStoreState["response"]>) => void;
   setSleepInhibitionLoading: (loading: boolean) => void;

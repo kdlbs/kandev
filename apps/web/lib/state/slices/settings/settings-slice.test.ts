@@ -52,6 +52,23 @@ describe("user settings snapshots", () => {
   });
 });
 
+describe("notification provider availability", () => {
+  it("changes only Apprise availability", () => {
+    const store = makeStore();
+    const before = store.getState().notificationProviders;
+
+    // @covers AC-PLATFORM-APPRISE-RESCAN-001.4
+    store.getState().setAppriseAvailable(true);
+
+    const after = store.getState().notificationProviders;
+    expect(after.appriseAvailable).toBe(true);
+    expect(after.items).toBe(before.items);
+    expect(after.events).toBe(before.events);
+    expect(after.loaded).toBe(before.loaded);
+    expect(after.loading).toBe(before.loading);
+  });
+});
+
 describe("settings update jobs", () => {
   it("rehydrates the newest retained job for each agent", () => {
     const store = makeStore();

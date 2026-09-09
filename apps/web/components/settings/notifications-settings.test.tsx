@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NotificationProvider } from "@/lib/types/http";
 import { NotificationsSettings } from "./notifications-settings";
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   testNotificationProvider: vi.fn(),
   updateNotificationProvider: vi.fn(),
   setNotificationProviders: vi.fn(),
+  rescanApprise: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -23,13 +24,21 @@ vi.mock("@/lib/api", () => ({
 // compares them by reference, so a fresh array per render re-hydrates forever.
 const PROVIDERS: NotificationProvider[] = [];
 const EVENTS = ["session.turn_finished"];
+let appriseAvailable = false;
+let appriseRescanPending = false;
+let appriseRescanError = false;
+let appriseRescanResult: boolean | null = null;
 
 vi.mock("@/hooks/domains/settings/use-notification-providers", () => ({
   useNotificationProviders: () => ({
     providers: PROVIDERS,
     events: EVENTS,
-    appriseAvailable: false,
+    appriseAvailable,
     loaded: true,
+    rescanApprise: mocks.rescanApprise,
+    appriseRescanPending,
+    appriseRescanError,
+    appriseRescanResult,
   }),
 }));
 
@@ -45,7 +54,13 @@ vi.mock("@/lib/desktop/native-notification-client", () => ({
   },
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  appriseAvailable = false;
+  appriseRescanPending = false;
+  appriseRescanError = false;
+  appriseRescanResult = null;
+});
 
 describe("NotificationsSettings", () => {
   it("renders the Apprise install notice as one sentence around its link", () => {
@@ -91,5 +106,60 @@ describe("NotificationsSettings", () => {
       // consuming boundary would let `text-xl/relaxed` through.
       .filter((className) => /(?:^|\s)text-(?:base|lg|\d?xl)(?=[\s/]|$)/.test(className));
     expect(oversized).toEqual([]);
+  });
+
+  it("rescans Apprise and exposes the fresh detection result", () => {
+    const { rerender } = render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    const rescan = screen.getByRole("button", { name: "Rescan Apprise" });
+    expect(rescan).toBeTruthy();
+    expect(screen.getByText(/Detection runs on the Kandev server/)).toBeTruthy();
+
+    fireEvent.click(rescan);
+    expect(mocks.rescanApprise).toHaveBeenCalledOnce();
+
+    appriseRescanPending = true;
+    rerender(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Checking Apprise" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    appriseAvailable = true;
+    appriseRescanPending = false;
+    appriseRescanResult = true;
+    rerender(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(screen.getByText("Apprise detected.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add Apprise Provider" })).toBeTruthy();
+  });
+
+  it("keeps the last availability and offers retry feedback after a rescan error", () => {
+    const { rerender } = render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    appriseRescanError = true;
+    rerender(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByText("Could not check Apprise. Try again.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Rescan Apprise" })).toBeTruthy();
+    expect(screen.getByText(/Apprise is not installed yet/)).toBeTruthy();
   });
 });
