@@ -233,6 +233,7 @@ func TestCascadeChildrenCompleted_PayloadParity_MergesWorkflowAuthoredPayload(t 
 					{
 						Type: wfmodels.GenericActionQueueRun,
 						Config: map[string]any{
+							"reason":  RunReasonTaskChildrenCompleted,
 							"payload": map[string]any{"escalate_to": "lead-agent"},
 						},
 					},
@@ -286,12 +287,14 @@ func TestCascadeChildrenCompleted_PayloadParity_IgnoresNonPrimaryTargetedAction(
 						Type: wfmodels.GenericActionQueueRun,
 						Config: map[string]any{
 							"target":  "workspace.ceo_agent",
+							"reason":  RunReasonTaskChildrenCompleted,
 							"payload": map[string]any{"escalate_to": "ceo-agent"},
 						},
 					},
 					{
 						Type: wfmodels.GenericActionQueueRun,
 						Config: map[string]any{
+							"reason":  RunReasonTaskChildrenCompleted,
 							"payload": map[string]any{"escalate_to": "lead-agent"},
 						},
 					},
@@ -345,5 +348,125 @@ func TestCascadeChildrenCompleted_PayloadParity_StepLookupFails_StillQueues(t *t
 
 	if queued != 1 {
 		t.Fatalf("queued = %d, want 1 (a step-lookup failure must not block the wake)", queued)
+	}
+}
+
+// TestCascadeChildrenCompleted_PersistsWorkflowStepID is AC-002.10's
+// staleness-guard half: an engine-routed producer's persisted payload
+// carries workflow_step_id, which evaluateRunStaleness uses to cancel a
+// queued run whose parent has since moved to a different step. A cascade
+// wake for the same wave must carry the same field, or the two producers'
+// wakes are not equivalent — whichever wins the unique-index race decides
+// whether the staleness guard applies at all.
+func TestCascadeChildrenCompleted_PersistsWorkflowStepID(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	if _, err := ss.repo.ExecRaw(ctx,
+		`UPDATE tasks SET workflow_step_id = 'step-x' WHERE id = 'parent-1'`); err != nil {
+		t.Fatalf("bind parent step: %v", err)
+	}
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+
+	var payload string
+	queue := func(_ string, c RunContext) {
+		encoded, err := encodeRunContext(c)
+		if err != nil {
+			t.Fatalf("encode run context: %v", err)
+		}
+		payload = encoded
+	}
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+
+	if !strings.Contains(payload, `"workflow_step_id":"step-x"`) {
+		t.Fatalf("payload = %s, want it to carry workflow_step_id like an engine-routed producer would", payload)
+	}
+}
+
+// TestCascadeChildrenCompleted_ExtraPayloadWorkflowStepID_CannotOverride
+// mirrors the existing task_id/workspace_id/child_task_id re-assertion
+// tests: a workflow-authored payload key must not be able to override the
+// wake's own workflow_step_id, the same envelope-field guarantee
+// encodeRunContext already provides for the other identity fields.
+func TestCascadeChildrenCompleted_ExtraPayloadWorkflowStepID_CannotOverride(t *testing.T) {
+	rc := RunContext{
+		Reason:         RunReasonTaskChildrenCompleted,
+		TaskID:         "parent-1",
+		WorkflowStepID: "step-x",
+		ExtraPayload:   map[string]any{"workflow_step_id": "step-foreign"},
+	}
+	payload, err := encodeRunContext(rc)
+	if err != nil {
+		t.Fatalf("encode run context: %v", err)
+	}
+	if !strings.Contains(payload, `"workflow_step_id":"step-x"`) {
+		t.Fatalf("payload = %s, want workflow_step_id = step-x (envelope field), not step-foreign", payload)
+	}
+}
+
+// TestCascadeChildrenCompleted_PayloadParity_IgnoresDifferentReasonAction
+// is AC-002.16's reason-matching half, mirroring the engine's own gate
+// (QueueRunCallback.Execute only attaches wave identity when
+// queueRunReason(in) == reasonTaskChildrenCompleted): a step authoring a
+// second primary-targeted queue_run action on this trigger with a
+// different (or unset) reason must not have its payload merged onto the
+// real task_children_completed wake. Without the reason check, cascade
+// would attach an unrelated action's content to this wave.
+func TestCascadeChildrenCompleted_PayloadParity_IgnoresDifferentReasonAction(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	if _, err := ss.repo.ExecRaw(ctx,
+		`UPDATE tasks SET workflow_step_id = 'step-x' WHERE id = 'parent-1'`); err != nil {
+		t.Fatalf("bind parent step: %v", err)
+	}
+	ss.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-x": {
+			ID: "step-x",
+			Events: wfmodels.StepEvents{
+				OnChildrenCompleted: []wfmodels.GenericAction{
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"reason":  "follow_up",
+							"payload": map[string]any{"escalate_to": "follow-up-agent"},
+						},
+					},
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"reason":  RunReasonTaskChildrenCompleted,
+							"payload": map[string]any{"escalate_to": "lead-agent"},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+
+	var payload string
+	queue := func(_ string, c RunContext) {
+		encoded, err := encodeRunContext(c)
+		if err != nil {
+			t.Fatalf("encode run context: %v", err)
+		}
+		payload = encoded
+	}
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+
+	if !strings.Contains(payload, `"escalate_to":"lead-agent"`) {
+		t.Fatalf("payload = %s, want it to contain the task_children_completed-reasoned action's escalate_to key", payload)
+	}
+	if strings.Contains(payload, "follow-up-agent") {
+		t.Fatalf("payload = %s, must not contain the differently-reasoned action's payload", payload)
 	}
 }

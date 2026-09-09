@@ -193,13 +193,13 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		  AND (
 		      EXISTS (
 		          SELECT 1 FROM runs w
-		          WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
 		            AND w.reason = ?
 		            AND w.wake_wave_key <> ''
 		      )
 		      OR NOT EXISTS (
 		          SELECT 1 FROM runs w
-		          WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
 		            AND w.reason = ?
 		            AND w.status IN ('finished', 'failed', 'cancelled')
 		            AND w.requested_at >= s.newest_child_updated_at

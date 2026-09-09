@@ -90,9 +90,17 @@ const (
 // Run.Payload column so the agent runtime can pick the right
 // system prompt template based on the reason.
 type RunContext struct {
-	Reason                string   `json:"reason"`
-	TaskID                string   `json:"task_id"`
-	WorkspaceID           string   `json:"workspace_id,omitempty"`
+	Reason      string `json:"reason"`
+	TaskID      string `json:"task_id"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// WorkflowStepID is the parent's workflow step at wake time. An
+	// engine-routed producer's request always carries it (runs/service's
+	// runPayload copies it from the typed field), and
+	// evaluateRunStaleness reads it to cancel a queued run whose parent
+	// has since moved to a different step. Left empty, that guard never
+	// applies — so cascade must set this whenever it can be resolved, or
+	// the two producers' wakes for the same wave are not equivalent.
+	WorkflowStepID        string   `json:"workflow_step_id,omitempty"`
 	ActorID               string   `json:"actor_id,omitempty"`
 	ActorType             string   `json:"actor_type,omitempty"` // "user" | "agent"
 	CommentID             string   `json:"comment_id,omitempty"`
@@ -418,6 +426,11 @@ func encodeRunContext(c RunContext) (string, error) {
 		m["child_task_id"] = c.ChildTaskID
 	} else {
 		delete(m, "child_task_id")
+	}
+	if c.WorkflowStepID != "" {
+		m["workflow_step_id"] = c.WorkflowStepID
+	} else {
+		delete(m, "workflow_step_id")
 	}
 	merged, err := json.Marshal(m)
 	if err != nil {

@@ -419,15 +419,17 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 		return
 	}
 
+	stepID, actionPayload := ss.resolveWaveActionPayload(ctx, task.ParentID)
 	rc := RunContext{
 		Reason:         RunReasonTaskChildrenCompleted,
 		TaskID:         task.ParentID,
 		WorkspaceID:    task.WorkspaceID,
 		ChildTaskID:    task.ID,
+		WorkflowStepID: stepID,
 		IdempotencyKey: childrenCompletedIdempotencyKey(task.ParentID, parentAssignee, children),
 		WaveKey:        waveKey,
 		WaveString:     waveString,
-		ExtraPayload:   ss.resolveWaveActionPayload(ctx, task.ParentID),
+		ExtraPayload:   actionPayload,
 	}
 	queue(parentAssignee, rc)
 }
@@ -462,13 +464,16 @@ func (ss *SchedulerService) resolveWaveIdentity(
 	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids), true
 }
 
-// resolveWaveActionPayload resolves the workflow-authored queue_run
-// payload the engine would attach for the parent's current step's
-// on_children_completed trigger, so a cascade wake that never touches the
-// engine still carries it. Any failure to resolve it — no getter wired,
-// no step bound, lookup error, no matching action, no payload — returns
-// nil and logs the omission at debug: the wake itself is unconditional,
-// an optional payload is not worth skipping it for.
+// resolveWaveActionPayload resolves the parent's current workflow step id
+// and, from that step's on_children_completed trigger, the
+// workflow-authored queue_run payload the engine would attach — so a
+// cascade wake that never touches the engine still carries both. The step
+// id is returned even when no matching action payload is found, since
+// AC-002.10's staleness-guard equivalence needs it regardless of whether
+// the step also authors a payload. Any failure to resolve the step itself
+// — no getter wired, no step bound, lookup error — returns ("", nil) and
+// logs the omission at debug: the wake itself is unconditional, an
+// optional field is not worth skipping it for.
 //
 // Cascade always wakes the parent's assignee, so only an action whose
 // resolved Target is the implicit-default or explicit "primary" collides
@@ -479,33 +484,45 @@ func (ss *SchedulerService) resolveWaveIdentity(
 // parity between producers waking the *same* target, and the first
 // non-empty payload regardless of target would silently carry the wrong
 // recipient's content.
-func (ss *SchedulerService) resolveWaveActionPayload(ctx context.Context, parentID string) map[string]any {
-	if ss.workflowStepGetter == nil {
-		return nil
-	}
+//
+// The action must also be reasoned task_children_completed, mirroring
+// QueueRunCallback.Execute's own reasonTaskChildrenCompleted gate: an
+// action left at its default reason resolves to the trigger name in the
+// engine, never task_children_completed, so it is excluded there too. A
+// step authoring a second on_children_completed queue_run action for an
+// unrelated reason must not have its payload attached to this wave.
+func (ss *SchedulerService) resolveWaveActionPayload(
+	ctx context.Context, parentID string,
+) (stepID string, payload map[string]any) {
 	stepID, err := ss.repo.GetTaskWorkflowStepID(ctx, parentID)
 	if err != nil || stepID == "" {
 		ss.logger.Debug("wave payload parity: no workflow step bound",
 			zap.String("parent_id", parentID), zap.Error(err))
-		return nil
+		return "", nil
+	}
+	if ss.workflowStepGetter == nil {
+		return stepID, nil
 	}
 	step, err := ss.workflowStepGetter.GetStep(ctx, stepID)
 	if err != nil || step == nil {
 		ss.logger.Debug("wave payload parity: step lookup failed",
 			zap.String("parent_id", parentID), zap.String("step_id", stepID), zap.Error(err))
-		return nil
+		return stepID, nil
 	}
 	spec := engine.CompileStep(step)
 	for _, action := range spec.Events[engine.TriggerOnChildrenCompleted] {
 		if action.Kind != engine.ActionQueueRun || action.QueueRun == nil || len(action.QueueRun.Payload) == 0 {
 			continue
 		}
+		if action.QueueRun.Reason != RunReasonTaskChildrenCompleted {
+			continue
+		}
 		target := strings.TrimSpace(action.QueueRun.Target)
 		if target == "" || target == engine.TargetPrimary {
-			return action.QueueRun.Payload
+			return stepID, action.QueueRun.Payload
 		}
 	}
-	return nil
+	return stepID, nil
 }
 
 // childrenCompletedIdempotencyKey digests the parent's child ID set
