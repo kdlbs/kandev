@@ -589,9 +589,7 @@ describe("useTaskSubmitHandlers — runner switch (REQ-TASKS-RUNNER-SWITCH-004)"
   });
 
   it("reports an unrecognized outcome class for a not-found switch rejection (AC-004.4b)", async () => {
-    switchTaskRunnerMock.mockRejectedValueOnce(
-      new WebSocketRequestError("gone", "NOT_FOUND"),
-    );
+    switchTaskRunnerMock.mockRejectedValueOnce(new WebSocketRequestError("gone", "NOT_FOUND"));
     const deps = makeDeps({
       isEditMode: true,
       taskName: ORIGINAL_TITLE,

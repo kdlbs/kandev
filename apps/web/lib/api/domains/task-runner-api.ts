@@ -10,10 +10,7 @@ const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
  * carrying the outcome's `code` and, for a mutability or compatibility
  * conflict, `details.error_code` naming the reason.
  */
-export async function switchTaskRunner(
-  taskId: string,
-  executorProfileId: string,
-): Promise<Task> {
+export async function switchTaskRunner(taskId: string, executorProfileId: string): Promise<Task> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);

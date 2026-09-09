@@ -438,7 +438,6 @@ describe("CreateEditSelectors", () => {
       "/settings/executors/exec-profile-1",
     );
   });
-
 });
 
 // REQ-TASKS-RUNNER-SWITCH-004: runner-editability gating is independent of

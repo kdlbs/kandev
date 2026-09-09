@@ -138,7 +138,8 @@ export function taskSubmitErrorMessage(error: unknown): string {
     return t("task:dependencyUpdateFailed");
   }
   if (error instanceof RunnerSwitchRejectedError) return runnerSwitchErrorMessage(error.cause);
-  if (error instanceof TaskUpdateAfterRunnerSwitchError) return t("task:runnerSwitchPartiallySaved");
+  if (error instanceof TaskUpdateAfterRunnerSwitchError)
+    return t("task:runnerSwitchPartiallySaved");
   if (error instanceof ApiError) {
     const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
     if (key) return t(key);
