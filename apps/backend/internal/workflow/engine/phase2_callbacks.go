@@ -90,6 +90,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	if err != nil {
 		return ActionResult{}, err
 	}
+	waveKey, waveString := waveIdentityPayload(in.Payload)
 	for _, agentID := range agentIDs {
 		req := QueueRunRequest{
 			AgentProfileID: agentID,
@@ -98,6 +99,8 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 			Reason:         queueRunReason(in),
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
 			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 		}
 		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -426,6 +429,22 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 		return nil
 	}
 	return out
+}
+
+// waveIdentityPayload extracts the completion-wave identity from a
+// TriggerOnChildrenCompleted dispatch, or ("", "") for any other trigger
+// (OnChildrenCompletedPayload's WaveKey/WaveString default to empty when
+// the dispatching producer could not derive one).
+func waveIdentityPayload(payload any) (waveKey, waveString string) {
+	switch p := payload.(type) {
+	case OnChildrenCompletedPayload:
+		return p.WaveKey, p.WaveString
+	case *OnChildrenCompletedPayload:
+		if p != nil {
+			return p.WaveKey, p.WaveString
+		}
+	}
+	return "", ""
 }
 
 func commentPayload(payload any) (OnCommentPayload, bool) {

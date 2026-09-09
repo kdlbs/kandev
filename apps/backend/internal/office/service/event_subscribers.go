@@ -1119,6 +1119,11 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return err
 	}
 
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, s.repo, parentID, s.logger)
+	if !ok {
+		return nil
+	}
+
 	// Derived the same way as ParentWakeReconciler's recovery dispatch
 	// (wakeOperationID) so both producers land on the identical operation
 	// id for the same parent + child set. That shared id is what lets
@@ -1147,7 +1152,11 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		})
 	}
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
+		engine.OnChildrenCompletedPayload{
+			ChildSummaries: summaries,
+			WaveKey:        waveKey,
+			WaveString:     waveString,
+		}, key)
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.

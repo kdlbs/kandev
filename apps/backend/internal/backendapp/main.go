@@ -1821,6 +1821,8 @@ func (a *runsServiceEngineAdapter) QueueRun(
 		Reason:         req.Reason,
 		IdempotencyKey: req.IdempotencyKey,
 		Payload:        req.Payload,
+		WakeWaveKey:    req.WaveKey,
+		WakeWaveString: req.WaveString,
 	})
 	return workflowengine.QueueOutcome(outcome), err
 }

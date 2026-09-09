@@ -49,6 +49,11 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// WaveKey and WaveString carry a completion-wave identity through from
+	// OnChildrenCompletedPayload (parent-wake-wave-identity). Empty for
+	// every trigger except on_children_completed.
+	WaveKey    string
+	WaveString string
 }
 
 // ParticipantInfo is a lightweight projection of a workflow_step_participants

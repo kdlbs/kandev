@@ -98,6 +98,11 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, svc.repo, c.ParentTaskID, h.logger)
+	if !ok {
+		return
+	}
+
 	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -107,6 +112,8 @@ func (h *ParentWakeReconciler) reconcileOne(
 			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
 		return
 	}
+	payload.WaveKey = waveKey
+	payload.WaveString = waveString
 
 	currentKey, err := svc.repo.GetChildSetKey(ctx, c.ParentTaskID)
 	if err != nil {

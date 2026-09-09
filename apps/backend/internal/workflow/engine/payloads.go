@@ -35,8 +35,17 @@ type ChildSummary struct {
 }
 
 // OnChildrenCompletedPayload accompanies TriggerOnChildrenCompleted.
+//
+// WaveKey and WaveString are the completion-wave identity
+// (parent-wake-wave-identity) the dispatching producer derived from its own
+// terminality-confirming wave-member read, before the trigger was raised.
+// Empty means the dispatcher could not derive one (AC-OFFICE-WAKE-WAVE-
+// IDENTITY-002.12) — QueueRunCallback then queues without a wave identity,
+// same as before this field existed.
 type OnChildrenCompletedPayload struct {
 	ChildSummaries []ChildSummary
+	WaveKey        string
+	WaveString     string
 }
 
 // OnApprovalResolvedPayload accompanies TriggerOnApprovalResolved.
