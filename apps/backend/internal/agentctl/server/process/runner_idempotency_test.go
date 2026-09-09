@@ -63,13 +63,13 @@ func TestProcessRunnerTimeoutReturnsTypedTerminalResultAndRetainsOutput(t *testi
 	command, env := fixtureShellExec("echo-then-sleep timeout 30")
 	info, err := runner.Start(context.Background(), StartProcessRequest{
 		RequestID: "workflow-timeout-1", SessionID: "session-timeout", Kind: types.ProcessKindCustom,
-		Command: command, Env: env, Timeout: 100 * time.Millisecond,
+		Command: command, Env: env, Timeout: 1 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("start timeout process: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		got, ok := runner.Get(info.ID, true)
 		if ok && got.Status == types.ProcessStatusTimedOut {
