@@ -26,9 +26,19 @@ export type TaskStateIconProps = {
   hasPendingPermission?: boolean;
   isOnLastWorkflowStep?: boolean;
   interrupted?: boolean;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input (permission/clarification) and by an active
+   * foregroundActivity (AC-34).
+   */
+  parkedOnBackgroundWork?: boolean;
   accessibleLabel?: string;
   showBackgroundTooltip?: boolean;
 };
+
+const BACKGROUND_WORK_RUNNING_LABEL_KEY = "task:backgroundWorkIsRunning";
 
 function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
   return classifyTask(sessionState, state) === "in_progress";
@@ -68,14 +78,14 @@ function BackgroundWorkTaskIcon({ showTooltip }: { showTooltip: boolean }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          aria-label={t("task:backgroundWorkIsRunning")}
+          aria-label={t(BACKGROUND_WORK_RUNNING_LABEL_KEY)}
           tabIndex={0}
           className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
         >
           {spinner}
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
+      <TooltipContent side="right">{t(BACKGROUND_WORK_RUNNING_LABEL_KEY)}</TooltipContent>
     </Tooltip>
   );
 }
@@ -131,6 +141,7 @@ export function TaskStateIcon({
   hasPendingPermission,
   isOnLastWorkflowStep,
   interrupted,
+  parkedOnBackgroundWork,
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
@@ -161,6 +172,14 @@ export function TaskStateIcon({
     );
   }
   if (foregroundActivity === "background") {
+    return withAccessibleLabel(
+      <BackgroundWorkTaskIcon showTooltip={showBackgroundTooltip} />,
+      showBackgroundTooltip ? undefined : accessibleLabel,
+    );
+  }
+  // Parked-on-background-work (AC-23): a settled session whose only
+  // remaining life is a positively-sampled background process.
+  if (parkedOnBackgroundWork) {
     return withAccessibleLabel(
       <BackgroundWorkTaskIcon showTooltip={showBackgroundTooltip} />,
       showBackgroundTooltip ? undefined : accessibleLabel,
@@ -230,12 +249,14 @@ export function getTaskStateIconLabelKey({
   hasPendingPermission,
   isOnLastWorkflowStep,
   interrupted,
+  parkedOnBackgroundWork,
 }: TaskStateIconProps) {
   if (shouldUsePermissionTaskIcon(hasPendingPermission) || hasPendingClarification) {
     return "common:taskStateWaitingForInput";
   }
   if (foregroundActivity === "generating") return "common:taskStateInProgress";
-  if (foregroundActivity === "background") return "task:backgroundWorkIsRunning";
+  if (foregroundActivity === "background") return BACKGROUND_WORK_RUNNING_LABEL_KEY;
+  if (parkedOnBackgroundWork) return BACKGROUND_WORK_RUNNING_LABEL_KEY;
   if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
   if (computeIsInProgress(state, sessionState)) {

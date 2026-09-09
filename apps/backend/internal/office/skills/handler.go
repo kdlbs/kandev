@@ -98,7 +98,7 @@ func (h *Handler) updateSkill(c *gin.Context) {
 		return
 	}
 	applySkillUpdates(skill, &req)
-	if err := h.svc.ValidateSkillUpdate(ctx, skill); err != nil {
+	if err := h.svc.ValidateSkillUpdate(ctx, skill, req.Slug != nil); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

@@ -36,11 +36,13 @@ export function shouldShowReopenStateIcon(
   foregroundActivity?: ForegroundActivity | null,
   hasPendingClarification = false,
   hasPendingPermission = false,
+  parkedOnBackgroundWork = false,
 ): boolean {
   if (state === "STARTING") return false;
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && (hasPendingClarification || hasPendingPermission)) return true;
   if (canRequestInput && foregroundActivity === "background") return true;
+  if (canRequestInput && parkedOnBackgroundWork) return true;
   if (canRequestInput) return false;
   return true;
 }
@@ -199,15 +201,15 @@ function SessionReopenMenuItem({
         session.foreground_activity,
         pending.clarification,
         pending.permission,
+        session.parked_on_background_work,
       ) && (
         <span className="shrink-0">
-          {getSessionStateIcon(
-            session.state,
-            "h-3 w-3",
-            session.foreground_activity,
-            pending.clarification,
-            pending.permission,
-          )}
+          {getSessionStateIcon(session.state, "h-3 w-3", {
+            foregroundActivity: session.foreground_activity,
+            hasPendingClarification: pending.clarification,
+            hasPendingPermission: pending.permission,
+            parkedOnBackgroundWork: session.parked_on_background_work,
+          })}
         </span>
       )}
     </DropdownMenuItem>

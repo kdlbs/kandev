@@ -63,6 +63,26 @@ func TestRemoteControlHandshake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "403") {
 			t.Fatalf("error = %v, want the status code", err)
 		}
+		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, want it to wrap errSSHAgentctlHandshakeRejected so the launch retry can classify it", err)
+		}
+	})
+
+	t.Run("non-403 non-200 is not classified as the nonce-rejection retry sentinel", func(t *testing.T) {
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer httpServer.Close()
+		server := newFakeSSHServer(t, nil)
+		server.forwardTo(strings.TrimPrefix(httpServer.URL, "http://"))
+
+		_, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce")
+		if err == nil || !strings.Contains(err.Error(), "500") {
+			t.Fatalf("error = %v, want the status code", err)
+		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, only 403 is the nonce rejection — a 500 must not trigger a fresh-instance retry", err)
+		}
 	})
 
 	t.Run("empty token is an error", func(t *testing.T) {
@@ -77,6 +97,9 @@ func TestRemoteControlHandshake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no token") {
 			t.Fatalf("error = %v, want missing-token error", err)
 		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, a 200 with a malformed body is not a rejected-listener error", err)
+		}
 	})
 
 	t.Run("unreachable control port is an error", func(t *testing.T) {
@@ -84,6 +107,9 @@ func TestRemoteControlHandshake(t *testing.T) {
 		_, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce")
 		if err == nil || !strings.Contains(err.Error(), "agentctl handshake") {
 			t.Fatalf("error = %v, want dial failure", err)
+		}
+		if errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			t.Fatalf("error = %v, a transport failure is not a rejected-listener error", err)
 		}
 	})
 }
@@ -223,6 +249,9 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	if got.Env[envKeyOpenAIAPIKey] != "sk-1" {
 		t.Fatalf("Env = %+v, want the allowlisted key", got.Env)
 	}
+	if got.Env[envKeyKandevCLI] != "/remote/agentctl" {
+		t.Fatalf("KANDEV_CLI = %q, want the remote agentctl path", got.Env[envKeyKandevCLI])
+	}
 	if _, leaked := got.Env["UNRELATED"]; leaked {
 		t.Fatalf("Env leaked a non-allowlisted key: %+v", got.Env)
 	}
@@ -271,6 +300,23 @@ func TestSSHRemoteAgentEnvForwardsOnlyScopedCredentials(t *testing.T) {
 		}
 		if _, ok := env["PROFILE_ONLY"]; ok {
 			t.Fatal("unapproved profile key must not be forwarded to the remote agent")
+		}
+	})
+
+	t.Run("signed runtime contract is forwarded", func(t *testing.T) {
+		env := sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{
+			envKeyKandevAPIURL:      "http://127.0.0.1:38429/api/v1",
+			envKeyKandevAPIKey:      "signed-key",
+			envKeyKandevRunToken:    "signed-token",
+			envKeyKandevAgentID:     "agent-1",
+			envKeyKandevWorkspaceID: "workspace-1",
+			envKeyKandevRunID:       "run-1",
+			envKeyKandevTaskID:      "task-1",
+			envKeyKandevCLI:         "/host/agentctl",
+		}})
+		if env[envKeyKandevAPIURL] == "" || env[envKeyKandevAPIKey] != "signed-key" ||
+			env[envKeyKandevRunToken] != "signed-token" || env[envKeyKandevTaskID] != "task-1" {
+			t.Fatalf("runtime contract = %+v", env)
 		}
 	})
 

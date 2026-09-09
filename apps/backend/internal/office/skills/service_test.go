@@ -247,7 +247,7 @@ func TestValidateSkillUpdate_NormalizesWellFormedSlugToCanonical(t *testing.T) {
 	}
 
 	skill.Slug = "renamed"
-	if err := svc.ValidateSkillUpdate(ctx, skill); err != nil {
+	if err := svc.ValidateSkillUpdate(ctx, skill, true); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if skill.Slug != "kandev-renamed" {
@@ -268,7 +268,7 @@ func TestValidateSkillUpdate_RejectsNotWellFormedSlug(t *testing.T) {
 	}
 
 	skill.Slug = "not a valid slug!"
-	if err := svc.ValidateSkillUpdate(ctx, skill); err == nil {
+	if err := svc.ValidateSkillUpdate(ctx, skill, true); err == nil {
 		t.Fatal("expected error for not-well-formed slug")
 	}
 }

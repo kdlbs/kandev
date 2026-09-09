@@ -10,7 +10,9 @@ import (
 // ManagedRuntimeCacheRepairRequest contains the trusted exact package spec
 // used to derive one npm execution tree.
 type ManagedRuntimeCacheRepairRequest struct {
-	PackageSpec string `json:"package_spec"`
+	PackageSpec string            `json:"package_spec"`
+	Env         map[string]string `json:"env,omitempty"`
+	StripEnv    []string          `json:"strip_env,omitempty"`
 }
 
 // ManagedRuntimeCacheRepairResponse reports the result without exposing the
@@ -34,7 +36,9 @@ func (s *Server) handleManagedRuntimeCacheRepair(c *gin.Context) {
 		})
 		return
 	}
-	if err := s.procMgr.RepairManagedRuntimeCache(c.Request.Context(), req.PackageSpec); err != nil {
+	if err := s.procMgr.RepairManagedRuntimeCacheWithEnvironment(
+		c.Request.Context(), req.PackageSpec, req.Env, req.StripEnv,
+	); err != nil {
 		if c.Request.Context().Err() != nil {
 			return
 		}

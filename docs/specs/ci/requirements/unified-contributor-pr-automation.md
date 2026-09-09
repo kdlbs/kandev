@@ -25,9 +25,9 @@ their current workflow behavior.
 - **Approval label:** The maintainer-applied `safe-to-review` label.
 - **Direct allowlist:** An existing repository variable that names trusted
   contributor logins. Direct allowlists remain independent authorization paths.
-- **Privileged preview path:** The existing fork preview job that checks out the
-  contributor head and runs `go run ./cmd/preview deploy` with its current
-  deployment credentials.
+- **Privileged preview path:** The preview pipeline that builds contributor
+  input without deployment credentials, packages a validated archive, and
+  deploys it from trusted base code.
 
 ## Requirements
 
@@ -102,10 +102,15 @@ review or preview implementation.
   `safe-to-review`, the existing Claude and OpenCode fork review workflows shall
   retain their current provider-specific event and permission contracts.
 - **AC-CI-PR-REVIEW-004.2:** When a contributor pull request is authorized by
-  `safe-to-review`, the preview workflow shall reuse its existing privileged
-  fork path, including its current head checkout and deployment credentials.
+  `safe-to-review`, the preview workflow shall build contributor input in
+  tokenless jobs and deploy only a validated archive with trusted base code
+  and deployment credentials. It shall not check out or execute contributor
+  source in the secret-bearing deploy job.
 - **AC-CI-PR-REVIEW-004.3:** Existing direct review and preview allowlists shall
   remain valid as independent authorization sources.
+- **AC-CI-PR-REVIEW-004.4:** When the preview deploy command receives an
+  explicit archive path that is missing or not a regular file, it shall fail
+  before it starts build commands or uses deployment credentials.
 
 ### REQ-CI-PR-FAIL-005: Fail closed and preserve unrelated behavior
 
@@ -125,8 +130,7 @@ permissions or changing same-repository automation.
 
 ## Out of scope
 
-- Redesigning the preview executor or isolating its existing privileged fork
-  deployment path.
+- Changing the preview service runtime or archive contents.
 - Changing review provider prompts, models, or follow-up review policies.
 - Removing `CLAUDE_REVIEW_ALLOWLIST`, `OPENCODE_REVIEW_ALLOWLIST`, or
   `PREVIEW_ENV_ALLOWLIST`.

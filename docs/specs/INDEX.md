@@ -4,29 +4,29 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 
 ## Systems
 
-| System | Index | Migration | Canonical documents |
-| --- | --- | --- | --- |
-| Agents | [README](agents/README.md) | complete | 27 requirements, 17 designs |
-| Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
-| CLI | [README](cli/README.md) | complete | 3 requirements, 1 designs |
-| Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
-| Desktop | [README](desktop/README.md) | complete | 1 requirements, 1 designs |
-| Executors | [README](executors/README.md) | complete | 3 requirements, 6 designs |
-| Integrations | [README](integrations/README.md) | complete | 18 requirements, 21 designs |
-| Office | [README](office/README.md) | complete | 19 requirements, 38 designs |
-| Platform | [README](platform/README.md) | complete | 30 requirements, 10 designs |
-| Plugins | [README](plugins/README.md) | complete | 7 requirements, 9 designs |
-| Release | [README](release/README.md) | complete | 5 requirements, 0 designs |
-| System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
-| Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
-| UI | [README](ui/README.md) | complete | 96 requirements, 12 designs |
-| Workspaces | [README](workspaces/README.md) | complete | 11 requirements, 3 designs |
+| System       | Index                            | Migration   | Canonical documents          |
+| ------------ | -------------------------------- | ----------- | ---------------------------- |
+| Agents       | [README](agents/README.md)       | complete    | 27 requirements, 17 designs  |
+| Auth         | [README](auth/README.md)         | complete    | 7 requirements, 2 designs    |
+| CLI          | [README](cli/README.md)          | complete    | 3 requirements, 1 designs    |
+| Costs        | [README](costs/README.md)        | complete    | 2 requirements, 0 designs    |
+| Desktop      | [README](desktop/README.md)      | complete    | 1 requirements, 1 designs    |
+| Executors    | [README](executors/README.md)    | complete    | 3 requirements, 6 designs    |
+| Integrations | [README](integrations/README.md) | complete    | 18 requirements, 21 designs  |
+| Office       | [README](office/README.md)       | complete    | 19 requirements, 38 designs  |
+| Platform     | [README](platform/README.md)     | complete    | 30 requirements, 10 designs  |
+| Plugins      | [README](plugins/README.md)      | complete    | 7 requirements, 9 designs    |
+| Release      | [README](release/README.md)      | complete    | 5 requirements, 0 designs    |
+| System page  | [README](system-page/README.md)  | complete    | 3 requirements, 5 designs    |
+| Tasks        | [README](tasks/README.md)        | complete    | 69 requirements, 12 designs  |
+| UI           | [README](ui/README.md)           | in_progress | 127 requirements, 56 designs |
+| Workspaces   | [README](workspaces/README.md)   | complete    | 11 requirements, 3 designs   |
 
 ## Migration record
 
 The legacy specification sources were migrated from the unstructured root and category directories into the system-oriented layout. Task and workflow sources from PR #2957 remain under `tasks/`; three task-owned sources found outside that tree were folded into the same system during this migration.
 
-----
+---
 
 The former legacy size exceptions for migrated sources were removed. All canonical requirement and system-design documents now pass the repository specification linter.
 
@@ -40,6 +40,20 @@ The following specifications were added after this migration and remain in the l
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Waiting Attribution](disambiguate-waiting/spec.md) (implemented)
+- [ACP Form Elicitation](acp-elicitation/spec.md) (draft)
+- [Parked-Session Notification Deferral](parked-notification-deferral/spec.md) (draft)
 - [Workflow Engine Operation Ledger Lifetime](workflow-engine-operation-ledger-lifetime/spec.md) (draft)
 
 ## Authoring rule
+
+- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
+- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
+- **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
+- **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
+
+## Cross-references
+
+- ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
+- Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)
