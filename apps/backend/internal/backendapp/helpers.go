@@ -1878,12 +1878,12 @@ func registerMCPAndDebugRoutes(
 				storage:       storageSettings,
 				automation:    automationServiceFromComponents(p.services.Automation),
 				agent:         p.agentSettingsController,
-				jira:          p.services.Jira,
-				linear:        p.services.Linear,
-				sentry:        p.services.Sentry,
-				github:        p.services.GitHub,
-				gitlab:        p.services.GitLab,
-				azureDevOps:   p.services.AzureDevOps,
+				jira:          settingsJiraServiceFromPointer(p.services.Jira),
+				linear:        settingsLinearServiceFromPointer(p.services.Linear),
+				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
+				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
+				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
+				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
 	}

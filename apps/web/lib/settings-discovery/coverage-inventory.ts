@@ -21,6 +21,45 @@ export type SettingsCoverageEvidence = {
   recovery?: string;
 };
 
+// i18n-exempt: settings coverage resource identifiers are protocol metadata, not UI copy.
+export const SETTINGS_COVERAGE_RESOURCE_TYPES: Readonly<Record<string, readonly string[]>> = {
+  agents: ["agent"],
+  profiles: ["agent_profile", "agent_profile_mcp"],
+  user_preferences: ["user_settings"],
+  workflows: ["workflow", "workflow_step"],
+  workspaces: ["workspace", "repository", "repository_set", "repository_script"],
+  execution: ["executor", "executor_profile", "environment"],
+  tasks: ["task"],
+  prompts: ["prompt"],
+  utilities: ["utility_agent"],
+  editors: ["editor"],
+  notifications: ["notification_provider"],
+  issue_integrations: [
+    "issue_integration",
+    "jira_settings",
+    "jira_issue_watch",
+    "linear_settings",
+    "linear_issue_watch",
+    "sentry_instance",
+    "sentry_issue_watch",
+  ],
+  code_host_integrations: [
+    "code_host_integration",
+    "github_settings",
+    "github_review_watch",
+    "github_issue_watch",
+    "gitlab_settings",
+    "gitlab_review_watch",
+    "gitlab_issue_watch",
+    "azure_devops_settings",
+    "azure_devops_work_item_watch",
+    "azure_devops_pull_request_watch",
+  ],
+  automation: ["automation", "automation_trigger"],
+  runtime: ["runtime_flag"],
+  storage: ["storage_maintenance"],
+};
+
 const source = (...paths: string[]) => paths;
 
 const PROFILE_TASK = "task-01-profile-contract";
@@ -83,6 +122,16 @@ const exception = ({
 // generated from the runtime catalog. The adapter slices in this change bind
 // each listed eligible control to the compact settings contract.
 export const SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
+  supported(
+    "agent-definition-fields",
+    "agents",
+    "settings",
+    source(
+      "apps/web/components/settings/agents",
+      "apps/backend/internal/agent/settings/controller",
+    ),
+    "task-01-profile-contract",
+  ),
   supported(
     "agent-profile-name",
     "agent_profile",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SETTINGS_COVERAGE_INVENTORY,
+  SETTINGS_COVERAGE_RESOURCE_TYPES,
   validateSettingsCoverageInventory,
   type SettingsCoverageEvidence,
 } from "./coverage-inventory";
@@ -72,5 +73,13 @@ describe("settings coverage inventory", () => {
     expect(
       exceptions.every((entry) => entry.exceptionCategory && entry.reason && entry.recovery),
     ).toBe(true);
+  });
+
+  it("maps every catalog resource type to an independent coverage domain", async () => {
+    const contract = await import("./contract.generated.json");
+    const mapped = new Set(Object.values(SETTINGS_COVERAGE_RESOURCE_TYPES).flat());
+    for (const domain of contract.default.domains) {
+      expect(mapped.has(domain.resource_type), domain.resource_type).toBe(true);
+    }
   });
 });

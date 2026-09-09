@@ -204,16 +204,32 @@ func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID string) {
+func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID, workspaceID string) {
 	if h.hub == nil || profileID == "" {
 		return
 	}
-	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, gin.H{
-		"profile_id": profileID,
-	})
-	if err == nil {
-		h.hub.Broadcast(notification)
+	var scopedWorkspaceID any
+	if workspaceID != "" {
+		scopedWorkspaceID = workspaceID
 	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, gin.H{
+		"profile_id":   profileID,
+		"workspace_id": scopedWorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	if workspaceID != "" {
+		workspaceHub, ok := h.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		})
+		if ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(workspaceID, notification)
+		}
+		return
+	}
+	//ws:global profile MCP updates without workspace ownership are global.
+	h.hub.Broadcast(notification)
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {
@@ -576,7 +592,7 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
-	h.broadcastProfileMCPConfigUpdated(profileID)
+	h.broadcastProfileMCPConfigUpdated(profileID, resp.WorkspaceID)
 }
 
 type createProfileRequest = dto.ProfileCreateRequest

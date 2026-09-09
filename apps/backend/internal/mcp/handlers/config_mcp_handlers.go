@@ -39,37 +39,49 @@ func (h *Handlers) handleUpdateMcpConfig(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "profile_id is required", nil)
 	}
 
-	// Get existing config to merge with
-	existing, err := h.mcpConfigSvc.GetConfigByProfileID(ctx, req.ProfileID)
-	if err != nil {
-		h.logger.Error("failed to get existing MCP config", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get existing MCP config", nil)
-	}
-
-	if req.Enabled != nil {
-		existing.Enabled = *req.Enabled
-	}
-	if req.Servers != nil {
-		existing.Servers = req.Servers
-	}
-
-	updated, err := h.mcpConfigSvc.UpsertConfigByProfileID(ctx, req.ProfileID, existing)
+	updated, err := h.mcpConfigSvc.PatchConfigByProfileID(ctx, req.ProfileID, mcpconfig.ConfigPatch{
+		Enabled: req.Enabled,
+		Servers: serverDefsPointer(req.Servers),
+	})
 	if err != nil {
 		h.logger.Error("failed to update MCP config", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MCP config", nil)
 	}
-	h.broadcastProfileMCPConfigUpdated(req.ProfileID)
+	h.broadcastProfileMCPConfigUpdated(req.ProfileID, updated.WorkspaceID)
 	return ws.NewResponse(msg.ID, msg.Action, updated)
 }
 
-func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID string) {
+func serverDefsPointer(value map[string]mcpconfig.ServerDef) *map[string]mcpconfig.ServerDef {
+	if value == nil {
+		return nil
+	}
+	return &value
+}
+
+func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID, workspaceID string) {
 	if h.settingsBroadcaster == nil || profileID == "" {
 		return
 	}
-	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, map[string]any{
-		"profile_id": profileID,
-	})
-	if err == nil {
-		h.settingsBroadcaster.Broadcast(notification)
+	var scopedWorkspaceID any
+	if workspaceID != "" {
+		scopedWorkspaceID = workspaceID
 	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, map[string]any{
+		"profile_id":   profileID,
+		"workspace_id": scopedWorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	if workspaceID != "" {
+		workspaceHub, ok := h.settingsBroadcaster.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		})
+		if ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(workspaceID, notification)
+		}
+		return
+	}
+	//ws:global profile MCP updates without workspace ownership are global.
+	h.settingsBroadcaster.Broadcast(notification)
 }

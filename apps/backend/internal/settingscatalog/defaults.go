@@ -1,6 +1,8 @@
 //nolint:goconst // Catalog owner and scope labels are stable metadata vocabulary.
 package settingscatalog
 
+import "strings"
+
 // DefaultDomainDescriptors is the stable cross-domain inventory used by the
 // backend when composition has not supplied a narrower registry.
 func DefaultDomainDescriptors() []DomainDescriptor {
@@ -187,17 +189,17 @@ func azureDevOpsSettingsDomain() DomainDescriptor {
 	)
 }
 
-func codeHostWatchFields(resourceType, owner string, projects bool, issue bool) []FieldDescriptor {
+func codeHostWatchFields(resourceType, owner string, projects bool, issue, camelCase bool) []FieldDescriptor {
 	fields := []FieldDescriptor{
-		integrationWritable(resourceType, "workflow_id", "Workflow", "Workflow that receives matching items.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "workflow_step_id", "Workflow step", "Workflow step that receives matching items.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "agent_profile_id", "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "executor_profile_id", "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("workflow_id", camelCase), "Workflow", "Workflow that receives matching items.", "string", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("workflow_step_id", camelCase), "Workflow step", "Workflow step that receives matching items.", "string", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("agent_profile_id", camelCase), "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("executor_profile_id", camelCase), "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
 		integrationWritable(resourceType, "prompt", "Prompt", "Prompt added to created tasks.", "string", owner, "workspace.manage"),
 		integrationWritable(resourceType, "enabled", "Enabled", "Whether background polling is enabled.", "boolean", owner, "workspace.manage"),
-		integrationWritable(resourceType, "poll_interval_seconds", "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
-		integrationWritable(resourceType, "cleanup_policy", "Cleanup policy", "Policy for tasks created by this watch.", "string", owner, "workspace.manage"),
-		integrationNullableWritable(resourceType, "max_inflight_tasks", "Concurrent task limit", "Maximum open tasks created by this watch, or null for unlimited.", "integer", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("poll_interval_seconds", camelCase), "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
+		integrationWritable(resourceType, codeHostWatchPath("cleanup_policy", camelCase), "Cleanup policy", "Policy for tasks created by this watch.", "string", owner, "workspace.manage"),
+		integrationNullableWritable(resourceType, codeHostWatchPath("max_inflight_tasks", camelCase), "Concurrent task limit", "Maximum open tasks created by this watch, or null for unlimited.", "integer", owner, "workspace.manage"),
 	}
 	if projects {
 		fields = append(fields, integrationWritable(resourceType, "projects", "Projects", "Provider project filters.", "array", owner, "workspace.manage"))
@@ -214,24 +216,40 @@ func codeHostWatchFields(resourceType, owner string, projects bool, issue bool) 
 	return fields
 }
 
+func codeHostWatchPath(snake string, camelCase bool) string {
+	if !camelCase {
+		return snake
+	}
+	parts := strings.Split(snake, "_")
+	for index := 1; index < len(parts); index++ {
+		if parts[index] == "" {
+			continue
+		}
+		parts[index] = strings.ToUpper(parts[index][:1]) + parts[index][1:]
+	}
+	return strings.Join(parts, "")
+}
+
 func githubReviewWatchDomain() DomainDescriptor {
-	return integrationDomain("code_host_integrations", "github_review_watch", "GitHub review watches", "GitHub review watch schedules and task bindings.", "github", watchTarget(), codeHostWatchFields("github_review_watch", "github", false, false)...)
+	fields := withoutIntegrationFields(codeHostWatchFields("github_review_watch", "github", false, false, false), "max_inflight_tasks")
+	return integrationDomain("code_host_integrations", "github_review_watch", "GitHub review watches", "GitHub review watch schedules and task bindings.", "github", watchTarget(), fields...)
 }
 
 func githubIssueWatchDomain() DomainDescriptor {
-	return integrationDomain("code_host_integrations", "github_issue_watch", "GitHub issue watches", "GitHub issue watch schedules and task bindings.", "github", watchTarget(), codeHostWatchFields("github_issue_watch", "github", false, true)...)
+	fields := withoutIntegrationFields(codeHostWatchFields("github_issue_watch", "github", false, true, false), "max_inflight_tasks")
+	return integrationDomain("code_host_integrations", "github_issue_watch", "GitHub issue watches", "GitHub issue watch schedules and task bindings.", "github", watchTarget(), fields...)
 }
 
 func gitlabReviewWatchDomain() DomainDescriptor {
-	return integrationDomain("code_host_integrations", "gitlab_review_watch", "GitLab review watches", "GitLab review watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_review_watch", "gitlab", true, false)...)
+	return integrationDomain("code_host_integrations", "gitlab_review_watch", "GitLab review watches", "GitLab review watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_review_watch", "gitlab", true, false, false)...)
 }
 
 func gitlabIssueWatchDomain() DomainDescriptor {
-	return integrationDomain("code_host_integrations", "gitlab_issue_watch", "GitLab issue watches", "GitLab issue watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_issue_watch", "gitlab", true, true)...)
+	return integrationDomain("code_host_integrations", "gitlab_issue_watch", "GitLab issue watches", "GitLab issue watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_issue_watch", "gitlab", true, true, false)...)
 }
 
 func azureDevOpsWorkItemWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_work_item_watch", "azuredevops", false, true), "repos", "labels", "custom_query")
+	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_work_item_watch", "azuredevops", false, true, true), "repos", "labels", "custom_query")
 	fields = append(fields,
 		integrationWritable("azure_devops_work_item_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
 		integrationWritable("azure_devops_work_item_watch", "wiql", "WIQL", "Azure Boards query.", "string", "azuredevops", "workspace.manage"),
@@ -242,7 +260,7 @@ func azureDevOpsWorkItemWatchDomain() DomainDescriptor {
 }
 
 func azureDevOpsPullRequestWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_pull_request_watch", "azuredevops", false, false), "repos", "review_scope", "custom_query")
+	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_pull_request_watch", "azuredevops", false, false, true), "repos", "review_scope", "custom_query")
 	fields = append(fields,
 		integrationWritable("azure_devops_pull_request_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
 		integrationWritable("azure_devops_pull_request_watch", "azureRepositoryId", "Azure repository", "Azure Repos repository filter.", "string", "azuredevops", "workspace.manage"),

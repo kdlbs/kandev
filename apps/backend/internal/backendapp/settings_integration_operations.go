@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -30,6 +32,9 @@ func isIntegrationResource(resourceType string) bool {
 //nolint:cyclop // Provider reads stay in one adapter so target validation and redaction are shared.
 func (s *settingsOperations) readIntegrationSettings(ctx context.Context, target settingscatalog.ResourceTarget, keys []string) (any, error) {
 	if err := s.requireIntegrationDependency(target.ResourceType); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeIntegrationRead(ctx, target); err != nil {
 		return nil, err
 	}
 	var value any
@@ -81,6 +86,21 @@ func (s *settingsOperations) readIntegrationSettings(ctx context.Context, target
 		"values": values,
 		"source": target.ResourceType,
 	}, nil
+}
+
+func (s *settingsOperations) authorizeIntegrationRead(ctx context.Context, target settingscatalog.ResourceTarget) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return nil
+	}
+	workspaceID := requireWorkspaceTarget(target)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace_id is required for integration settings")
+	}
+	if s.deps.task == nil {
+		return fmt.Errorf("workspace authorization is unavailable")
+	}
+	return s.deps.task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead)
 }
 
 //nolint:cyclop // Provider updates stay in one adapter so normalization and projection are shared.
@@ -489,6 +509,9 @@ func (s *settingsOperations) listIntegrationSettingsResources(ctx context.Contex
 	if err := s.requireIntegrationDependency(resourceType); err != nil {
 		return nil, err
 	}
+	if err := s.authorizeIntegrationList(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	workspaces, err := s.settingsWorkspaces(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -625,6 +648,20 @@ func (s *settingsOperations) listIntegrationSettingsResources(ctx context.Contex
 	return pageSettingsResources(resources, limit, cursor), nil
 }
 
+func (s *settingsOperations) authorizeIntegrationList(ctx context.Context, workspaceID *string) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return nil
+	}
+	if workspaceID == nil || strings.TrimSpace(*workspaceID) == "" {
+		return fmt.Errorf("workspace_id is required for integration resource lookup")
+	}
+	if s.deps.task == nil {
+		return fmt.Errorf("workspace authorization is unavailable")
+	}
+	return s.deps.task.AuthorizeWorkspaceScope(ctx, strings.TrimSpace(*workspaceID), authz.ScopeWorkspaceRead)
+}
+
 func (s *settingsOperations) requireIntegrationDependency(resourceType string) error {
 	var available bool
 	switch resourceType {
@@ -658,6 +695,17 @@ func (s *settingsOperations) settingsWorkspaces(ctx context.Context, requested *
 	if s.deps.task == nil {
 		return nil, fmt.Errorf("workspace lookup is unavailable")
 	}
+	if requested != nil && strings.TrimSpace(*requested) != "" {
+		workspaceID := strings.TrimSpace(*requested)
+		item, err := s.deps.task.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if item == nil {
+			return nil, fmt.Errorf("workspace was not found")
+		}
+		return []settingsWorkspace{{id: item.ID, name: item.Name}}, nil
+	}
 	items, err := s.deps.task.ListWorkspaces(ctx)
 	if err != nil {
 		return nil, err
@@ -667,13 +715,7 @@ func (s *settingsOperations) settingsWorkspaces(ctx context.Context, requested *
 		if item == nil {
 			continue
 		}
-		if requested != nil && strings.TrimSpace(*requested) != "" && item.ID != strings.TrimSpace(*requested) {
-			continue
-		}
 		result = append(result, settingsWorkspace{id: item.ID, name: item.Name})
-	}
-	if requested != nil && strings.TrimSpace(*requested) != "" && len(result) == 0 {
-		return nil, fmt.Errorf("workspace was not found")
 	}
 	return result, nil
 }

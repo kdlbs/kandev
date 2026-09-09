@@ -2,9 +2,11 @@
 package backendapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -196,8 +198,14 @@ func decodePatch(changes map[string]json.RawMessage, target any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(payload, target); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid settings patch: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("invalid settings patch: trailing JSON data")
 	}
 	return nil
 }
@@ -346,11 +354,7 @@ func (s *settingsOperations) updateRuntimeFlag(ctx context.Context, key string, 
 	}
 	for _, state := range states {
 		if state.Key == key {
-			return map[string]any{
-				"accepted_fields": []string{"override"},
-				"settings":        runtimeFlagSettingsValue(state),
-				"source":          "runtime",
-			}, nil
+			return runtimeFlagSettingsValue(state), nil
 		}
 	}
 	return nil, fmt.Errorf("runtime flag not found after update")
@@ -478,15 +482,24 @@ func (s *settingsOperations) validateDomainWorkspace(ctx context.Context, target
 		if err != nil {
 			return err
 		}
+		if item == nil {
+			return fmt.Errorf("automation not found")
+		}
 		workspaceID = item.WorkspaceID
 	case "automation_trigger":
 		trigger, err := s.deps.automation.GetTrigger(ctx, *target.ResourceID)
 		if err != nil {
 			return err
 		}
+		if trigger == nil {
+			return fmt.Errorf("automation trigger not found")
+		}
 		automation, err := s.deps.automation.GetAutomation(ctx, trigger.AutomationID)
 		if err != nil {
 			return err
+		}
+		if automation == nil {
+			return fmt.Errorf("automation not found")
 		}
 		workspaceID = automation.WorkspaceID
 	default:

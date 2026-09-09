@@ -700,8 +700,8 @@
       },
       "fields": [
         {
-          "key": "azure_devops_pull_request_watch.workflow_id",
-          "field_path": "workflow_id",
+          "key": "azure_devops_pull_request_watch.workflowId",
+          "field_path": "workflowId",
           "label": "Workflow",
           "description": "Workflow that receives matching items.",
           "json_type": "string",
@@ -714,8 +714,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.workflow_step_id",
-          "field_path": "workflow_step_id",
+          "key": "azure_devops_pull_request_watch.workflowStepId",
+          "field_path": "workflowStepId",
           "label": "Workflow step",
           "description": "Workflow step that receives matching items.",
           "json_type": "string",
@@ -728,8 +728,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.agent_profile_id",
-          "field_path": "agent_profile_id",
+          "key": "azure_devops_pull_request_watch.agentProfileId",
+          "field_path": "agentProfileId",
           "label": "Agent profile",
           "description": "Profile used for created tasks.",
           "json_type": "string",
@@ -742,8 +742,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.executor_profile_id",
-          "field_path": "executor_profile_id",
+          "key": "azure_devops_pull_request_watch.executorProfileId",
+          "field_path": "executorProfileId",
           "label": "Executor profile",
           "description": "Executor profile used for created tasks.",
           "json_type": "string",
@@ -784,8 +784,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.poll_interval_seconds",
-          "field_path": "poll_interval_seconds",
+          "key": "azure_devops_pull_request_watch.pollIntervalSeconds",
+          "field_path": "pollIntervalSeconds",
           "label": "Poll interval",
           "description": "Background polling interval in seconds.",
           "json_type": "integer",
@@ -798,8 +798,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.cleanup_policy",
-          "field_path": "cleanup_policy",
+          "key": "azure_devops_pull_request_watch.cleanupPolicy",
+          "field_path": "cleanupPolicy",
           "label": "Cleanup policy",
           "description": "Policy for tasks created by this watch.",
           "json_type": "string",
@@ -812,8 +812,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_pull_request_watch.max_inflight_tasks",
-          "field_path": "max_inflight_tasks",
+          "key": "azure_devops_pull_request_watch.maxInflightTasks",
+          "field_path": "maxInflightTasks",
           "label": "Concurrent task limit",
           "description": "Maximum open tasks created by this watch, or null for unlimited.",
           "json_type": "integer",
@@ -1027,8 +1027,8 @@
       },
       "fields": [
         {
-          "key": "azure_devops_work_item_watch.workflow_id",
-          "field_path": "workflow_id",
+          "key": "azure_devops_work_item_watch.workflowId",
+          "field_path": "workflowId",
           "label": "Workflow",
           "description": "Workflow that receives matching items.",
           "json_type": "string",
@@ -1041,8 +1041,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.workflow_step_id",
-          "field_path": "workflow_step_id",
+          "key": "azure_devops_work_item_watch.workflowStepId",
+          "field_path": "workflowStepId",
           "label": "Workflow step",
           "description": "Workflow step that receives matching items.",
           "json_type": "string",
@@ -1055,8 +1055,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.agent_profile_id",
-          "field_path": "agent_profile_id",
+          "key": "azure_devops_work_item_watch.agentProfileId",
+          "field_path": "agentProfileId",
           "label": "Agent profile",
           "description": "Profile used for created tasks.",
           "json_type": "string",
@@ -1069,8 +1069,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.executor_profile_id",
-          "field_path": "executor_profile_id",
+          "key": "azure_devops_work_item_watch.executorProfileId",
+          "field_path": "executorProfileId",
           "label": "Executor profile",
           "description": "Executor profile used for created tasks.",
           "json_type": "string",
@@ -1111,8 +1111,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.poll_interval_seconds",
-          "field_path": "poll_interval_seconds",
+          "key": "azure_devops_work_item_watch.pollIntervalSeconds",
+          "field_path": "pollIntervalSeconds",
           "label": "Poll interval",
           "description": "Background polling interval in seconds.",
           "json_type": "integer",
@@ -1125,8 +1125,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.cleanup_policy",
-          "field_path": "cleanup_policy",
+          "key": "azure_devops_work_item_watch.cleanupPolicy",
+          "field_path": "cleanupPolicy",
           "label": "Cleanup policy",
           "description": "Policy for tasks created by this watch.",
           "json_type": "string",
@@ -1139,8 +1139,8 @@
           "settings_href": "/settings"
         },
         {
-          "key": "azure_devops_work_item_watch.max_inflight_tasks",
-          "field_path": "max_inflight_tasks",
+          "key": "azure_devops_work_item_watch.maxInflightTasks",
+          "field_path": "maxInflightTasks",
           "label": "Concurrent task limit",
           "description": "Maximum open tasks created by this watch, or null for unlimited.",
           "json_type": "integer",
@@ -1757,21 +1757,6 @@
           "settings_href": "/settings"
         },
         {
-          "key": "github_issue_watch.max_inflight_tasks",
-          "field_path": "max_inflight_tasks",
-          "label": "Concurrent task limit",
-          "description": "Maximum open tasks created by this watch, or null for unlimited.",
-          "json_type": "integer",
-          "nullable": true,
-          "support": "supported",
-          "classification": "writable",
-          "owner": "github",
-          "writable": true,
-          "validator": "github.github_issue_watch",
-          "authority": "workspace.manage",
-          "settings_href": "/settings"
-        },
-        {
           "key": "github_issue_watch.repos",
           "field_path": "repos",
           "label": "Repositories",
@@ -1941,21 +1926,6 @@
           "label": "Cleanup policy",
           "description": "Policy for tasks created by this watch.",
           "json_type": "string",
-          "support": "supported",
-          "classification": "writable",
-          "owner": "github",
-          "writable": true,
-          "validator": "github.github_review_watch",
-          "authority": "workspace.manage",
-          "settings_href": "/settings"
-        },
-        {
-          "key": "github_review_watch.max_inflight_tasks",
-          "field_path": "max_inflight_tasks",
-          "label": "Concurrent task limit",
-          "description": "Maximum open tasks created by this watch, or null for unlimited.",
-          "json_type": "integer",
-          "nullable": true,
           "support": "supported",
           "classification": "writable",
           "owner": "github",

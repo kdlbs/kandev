@@ -183,12 +183,13 @@ All work orders are complete; the individual result sections record the shared-a
 
 Implementation checks passed on 2026-09-09:
 
-- `rtk go test ./internal/backendapp ./internal/mcp/handlers ./internal/mcp/server ./internal/settingscatalog ./internal/agent/settings/...`: 2,338 tests passed in 12 packages.
+- `rtk go test ./internal/agent/mcpconfig ./internal/agent/settings/... ./internal/backendapp ./internal/mcp/handlers ./internal/settingscatalog ./internal/task/service`: 3,630 tests passed in 13 packages.
 - `rtk go run ./cmd/settings-catalog --check`: passed.
 - `rtk node --test scripts/settings-contract-ci.test.mjs`: 3 tests passed.
 - `rtk node --test scripts/validate-public-docs.test.mjs`: 61 tests passed.
-- `rtk pnpm exec vitest run lib/settings-discovery/*.test.ts components/settings/agent-profile-reconciliation.test.ts lib/ws/handlers/agents-settings-updated.test.ts`: 46 tests passed in 9 files.
+- `rtk pnpm exec vitest run 'app/settings/agents/[agentId]/use-profile-mcp-config.test.ts' lib/settings-discovery/*.test.ts components/settings/agent-profile-page-state.test.ts components/settings/agent-profile-reconciliation.test.ts`: 52 tests passed in 10 files.
 - `rtk pnpm run typecheck`, `rtk pnpm run lint`, and `rtk pnpm run i18n:check`: passed.
+- Changed-code `rtk golangci-lint run ./... --new-from-rev='3d042e9d8f1897f167891e44eb78b3977e2e27c8' --timeout=5m`: no issues found.
 - Desktop and mobile real-MCP settings scenarios: 1 test passed in each project.
 - `rtk python3 scripts/lint-spec-files.test.py`: 30 tests passed.
 - `rtk python3 scripts/lint-spec-files.py --all`: passed.

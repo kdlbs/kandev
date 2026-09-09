@@ -118,6 +118,7 @@ type DomainDescriptor struct {
 type Registry struct {
 	domainsByType map[string]DomainDescriptor
 	fieldsByKey   map[string]FieldDescriptor
+	domainByField map[string]DomainDescriptor
 	fields        []FieldDescriptor
 }
 
@@ -150,6 +151,7 @@ func NewRegistry(domains []DomainDescriptor) (*Registry, error) {
 	registry := &Registry{
 		domainsByType: make(map[string]DomainDescriptor, len(domains)),
 		fieldsByKey:   make(map[string]FieldDescriptor),
+		domainByField: make(map[string]DomainDescriptor),
 	}
 	for _, domain := range domains {
 		if err := validateDomain(domain); err != nil {
@@ -164,6 +166,7 @@ func NewRegistry(domains []DomainDescriptor) (*Registry, error) {
 				return nil, fmt.Errorf("duplicate setting key %q", field.Key)
 			}
 			registry.fieldsByKey[field.Key] = cloneField(field)
+			registry.domainByField[field.Key] = registry.domainsByType[domain.ResourceType]
 			registry.fields = append(registry.fields, cloneField(field))
 		}
 	}
@@ -338,14 +341,8 @@ func (r *Registry) ValidateTarget(target ResourceTarget) error {
 }
 
 func (r *Registry) domainForField(key string) (DomainDescriptor, bool) {
-	for _, domain := range r.domainsByType {
-		for _, field := range domain.Fields {
-			if field.Key == key {
-				return domain, true
-			}
-		}
-	}
-	return DomainDescriptor{}, false
+	domain, ok := r.domainByField[key]
+	return domain, ok
 }
 
 func matchField(field FieldDescriptor, domain DomainDescriptor, query string, queryTokens []string) (MatchReason, int, bool) {

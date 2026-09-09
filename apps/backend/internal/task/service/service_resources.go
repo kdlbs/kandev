@@ -1247,6 +1247,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	if req.ProviderName != nil {
 		repository.ProviderName = *req.ProviderName
 	}
+	if req.RemoteURL != nil {
+		repository.RemoteURL = strings.TrimSpace(*req.RemoteURL)
+	}
 	if req.DefaultBranch != nil {
 		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
 			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)

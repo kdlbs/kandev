@@ -62,6 +62,13 @@ export function useSyncAgentsToStore() {
   };
 }
 
+export function shouldSyncProfileSaveResponse(
+  response: AgentProfile,
+  currentSaved: AgentProfile,
+): boolean {
+  return isProfileRevisionNewer(response, currentSaved);
+}
+
 export function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -109,16 +116,17 @@ export function useProfileEditorState(
   }, []);
 
   const acceptProfileSaveResponse = useCallback(
-    (response: AgentProfile, submitted: AgentProfile) => {
+    (response: AgentProfile, submitted: AgentProfile): boolean => {
       const currentSaved = savedProfileRef.current;
-      if (!isProfileRevisionNewer(response, currentSaved)) {
+      if (!shouldSyncProfileSaveResponse(response, currentSaved)) {
         submittedProfileRef.current = null;
-        return;
+        return false;
       }
       setSavedProfile(response);
       if (sameEditableProfile(draftRef.current, submitted)) setDraft(response);
       setHasExternalConflict(false);
       submittedProfileRef.current = null;
+      return true;
     },
     [],
   );
@@ -159,7 +167,7 @@ type ProfileEditorActionsOptions = {
   savedProfile: AgentProfile;
   setSaveStatus: (s: SaveStatus) => void;
   markProfileSubmitted: (profile: AgentProfile | null) => void;
-  acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => void;
+  acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
@@ -217,18 +225,19 @@ export function useProfileSave({
         },
         force,
       );
-      acceptProfileSaveResponse(updated, submitted);
-      const nextAgents = settingsAgents.map((agentItem: Agent) =>
-        agentItem.id === agent.id
-          ? {
-              ...agentItem,
-              profiles: agentItem.profiles.map((p: AgentProfile) =>
-                p.id === updated.id ? updated : p,
-              ),
-            }
-          : agentItem,
-      );
-      syncAgentsToStore(nextAgents);
+      if (acceptProfileSaveResponse(updated, submitted)) {
+        const nextAgents = settingsAgents.map((agentItem: Agent) =>
+          agentItem.id === agent.id
+            ? {
+                ...agentItem,
+                profiles: agentItem.profiles.map((p: AgentProfile) =>
+                  p.id === updated.id ? updated : p,
+                ),
+              }
+            : agentItem,
+        );
+        syncAgentsToStore(nextAgents);
+      }
       setSaveStatus("success");
     } catch (error) {
       markProfileSubmitted(null);

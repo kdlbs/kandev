@@ -64,6 +64,25 @@ func TestRuntimeFlagSettingsValueUsesCatalogOverridePath(t *testing.T) {
 	}
 }
 
+func TestDecodeUserSettingsUpdateMapsSidebarTaskColors(t *testing.T) {
+	request, err := decodeUserSettingsUpdate(map[string]json.RawMessage{
+		"user_settings.sidebar_task_colors": json.RawMessage(`{"task-1":"blue","task-2":null}`),
+	})
+	if err != nil {
+		t.Fatalf("decode user settings: %v", err)
+	}
+	if request.SidebarTaskColorPatch == nil {
+		t.Fatal("sidebar task color patch is nil")
+	}
+	if request.SidebarTaskColorPatch.Colors["task-1"] == nil ||
+		*request.SidebarTaskColorPatch.Colors["task-1"] != "blue" {
+		t.Fatalf("task-1 color = %#v", request.SidebarTaskColorPatch.Colors["task-1"])
+	}
+	if value, exists := request.SidebarTaskColorPatch.Colors["task-2"]; !exists || value != nil {
+		t.Fatalf("task-2 color = %#v, want a clear tombstone", value)
+	}
+}
+
 func TestAgentProfileCollectionsRedactEmbeddedEnvironmentValues(t *testing.T) {
 	values := map[string]any{
 		"profiles": []any{

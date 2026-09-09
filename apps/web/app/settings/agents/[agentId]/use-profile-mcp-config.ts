@@ -153,8 +153,11 @@ function useMcpConfigLoader({
           !conflictRef.current &&
           latestDraftRef.current.enabled === (currentBaseline?.enabled ?? false) &&
           latestDraftRef.current.servers === serializeServers(currentBaseline);
+        const draftMatchesIncoming =
+          latestDraftRef.current.enabled === config.enabled &&
+          latestDraftRef.current.servers === serializeServers(config);
         setters.setMcpConfig(config);
-        if (draftWasClean) {
+        if (draftWasClean || draftMatchesIncoming) {
           setters.setMcpEnabledState(config.enabled);
           setters.setMcpServers(serializeServers(config));
           setters.setMcpDirty(false);
@@ -203,6 +206,7 @@ type McpSaveParams = {
   mcpServers: string;
   mcpConfig: AgentProfileMcpConfig | null;
   latestDraftRef: MutableRefObject<{ enabled: boolean; servers: string }>;
+  requestGenerationRef: MutableRefObject<number>;
   onToastError: (error: unknown) => void;
   setters: McpStateSetters;
 };
@@ -215,11 +219,13 @@ function useMcpSave({
   mcpServers,
   mcpConfig,
   latestDraftRef,
+  requestGenerationRef,
   onToastError,
   setters,
 }: McpSaveParams) {
   return useCallback(async () => {
     if (!isEditableProfile || mcpConflict) return;
+    requestGenerationRef.current += 1;
     const submittedEnabled = mcpEnabled;
     const submittedServers = mcpServers;
     setters.setMcpStatus("loading");
@@ -269,6 +275,7 @@ function useMcpSave({
     mcpServers,
     onToastError,
     profileId,
+    requestGenerationRef,
     setters,
   ]);
 }
@@ -363,6 +370,7 @@ export function useProfileMcpConfig({
     mcpServers,
     mcpConfig,
     latestDraftRef,
+    requestGenerationRef,
     onToastError,
     setters: stateSetters,
   });

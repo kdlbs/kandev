@@ -173,10 +173,52 @@ type settingsAzureDevOpsService interface {
 }
 
 func automationServiceFromComponents(components *automation.Components) settingsAutomationService {
-	if components == nil {
+	if components == nil || components.Service == nil {
 		return nil
 	}
 	return components.Service
+}
+
+func settingsJiraServiceFromPointer(service *jira.Service) settingsJiraService {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func settingsLinearServiceFromPointer(service *linear.Service) settingsLinearService {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func settingsSentryServiceFromPointer(service *sentry.Service) settingsSentryService {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func settingsGitHubServiceFromPointer(service *github.Service) settingsGitHubService {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func settingsGitLabServiceFromPointer(service *gitlab.Service) settingsGitLabService {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+func settingsAzureDevOpsServiceFromPointer(service *azuredevops.Service) settingsAzureDevOpsService {
+	if service == nil {
+		return nil
+	}
+	return service
 }
 
 var _ settingsTaskService = (*taskservice.Service)(nil)

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -112,8 +114,14 @@ func (h *Handlers) handleCreateAgentProfile(ctx context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid settings payload", nil)
 	}
 	var req agentsettingsdto.ProfileCreateRequest
-	if err := json.Unmarshal(encoded, &req); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid settings payload: "+err.Error(), nil)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid settings payload", nil)
 	}
 	req.AgentID = envelope.AgentID
 	req.Name = envelope.Name

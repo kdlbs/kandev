@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -468,6 +469,7 @@ func (s *settingsOperations) updateAgentSettings(ctx context.Context, target set
 			}
 			request.SupportsMCP = &value
 		case "mcp_config_path":
+			request.MCPConfigPathSet = true
 			var value *string
 			if string(raw) != "null" {
 				var decoded string
@@ -542,6 +544,21 @@ func decodeUserSettingsUpdate(changes map[string]json.RawMessage) (userdto.Updat
 	if err != nil {
 		return userdto.UpdateUserSettingsRequest{}, err
 	}
+	if raw, ok := normalized["sidebar_task_colors"]; ok {
+		if string(raw) == "null" {
+			return userdto.UpdateUserSettingsRequest{}, fmt.Errorf("sidebar_task_colors must be an object")
+		}
+		var colors map[string]*string
+		if err := json.Unmarshal(raw, &colors); err != nil || colors == nil {
+			return userdto.UpdateUserSettingsRequest{}, fmt.Errorf("sidebar_task_colors must be an object")
+		}
+		patch, marshalErr := json.Marshal(map[string]any{"colors": colors})
+		if marshalErr != nil {
+			return userdto.UpdateUserSettingsRequest{}, marshalErr
+		}
+		delete(normalized, "sidebar_task_colors")
+		normalized["sidebar_task_color_patch"] = patch
+	}
 	payload, err := json.Marshal(normalized)
 	if err != nil {
 		return userdto.UpdateUserSettingsRequest{}, err
@@ -570,48 +587,70 @@ func (s *settingsOperations) updateProfileMCP(ctx context.Context, target settin
 	if s.profiles == nil || target.ResourceID == nil {
 		return nil, fmt.Errorf("profile MCP settings are unavailable")
 	}
-	current, err := s.profiles.GetAgentProfileMcpConfig(ctx, *target.ResourceID)
+	profile, err := s.findProfile(ctx, target)
 	if err != nil {
 		return nil, err
 	}
-	request := agentsettingscontroller.UpdateAgentProfileMcpConfigRequest{Enabled: current.Enabled, Servers: current.Servers, Meta: current.Meta}
 	normalized, err := normalizeChangeMap(changes, "agent_profile_mcp")
 	if err != nil {
 		return nil, err
 	}
+	request := agentsettingscontroller.UpdateAgentProfileMcpConfigPatchRequest{}
 	for key, value := range normalized {
 		switch key {
 		case "enabled":
-			if err := json.Unmarshal(value, &request.Enabled); err != nil {
+			var enabled bool
+			if string(value) == "null" || json.Unmarshal(value, &enabled) != nil {
 				return nil, fmt.Errorf("enabled must be boolean")
 			}
+			request.Enabled = &enabled
 		case "servers":
-			if err := json.Unmarshal(value, &request.Servers); err != nil {
+			if string(value) == "null" {
 				return nil, fmt.Errorf("servers must be an object")
 			}
+			var servers map[string]mcpconfig.ServerDef
+			if err := json.Unmarshal(value, &servers); err != nil || servers == nil {
+				return nil, fmt.Errorf("servers must be an object")
+			}
+			request.Servers = &servers
 		default:
 			return nil, fmt.Errorf("setting %q is not writable", key)
 		}
 	}
-	updated, err := s.profiles.UpdateAgentProfileMcpConfig(ctx, *target.ResourceID, request)
+	updated, err := s.profiles.UpdateAgentProfileMcpConfigPatch(ctx, *target.ResourceID, request)
 	if err != nil {
 		return nil, err
 	}
-	s.broadcastProfileMCPConfigUpdated(*target.ResourceID, target.WorkspaceID)
+	s.broadcastProfileMCPConfigUpdated(*target.ResourceID, profile.WorkspaceID)
 	return map[string]any{"target": target, "accepted_fields": changePaths(changes), "settings": s.sanitizeSettingsValue(target.ResourceType, updated), "source": "profile_mcp"}, nil
 }
 
-func (s *settingsOperations) broadcastProfileMCPConfigUpdated(profileID string, workspaceID *string) {
+func (s *settingsOperations) broadcastProfileMCPConfigUpdated(profileID, workspaceID string) {
 	if s.deps.broadcaster == nil || profileID == "" {
 		return
 	}
+	var scopedWorkspaceID any
+	if workspaceID != "" {
+		scopedWorkspaceID = workspaceID
+	}
 	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, map[string]any{
 		"profile_id":   profileID,
-		"workspace_id": workspaceID,
+		"workspace_id": scopedWorkspaceID,
 	})
-	if err == nil {
-		s.deps.broadcaster.Broadcast(notification)
+	if err != nil {
+		return
 	}
+	if workspaceID != "" {
+		workspaceHub, ok := s.deps.broadcaster.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		})
+		if ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(workspaceID, notification)
+		}
+		return
+	}
+	//ws:global profile MCP updates without workspace ownership are global.
+	s.deps.broadcaster.Broadcast(notification)
 }
 
 //nolint:nestif // The repository-set projection needs its nested stored-resource fallback.

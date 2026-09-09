@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   SETTINGS_COVERAGE_INVENTORY,
+  SETTINGS_COVERAGE_RESOURCE_TYPES,
   validateSettingsCoverageInventory,
 } from "./coverage-inventory";
+import contract from "./contract.generated.json";
 
 describe("settings delivery coverage", () => {
   it("has no pending eligible inventory entries", () => {
@@ -18,5 +20,14 @@ describe("settings delivery coverage", () => {
         (entry) => entry.owner.length > 0 && entry.sourcePaths.length > 0,
       ),
     ).toBe(true);
+  });
+
+  it("keeps integration and automation coverage mapped to concrete resources", () => {
+    const catalogTypes = new Set(contract.domains.map((domain) => domain.resource_type));
+    for (const resourceTypes of Object.values(SETTINGS_COVERAGE_RESOURCE_TYPES)) {
+      for (const resourceType of resourceTypes) {
+        expect(catalogTypes.has(resourceType), resourceType).toBe(true);
+      }
+    }
   });
 });
