@@ -10,6 +10,8 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/waveidentity"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -411,13 +413,87 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 			return
 		}
 	}
-	queue(parentAssignee, RunContext{
+
+	waveKey, waveString, ok := ss.resolveWaveIdentity(ctx, task.ParentID)
+	if !ok {
+		return
+	}
+
+	rc := RunContext{
 		Reason:         RunReasonTaskChildrenCompleted,
 		TaskID:         task.ParentID,
 		WorkspaceID:    task.WorkspaceID,
 		ChildTaskID:    task.ID,
 		IdempotencyKey: childrenCompletedIdempotencyKey(task.ParentID, parentAssignee, children),
-	})
+		WaveKey:        waveKey,
+		WaveString:     waveString,
+		ExtraPayload:   ss.resolveWaveActionPayload(ctx, task.ParentID),
+	}
+	queue(parentAssignee, rc)
+}
+
+// resolveWaveIdentity performs the terminality-confirming last read
+// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.15): a wave identity is derived from,
+// and only from, a wave-member read that itself observed every member
+// terminal. It does not trust the earlier ListChildStates loop above,
+// which counts every child (not just wave members) and is a separate,
+// unsynchronized read. A read error, any non-terminal wave member, or an
+// empty wave-member set (AC-...-001.7 — a parent with no wave members has
+// no wave) all report ok=false: the caller queues nothing and the backstop
+// delivers the wake later (AC-...-002.12).
+func (ss *SchedulerService) resolveWaveIdentity(
+	ctx context.Context, parentID string,
+) (waveKey, waveString string, ok bool) {
+	members, err := ss.repo.ListWaveMembers(ctx, parentID)
+	if err != nil {
+		ss.logger.Debug("list wave members failed",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return "", "", false
+	}
+	if len(members) == 0 {
+		return "", "", false
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.State != "COMPLETED" && m.State != "CANCELLED" {
+			return "", "", false
+		}
+		ids = append(ids, m.TaskID)
+	}
+	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids), true
+}
+
+// resolveWaveActionPayload resolves the workflow-authored queue_run
+// payload the engine would attach for the parent's current step's
+// on_children_completed trigger, so a cascade wake that never touches the
+// engine still carries it (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16). Any
+// failure to resolve it — no getter wired, no step bound, lookup error, no
+// matching action, no payload — returns nil and logs the omission at
+// debug: the wake itself is unconditional (AC-...-004.2), an optional
+// payload is not worth skipping it for.
+func (ss *SchedulerService) resolveWaveActionPayload(ctx context.Context, parentID string) map[string]any {
+	if ss.workflowStepGetter == nil {
+		return nil
+	}
+	stepID, err := ss.repo.GetTaskWorkflowStepID(ctx, parentID)
+	if err != nil || stepID == "" {
+		ss.logger.Debug("wave payload parity: no workflow step bound",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return nil
+	}
+	step, err := ss.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil || step == nil {
+		ss.logger.Debug("wave payload parity: step lookup failed",
+			zap.String("parent_id", parentID), zap.String("step_id", stepID), zap.Error(err))
+		return nil
+	}
+	spec := engine.CompileStep(step)
+	for _, action := range spec.Events[engine.TriggerOnChildrenCompleted] {
+		if action.Kind == engine.ActionQueueRun && action.QueueRun != nil && len(action.QueueRun.Payload) > 0 {
+			return action.QueueRun.Payload
+		}
+	}
+	return nil
 }
 
 // childrenCompletedIdempotencyKey digests the parent's child ID set

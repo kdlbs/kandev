@@ -20,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // ErrRoutingNotSupported is returned by TaskStarter.StartTaskWithRoute
@@ -119,6 +121,20 @@ type RunContext struct {
 	// encodeRunContext's output shape, which CoalesceRun compares for
 	// equality and taskIDFromPayload parses.
 	IdempotencyKey string `json:"-"`
+
+	// WaveKey and WaveString carry a completion-wave identity onto the
+	// persisted run (models.Run.WakeWaveKey / WakeWaveString), not into
+	// the JSON payload: they gate admission via idx_run_wake_wave and
+	// coalescing, not agent-facing content. Empty means "no wave
+	// identity" — the ordinary idempotency-key path applies instead.
+	WaveKey    string `json:"-"`
+	WaveString string `json:"-"`
+
+	// ExtraPayload, when non-empty, is merged onto the JSON-encoded
+	// payload by encodeRunContext (workflow-authored keys win over any
+	// struct field of the same name). Left nil, encodeRunContext's
+	// output is byte-identical to a plain struct marshal.
+	ExtraPayload map[string]any `json:"-"`
 }
 
 // Run status constants.
@@ -176,6 +192,22 @@ type SchedulerService struct {
 	kandevBasePathFn        func() string
 	agentTypeResolver       func(profileID string) string
 	projectSkillDirResolver func(agentTypeID string) string
+	workflowStepGetter      WorkflowStepGetter
+}
+
+// WorkflowStepGetter resolves a workflow step by ID. Implemented by
+// workflow/service.Service.GetStep; wired via SetWorkflowStepGetter so the
+// cascade producer (P1) can resolve the parent's current step without an
+// engine dependency, for payload parity with the engine-routed producers
+// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16).
+type WorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used for payload
+// parity. Left nil, cascade wakes queue without a merged action payload.
+func (ss *SchedulerService) SetWorkflowStepGetter(g WorkflowStepGetter) {
+	ss.workflowStepGetter = g
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -250,6 +282,21 @@ func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
+	return ss.queueRun(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "")
+}
+
+// queueRun is QueueRun plus an optional completion-wave identity. A
+// non-empty waveKey (a) skips CoalesceRun — a wave-carrying request is
+// never coalesced in and a wave-carrying queued run is never coalesced
+// into (AC-OFFICE-WAKE-WAVE-IDENTITY-002.14) — and (b) classifies
+// CreateRun's idx_run_wake_wave violation as an already-delivered wake
+// rather than an error: this call site inserts directly (not through
+// runs/service), so runs/service's own classification (Task 02) doesn't
+// cover it.
+func (ss *SchedulerService) queueRun(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
+) error {
 	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
 		return err
 	}
@@ -266,15 +313,17 @@ func (ss *SchedulerService) QueueRun(
 		}
 	}
 
-	coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		ss.logger.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", reason))
-		return nil
+	if waveKey == "" {
+		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			ss.logger.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", reason))
+			return nil
+		}
 	}
 
 	var idemKeyPtr *string
@@ -289,9 +338,17 @@ func (ss *SchedulerService) QueueRun(
 		Status:         RunStatusQueued,
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
+		WakeWaveKey:    waveKey,
+		WakeWaveString: waveString,
 		RequestedAt:    time.Now().UTC(),
 	}
 	if err := ss.repo.CreateRun(ctx, req); err != nil {
+		if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(err) {
+			shared.ParentWakeDedupedTotal.Add(1)
+			ss.logger.Debug("run skipped (wave already woken)",
+				zap.String("wave_key", waveKey))
+			return nil
+		}
 		return fmt.Errorf("enqueue run: %w", err)
 	}
 
@@ -320,15 +377,34 @@ func (ss *SchedulerService) QueueRunCtx(
 	if idempotencyKey == "" {
 		idempotencyKey = fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
 	}
-	return ss.QueueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey)
+	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey, c.WaveKey, c.WaveString)
 }
 
+// encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output
+// is a plain struct marshal, byte-identical to before ExtraPayload existed.
+// Otherwise ExtraPayload's keys are overlaid onto the encoded object —
+// workflow-authored keys win, matching engine.queueRunPayload's precedence
+// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16).
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	if len(c.ExtraPayload) == 0 {
+		return string(b), nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", err
+	}
+	for k, v := range c.ExtraPayload {
+		m[k] = v
+	}
+	merged, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(merged), nil
 }
 
 // guardAgentStatus returns an error if the agent is paused or stopped.

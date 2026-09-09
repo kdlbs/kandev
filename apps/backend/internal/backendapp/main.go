@@ -1624,6 +1624,10 @@ func startSchedulingRuntime(
 	)
 	if services.OfficeSvcs != nil {
 		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
+		// Payload parity (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16): the
+		// cascade producer resolves the parent's current step directly,
+		// since it never goes through the engine.
+		services.OfficeSvcs.Scheduler.SetWorkflowStepGetter(services.Workflow)
 	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
