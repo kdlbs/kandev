@@ -54,7 +54,10 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
 }
 
 test.describe("Routine catch-up policy UI", () => {
-  test("create dialog: catch-up policy control visibility toggles live", async ({ testPage }) => {
+  test("create dialog: catch-up policy control visibility toggles live", async ({
+    testPage,
+    prCapture,
+  }) => {
     await testPage.goto("/office/routines");
     await testPage.getByRole("button", { name: "New Routine" }).click();
 
@@ -71,12 +74,17 @@ test.describe("Routine catch-up policy UI", () => {
     await assertCatchUpPolicyToggles(testPage, async () => {
       await expect(testPage.getByLabel("Catch-up max")).toHaveValue("25");
     });
+    await prCapture.screenshot("create-dialog-catch-up-policy", {
+      caption:
+        "Create Routine dialog with the summarize_missed catch-up policy and its catch-up max field",
+    });
   });
 
   test("detail view: catch-up policy control visibility toggles live", async ({
     officeApi,
     officeSeed,
     testPage,
+    prCapture,
   }) => {
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
       name: "E2E Catch-up Detail Toggle",
@@ -90,6 +98,10 @@ test.describe("Routine catch-up policy UI", () => {
 
     await assertCatchUpPolicyToggles(testPage, async () => {
       await expect(testPage.getByText("Catch-up max", { exact: true })).toBeVisible();
+    });
+    await prCapture.screenshot("detail-view-catch-up-policy", {
+      caption:
+        "Routine detail view with the summarize_missed catch-up policy and its catch-up max field",
     });
   });
 
