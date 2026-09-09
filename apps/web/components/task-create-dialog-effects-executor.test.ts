@@ -137,7 +137,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
       expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
     );
   });
+});
 
+describe("useDefaultSelectionsEffect - executor profile defaults for explicit local-path tasks", () => {
   it("defaults explicit local-path tasks to a local profile when no profile was saved", async () => {
     const fs = makeDefaultSelFs({
       executorId: "",
