@@ -67,6 +67,21 @@ describe("notification provider availability", () => {
     expect(after.loaded).toBe(before.loaded);
     expect(after.loading).toBe(before.loading);
   });
+
+  it("preserves availability when a provider update omits it", () => {
+    const store = makeStore();
+    store.getState().setAppriseAvailable(true);
+    const before = store.getState().notificationProviders;
+
+    store.getState().setNotificationProviders({
+      items: before.items,
+      events: before.events,
+      loaded: true,
+      loading: false,
+    });
+
+    expect(store.getState().notificationProviders.appriseAvailable).toBe(true);
+  });
 });
 
 describe("settings update jobs", () => {

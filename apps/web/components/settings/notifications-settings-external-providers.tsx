@@ -75,6 +75,7 @@ function AppriseProviderList({
   onAppriseEdit,
   onOpenForm,
   onCloseForm,
+  onCancelForm,
   onDeleteProvider,
   onTestProvider,
   onTextareaInput,
@@ -127,7 +128,7 @@ function AppriseProviderList({
                   onAppriseEdit(provider.id, value);
                 }}
                 onSubmit={onCloseForm}
-                onCancel={onCloseForm}
+                onCancel={onCancelForm}
                 onInput={onTextareaInput}
                 nameIsDirty={nameIsDirty}
                 urlsIsDirty={urlsIsDirty}

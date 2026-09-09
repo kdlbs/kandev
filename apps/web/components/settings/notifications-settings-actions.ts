@@ -210,7 +210,7 @@ export function useNotificationsState() {
     appriseRescanError,
     appriseRescanResult,
   } = useNotificationProviders();
-  const appriseAvailable = storeAppriseAvailable ?? true;
+  const appriseAvailable = storeAppriseAvailable ?? false;
   const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
   const [providers, setProviders] = useState<NotificationProvider[]>(() => storeProviders ?? []);
   const [baselineProviders, setBaselineProviders] = useState<NotificationProvider[]>(
@@ -345,7 +345,6 @@ export function useSaveRequest(state: NotificationsState) {
     setNotificationProviders({
       items: nextProviders,
       events: state.notificationEvents,
-      appriseAvailable: state.appriseAvailable,
       loaded: true,
       loading: false,
     });

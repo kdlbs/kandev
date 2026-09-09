@@ -288,6 +288,38 @@ describe("notification provider draft saving", () => {
     expect(result.current.state.providers).toEqual([savedProvider]);
     expect(result.current.isDirty).toBe(false);
   });
+
+  it("does not overwrite a rescan that completes during a provider save", async () => {
+    let resolveUpdate: (provider: NotificationProvider) => void = () => undefined;
+    const updatePromise = new Promise<NotificationProvider>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    mocks.updateNotificationProvider.mockReturnValueOnce(updatePromise);
+    const { result, rerender } = renderHook(useHarness);
+
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, DRAFT_NAME));
+    let savePromise: Promise<unknown>;
+    act(() => {
+      savePromise = result.current.saveRequest.run();
+    });
+    await waitFor(() => expect(mocks.updateNotificationProvider).toHaveBeenCalledOnce());
+
+    notificationAppriseAvailable = false;
+    rerender();
+
+    await act(async () => {
+      resolveUpdate({ ...savedProvider, name: DRAFT_NAME });
+      await savePromise;
+    });
+
+    const lastSnapshot = mocks.setNotificationProviders.mock.lastCall?.[0];
+    expect(lastSnapshot).toEqual({
+      items: [{ ...savedProvider, name: DRAFT_NAME }],
+      events: [SAVED_EVENT],
+      loaded: true,
+      loading: false,
+    });
+  });
 });
 
 describe("notification permission actions", () => {

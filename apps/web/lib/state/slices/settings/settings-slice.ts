@@ -400,7 +400,9 @@ function createSecretAndSpriteActions(
       set((draft) => {
         draft.notificationProviders.items = state.items;
         draft.notificationProviders.events = state.events;
-        draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        if (state.appriseAvailable !== undefined) {
+          draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        }
         draft.notificationProviders.loaded = state.loaded;
         draft.notificationProviders.loading = state.loading;
       }),

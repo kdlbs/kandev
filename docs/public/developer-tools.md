@@ -21,8 +21,8 @@ environment of the running Kandev backend. When it is found, **Add Apprise Provi
 available. Rescanning does not save notification drafts or send a notification.
 
 If Kandev does not detect Apprise, check the `PATH` used by the backend process. If you install
-Apprise or change `PATH` after Kandev starts, restart Kandev so the running backend receives the new
-environment, then rescan.
+Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
+after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
 
 ## Quick Chat
 
