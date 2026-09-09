@@ -229,7 +229,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
 			zap.String("agent_status", string(agent.Status)))
-		_ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
+		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
 		return
 	}
 
@@ -259,7 +259,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent_id": agent.ID,
 			}), runID, "")
 		si.svc.clearAgentWorking(ctx, agent.ID, runID)
-		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
+		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
 
@@ -547,7 +547,7 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 		zap.String("task_id", taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
-	_ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
+	_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
 	return true
 }
 
@@ -658,7 +658,9 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 		return
 	}
 	if !wrote {
-		IncLoopLaunchWithoutSession(workspaceID)
+		si.logger.Warn("persist launched session id matched no row",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		IncLoopSessionPersistFailed(workspaceID)
 	}
 }
 
@@ -703,10 +705,17 @@ func (si *SchedulerIntegration) failTasklessRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
+	wrote, err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg)
+	if err != nil {
 		si.logger.Error("failed to mark taskless run as failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
+	}
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the caller's read and this write — nothing to classify
+		// or publish (Review round 3, R3-1).
+		return
 	}
 	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
@@ -762,10 +771,16 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
+	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg)
+	if err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
+	}
+	if !wrote {
+		// Already terminal via another writer — nothing to publish
+		// (Review round 3, R3-1).
+		return
 	}
 	run.ErrorMessage = msg
 	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)
@@ -878,6 +893,38 @@ func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, ru
 		si.logger.Error("failed to requeue contended checkout",
 			zap.String("run_id", run.ID), zap.Error(err))
 	}
+}
+
+// checkBudget runs pre-execution budget checks. Returns true if allowed.
+func (si *SchedulerIntegration) checkBudget(
+	ctx context.Context, run *models.Run,
+	agent *models.AgentInstance, taskID string,
+) bool {
+	projectID := si.extractProjectID(ctx, run.Payload)
+	allowed, reason, err := si.svc.CheckPreExecutionBudget(
+		ctx, agent.ID, projectID, agent.WorkspaceID)
+	if err != nil {
+		si.logger.Error("budget check failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return true // fail-open on error
+	}
+	if !allowed {
+		si.logger.Info("run skipped (budget exceeded)",
+			zap.String("run_id", run.ID), zap.String("reason", reason))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
+		_, _ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
+		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
+			"scheduler", "office-scheduler",
+			"run_budget_blocked", "run", run.ID,
+			mustJSON(map[string]string{
+				"agent":    agent.Name,
+				"agent_id": agent.ID,
+				"reason":   reason,
+			}), run.ID, "")
+		return false
+	}
+	return true
 }
 
 // releaseCheckoutIfNeeded releases the task checkout the given run may hold.

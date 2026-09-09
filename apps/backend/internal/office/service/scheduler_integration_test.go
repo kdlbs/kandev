@@ -44,7 +44,7 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	}
 
 	// Finish the run.
-	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestSchedulerIntegration_AtCapacityStaysQueued(t *testing.T) {
 	}
 
 	// Finish the first run.
-	if err := svc.FinishRun(ctx, first.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, first.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -348,7 +348,7 @@ func TestSchedulerIntegration_PromptBuiltCorrectly(t *testing.T) {
 				t.Errorf("prompt should contain %q, got: %s", tt.contains, prompt)
 			}
 
-			_ = svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed)
+			_, _ = svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed)
 		})
 	}
 }

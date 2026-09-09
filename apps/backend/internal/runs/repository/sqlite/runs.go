@@ -222,13 +222,19 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 // stands immediately after that write, via the same statement (RETURNING),
 // so a caller classifying the transition (office_loop_terminal_total) never
 // depends on a separate read succeeding independently of the write that
-// persisted it. Returns (nil, nil) for an unknown id: zero rows changed, so
-// there is nothing to classify.
+// persisted it. Guarded to status = 'claimed', the same status every caller
+// reaches this from (ClaimNextEligibleRun then processRun/an event
+// subscriber): without the guard, a cancel that commits between the
+// caller's read and this write would have its 'cancelled' status and
+// finished_at overwritten by this transition. Returns (nil, nil) for an
+// unknown id or a run no longer claimed (already terminal by another
+// writer): zero rows changed, so there is nothing to classify.
 func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) (*models.Run, error) {
 	now := time.Now().UTC()
 	var run models.Run
 	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
-		UPDATE runs SET status = ?, outcome = ?, finished_at = ? WHERE id = ?
+		UPDATE runs SET status = ?, outcome = ?, finished_at = ?
+		WHERE id = ? AND status = 'claimed'
 		RETURNING *
 	`), status, outcome, now, id).StructScan(&run)
 	if errors.Is(err, sql.ErrNoRows) {

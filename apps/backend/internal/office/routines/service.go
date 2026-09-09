@@ -578,6 +578,20 @@ func (s *RoutineService) dispatchRoutineRun(
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
+	// AC-003.1/AC-003.9 (Review round 3, R3-4): office_loop_routine_run_total
+	// counts this fire's CreateRoutineRun above — a write that just
+	// succeeded — not whatever applyConcurrencyPolicy/materialiseRoutineRun
+	// do afterward. A single deferred increment fires exactly once no
+	// matter which return path below is taken, labelled by whatever
+	// disposition was reached; it defaults to "failed" (the existing
+	// RoutineRunStatus value, not an invented one) so a fire that created
+	// a real row but then errored is still counted rather than silently
+	// dropped.
+	disposition := string(models.RoutineRunStatusFailed)
+	defer func() {
+		service.IncLoopRoutineRun(routine.WorkspaceID, source, disposition)
+	}()
+
 	// AC-OFFICE-LOOP-LIVENESS-001.1: advances last_run_at for every
 	// dispatch, whatever disposition the run later reaches — so it must
 	// run before applyConcurrencyPolicy, which can short-circuit into a
@@ -595,14 +609,14 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, err
 	}
 	if status != "" {
-		service.IncLoopRoutineRun(routine.WorkspaceID, source, string(status))
+		disposition = string(status)
 		return run, nil
 	}
 
 	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks); err != nil {
 		return run, err
 	}
-	service.IncLoopRoutineRun(routine.WorkspaceID, source, string(models.RoutineRunStatusTaskCreated))
+	disposition = string(models.RoutineRunStatusTaskCreated)
 
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),

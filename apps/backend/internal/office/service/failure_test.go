@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
 // queueAndReadRun enqueues a run with a unique idempotency key
-// (so multiple calls in one test don't coalesce) and reads it back.
-// Mirrors the production path (QueueRun) without going through the
-// claim step (which lives on the repository).
+// (so multiple calls in one test don't coalesce), reads it back, and
+// marks it claimed — the precondition every production caller of
+// HandleAgentFailure actually has (resolveLifecycleRun resolves via
+// GetClaimedRunByID before ever reaching it). Review round 3, R3-1
+// guards MarkRunFailed's write to status = 'claimed', so a test that
+// skipped this step would see every HandleAgentFailure call in this
+// file silently no-op.
 func queueAndReadRun(
 	t *testing.T, svc *service.Service, agentID, taskID string,
 ) *models.Run {
@@ -30,6 +35,9 @@ func queueAndReadRun(
 	}
 	for _, w := range rows {
 		if w.AgentProfileID == agentID && taskIDFromPayload(t, w.Payload) == taskID && w.Status != service.RunStatusFailed {
+			svc.ExecSQL(t, `UPDATE runs SET status = 'claimed', claimed_at = ? WHERE id = ?`,
+				time.Now().UTC(), w.ID)
+			w.Status = service.RunStatusClaimed
 			return w
 		}
 	}
@@ -94,7 +102,7 @@ func TestHandleAgentFailure_AutoPausesAtThreshold(t *testing.T) {
 		taskID := uuidish("task-pause", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "agent-pause")
 		w := queueAndReadRun(t, svc, "agent-pause", taskID)
-		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -128,7 +136,7 @@ func TestRecordAgentSuccess_ResetsCounter(t *testing.T) {
 		taskID := uuidish("task-succ", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "agent-success")
 		w := queueAndReadRun(t, svc, "agent-success", taskID)
-		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -172,7 +180,7 @@ func TestHandleAgentFailure_RespectsPerAgentThreshold(t *testing.T) {
 	taskID := "task-tight-1"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-tight")
 	w := queueAndReadRun(t, svc, "agent-tight", taskID)
-	if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 
@@ -198,7 +206,7 @@ func autoPauseAgent(
 		taskID := agentID + "-task-" + uuidish("p", i)
 		insertSyntheticTask(t, svc, taskID, wsID, agentID)
 		w := queueAndReadRun(t, svc, agentID, taskID)
-		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
 	}
@@ -328,7 +336,7 @@ func TestMarkAgentRunFailedFixed_LeavesInboxWhenRequeueFails(t *testing.T) {
 	taskID := "task-retry-after-queue-error"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-task-retry")
 	run := queueAndReadRun(t, svc, "agent-task-retry", taskID)
-	if err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 	if err := svc.UpdateAgentStatusFields(ctx, "agent-task-retry",
@@ -358,7 +366,7 @@ func TestMarkAgentPausedFixed_UsesPauseSnapshot(t *testing.T) {
 	oldTaskID := "old-failure-task"
 	insertSyntheticTask(t, svc, oldTaskID, "ws-1", "agent-snapshot")
 	oldRun := queueAndReadRun(t, svc, "agent-snapshot", oldTaskID)
-	if err := svc.HandleAgentFailure(ctx, oldRun, "old failure"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, oldRun, "old failure"); err != nil {
 		t.Fatalf("old failure: %v", err)
 	}
 	svc.RecordAgentSuccess(ctx, "agent-snapshot")
@@ -392,7 +400,7 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	reassignedTaskID := "reassigned-task"
 	insertSyntheticTask(t, svc, reassignedTaskID, "ws-1", "agent-reassigned-from")
 	failedRun := queueAndReadRun(t, svc, "agent-reassigned-from", reassignedTaskID)
-	if err := svc.HandleAgentFailure(ctx, failedRun, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, failedRun, "boom"); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 	// Two more failures (on other tasks) to cross the default threshold
@@ -539,7 +547,7 @@ func TestHandleAgentFailure_RecordsTerminalShape(t *testing.T) {
 	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeLaunchedFailed))
 	before := terminalShapeExpvarInt(t, key)
 
-	if err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, run, "boom"); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 
@@ -561,7 +569,7 @@ func TestOnAssigneeChanged_DismissesPriorEntryWithoutResettingCounter(t *testing
 	taskID := "task-reassign-1"
 	insertSyntheticTask(t, svc, taskID, "ws-1", "old-agent")
 	w := queueAndReadRun(t, svc, "old-agent", taskID)
-	if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+	if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 

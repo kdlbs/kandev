@@ -43,7 +43,12 @@ func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
 // an OfficeRunProcessed bus event. The run row is fetched first so the
 // published payload carries enough context (agent, task, comment, reason)
 // for downstream WS consumers to scope updates.
-func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
+//
+// Returns wrote=false when the guarded write was a no-op — the run was
+// no longer claimed (already terminal via a concurrent writer, e.g. a
+// cancel) by the time this statement ran — so there is nothing to
+// classify or publish (Review round 3, R3-1).
+func (s *Service) FinishRun(ctx context.Context, id, outcome string) (bool, error) {
 	return s.transitionRunTerminal(ctx, id, RunStatusFinished, &outcome)
 }
 
@@ -51,8 +56,9 @@ func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
 // OfficeRunProcessed event. outcome is written as NULL: a failed run is
 // bucketed by RunCountsByDayForAgent on status alone and never reaches the
 // outcome-derived buckets, so no value from the five-value vocabulary is
-// invented for it. See FinishRun for the lifecycle contract.
-func (s *Service) FailRun(ctx context.Context, id string) error {
+// invented for it. See FinishRun for the lifecycle contract and the
+// wrote=false no-op case.
+func (s *Service) FailRun(ctx context.Context, id string) (bool, error) {
 	return s.transitionRunTerminal(ctx, id, RunStatusFailed, nil)
 }
 
@@ -65,6 +71,12 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // Publish errors are logged at debug and swallowed; persistence errors are
 // returned to the caller.
 //
+// FinishRun's guarded write (status = 'claimed') returns a nil run when
+// another writer already moved the row to a different terminal state
+// between the caller's read and this statement — nothing to classify or
+// publish in that case, so this returns wrote=false without touching
+// recordTerminalShape or publishRunProcessed (Review round 3, R3-1).
+//
 // Deliberately does NOT release the task checkout: transitionRunTerminal
 // is reached by every terminal run, including ones that never held the
 // checkout in the first place (the "agent not active" / idle-skip /
@@ -75,19 +87,23 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // for the SAME agent + task races a first run that is genuinely still
 // executing and holds the checkout — that second run's release matches
 // the first run's own checkout_agent_id and steals its own live lock out
-// from under it (Review round 3, BLOCKING FINDING 1). Callers that KNOW
-// their run actually held the checkout call releaseTaskCheckoutForRun
-// explicitly instead: handleAgentCompleted / handleTasklessAgentCompleted
-// (event_subscribers.go) for the launched-run completion path, and
-// HandleAgentFailure (failure.go) for the launched-run failure path.
-func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) error {
+// from under it. Callers that KNOW their run actually held the checkout
+// call releaseTaskCheckoutForRun explicitly instead, and only when this
+// method reports wrote=true: handleAgentCompleted /
+// handleTasklessAgentCompleted (event_subscribers.go) for the
+// launched-run completion path, and HandleAgentFailure (failure.go) for
+// the launched-run failure path.
+func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) (bool, error) {
 	run, err := s.repo.FinishRun(ctx, id, status, outcome)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if run == nil {
+		return false, nil
 	}
 	s.recordTerminalShape(ctx, run, status, outcome)
 	s.publishRunProcessed(ctx, id, status, run)
-	return nil
+	return true, nil
 }
 
 // recordTerminalShape classifies the just-persisted terminal transition

@@ -172,7 +172,7 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 	} else {
 		incBudgetBlockedByLimit(provenance)
 	}
-	_ = si.svc.FinishRun(ctx, run.ID, outcome)
+	_, _ = si.svc.FinishRun(ctx, run.ID, outcome)
 
 	fields := map[string]string{"degraded": strconv.FormatBool(p.Degraded)}
 	if p.IsDefault {
@@ -409,7 +409,7 @@ func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context,
 
 	if run.RetryCount >= MaxRetryCount {
 		incBudgetFailedWorkspaceLookup(provenance)
-		if err := si.svc.FailRun(ctx, run.ID); err != nil {
+		if _, err := si.svc.FailRun(ctx, run.ID); err != nil {
 			si.logger.Error("failed to fail run without escalation",
 				zap.String("run_id", run.ID), zap.Error(err))
 			return

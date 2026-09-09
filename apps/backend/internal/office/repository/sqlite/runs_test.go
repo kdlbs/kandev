@@ -235,13 +235,14 @@ func TestCleanExpired(t *testing.T) {
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
-		Status:         "queued",
+		Status:         "claimed",
 		CoalescedCount: 1,
 	}
 	if err := repo.CreateRun(ctx, req); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Finish it.
+	// Finish it. FinishRun is guarded to status = 'claimed' (Review round
+	// 3, R3-1), matching the seeded status above.
 	if _, err := repo.FinishRun(ctx, req.ID, "finished", strPtr("processed")); err != nil {
 		t.Fatalf("finish: %v", err)
 	}

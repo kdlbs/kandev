@@ -445,20 +445,29 @@ func (ss *SchedulerService) launchCandidate(
 	return "", ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, route)
 }
 
-// handleLaunchSuccess records the resolved provider/model on the run
-// row, persists the launched session id, and flips every health scope
-// this candidate touched back to healthy. Returns (launched=true, nil,
-// nil) on success.
+// handleLaunchSuccess persists the launched session id, counts the
+// launch, records the resolved provider/model on the run row, and
+// flips every health scope this candidate touched back to healthy.
+// Always returns (launched=true, nil, nil): by the time this is called
+// launchCandidate has already started a real agent session, so nothing
+// downstream may report the launch as failed or leave it uncounted
+// (AC-002.7, AC-003.9). The session id and the launch counter are
+// persisted first and unconditionally — they are the correlation this
+// capability exists to preserve — before the best-effort
+// resolved-route snapshot, whose own failure (Review round 3, R3-2)
+// must not undo them or cause a caller to retry-launch an agent that
+// is already running.
 func (ss *SchedulerService) handleLaunchSuccess(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, candidate routing.Candidate, sessionID string,
 ) (bool, *routing.BlockReason, error) {
-	if err := ss.repo.SetRunResolvedRoute(ctx,
-		run.ID, candidate.ExecutionProfileID, string(candidate.ProviderID), candidate.Model); err != nil {
-		return false, nil, err
-	}
 	service.IncLoopLaunch(agent.WorkspaceID)
 	ss.persistLaunchedSession(ctx, run.ID, agent.WorkspaceID, sessionID)
+	if err := ss.repo.SetRunResolvedRoute(ctx,
+		run.ID, candidate.ExecutionProfileID, string(candidate.ProviderID), candidate.Model); err != nil {
+		ss.logger.Warn("persist resolved route failed",
+			zap.String("run_id", run.ID), zap.String("provider_id", string(candidate.ProviderID)), zap.Error(err))
+	}
 	ss.markHealthScopes(ctx, agent.WorkspaceID, candidate)
 	return true, nil, nil
 }
@@ -469,7 +478,11 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // A write failure does not fail the launch — the agent is already
 // running — and is counted separately from the without-session case
 // (AC-002.11) so the two causes of an identical "processed, no
-// session" row stay distinguishable in the counters.
+// session" row stay distinguishable in the counters. A non-empty id
+// whose write affects zero rows (e.g. the run row vanished between
+// claim and this write) is the same AC-002.11 case as a hard write
+// error — a real session id that failed to persist — not the AC-002.8
+// case, so it counts under the same persist-failed counter.
 func (ss *SchedulerService) persistLaunchedSession(
 	ctx context.Context, runID, workspaceID, sessionID string,
 ) {
@@ -485,7 +498,9 @@ func (ss *SchedulerService) persistLaunchedSession(
 		return
 	}
 	if !wrote {
-		service.IncLoopLaunchWithoutSession(workspaceID)
+		ss.logger.Warn("persist launched session id matched no row",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		service.IncLoopSessionPersistFailed(workspaceID)
 	}
 }
 

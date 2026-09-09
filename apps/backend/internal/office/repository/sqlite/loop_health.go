@@ -36,9 +36,13 @@ func (r *Repository) CountEligibleTriggers(ctx context.Context, workspaceID stri
 }
 
 // ListOverdueOrStrandedTriggers returns eligible cron triggers that are
-// overdue (armed but past grace) or stranded (claimed and never
-// re-armed past grace), capped at limit, with the untruncated total
-// from the same statement (AC-004.9, AC-004.12). A trigger claimed
+// overdue (armed but past grace) or stranded (claimed, or never fired
+// at all, and not re-armed past grace), capped at limit, with the
+// untruncated total from the same statement (AC-004.9, AC-004.12). The
+// stranded clock is the claim instant COALESCE(last_fired_at,
+// created_at), not last_fired_at alone: a trigger that has never fired
+// (e.g. a malformed cron_expression that never got a next_run_at)
+// ages from its own creation, not from the epoch. A trigger claimed
 // less than strandedGrace ago is a claiming trigger — excluded here
 // rather than given a third label (AC-004.15).
 func (r *Repository) ListOverdueOrStrandedTriggers(
@@ -62,7 +66,7 @@ func (r *Repository) ListOverdueOrStrandedTriggers(
 		WHERE t.kind = 'cron' AND t.enabled = 1 AND rt.workspace_id = ?
 		  AND (
 		    (t.next_run_at IS NOT NULL AND t.next_run_at <= ?)
-		    OR (t.next_run_at IS NULL AND (t.last_fired_at IS NULL OR t.last_fired_at <= ?))
+		    OR (t.next_run_at IS NULL AND COALESCE(t.last_fired_at, t.created_at) <= ?)
 		  )
 		ORDER BY (t.next_run_at IS NULL) DESC, t.next_run_at ASC, t.id ASC
 		LIMIT ?

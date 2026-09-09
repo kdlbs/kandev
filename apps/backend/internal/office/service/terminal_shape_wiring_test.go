@@ -54,7 +54,7 @@ func TestFinishRun_RecordsSilentSuccessTerminalShape(t *testing.T) {
 	key := service.LoopMetricLabel("workspace", agent.WorkspaceID, "shape", string(service.ShapeSilentSuccess))
 	before := terminalShapeExpvarInt(t, key)
 
-	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestFailRun_RecordsUnlaunchedFailedTerminalShape(t *testing.T) {
 	key := service.LoopMetricLabel("workspace", agent.WorkspaceID, "shape", string(service.ShapeUnlaunchedFailed))
 	before := terminalShapeExpvarInt(t, key)
 
-	if err := svc.FailRun(ctx, run.ID); err != nil {
+	if _, err := svc.FailRun(ctx, run.ID); err != nil {
 		t.Fatalf("fail: %v", err)
 	}
 
