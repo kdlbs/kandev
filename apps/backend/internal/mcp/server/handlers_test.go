@@ -400,6 +400,7 @@ func TestCreateTask_ExternalMode_AgentProfileDescNotesOfficeAssigneeLimitation(t
 	require.True(t, ok, "agent_profile_id should have a description")
 	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
 	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
 }
 
 func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
