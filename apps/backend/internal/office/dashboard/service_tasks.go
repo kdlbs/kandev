@@ -929,6 +929,13 @@ const (
 	capacitySeat   retainedCapacity = "seat"
 )
 
+// sessionCapacityReadHook is a test-only yield point invoked immediately
+// before the determination reads capacity, letting a test seed a capacity
+// change in the guarded path's own commit-to-read window
+// (AC-OFFICE-SESSION-TERM-002.12). Nil in production; set only through
+// SetSessionCapacityReadHook in export_test.go.
+var sessionCapacityReadHook func(taskID, agentProfileID string)
+
 // retainsTaskCapacity reports which capacity, if any, agentProfileID still
 // holds on taskID.
 //
@@ -994,6 +1001,9 @@ func (s *DashboardService) terminateSessionUnlessRetained(
 		zap.String("reason", reason),
 	}, extra...)
 
+	if sessionCapacityReadHook != nil {
+		sessionCapacityReadHook(taskID, agentProfileID)
+	}
 	capacity, err := s.retainsTaskCapacity(ctx, taskID, agentProfileID)
 	if err != nil {
 		recordSessionTermSuppressed(reason, sessionTermSuppressReadFailed)
