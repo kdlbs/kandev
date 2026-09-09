@@ -117,29 +117,37 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 type countingCanceller struct {
 	mu     sync.Mutex
 	called []string
+	done   chan struct{}
+}
+
+// newCountingCanceller returns a countingCanceller ready to signal waitForCancel.
+func newCountingCanceller() *countingCanceller {
+	return &countingCanceller{done: make(chan struct{}, 1)}
 }
 
 func (c *countingCanceller) CancelTaskExecution(_ context.Context, taskID, _ string, _ bool) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.called = append(c.called, taskID)
+	c.mu.Unlock()
+	select {
+	case c.done <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
-// waitForCancel blocks briefly for the hard cancel, which the reassignment
-// path dispatches on its own goroutine.
+// waitForCancel joins the hard cancel, which the reassignment path dispatches
+// on its own goroutine, via the done channel rather than a sleep-poll loop.
 func (c *countingCanceller) waitForCancel(t *testing.T) int {
 	t.Helper()
-	for i := 0; i < 200; i++ {
-		c.mu.Lock()
-		n := len(c.called)
-		c.mu.Unlock()
-		if n > 0 {
-			return n
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-c.done:
+	case <-time.After(time.Second):
+		t.Log("timed out waiting for cancel")
 	}
-	return 0
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.called)
 }
 
 // seedSelfReviewTask builds the shipped fallback shape: one agent is both the
@@ -164,7 +172,7 @@ func seedSelfReviewTask(t *testing.T, deps *testDeps, taskID, agentID string) {
 func TestSetTaskAssignee_KeepsSessionOfPrevRunnerStillSeated(t *testing.T) {
 	deps := newTestDeps(t)
 	rt := &recordingTerminator{}
-	cancels := &countingCanceller{}
+	cancels := newCountingCanceller()
 	deps.svc.SetSessionTerminator(rt)
 	deps.svc.SetTaskCanceller(cancels)
 	deps.svc.SetReactivityApplier(&recordingReactivity{
