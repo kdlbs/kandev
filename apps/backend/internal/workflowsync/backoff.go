@@ -52,6 +52,13 @@ func buildFailureDirective(
 			retryAt = apiErr.RetryAt.UTC()
 		}
 	}
+	var admissionWait *github.AdmissionWaitError
+	if errors.As(syncErr, &admissionWait) {
+		directive.retrySource = admissionWait.RetrySource
+		if admissionWait.RetryAt.After(retryAt) {
+			retryAt = admissionWait.RetryAt.UTC()
+		}
+	}
 	directive.nextAttemptAt = &retryAt
 	return directive
 }

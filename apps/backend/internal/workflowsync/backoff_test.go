@@ -1,6 +1,7 @@
 package workflowsync
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -48,6 +49,23 @@ func TestBuildFailureDirectiveHonorsProviderRetryLowerBound(t *testing.T) {
 	assert.Equal(t, providerRetry, *directive.nextAttemptAt)
 	assert.Equal(t, github.RetrySourceRetryAfter, directive.retrySource)
 	assert.Equal(t, string(github.FailureSecondaryRateLimit), directive.class)
+}
+
+func TestBuildFailureDirectiveHonorsCanceledAdmissionRetryLowerBound(t *testing.T) {
+	now := time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC)
+	providerRetry := now.Add(17 * time.Minute)
+	directive := buildFailureDirective(&Config{
+		Provider: ProviderGitHub, IntervalSeconds: 60,
+	}, &github.AdmissionWaitError{
+		Resource: github.ResourceCore, RetryAt: providerRetry,
+		RetrySource: github.RetrySourceRetryAfter,
+		Reason:      "observed_secondary_rate_limit", Cause: context.Canceled,
+	}, now, func(time.Duration) time.Duration { return 0 })
+
+	require.NotNil(t, directive.nextAttemptAt)
+	assert.Equal(t, providerRetry, *directive.nextAttemptAt)
+	assert.Equal(t, github.RetrySourceRetryAfter, directive.retrySource)
+	assert.Equal(t, string(github.FailureTransient), directive.class)
 }
 
 func TestBuildFailureDirectiveSuspendsOnlyPermanentGitHubFailures(t *testing.T) {
