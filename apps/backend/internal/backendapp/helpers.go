@@ -1816,8 +1816,10 @@ func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
 				URL:          pr.PRURL,
 				Title:        pr.PRTitle,
 				State:        pr.State,
+				Draft:        pr.IsDraft,
 				BaseRef:      pr.BaseBranch,
 				HeadRef:      pr.HeadBranch,
+				HeadSHA:      pr.HeadSHA,
 				MergedAt:     pr.MergedAt,
 				ClosedAt:     pr.ClosedAt,
 			})

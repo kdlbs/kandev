@@ -49,7 +49,7 @@ func TestEnrichTasksWithPRs(t *testing.T) {
 	lister := &fakeTaskPRLister{
 		byTask: map[string][]TaskPRInfo{
 			"task-1": {
-				{RepositoryID: "repo-gh", Number: 42, URL: "https://github.com/o/r/pull/42", Title: "Fix bug", State: "merged", Draft: &draft, BaseRef: "main", HeadRef: "fix"},
+				{RepositoryID: "repo-gh", Number: 42, URL: "https://github.com/o/r/pull/42", Title: "Fix bug", State: "merged", Draft: &draft, BaseRef: "main", HeadRef: "fix", HeadSHA: "head-sha"},
 				{Number: 43, URL: "https://github.com/o/r/pull/43", Title: "Add feature", State: "open"},
 			},
 		},
@@ -69,7 +69,7 @@ func TestEnrichTasksWithPRs(t *testing.T) {
 	assert.Equal(t, v1.TaskChangeRequestSummary{
 		Provider: "github", RepositoryID: "repo-gh", Number: 42,
 		URL: "https://github.com/o/r/pull/42", Title: "Fix bug", State: "merged",
-		Draft: &draft, BaseRef: "main", HeadRef: "fix",
+		Draft: &draft, BaseRef: "main", HeadRef: "fix", HeadSHA: "head-sha",
 	}, dtos[0].ChangeRequests[0])
 	assert.Nil(t, dtos[1].PRs, "tasks without PRs stay nil")
 }

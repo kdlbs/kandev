@@ -118,6 +118,7 @@ func (h *Handlers) addPRSummaries(ctx context.Context, taskIDs []string, out tas
 				Draft:        pr.Draft,
 				BaseRef:      pr.BaseRef,
 				HeadRef:      pr.HeadRef,
+				HeadSHA:      pr.HeadSHA,
 				MergedAt:     pr.MergedAt,
 				ClosedAt:     pr.ClosedAt,
 			})

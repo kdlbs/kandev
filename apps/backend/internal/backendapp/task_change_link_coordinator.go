@@ -61,6 +61,9 @@ func (c taskChangeLinkCoordinator) ReplaceTaskChange(ctx context.Context, req mc
 	if req.Link == *req.Old {
 		return c.list(ctx, req.TaskID)
 	}
+	if req.Link.Provider != req.Old.Provider {
+		return nil, fmt.Errorf("cross-provider task change replacement is not supported")
+	}
 	before, err := c.list(ctx, req.TaskID)
 	if err != nil {
 		return nil, err

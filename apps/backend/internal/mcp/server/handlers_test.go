@@ -1067,6 +1067,7 @@ func TestReplaceTaskPRToolRequiresOldCanonicalIdentity(t *testing.T) {
 	assert.Contains(t, properties, "old_provider")
 	assert.Contains(t, properties, "old_repository_id")
 	assert.Contains(t, properties, "old_number")
+	assert.Contains(t, s.mcpServer.ListTools()["replace_task_pr_kandev"].Tool.Description, "same provider")
 }
 
 // TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields covers

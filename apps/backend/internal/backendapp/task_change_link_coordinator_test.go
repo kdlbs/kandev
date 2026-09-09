@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +27,36 @@ type fakeGitLabChangeLinks struct {
 	linkedURL string
 	unlinkErr map[string]error
 	unlinked  []string
+}
+
+type fakeGitHubChangeLinks struct {
+	prs       []*github.TaskPR
+	linkedURL string
+	unlinked  []string
+}
+
+func (f *fakeGitHubChangeLinks) AssociateExistingPRByURL(_ context.Context, taskID, repositoryID, prURL string) (*github.TaskPR, error) {
+	f.linkedURL = prURL
+	pr := &github.TaskPR{ID: "linked-github", TaskID: taskID, RepositoryID: repositoryID, PRNumber: 42, PRURL: prURL}
+	f.prs = append(f.prs, pr)
+	return pr, nil
+}
+
+func (f *fakeGitHubChangeLinks) DetachTaskPR(_ context.Context, _ string, associationID string) (*github.TaskPR, error) {
+	f.unlinked = append(f.unlinked, associationID)
+	return nil, nil
+}
+
+func (f *fakeGitHubChangeLinks) ListTaskPRs(_ context.Context, taskIDs []string) (map[string][]*github.TaskPR, error) {
+	out := make(map[string][]*github.TaskPR)
+	for _, taskID := range taskIDs {
+		for _, pr := range f.prs {
+			if pr.TaskID == taskID {
+				out[taskID] = append(out[taskID], pr)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeGitLabChangeLinks) AssociateExistingMRByURL(
@@ -212,6 +243,40 @@ func TestTaskChangeCoordinatorReplaceSameIdentityIsANoOp(t *testing.T) {
 	}
 	if len(links.unlinked) != 0 || links.linkedURL != "" {
 		t.Fatalf("same-identity replace mutated provider: unlinked=%#v linked=%q", links.unlinked, links.linkedURL)
+	}
+}
+
+func TestTaskChangeCoordinatorRejectsCrossProviderReplaceWithoutMutation(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	now := time.Now().UTC()
+	if err := repos.CreateRepository(context.Background(), &models.Repository{
+		ID: "repo-gh", WorkspaceID: "ws-1", Name: "api", ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "api", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create GitHub repository: %v", err)
+	}
+	if err := repos.CreateTaskRepository(context.Background(), &models.TaskRepository{
+		ID: "tr-task-1-repo-gh", TaskID: "task-1", RepositoryID: "repo-gh", CreatedAt: now, UpdatedAt: now, Metadata: map[string]interface{}{},
+	}); err != nil {
+		t.Fatalf("attach GitHub repository: %v", err)
+	}
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{
+		ID: "old", TaskID: "task-1", RepositoryID: "repo-1", MRIID: 7,
+		MRURL: "https://gitlab.example.test/group/project/-/merge_requests/7",
+	}}}
+	githubLinks := &fakeGitHubChangeLinks{}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, github: githubLinks, gitlab: gitlabLinks}
+
+	_, err := coordinator.ReplaceTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "github", RepositoryID: "repo-gh", Number: 42},
+		Old:    &mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},
+	})
+	if err == nil {
+		t.Fatal("ReplaceTaskChange accepted a cross-provider replacement")
+	}
+	if len(gitlabLinks.mrs) != 1 || gitlabLinks.mrs[0].ID != "old" || githubLinks.linkedURL != "" || len(gitlabLinks.unlinked) != 0 {
+		t.Fatalf("cross-provider replace mutated links: mrs=%#v github=%q unlinked=%#v", gitlabLinks.mrs, githubLinks.linkedURL, gitlabLinks.unlinked)
 	}
 }
 

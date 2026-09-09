@@ -1411,6 +1411,7 @@ func taskPRLinkToolOptions(replace bool) []mcp.ToolOption {
 		mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
 	}
 	if replace {
+		options[0] = mcp.WithDescription("Replace an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number. The old and new associations must use the same provider.")
 		options = append(options,
 			mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
 			mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),

@@ -231,7 +231,9 @@ so a fork and its canonical repository can safely have the same number.
 For example, link GitLab merge request 42 to its target task with
 `{ "task_id": "…", "provider": "gitlab", "repository_id": "…", "number": 42 }`.
 `replace_task_pr_kandev` also requires `old_provider`, `old_repository_id`, and
-`old_number`. Every successful mutation returns the resulting active link set.
+`old_number`. Replacement supports associations from the same provider only;
+to switch between GitHub and GitLab, unlink the current association and then
+link the new one. Every successful mutation returns the resulting active link set.
 The target task must be reachable from the calling task's workspace.
 `list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
 GitLab MR associations in the provider-neutral `change_requests` field; the
