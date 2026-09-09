@@ -378,6 +378,37 @@ describe("persistWorkflowDraft", () => {
   });
 });
 
+describe("persistWorkflowDraft dependency ordering", () => {
+  it("repairs dependent targets before persisting a source profile change", async () => {
+    vi.mocked(updateWorkflowAction).mockResolvedValue(workflow);
+    const sourceSaved = {
+      ...step("source", "Implement", 0, true),
+      agent_profile_id: "profile-a",
+    } as WorkflowStep;
+    const dependentSaved = {
+      ...step("dependent", "Review", 1, false),
+      session_target: { kind: "step", step_id: "source" },
+    } as WorkflowStep;
+    await persistWorkflowDraft({
+      workflow,
+      draftSteps: [
+        { ...sourceSaved, agent_profile_id: "" },
+        { ...dependentSaved, session_target: null },
+      ],
+      savedSteps: [sourceSaved, dependentSaved],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+    expect(vi.mocked(updateWorkflowStepAction).mock.calls[0]).toEqual([
+      "dependent",
+      { session_target: null },
+    ]);
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(
+      "source",
+      expect.objectContaining({ agent_profile_id: "" }),
+    );
+  });
+});
+
 describe("persistWorkflowDraft cancellation policy", () => {
   it("forwards step session policy and cancellation policy when creating a missing step", async () => {
     const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;

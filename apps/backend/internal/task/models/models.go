@@ -250,6 +250,28 @@ type WorkflowSessionRoute struct {
 	Phase             string `json:"phase"`
 }
 
+// LoadWorkflowSessionRoute decodes the bounded route record stored in task
+// metadata. Invalid or incomplete values are ignored so a stale record cannot
+// redirect a workflow entry to an unrelated session.
+func LoadWorkflowSessionRoute(metadata map[string]interface{}) (WorkflowSessionRoute, bool) {
+	value, ok := metadata[MetaKeyWorkflowSessionRoute]
+	if !ok {
+		return WorkflowSessionRoute{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	var route WorkflowSessionRoute
+	if err := json.Unmarshal(payload, &route); err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	if route.OperationID == "" || route.DestinationStepID == "" || route.TargetKind == "" || route.Phase == "" {
+		return WorkflowSessionRoute{}, false
+	}
+	return route, true
+}
+
 // WorkflowSessionBinding records the latest session selected when a direct
 // profile workflow step was entered. The session pointer is nullable because
 // deleting a session must preserve the logical profile for a later fresh

@@ -351,14 +351,20 @@ func (c *Controller) validateSessionTarget(ctx context.Context, step *models.Wor
 	if err := models.ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
 		return fmt.Errorf("session_target is invalid: %w", err)
 	}
-	if step.SessionTarget == nil || step.SessionTarget.Kind == models.WorkflowSessionTargetInitial {
+	if step.SessionTarget == nil {
 		return nil
 	}
 	if step.AgentProfileID != "" {
 		return fmt.Errorf("session_target cannot be combined with agent_profile_id")
 	}
+	if step.SessionTarget.Kind == models.WorkflowSessionTargetInitial {
+		return nil
+	}
 	if step.ID != "" && step.SessionTarget.StepID == step.ID {
 		return fmt.Errorf("session_target cannot reference the same step")
+	}
+	if err := c.svc.AuthorizeStep(ctx, step.SessionTarget.StepID); err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
 	}
 	target, err := c.svc.GetStep(ctx, step.SessionTarget.StepID)
 	if err != nil {

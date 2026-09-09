@@ -97,9 +97,11 @@ consumed tombstone remains durable.
 
 1. Obtain the source step and destination step for the transition.
 2. Resolve the destination step's effective profile.
-3. For a profile-only step, if the profile is empty or matches the active
-   session, preserve the current session. For an explicit target, use the
-   explicit routing flow below, including same-profile fresh sessions.
+3. For a profile-only step, if the normalized start policy is `reuse` and the
+   profile is empty or matches the active session, preserve the current
+   session. If the policy is `new`, create a fresh conversation even when the
+   profile matches the active session. For an explicit target, use the explicit
+   routing flow below, including same-profile fresh sessions.
 4. Normalize the destination start setting and the source end setting.
 5. If the start setting is `reuse`, select the newest eligible nonterminal
    matching session. Exclude the source session.

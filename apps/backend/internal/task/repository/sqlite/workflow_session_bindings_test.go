@@ -64,6 +64,51 @@ func TestWorkflowSessionBindingRejectsStaleOperationAndRetainsProfileAfterSessio
 	require.Equal(t, session.AgentProfileID, binding.AgentProfileID)
 }
 
+func TestWorkflowSessionBindingRejectsEqualTimestampReplacement(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID     = "task-workflow-binding-equal"
+		workflowID = "workflow-workflow-binding-equal"
+		targetKey  = "step:review"
+	)
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Equal timestamp"}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-first", TaskID: taskID, AgentProfileID: "profile-review",
+		State: models.TaskSessionStateWaitingForInput,
+	}))
+	stamp := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+
+	accepted, err := repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID:         taskID,
+		TargetKey:      targetKey,
+		WorkflowID:     workflowID,
+		AgentProfileID: "profile-review",
+		SessionID:      "session-first",
+		OperationID:    "operation-first",
+		UpdatedAt:      stamp,
+	})
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	accepted, err = repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID:         taskID,
+		TargetKey:      targetKey,
+		WorkflowID:     workflowID,
+		AgentProfileID: "profile-review",
+		SessionID:      "session-equal",
+		OperationID:    "operation-equal",
+		UpdatedAt:      stamp,
+	})
+	require.NoError(t, err)
+	require.False(t, accepted)
+
+	binding, err := repo.GetWorkflowSessionBinding(ctx, taskID, targetKey)
+	require.NoError(t, err)
+	require.Equal(t, "session-first", binding.SessionID)
+	require.Equal(t, "operation-first", binding.OperationID)
+}
+
 func TestWorkflowSessionBindingsCascadeWithTask(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

@@ -1072,27 +1072,26 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 	ctx context.Context,
 	taskID string,
 	workflowSessionConfigStepID string,
-	callerProfileID string,
-) (*models.TaskSession, string, *models.WorkflowSessionRoute, bool, error) {
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
 	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
-		return nil, "", nil, false, nil
+		return nil, "", nil, nil
 	}
 
 	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
 	if err != nil {
-		return nil, "", nil, false, fmt.Errorf("load workflow step for session target: %w", err)
+		return nil, "", nil, fmt.Errorf("load workflow step for session target: %w", err)
 	}
 	if candidateStep == nil || candidateStep.SessionTarget == nil {
-		return nil, "", nil, false, nil
+		return nil, "", nil, nil
 	}
 
 	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
 	if err != nil {
-		return nil, "", nil, false, err
+		return nil, "", nil, err
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
-			return nil, "", nil, false, err
+			return nil, "", nil, err
 		}
 	}
 
@@ -1105,8 +1104,16 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 		AgentProfileID:    profileID,
 		Phase:             workflowSessionRoutePrepared,
 	}
-	s.persistWorkflowSessionRoute(ctx, taskID, *route)
-	return selectedSession, profileID, route, profileID != callerProfileID, nil
+	if recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, route.OperationID, candidateStep, profileID); err != nil {
+		return nil, "", nil, err
+	} else if recordedSession != nil {
+		selectedSession = recordedSession
+		route = recordedRoute
+	}
+	if err := s.persistWorkflowSessionRoute(ctx, taskID, *route); err != nil {
+		return nil, "", nil, err
+	}
+	return selectedSession, profileID, route, nil
 }
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
@@ -1255,17 +1262,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	var explicitStartRoute *models.WorkflowSessionRoute
 	var selectedExplicitSession *models.TaskSession
 	var explicitProfileID string
-	var explicitRouteApplied bool
-	selectedExplicitSession, explicitProfileID, explicitStartRoute, explicitRouteApplied, err = s.prepareExplicitWorkflowStartRoute(
+	selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
 		ctx,
 		task.ID,
 		workflowSessionConfigStepID,
-		callerProfileID,
 	)
 	if err != nil {
 		return nil, err
 	}
-	if explicitRouteApplied {
+	if explicitStartRoute != nil && explicitProfileID != "" {
 		agentProfileID = explicitProfileID
 		overrideApplied = agentProfileID != callerProfileID
 	}
@@ -1305,7 +1310,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if explicitStartRoute != nil {
 		explicitStartRoute.DestinationID = sessionID
 		explicitStartRoute.Phase = workflowSessionRouteCommitted
-		s.persistWorkflowSessionRoute(ctx, task.ID, *explicitStartRoute)
+		if err := s.persistWorkflowSessionRoute(ctx, task.ID, *explicitStartRoute); err != nil {
+			return nil, err
+		}
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the

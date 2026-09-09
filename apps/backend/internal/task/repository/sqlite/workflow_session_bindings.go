@@ -92,7 +92,7 @@ func (r *Repository) UpsertWorkflowSessionBinding(
 			session_id = EXCLUDED.session_id,
 			operation_id = EXCLUDED.operation_id,
 			updated_at = EXCLUDED.updated_at
-		WHERE task_workflow_session_bindings.updated_at <= EXCLUDED.updated_at
+		WHERE task_workflow_session_bindings.updated_at < EXCLUDED.updated_at
 	`
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		binding.TaskID,
@@ -108,20 +108,6 @@ func (r *Repository) UpsertWorkflowSessionBinding(
 	}
 	rows, err := result.RowsAffected()
 	return rows > 0, err
-}
-
-// DeleteWorkflowSessionBindingsByWorkflow removes source-step bindings when
-// their workflow is deleted. Task deletion also removes them through the task
-// foreign key, but workflow deletion archives tasks before removing the
-// workflow row and therefore needs this explicit cleanup.
-func (r *Repository) DeleteWorkflowSessionBindingsByWorkflow(ctx context.Context, workflowID string) error {
-	if workflowID == "" {
-		return nil
-	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
-	`), workflowID)
-	return err
 }
 
 func nullableBindingSessionID(sessionID string) interface{} {

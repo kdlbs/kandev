@@ -156,6 +156,8 @@ func TestWorkflowStepTools_SchemaExposesSessionTarget(t *testing.T) {
 	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
 	assert.Contains(t, createProps, "session_target")
 	assert.Contains(t, updateProps, "session_target")
+	assert.Equal(t, []interface{}{"object", "null"}, createProps["session_target"].(map[string]interface{})["type"])
+	assert.Equal(t, []interface{}{"object", "null"}, updateProps["session_target"].(map[string]interface{})["type"])
 }
 
 func TestCreateWorkflowHandler_Success(t *testing.T) {
@@ -450,6 +452,30 @@ func TestUpdateWorkflowStepHandler_ForwardsCancelTriggersTurnComplete(t *testing
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, false, payload["cancel_triggers_turn_complete"])
+}
+
+func TestWorkflowStepHandlersForwardExplicitNullSessionTarget(t *testing.T) {
+	for _, toolName := range []string{"create_workflow_step_kandev", "update_workflow_step_kandev"} {
+		t.Run(toolName, func(t *testing.T) {
+			backend := &testBackend{response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}}}
+			s := newTestServer(t, backend)
+			args := map[string]interface{}{"session_target": nil}
+			if toolName == "create_workflow_step_kandev" {
+				args["workflow_id"] = "workflow-1"
+				args["name"] = "Review"
+			} else {
+				args["step_id"] = "step-1"
+			}
+
+			result := callTool(t, s, toolName, args)
+			require.False(t, result.IsError)
+			payload, ok := backend.lastPayload.(map[string]interface{})
+			require.True(t, ok)
+			value, present := payload["session_target"]
+			require.True(t, present)
+			require.Nil(t, value)
+		})
+	}
 }
 
 func TestUpdateWorkflowStepHandler_MissingStepID(t *testing.T) {

@@ -403,6 +403,9 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 		}
 		steps = append(steps, step)
 	}
+	if err := validateWorkflowSessionTargets(steps); err != nil {
+		return fmt.Errorf("validate template workflow session targets: %w", err)
+	}
 
 	for _, step := range steps {
 		if err := s.repo.CreateStep(ctx, step); err != nil {
@@ -677,7 +680,7 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 		return nil, fmt.Errorf("failed to list steps: %w", err)
 	}
 	stepMap := map[string][]*models.WorkflowStep{wf.ID: steps}
-	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile), nil
+	return models.BuildWorkflowExportWithError([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile)
 }
 
 // ExportWorkflows exports workflows for a workspace. When workflowIDs is nil,
@@ -711,7 +714,7 @@ func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string, workf
 		}
 		stepMap[wf.ID] = steps
 	}
-	return models.BuildWorkflowExport(workflows, stepMap, s.resolveProfile), nil
+	return models.BuildWorkflowExportWithError(workflows, stepMap, s.resolveProfile)
 }
 
 // filterWorkflowsByID returns the subset of workflows whose ID is in ids,

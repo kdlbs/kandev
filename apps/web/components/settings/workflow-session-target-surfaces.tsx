@@ -338,15 +338,13 @@ function LifecycleOptionList({
 
 function LifecycleNavigation({
   step,
-  readOnly,
   onOpen,
-}: Pick<WorkflowSessionSelectorSurfaceProps, "step" | "readOnly"> & { onOpen: () => void }) {
+}: Pick<WorkflowSessionSelectorSurfaceProps, "step"> & { onOpen: () => void }) {
   const { t } = useTranslation();
   return (
     <button
       type="button"
       className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-      disabled={readOnly}
       data-testid={step.id + "-profile-session-lifecycle-select"}
       onClick={onOpen}
     >
@@ -410,7 +408,7 @@ export function SelectorSurface({
   return (
     <div className="min-w-0">
       <div className="border-t border-border p-2">
-        <LifecycleNavigation step={step} readOnly={readOnly} onOpen={() => setView("session")} />
+        <LifecycleNavigation step={step} onOpen={() => setView("session")} />
       </div>
       <div className="max-h-[min(70vh,32rem,calc(var(--radix-popover-content-available-height)-4rem))] overflow-y-auto overscroll-contain">
         <ProfileOptionList
@@ -484,7 +482,7 @@ export function MobileSelectorSurface({
       contentTestId={step.id + "-profile-picker-content"}
       fixedContent={
         <div className="border-b border-border p-2">
-          <LifecycleNavigation step={step} readOnly={readOnly} onOpen={() => setView("session")} />
+          <LifecycleNavigation step={step} onOpen={() => setView("session")} />
         </div>
       }
     >

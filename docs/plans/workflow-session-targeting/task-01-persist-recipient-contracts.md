@@ -119,3 +119,7 @@ Implemented the initial target contract across models, REST, MCP, SQL schema,
 workflow templates, export/import, duplication, and frontend types. Added the
 initial metadata snapshot and bounded route record used by runtime routing.
 Workflow, MCP, repository, SQL guard, and store-conformance checks passed.
+The PostgreSQL-specific repository checks were not run because
+`KANDEV_TEST_POSTGRES_DSN` was unavailable. The store-conformance run covered
+the available SQLite adapter, and the requested PostgreSQL boot test had no
+matching test in this checkout.

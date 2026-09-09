@@ -168,6 +168,11 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 	if err != nil {
 		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
 	}
+	if s.SessionTarget != nil {
+		if err := models.ValidateWorkflowSessionTarget(s.SessionTarget); err != nil {
+			return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
+		}
+	}
 	return models.StepDefinition{
 		ID:                         s.ID,
 		Name:                       s.Name,

@@ -7,6 +7,7 @@ const breakpoint = { isMobile: false };
 const ARIA_PRESSED = "aria-pressed";
 const ARIA_TRUE = "true";
 const START_NEW_TEST_ID = "step-1-profile-session-start-new";
+const LIFECYCLE_TEST_ID = "step-1-profile-session-lifecycle-select";
 const SOURCE_TARGET_TEST_ID = "step-2-session-target-step-step-1";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -94,7 +95,7 @@ describe("WorkflowStepAgentProfileSelector", () => {
     const { onUpdate, trigger } = renderSelector();
 
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
     expect(screen.getByText("When this step starts:")).toBeTruthy();
     expect(screen.getByText("When this step ends:")).toBeTruthy();
     expect(
@@ -120,25 +121,12 @@ describe("WorkflowStepAgentProfileSelector", () => {
 
     fireEvent.click(trigger);
     expect(screen.getByRole("heading", { name: "Agent Profile" })).toBeTruthy();
-    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
     expect(screen.getByRole("heading", { name: "Session lifecycle" })).toBeTruthy();
     expect(screen.getByTestId(START_NEW_TEST_ID).getAttribute(ARIA_PRESSED)).toBe(ARIA_TRUE);
     expect(screen.getByTestId("step-1-profile-session-end-park").getAttribute(ARIA_PRESSED)).toBe(
       ARIA_TRUE,
     );
-  });
-
-  it("keeps the current profile and policy visible while read-only", () => {
-    const { trigger } = renderSelector(
-      { profile_session_start_policy: "new", profile_session_end_policy: "park" },
-      true,
-    );
-
-    expect((trigger as HTMLButtonElement).disabled).toBe(true);
-    expect(trigger.textContent).toContain("Codex • Fast");
-    expect(trigger.textContent).toContain("New on start");
-    expect(trigger.textContent).toContain("Park on end");
-    expect(screen.getByTestId("agent-logo-codex")).toBeTruthy();
   });
 
   it("keeps lifecycle editing available when conditional session settings are configured", () => {
@@ -153,10 +141,54 @@ describe("WorkflowStepAgentProfileSelector", () => {
       screen.getByTestId("step-1-profile-option-profile-b").getAttribute("data-disabled"),
     ).toBe("true");
 
-    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
     expect((screen.getByTestId(START_NEW_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId(START_NEW_TEST_ID));
     expect(onUpdate).toHaveBeenCalledWith({ profile_session_start_policy: "new" });
+  });
+});
+
+describe("read-only workflow selector", () => {
+  it("keeps the current profile and policy visible while read-only", () => {
+    const { trigger } = renderSelector(
+      { profile_session_start_policy: "new", profile_session_end_policy: "park" },
+      true,
+    );
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
+    expect(trigger.textContent).toContain("Codex • Fast");
+    expect(trigger.textContent).toContain("New on start");
+    expect(trigger.textContent).toContain("Park on end");
+    expect(screen.getByTestId("agent-logo-codex")).toBeTruthy();
+  });
+
+  it("allows inspection while disabling selector mutations", () => {
+    const { onUpdate, trigger } = renderSelector(undefined, true);
+    fireEvent.click(trigger);
+    expect(
+      screen.getByTestId("step-1-profile-option-profile-b").getAttribute("data-disabled"),
+    ).toBe("true");
+    fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
+    expect((screen.getByTestId(START_NEW_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId(START_NEW_TEST_ID));
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps repair inspection available while disabling read-only repairs", () => {
+    const source = { ...step, position: 2 } as WorkflowStep;
+    const destination = {
+      ...step,
+      id: "step-2",
+      position: 1,
+      agent_profile_id: "",
+      session_target: { kind: "step", step_id: "step-1" },
+    } as WorkflowStep;
+    const { trigger } = renderSelector(destination, true, [source, destination]);
+    expect(
+      (screen.getByTestId("workflow-session-target-clear") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByTestId("workflow-session-target-choose-another"));
+    expect(screen.getByPlaceholderText("Search agent profiles...")).toBeTruthy();
+    expect(trigger).toBeTruthy();
   });
 });
 

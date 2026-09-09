@@ -88,12 +88,14 @@ function sessionTargetIssueLabel(
 function SessionTargetRepair({
   issue,
   canRestoreSource,
+  readOnly,
   onChooseAnother,
   onClear,
   onRestoreSource,
 }: {
   issue: WorkflowSessionTargetIssue;
   canRestoreSource: boolean;
+  readOnly: boolean;
   onChooseAnother: () => void;
   onClear: () => void;
   onRestoreSource?: () => void;
@@ -127,6 +129,7 @@ function SessionTargetRepair({
           variant="ghost"
           size="sm"
           className="min-h-11 cursor-pointer"
+          disabled={readOnly}
           onClick={onClear}
           data-testid="workflow-session-target-clear"
         >
@@ -138,6 +141,7 @@ function SessionTargetRepair({
             variant="ghost"
             size="sm"
             className="min-h-11 cursor-pointer"
+            disabled={readOnly}
             onClick={onRestoreSource}
             data-testid="workflow-session-target-restore-source"
           >
@@ -320,7 +324,7 @@ function SelectorChoicePopup({
       selectionLabel={selectionLabel}
       summary={summary}
       open={open}
-      disabled={readOnly}
+      disabled={false}
       dirty={dirty}
       ref={triggerRef}
       onOpen={isMobile ? () => handleOpenChange(true) : undefined}
@@ -450,6 +454,7 @@ function SelectorContent({
         <SessionTargetRepair
           issue={targetIssue}
           canRestoreSource={Boolean(targetStep)}
+          readOnly={readOnly}
           onChooseAnother={() => handleOpenChange(true)}
           onClear={() => onUpdate({ session_target: null, agent_profile_id: "" })}
           onRestoreSource={onRestoreSource}
@@ -476,7 +481,8 @@ export function WorkflowStepAgentProfileSelector({
   readOnly,
 }: WorkflowStepAgentProfileSelectorProps) {
   const { isMobile } = useResponsiveBreakpoint();
-  const profiles = useHealthyAgentProfiles(step.agent_profile_id);
+  const targetStep = targetStepFor(step, steps);
+  const profiles = useHealthyAgentProfiles(step.agent_profile_id || targetStep?.agent_profile_id);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SelectorView>("profiles");
   const triggerRef = useRef<HTMLButtonElement>(null);

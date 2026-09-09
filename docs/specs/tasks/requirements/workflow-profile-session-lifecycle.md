@@ -62,9 +62,12 @@ starts and ends, so repeated stages use the intended context.
   nonterminal. The conversation shall remain available for reuse or manual
   follow-up.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.5:** For existing profile-only steps,
-  consecutive steps with the active session's profile shall keep that session.
-  Explicit initial-session and earlier-step targets follow requirement 002,
-  including fresh conversations with the same profile.
+  consecutive steps with the active session's profile shall keep that session
+  when the destination uses the default or **Reuse an available session** start
+  behavior. A profile-only destination with **Start a new session** shall
+  always create a fresh conversation, even when its profile matches the active
+  session. Explicit initial-session and earlier-step targets follow requirement
+  002, including fresh conversations with the same profile.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.6:** When Kandev parks a session
   during a profile switch, its completion or stopped event shall not repeat
   transition actions for the destination step.

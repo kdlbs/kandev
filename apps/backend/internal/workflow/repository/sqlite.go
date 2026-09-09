@@ -243,6 +243,10 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if err != nil {
 				return fmt.Errorf("failed to marshal events: %w", err)
 			}
+			sessionTargetJSON, err := marshalSessionTarget(models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap))
+			if err != nil {
+				return fmt.Errorf("failed to marshal session target: %w", err)
+			}
 
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
@@ -255,7 +259,7 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), marshalSessionTarget(models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap)), dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), sessionTargetJSON, dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
 			); err != nil {
 				return err
 			}
@@ -619,7 +623,10 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 	step.UpdatedAt = now
 	step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
 	step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
-	sessionTargetJSON := marshalSessionTarget(step.SessionTarget)
+	sessionTargetJSON, err := marshalSessionTarget(step.SessionTarget)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal session target: %w", err)
+	}
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
@@ -669,15 +676,15 @@ func normalizeStageType(s models.StageType) string {
 	return string(models.StageTypeCustom)
 }
 
-func marshalSessionTarget(target *models.WorkflowSessionTarget) interface{} {
+func marshalSessionTarget(target *models.WorkflowSessionTarget) (interface{}, error) {
 	if target == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(target)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("marshal workflow session target: %w", err)
 	}
-	return string(data)
+	return string(data), nil
 }
 
 // scanStep scans a single workflow step row including JSON events parsing.
@@ -768,7 +775,10 @@ func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *
 	step.UpdatedAt = time.Now().UTC()
 	step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
 	step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
-	sessionTargetJSON := marshalSessionTarget(step.SessionTarget)
+	sessionTargetJSON, err := marshalSessionTarget(step.SessionTarget)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal session target: %w", err)
+	}
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {

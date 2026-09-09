@@ -302,28 +302,24 @@ function restoreWorkflowSourceStep({
   const savedSource = savedStepsById.get(sourceStepId);
   if (!savedSource || !steps.some((step) => step.id === sourceStepId)) return;
 
-  const savedOrder = new Map(
-    [...savedSteps]
-      .sort((left, right) => left.position - right.position)
-      .map((step, index) => [step.id, index]),
+  const restored = steps.map((step) =>
+    step.id === sourceStepId
+      ? {
+          ...step,
+          agent_profile_id: savedSource.agent_profile_id,
+          session_target: savedSource.session_target ?? null,
+        }
+      : step,
   );
-  const restored = [...steps]
-    .map((step) =>
-      step.id === sourceStepId
-        ? {
-            ...step,
-            agent_profile_id: savedSource.agent_profile_id,
-            session_target: savedSource.session_target ?? null,
-          }
-        : step,
-    )
-    .sort(
-      (left, right) =>
-        (savedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
-        (savedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
-    )
-    .map((step, position) => ({ ...step, position }));
-  onReorderSteps(restored);
+  const currentIndex = restored.findIndex((step) => step.id === sourceStepId);
+  const savedSourceIndex = [...savedSteps]
+    .sort((left, right) => left.position - right.position)
+    .findIndex((step) => step.id === sourceStepId);
+  if (currentIndex === -1 || savedSourceIndex === -1) return;
+  const [source] = restored.splice(currentIndex, 1);
+  restored.splice(Math.min(savedSourceIndex, restored.length), 0, source);
+  const positioned = restored.map((step, position) => ({ ...step, position }));
+  onReorderSteps(positioned);
 }
 
 function removeWorkflowStep(
