@@ -115,6 +115,28 @@ func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
 	}
 }
 
+func TestMapKanbanTaskStateIncludesRunnerMutability(t *testing.T) {
+	editable := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-eligible",
+		WorkflowStepID:         "step-review",
+		RunnerEditable:         true,
+		RunnerIneligibleReason: "eligible",
+	})
+	if editable["runnerEditable"] != true || editable["runnerIneligibleReason"] != "eligible" {
+		t.Fatalf("kanban task runner fields = %#v, want editable/eligible", editable)
+	}
+
+	ineligible := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-ineligible",
+		WorkflowStepID:         "step-review",
+		RunnerEditable:         false,
+		RunnerIneligibleReason: "session_exists",
+	})
+	if ineligible["runnerEditable"] != false || ineligible["runnerIneligibleReason"] != "session_exists" {
+		t.Fatalf("kanban task runner fields = %#v, want non-editable/session_exists", ineligible)
+	}
+}
+
 func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
