@@ -6145,7 +6145,11 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		if !ok {
 			return false
 		}
-		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
+		// A queued prompt has already claimed RUNNING before its turn-start
+		// hook. Preserve that claim when profile preparation keeps the session.
+		if effectiveSession.ID != session.ID || session.State != models.TaskSessionStateRunning {
+			s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
+		}
 		return true
 	}
 
