@@ -30,7 +30,7 @@ The count includes application source, test source, and web translation catalogs
 - GitHub workflows and repository scripts.
 - Generated files and dependency files.
 - Linter code, linter settings, and other tool settings.
-- Assets and files that do not contain application source or translation text.
+- A file with a known image, font, or binary asset extension, or a file under one of these asset directories: `apps/backend/internal/notifications/providers/assets/`, `apps/desktop/src-tauri/icons/`, `apps/web/lib/assets/`, `apps/web/public/`, and `apps/web/src/assets/`.
 
 The size groups use these fixed limits:
 

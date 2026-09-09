@@ -46,7 +46,7 @@ on:
 
 The concurrency group contains the pull request number. The group uses `cancel-in-progress: false`.
 
-The workflow serializes events for one pull request. A later event recalculates the current file list after an earlier event completes.
+The workflow serializes surviving runs for one pull request. `cancel-in-progress: false` keeps an active run, but GitHub can replace a pending run with a newer event and does not guarantee dispatch order. Each surviving run reads the current file list and label state instead of relying on event snapshots.
 
 ## File classification
 
@@ -57,11 +57,13 @@ A counted file must start with `apps/`. It must also meet one of these rules:
 - Its extension is `c`, `cc`, `cpp`, `css`, `go`, `graphql`, `gql`, `h`, `html`, `js`, `jsx`, `mjs`, `mts`, `proto`, `rs`, `scss`, `sql`, `ts`, or `tsx`.
 - Its path matches `apps/web/src/locales/<locale>/<namespace>.json`.
 
-The filter rejects a path that contains a `scripts`, `generated`, or `node_modules` directory. The filter also rejects known linter implementation directories.
+The filter rejects these repository tooling directories: `apps/backend/internal/agentctl/server/api/scripts/`, `apps/backend/internal/webapp/embedded/generated/`, `apps/backend/scripts/`, `apps/web/e2e/scripts/`, `apps/web/generated/`, and `apps/web/scripts/`. It rejects any path containing a `node_modules` directory.
 
 The known linter directories are `apps/backend/cmd/sqlguard/`, `apps/backend/internal/db/sqlguard/`, and `apps/web/eslint-rules/`.
 
-The filter rejects tool files whose base name starts with a known tool name. The names are `eslint`, `prettier`, `stylelint`, `vitest`, `vite`, `playwright`, `postcss`, and `tailwind`.
+The filter rejects these exact tool setting base names: `commitlint.config.mjs`, `eslint.config.mjs`, `eslint.e2e-sleeps.config.mjs`, `eslint.i18n.config.mjs`, `eslint.i18n.options.mjs`, `playwright.config.ts`, `postcss.config.mjs`, `prettier.config.mjs`, `stylelint.config.mjs`, `tailwind.config.ts`, `vite.config.ts`, `vitest.config.ts`, `vitest.monaco-editor.ts`, and `vitest.setup.ts`. A source or test file with a similar prefix, such as `vite-preload-recovery.ts`, remains counted.
+
+The filter excludes image, font, and binary files with known asset extensions and files under these asset directories: `apps/backend/internal/notifications/providers/assets/`, `apps/desktop/src-tauri/icons/`, `apps/web/lib/assets/`, `apps/web/public/`, and `apps/web/src/assets/`.
 
 The explicit application root and extension list exclude these files without separate path rules:
 
@@ -98,7 +100,7 @@ The workflow creates a missing definition before it changes pull request labels.
 2. The workflow reads all available changed-file pages for the current pull request.
 3. The workflow stops before mutations if the changed-file result can be incomplete.
 4. The workflow filters the paths and calculates the target size label.
-5. The workflow reads the three repository label definitions and creates missing definitions.
+5. The workflow reads the three repository label definitions and creates missing definitions. If another run created a label after the read, a 422 `already_exists` response is re-read as success; other errors fail the job.
 6. The workflow adds the target label if the pull request does not have it.
 7. The workflow removes the other size labels if the pull request has them.
 8. The workflow writes the counted-file total and final label to the step summary.
@@ -111,11 +113,11 @@ The GitHub files endpoint returns at most 3,000 files. A result with 3,000 files
 
 A changed-file API error also fails before a label mutation. The current size labels remain unchanged in both cases.
 
-A label-definition or label-mutation error fails the job. A retry reads current GitHub state and converges on one target label.
+A label-definition or label-mutation error fails the job. A concurrent label-definition creation that returns 422 with `already_exists` is re-read and does not fail the run. A retry reads current GitHub state and converges on one target label.
 
 The workflow adds the target before it removes stale labels. A partial mutation can temporarily leave two size labels, but it does not leave the pull request unlabeled.
 
-Serialized event runs preserve the event order. Each run reads current file and label state instead of using the event's label snapshot.
+Surviving serialized runs do not promise event order. Each run reads current file and label state, so a later completed run can converge on the current pull request diff even when GitHub replaces a pending run or dispatches events out of order.
 
 ## Security
 

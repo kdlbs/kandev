@@ -42,35 +42,81 @@ jobs:
               }
 
               const pathSegments = filename.split('/');
-              if (
-                pathSegments.includes('scripts') ||
-                pathSegments.includes('generated') ||
-                pathSegments.includes('node_modules')
-              ) {
+              if (pathSegments.includes('node_modules')) {
                 return false;
               }
 
               const excludedDirectories = [
+                'apps/backend/internal/agentctl/server/api/scripts/',
+                'apps/backend/internal/webapp/embedded/generated/',
+                'apps/backend/scripts/',
                 'apps/backend/cmd/sqlguard/',
                 'apps/backend/internal/db/sqlguard/',
+                'apps/web/e2e/scripts/',
+                'apps/web/generated/',
                 'apps/web/eslint-rules/',
+                'apps/web/scripts/',
               ];
               if (excludedDirectories.some(prefix => filename.startsWith(prefix))) {
                 return false;
               }
 
-              const basename = filename.split('/').pop() ?? '';
-              const toolFilePrefixes = [
-                'eslint',
-                'prettier',
-                'stylelint',
-                'vitest',
-                'vite',
-                'playwright',
-                'postcss',
-                'tailwind',
+              const excludedAssetDirectories = [
+                'apps/backend/internal/notifications/providers/assets/',
+                'apps/desktop/src-tauri/icons/',
+                'apps/web/lib/assets/',
+                'apps/web/public/',
+                'apps/web/src/assets/',
               ];
-              if (toolFilePrefixes.some(prefix => basename.startsWith(prefix))) {
+              if (excludedAssetDirectories.some(prefix => filename.startsWith(prefix))) {
+                return false;
+              }
+
+              const basename = filename.split('/').pop() ?? '';
+              const extension = basename.includes('.') ? basename.split('.').pop() : '';
+              const excludedAssetExtensions = new Set([
+                'avif',
+                'bmp',
+                'bin',
+                'dmg',
+                'dll',
+                'gif',
+                'icns',
+                'ico',
+                'jpeg',
+                'jpg',
+                'otf',
+                'pdf',
+                'png',
+                'so',
+                'svg',
+                'ttf',
+                'wasm',
+                'webp',
+                'woff',
+                'woff2',
+              ]);
+              if (excludedAssetExtensions.has(extension)) {
+                return false;
+              }
+
+              const toolSettingNames = new Set([
+                'commitlint.config.mjs',
+                'eslint.config.mjs',
+                'eslint.e2e-sleeps.config.mjs',
+                'eslint.i18n.config.mjs',
+                'eslint.i18n.options.mjs',
+                'playwright.config.ts',
+                'postcss.config.mjs',
+                'prettier.config.mjs',
+                'stylelint.config.mjs',
+                'tailwind.config.ts',
+                'vite.config.ts',
+                'vitest.config.ts',
+                'vitest.monaco-editor.ts',
+                'vitest.setup.ts',
+              ]);
+              if (toolSettingNames.has(basename)) {
                 return false;
               }
 
@@ -99,7 +145,6 @@ jobs:
                 'ts',
                 'tsx',
               ]);
-              const extension = basename.includes('.') ? basename.split('.').pop() : '';
               return countedExtensions.has(extension);
             }
 
@@ -118,6 +163,19 @@ jobs:
               return currentLabels.filter(
                 label => sizeLabels.has(label) && label !== targetLabel,
               );
+            }
+
+            function isAlreadyExistingLabelError(error) {
+              const status = error?.status ?? error?.response?.status;
+              return (
+                status === 422 &&
+                Array.isArray(error?.response?.data?.errors) &&
+                error.response.data.errors.some(detail => detail?.code === 'already_exists')
+              );
+            }
+
+            function summaryTableRow(countedFileCount, targetLabel) {
+              return [String(countedFileCount), targetLabel];
             }
 
             const pullNumber = context.payload.pull_request?.number;
@@ -157,13 +215,24 @@ jobs:
                 if (status !== 404) {
                   throw error;
                 }
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                  color: definition.color,
-                  description: definition.description,
-                });
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color: definition.color,
+                    description: definition.description,
+                  });
+                } catch (createError) {
+                  if (!isAlreadyExistingLabelError(createError)) {
+                    throw createError;
+                  }
+                  await github.rest.issues.getLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                  });
+                }
               }
             }
 
@@ -204,6 +273,6 @@ jobs:
                 { data: 'Counted application files', header: true },
                 { data: 'Size label', header: true },
               ],
-              [[String(countedFileCount), targetLabel]],
+              [summaryTableRow(countedFileCount, targetLabel)],
             ]);
             await core.summary.write();

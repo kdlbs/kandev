@@ -74,6 +74,15 @@ A post-merge pull request event supplies live GitHub evidence. This observation 
   the intentional `pull_request_target` audit was documented inline.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check -- .github` passed.
+- Review remediation narrowed script and tool-setting exclusions to explicit
+  paths, added asset exclusions, fixed the step-summary row, and handled the
+  duplicate-label creation race.
+- Review remediation updated the concurrency and asset contracts across the
+  system design, requirements, and ADR.
+- Fixup verification: `python3
+  .github/scripts/pr-size-label-workflow-contract_test.py` passed, 9 tests;
+  action-pinning tests and linter passed; specification lint passed; targeted
+  `zizmor` passed; and `git diff --check` passed.
 
 ## Risks
 

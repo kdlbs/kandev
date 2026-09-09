@@ -143,7 +143,12 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
         counted = [
             "apps/backend/internal/workflow/workflow.go",
             "apps/backend/internal/workflow/workflow_test.go",
+            "apps/backend/internal/common/scripts/scripts.go",
             "apps/web/src/components/task/task.tsx",
+            "apps/web/src/vite-preload-recovery.ts",
+            "apps/web/src/vite-preload-recovery.test.ts",
+            "apps/web/vitest-environment.test.tsx",
+            "apps/web/vitest-monaco-editor.test.ts",
             "apps/web/src/locales/en/common.json",
             "apps/web/src/locales/zh-cn/common.json",
             "apps/desktop/src-tauri/src/main.rs",
@@ -153,17 +158,28 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
             ".github/workflows/pr-size-label.yml",
             "scripts/pr-size-label.py",
             "apps/web/src/assets/icon.svg",
+            "apps/web/src/assets/compiled.ts",
+            "apps/web/lib/assets/icons.ts",
+            "apps/web/public/style.css",
+            "apps/backend/internal/notifications/providers/assets/icon.ts",
+            "apps/desktop/src-tauri/icons/generated.ts",
             "apps/web/src/locales/en/common.yaml",
             "apps/web/node_modules/example/index.ts",
-            "apps/backend/internal/generated/model.go",
-            "apps/backend/internal/scripts/check.go",
+            "apps/backend/internal/webapp/embedded/generated/model.go",
+            "apps/web/generated/model.ts",
+            "apps/backend/scripts/check.go",
+            "apps/backend/internal/agentctl/server/api/scripts/inspector.js",
+            "apps/web/e2e/scripts/check.ts",
+            "apps/web/scripts/check.ts",
             "apps/backend/cmd/sqlguard/check.go",
             "apps/backend/internal/db/sqlguard/check.go",
             "apps/web/eslint-rules/no-literal.ts",
-            "apps/web/src/eslint.config.ts",
-            "apps/web/src/vite.config.ts",
-            "apps/web/src/playwright.setup.ts",
-            "apps/web/src/tailwind.css",
+            "apps/commitlint.config.mjs",
+            "apps/prettier.config.mjs",
+            "apps/web/eslint.config.mjs",
+            "apps/web/e2e/playwright.config.ts",
+            "apps/web/postcss.config.mjs",
+            "apps/web/tailwind.config.ts",
         ]
 
         self.assertEqual(
@@ -180,9 +196,24 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
         self.assertIn("typeof filename !== 'string'", self.workflow)
         self.assertIn("filename.startsWith('apps/')", self.workflow)
         self.assertIn("filename.split('/')", self.workflow)
-        self.assertIn("scripts", self.workflow)
-        self.assertIn("generated", self.workflow)
-        self.assertIn("node_modules", self.workflow)
+        self.assertIn("pathSegments.includes('node_modules')", self.workflow)
+        for directory in (
+            "apps/backend/scripts/",
+            "apps/backend/internal/agentctl/server/api/scripts/",
+            "apps/backend/internal/webapp/embedded/generated/",
+            "apps/web/e2e/scripts/",
+            "apps/web/generated/",
+            "apps/web/scripts/",
+        ):
+            self.assertIn(directory, self.workflow)
+        for directory in (
+            "apps/backend/internal/notifications/providers/assets/",
+            "apps/desktop/src-tauri/icons/",
+            "apps/web/lib/assets/",
+            "apps/web/public/",
+            "apps/web/src/assets/",
+        ):
+            self.assertIn(directory, self.workflow)
         for extension in (
             "c",
             "cc",
@@ -236,6 +267,43 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
         add_index = self.workflow.index("github.rest.issues.addLabels")
         remove_index = self.workflow.index("github.rest.issues.removeLabel")
         self.assertLess(add_index, remove_index)
+
+        already_exists = extract_function(self.workflow, "isAlreadyExistingLabelError")
+        self.assertTrue(
+            run_javascript(
+                already_exists,
+                "isAlreadyExistingLabelError",
+                [
+                    {
+                        "status": 422,
+                        "response": {
+                            "data": {"errors": [{"code": "already_exists"}]}
+                        },
+                    }
+                ],
+            )
+        )
+        self.assertFalse(
+            run_javascript(
+                already_exists,
+                "isAlreadyExistingLabelError",
+                [{"status": 422, "response": {"data": {"errors": [{"code": "invalid"}]}}}],
+            )
+        )
+        create_index = self.workflow.index("github.rest.issues.createLabel")
+        retry_read_index = self.workflow.index(
+            "await github.rest.issues.getLabel", create_index
+        )
+        self.assertLess(create_index, retry_read_index)
+
+    # @covers AC-CI-PR-SIZE-001.5
+    def test_summary_row_contains_two_string_cells(self) -> None:
+        summary_row = extract_function(self.workflow, "summaryTableRow")
+        self.assertEqual(
+            run_javascript(summary_row, "summaryTableRow", [4, "small"]),
+            ["4", "small"],
+        )
+        self.assertIn("summaryTableRow(countedFileCount, targetLabel)", self.workflow)
 
     # @covers AC-CI-PR-SIZE-001.7
     def test_incomplete_file_results_fail_before_label_mutations(self) -> None:

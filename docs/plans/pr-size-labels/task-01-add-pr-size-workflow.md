@@ -92,7 +92,7 @@ None.
 - Added the explicit application-file classifier, fixed size boundaries, 3,000
   file completeness guard, repository label creation, and convergent label
   mutations that preserve unrelated labels.
-- Added 8 workflow contract tests covering the classifier, examples, API
+- Added 9 workflow contract tests covering the classifier, examples, API
   limits, label lifecycle, concurrency, security, and lint registration.
 - RED failed because the workflow was missing; GREEN passed after the workflow
   and lint registration were added.
@@ -102,3 +102,9 @@ None.
 - `zizmor .github/workflows/pr-size-label.yml` passed with no findings.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check -- .github` passed.
+- Review remediation narrowed script and tool-setting exclusions to explicit
+  paths, added asset exclusions, fixed the step-summary row, handled the
+  duplicate-label creation race, and corrected the concurrency contract.
+- Fixup verification passed: the contract test passed with 9 tests, action
+  pinning tests and linter passed, specification lint passed, targeted
+  `zizmor` passed, and `git diff --check` passed.
