@@ -26,7 +26,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { buildTaskVcsSearchIndex } from "@/lib/kanban/task-search-index";
+import {
+  buildTaskVcsSearchIndex,
+  getTaskPRsByTaskIdForCurrentWorkspace,
+} from "@/lib/kanban/task-search-index";
 import { selectVisibleWorkflows } from "@/lib/kanban/workflow-swimlanes";
 import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
@@ -304,16 +307,30 @@ function useWorkflowReorder(
 
 /** One lowercase `#<number>` haystack per task, built from its linked PRs/MRs in the active workspace. */
 function useVcsSearchIndex() {
+  const taskPRsByTaskId = useAppStore((state) =>
+    getTaskPRsByTaskIdForCurrentWorkspace(
+      state.taskPRs,
+      state.workspaces.activeId,
+      state.workspaceContextGeneration,
+    ),
+  );
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const taskMRsByTaskId = useAppStore(
     (state) =>
       (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
       EMPTY_TASK_MRS_BY_TASK_ID,
   );
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const statusSummaryByTaskId = useMemo(() => {
+    const summaries: Record<string, Task["statusSummary"]> = {};
+    for (const snapshot of Object.values(snapshots)) {
+      for (const task of snapshot.tasks) summaries[task.id] = task.statusSummary;
+    }
+    return summaries;
+  }, [snapshots]);
   return useMemo(
-    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
-    [taskPRsByTaskId, taskMRsByTaskId],
+    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId, statusSummaryByTaskId),
+    [statusSummaryByTaskId, taskMRsByTaskId, taskPRsByTaskId],
   );
 }
 
