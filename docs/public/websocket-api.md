@@ -665,6 +665,7 @@ workflow.step.updated
 workflow.step.deleted
 agent.profile.created
 agent.profile.updated
+agent.profile.mcp_config.updated
 agent.profile.deleted
 task.created
 task.updated

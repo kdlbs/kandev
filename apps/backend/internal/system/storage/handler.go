@@ -105,6 +105,24 @@ func NewHandler(config HandlerConfig) *Handler {
 	return &Handler{config: config}
 }
 
+func (h *Handler) GetSettings(ctx context.Context) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	return h.config.Settings.GetSettings(ctx)
+}
+
+func (h *Handler) SaveSettingsWithConfirmations(ctx context.Context, settings StorageMaintenanceSettings, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	updated, err := h.config.Settings.SaveSettingsWithConfirmations(ctx, settings, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
 func (h *Handler) logError(message string, err error) {
 	if h.config.LogError != nil {
 		h.config.LogError(message, err)

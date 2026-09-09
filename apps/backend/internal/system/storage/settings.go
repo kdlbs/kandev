@@ -20,6 +20,10 @@ type SaveConfirmations struct {
 	adoptGoCache    bool
 }
 
+func NewSaveConfirmations(dedicatedDocker, adoptGoCache bool) SaveConfirmations {
+	return SaveConfirmations{DedicatedDocker: dedicatedDocker, adoptGoCache: adoptGoCache}
+}
+
 func NewSettingsStore(settings *systemsettings.Store) *SettingsStore {
 	return &SettingsStore{settings: settings}
 }

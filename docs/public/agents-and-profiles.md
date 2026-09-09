@@ -163,6 +163,14 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
 
+Agents can inspect and update declared profile settings through the compact
+`search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
+and `update_settings_kandev` tools. Use the separate
+`agent_profile_mcp` target for the profile MCP document. The settings tools
+preserve profile validation and save replacement lists atomically. They never
+return environment values or MCP credentials; use references or the existing
+interactive credential flow when a secret is required.
+
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
 Configuration options are resolved for the model selected in the profile. An

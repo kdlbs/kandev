@@ -58,5 +58,18 @@ func (h *Handlers) handleUpdateMcpConfig(ctx context.Context, msg *ws.Message) (
 		h.logger.Error("failed to update MCP config", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MCP config", nil)
 	}
+	h.broadcastProfileMCPConfigUpdated(req.ProfileID)
 	return ws.NewResponse(msg.ID, msg.Action, updated)
+}
+
+func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID string) {
+	if h.settingsBroadcaster == nil || profileID == "" {
+		return
+	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, map[string]any{
+		"profile_id": profileID,
+	})
+	if err == nil {
+		h.settingsBroadcaster.Broadcast(notification)
+	}
 }

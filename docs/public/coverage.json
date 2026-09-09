@@ -340,12 +340,20 @@
       ],
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
+        "apps/backend/internal/backendapp/settings_operations.go",
+        "apps/backend/internal/settingscatalog/catalog.go",
+        "apps/backend/internal/mcp/handlers/settings_handlers.go",
+        "apps/backend/internal/mcp/server/settings_tools.go",
         "apps/web/app/settings/agents/page.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.ts"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
+        "apps/backend/internal/backendapp/settings_operations_test.go",
+        "apps/backend/internal/mcp/handlers/settings_handlers_test.go",
+        "apps/backend/internal/mcp/server/settings_tools_test.go",
         "apps/web/components/settings/agent-profile-page.test.tsx",
+        "apps/web/lib/settings-discovery/coverage-inventory.test.ts",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
       ],
       "settingsRoutes": [
@@ -360,7 +368,12 @@
         "list_agent_profiles_kandev",
         "list_agents_kandev",
         "update_agent_kandev",
-        "update_agent_profile_kandev"
+        "update_agent_profile_kandev",
+        "search_settings_kandev",
+        "describe_setting_kandev",
+        "get_settings_kandev",
+        "update_settings_kandev",
+        "list_settings_resources_kandev"
       ]
     },
     {

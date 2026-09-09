@@ -204,6 +204,18 @@ func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID string) {
+	if h.hub == nil || profileID == "" {
+		return
+	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, gin.H{
+		"profile_id": profileID,
+	})
+	if err == nil {
+		h.hub.Broadcast(notification)
+	}
+}
+
 func requireAgentName(c *gin.Context) (string, bool) {
 	name := strings.TrimSpace(c.Param("agentName"))
 	if name == "" {
@@ -564,23 +576,10 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+	h.broadcastProfileMCPConfigUpdated(profileID)
 }
 
-type createProfileRequest struct {
-	Name           string                      `json:"name"`
-	Model          string                      `json:"model"`
-	FallbackModel  string                      `json:"fallback_model,omitempty"`
-	AutoFallback   bool                        `json:"auto_fallback"`
-	Mode           string                      `json:"mode,omitempty"`
-	ConfigOptions  map[string]string           `json:"config_options,omitempty"`
-	AllowIndexing  bool                        `json:"allow_indexing"`
-	AutoApprove    bool                        `json:"auto_approve"`
-	CLIPassthrough bool                        `json:"cli_passthrough"`
-	CLIFlags       []dto.CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars        []dto.ProfileEnvVarDTO      `json:"env_vars,omitempty"`
-	CommandPrefix  string                      `json:"command_prefix,omitempty"`
-	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-}
+type createProfileRequest = dto.ProfileCreateRequest
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	var body createProfileRequest
@@ -588,26 +587,12 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" {
+	body.AgentID = c.Param("id")
+	if err := body.Validate(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
-	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequest{
-		AgentID:        c.Param("id"),
-		Name:           body.Name,
-		Model:          body.Model,
-		FallbackModel:  body.FallbackModel,
-		AutoFallback:   body.AutoFallback,
-		Mode:           body.Mode,
-		ConfigOptions:  body.ConfigOptions,
-		AllowIndexing:  body.AllowIndexing,
-		AutoApprove:    body.AutoApprove,
-		CLIPassthrough: body.CLIPassthrough,
-		CLIFlags:       body.CLIFlags,
-		EnvVars:        body.EnvVars,
-		CommandPrefix:  body.CommandPrefix,
-		Dynamic:        body.Dynamic,
-	})
+	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
 	if err != nil {
 		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -632,22 +617,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-type updateProfileRequest struct {
-	Name           *string                     `json:"name,omitempty"`
-	Model          *string                     `json:"model,omitempty"`
-	FallbackModel  *string                     `json:"fallback_model,omitempty"`
-	AutoFallback   *bool                       `json:"auto_fallback,omitempty"`
-	Mode           *string                     `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string          `json:"config_options,omitempty"`
-	AllowIndexing  *bool                       `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                       `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                       `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                       `json:"enabled,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO           `json:"cli_flags,omitempty"`
-	EnvVars        *[]dto.ProfileEnvVarDTO     `json:"env_vars,omitempty"`
-	CommandPrefix  *string                     `json:"command_prefix,omitempty"`
-	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-}
+type updateProfileRequest = dto.ProfileUpdateRequest
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	var body updateProfileRequest
@@ -655,28 +625,17 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	body.ID = c.Param("id")
+	body.Force = c.Query("force") == queryTrue
+	if err := body.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
-	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequest{
-		ID:             c.Param("id"),
-		Name:           body.Name,
-		Model:          body.Model,
-		FallbackModel:  body.FallbackModel,
-		AutoFallback:   body.AutoFallback,
-		Mode:           body.Mode,
-		ConfigOptions:  body.ConfigOptions,
-		AllowIndexing:  body.AllowIndexing,
-		AutoApprove:    body.AutoApprove,
-		CLIPassthrough: body.CLIPassthrough,
-		Enabled:        body.Enabled,
-		CLIFlags:       body.CLIFlags,
-		EnvVars:        body.EnvVars,
-		CommandPrefix:  body.CommandPrefix,
-		Dynamic:        body.Dynamic,
-		Force:          c.Query("force") == queryTrue,
-	})
+	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequestFromDTO(body))
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
