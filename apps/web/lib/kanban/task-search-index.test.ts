@@ -92,16 +92,6 @@ describe("buildTaskVcsSearchIndex", () => {
   it("returns an empty index for missing/empty inputs", () => {
     expect(buildTaskVcsSearchIndex({}, {})).toEqual({});
   });
-
-  it("includes the status-summary PR number when association data is unavailable", () => {
-    const index = buildTaskVcsSearchIndex(
-      {},
-      {},
-      { "task-1": { pull_request: { number: 3295 } } as never },
-    );
-
-    expect(index["task-1"]).toBe("#3295");
-  });
 });
 
 describe("getTaskPRsByTaskIdForCurrentWorkspace", () => {

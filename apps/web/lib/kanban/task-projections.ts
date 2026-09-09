@@ -1,5 +1,6 @@
 import type { Task } from "@/components/kanban-card";
 import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { changeRequestSearchText } from "@/lib/kanban/task-search-index";
 
 type FilterTasksOptions = {
   searchQuery?: string;
@@ -33,6 +34,7 @@ export function filterTasks(
       (task) =>
         task.title.toLowerCase().includes(query) ||
         (task.description && task.description.toLowerCase().includes(query)) ||
+        changeRequestSearchText(task).toLowerCase().includes(query) ||
         (vcsSearchTextByTaskId?.[task.id]?.toLowerCase().includes(query) ?? false),
     );
   }

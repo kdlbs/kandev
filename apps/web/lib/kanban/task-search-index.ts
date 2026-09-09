@@ -7,8 +7,6 @@ type TaskWithStatusSummary = {
   statusSummary?: TaskStatusSummary | null;
 };
 
-type TaskStatusSummaryByTaskId = Record<string, TaskStatusSummary | null | undefined>;
-
 const EMPTY_TASK_PRS_BY_TASK_ID: Record<string, TaskPR[]> = {};
 
 /** Return GitHub associations only when their store scope matches the active workspace. */
@@ -41,31 +39,30 @@ export function changeRequestNumbers(
   return [...numbers].sort((a, b) => a - b);
 }
 
+export function changeRequestSearchText(
+  task: TaskWithStatusSummary,
+  mrsForTask: TaskMR[] = [],
+  prsForTask: TaskPR[] = [],
+): string {
+  return changeRequestNumbers(task, mrsForTask, prsForTask)
+    .map((number) => `#${number}`)
+    .join(" ");
+}
+
 /**
- * One lowercase haystack per task built from its linked PR/MR numbers, tokenized
+ * One haystack per task built from its linked PR/MR numbers, tokenized
  * as `#<number>` so both a bare number and a `#`-prefixed number substring-match.
  */
 export function buildTaskVcsSearchIndex(
   taskPRsByTaskId: Record<string, TaskPR[]>,
   taskMRsByTaskId: Record<string, TaskMR[]>,
-  statusSummaryByTaskId: TaskStatusSummaryByTaskId = {},
 ): Record<string, string> {
   const index: Record<string, string> = {};
-  const taskIds = new Set([
-    ...Object.keys(taskPRsByTaskId),
-    ...Object.keys(taskMRsByTaskId),
-    ...Object.keys(statusSummaryByTaskId),
-  ]);
+  const taskIds = new Set([...Object.keys(taskPRsByTaskId), ...Object.keys(taskMRsByTaskId)]);
 
   for (const taskId of taskIds) {
-    const numbers = changeRequestNumbers(
-      { statusSummary: statusSummaryByTaskId[taskId] },
-      taskMRsByTaskId[taskId],
-      taskPRsByTaskId[taskId],
-    );
-    if (numbers.length > 0) {
-      index[taskId] = numbers.map((number) => `#${number}`).join(" ");
-    }
+    const text = changeRequestSearchText({}, taskMRsByTaskId[taskId], taskPRsByTaskId[taskId]);
+    if (text) index[taskId] = text;
   }
 
   return index;

@@ -320,17 +320,9 @@ function useVcsSearchIndex() {
       (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
       EMPTY_TASK_MRS_BY_TASK_ID,
   );
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const statusSummaryByTaskId = useMemo(() => {
-    const summaries: Record<string, Task["statusSummary"]> = {};
-    for (const snapshot of Object.values(snapshots)) {
-      for (const task of snapshot.tasks) summaries[task.id] = task.statusSummary;
-    }
-    return summaries;
-  }, [snapshots]);
   return useMemo(
-    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId, statusSummaryByTaskId),
-    [statusSummaryByTaskId, taskMRsByTaskId, taskPRsByTaskId],
+    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
+    [taskMRsByTaskId, taskPRsByTaskId],
   );
 }
 

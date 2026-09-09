@@ -108,6 +108,27 @@ describe("filterTasks — searchQuery matches linked PR/MR numbers", () => {
     ).toEqual(["1"]);
   });
 
+  it("matches the status-summary PR number before associations load", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({
+            id: "1",
+            title: "Task",
+            statusSummary: { pull_request: { number: 3295 } } as never,
+          }),
+        ],
+        steps: [],
+      },
+    };
+
+    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "#3295",
+    });
+
+    expect(result.map((t) => t.id)).toEqual(["1"]);
+  });
+
   it("excludes a task whose linked PR number does not match the query", () => {
     const snapshots = {
       wf: {
