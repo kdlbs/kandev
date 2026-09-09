@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useDialogFormState } from "./task-create-dialog-state";
+import { useDefaultSelectionsEffect } from "./task-create-dialog-effects";
+import type { StoreSelections } from "./task-create-dialog-types";
 
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
 // it so the dialog state hook can mount in JSDOM without hitting fetch. The
@@ -95,5 +97,35 @@ describe("useDialogFormState — seededExecutorProfileId", () => {
     rerender({ open: true });
 
     expect(result.current.seededExecutorProfileId).toBeNull();
+  });
+
+  // Regression: on the same open-transition, the reset effect that bumps
+  // openCycle (useFormResetEffects) and the stored-profile seed effect
+  // (useDefaultSelectionsEffect) both fire and their setState calls land in
+  // the same subsequent render. A reset keyed on comparing openCycle in the
+  // render body cannot tell "openCycle changed because the dialog just
+  // opened" apart from "openCycle changed and a seed write from that very
+  // open already landed" — it must not wipe a seed that arrived on the same
+  // transition that triggered it.
+  it("keeps a stored-profile seed written on the same open transition that bumps openCycle", async () => {
+    const editingTaskExecutorProfileId = "profile-from-stored-task";
+    const sel: StoreSelections = {
+      agentProfiles: [],
+      compatibleAgentProfiles: [],
+      authLoaded: true,
+      executors: [],
+      workspaceDefaults: null,
+    };
+
+    const { result } = renderHook(() => {
+      const fs = useDialogFormState(true, "ws-1", null);
+      useDefaultSelectionsEffect(fs, true, sel, [], editingTaskExecutorProfileId);
+      return fs;
+    });
+
+    await waitFor(() =>
+      expect(result.current.executorProfileId).toBe(editingTaskExecutorProfileId),
+    );
+    expect(result.current.seededExecutorProfileId).toBe(editingTaskExecutorProfileId);
   });
 });
