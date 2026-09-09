@@ -628,7 +628,7 @@
         {
           "name": "update",
           "binding": "automations.automation.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -680,7 +680,7 @@
         {
           "name": "update",
           "binding": "automations.automation_trigger.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -929,7 +929,7 @@
         {
           "name": "update",
           "binding": "azuredevops.azure_devops_pull_request_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1007,7 +1007,7 @@
         {
           "name": "update",
           "binding": "azuredevops.azure_devops_settings.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1214,7 +1214,7 @@
         {
           "name": "update",
           "binding": "azuredevops.azure_devops_work_item_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1319,7 +1319,7 @@
         {
           "name": "update",
           "binding": "editors.editor.update",
-          "authority": "domain.owner"
+          "authority": "editor.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1425,7 +1425,7 @@
         {
           "name": "update",
           "binding": "execution.environment.update",
-          "authority": "domain.owner"
+          "authority": "execution.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1518,7 +1518,7 @@
         {
           "name": "update",
           "binding": "execution.executor.update",
-          "authority": "domain.owner"
+          "authority": "execution.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1625,7 +1625,7 @@
         {
           "name": "update",
           "binding": "execution.executor_profile.update",
-          "authority": "domain.owner"
+          "authority": "execution.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1803,7 +1803,7 @@
         {
           "name": "update",
           "binding": "github.github_issue_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -1981,7 +1981,7 @@
         {
           "name": "update",
           "binding": "github.github_review_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -2087,7 +2087,7 @@
         {
           "name": "update",
           "binding": "github.github_settings.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -2280,7 +2280,7 @@
         {
           "name": "update",
           "binding": "gitlab.gitlab_issue_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -2473,7 +2473,7 @@
         {
           "name": "update",
           "binding": "gitlab.gitlab_review_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -2519,13 +2519,6 @@
           "support": "read_only",
           "classification": "computed",
           "owner": "gitlab"
-        }
-      ],
-      "operations": [
-        {
-          "name": "update",
-          "binding": "gitlab.gitlab_settings.update",
-          "authority": "domain.owner"
         }
       ],
       "settings_href": "/settings"
@@ -2731,7 +2724,7 @@
         {
           "name": "update",
           "binding": "jira.jira_issue_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -2817,7 +2810,7 @@
         {
           "name": "update",
           "binding": "jira.jira_settings.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3010,7 +3003,7 @@
         {
           "name": "update",
           "binding": "linear.linear_issue_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3076,7 +3069,7 @@
         {
           "name": "update",
           "binding": "linear.linear_settings.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3169,7 +3162,7 @@
         {
           "name": "update",
           "binding": "notifications.notification_provider.update",
-          "authority": "domain.owner"
+          "authority": "notification.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3219,7 +3212,7 @@
         {
           "name": "update",
           "binding": "prompts.prompt.update",
-          "authority": "domain.owner"
+          "authority": "prompt.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3509,7 +3502,7 @@
         {
           "name": "update",
           "binding": "workspace.repository.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3573,7 +3566,7 @@
         {
           "name": "update",
           "binding": "workspace.repository_script.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3638,7 +3631,7 @@
         {
           "name": "update",
           "binding": "workspace.repository_set.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3675,7 +3668,7 @@
         {
           "name": "update",
           "binding": "runtime.runtime_flag.update",
-          "authority": "domain.owner"
+          "authority": "org.settings.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3743,7 +3736,7 @@
         {
           "name": "update",
           "binding": "sentry.sentry_instance.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -3922,7 +3915,7 @@
         {
           "name": "update",
           "binding": "sentry.sentry_issue_watch.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -4168,7 +4161,19 @@
         {
           "name": "update",
           "binding": "storage.storage_maintenance.update",
-          "authority": "domain.owner"
+          "authority": "org.settings.manage",
+          "options": {
+            "additionalProperties": false,
+            "properties": {
+              "adopt_go_cache": {
+                "type": "boolean"
+              },
+              "confirm_dedicated_docker": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
         }
       ],
       "settings_href": "/settings"
@@ -4272,7 +4277,7 @@
         {
           "name": "update",
           "binding": "task.task.update",
-          "authority": "domain.owner"
+          "authority": "task.manage"
         }
       ],
       "settings_href": "/settings"
@@ -4907,6 +4912,37 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.sidebar_task_color_patch",
+          "field_path": "sidebar_task_color_patch",
+          "label": "sidebar task color patch",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "object",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences",
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "colors": {
+                "additionalProperties": {
+                  "nullable": true,
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "if_missing": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
           "key": "user_settings.task_create_last_used",
           "field_path": "task_create_last_used",
           "label": "last task create values",
@@ -5075,7 +5111,40 @@
           "validator": "user-settings",
           "authority": "user.self",
           "change_timing": "future_views",
-          "settings_href": "/settings/preferences"
+          "settings_href": "/settings/preferences",
+          "schema": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "modifiers": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "alt": {
+                      "type": "boolean"
+                    },
+                    "command": {
+                      "type": "boolean"
+                    },
+                    "ctrl": {
+                      "type": "boolean"
+                    },
+                    "meta": {
+                      "type": "boolean"
+                    },
+                    "shift": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          }
         },
         {
           "key": "user_settings.terminal_link_behavior",
@@ -5261,7 +5330,8 @@
       "operations": [
         {
           "name": "update",
-          "binding": "user-settings.update"
+          "binding": "user-settings.update",
+          "authority": "user.self"
         }
       ],
       "settings_href": "/settings/preferences"
@@ -5395,7 +5465,7 @@
         {
           "name": "update",
           "binding": "utilities.utility_agent.update",
-          "authority": "domain.owner"
+          "authority": "utility.manage"
         }
       ],
       "settings_href": "/settings"
@@ -5474,7 +5544,7 @@
         {
           "name": "update",
           "binding": "workflow.workflow.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -5559,7 +5629,189 @@
           "writable": true,
           "validator": "workflow.workflow_step",
           "authority": "workspace.manage",
-          "settings_href": "/settings"
+          "settings_href": "/settings",
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "on_agent_error": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_approval_resolved": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_blocker_resolved": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_budget_alert": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_children_completed": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_comment": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_enter": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_exit": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_heartbeat": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_turn_complete": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_turn_start": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
         },
         {
           "key": "workflow_step.allow_manual_move",
@@ -5734,7 +5986,7 @@
         {
           "name": "update",
           "binding": "workflow.workflow_step.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
@@ -5840,10 +6092,95 @@
         {
           "name": "update",
           "binding": "workspace.workspace.update",
-          "authority": "domain.owner"
+          "authority": "workspace.manage"
         }
       ],
       "settings_href": "/settings"
     }
-  ]
+  ],
+  "mutable_fields": {
+    "agent_profile": [
+      "allow_indexing",
+      "auto_approve",
+      "auto_fallback",
+      "cli_flags",
+      "cli_passthrough",
+      "command_prefix",
+      "config_options",
+      "dynamic",
+      "enabled",
+      "env_vars",
+      "fallback_model",
+      "mode",
+      "model",
+      "name"
+    ],
+    "user_settings": [
+      "agent_generated_task_titles",
+      "app_status_bar_enabled",
+      "app_status_bar_order",
+      "azure_devops_browse_preferences",
+      "changes_panel_layout",
+      "chat_submit_key",
+      "confirm_task_archive",
+      "default_editor_id",
+      "default_utility_agent_id",
+      "default_utility_agent_profile_id",
+      "default_utility_model",
+      "enable_preview_on_click",
+      "github_default_query_presets",
+      "github_saved_presets",
+      "gitlab_saved_presets",
+      "initial_setup_complete",
+      "jira_saved_views",
+      "jira_task_presets",
+      "kanban_hidden_step_ids",
+      "kanban_view_mode",
+      "keyboard_shortcuts",
+      "last_seen_display",
+      "lsp_auto_install_languages",
+      "lsp_auto_start_languages",
+      "lsp_server_configs",
+      "lsp_status_location",
+      "mcp_task_agent_profile_default",
+      "preferred_shell",
+      "prevent_auto_start_agent_on_open",
+      "quick_chat_tab_order_by_workspace",
+      "release_notes_last_seen_version",
+      "repository_ids",
+      "resolve_session_hostnames",
+      "review_auto_mark_on_scroll",
+      "saved_layouts",
+      "show_anchored_prompt_bar",
+      "show_release_notification",
+      "show_scroll_to_last_prompt",
+      "show_scroll_to_start",
+      "show_todo_list_panel",
+      "show_todo_list_panel_only_when_not_empty",
+      "show_transcript_auto_scroll_control",
+      "sidebar_active_view_id",
+      "sidebar_draft",
+      "sidebar_task_color_automation",
+      "sidebar_task_color_patch",
+      "sidebar_task_colors",
+      "sidebar_task_prefs",
+      "sidebar_views",
+      "startup_page",
+      "system_metrics_display",
+      "task_create_last_used",
+      "tasks_list_group",
+      "tasks_list_show_details",
+      "tasks_list_sort",
+      "terminal_font_family",
+      "terminal_font_size",
+      "terminal_link_behavior",
+      "thread_active_view_id",
+      "thread_view_draft",
+      "thread_views",
+      "unread_divider",
+      "workflow_filter_id",
+      "workflow_ids_with_auto_hide_empty_steps",
+      "workspace_id"
+    ]
+  }
 }

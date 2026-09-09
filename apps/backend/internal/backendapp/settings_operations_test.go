@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/settingscatalog"
+	storage "github.com/kandev/kandev/internal/system/storage"
 )
 
 func TestSettingsMutationRequiresCallerIdentity(t *testing.T) {
@@ -61,6 +62,82 @@ func TestRuntimeFlagSettingsValueUsesCatalogOverridePath(t *testing.T) {
 	}
 	if _, ok := value["override_value"]; ok {
 		t.Fatalf("service-specific override_value leaked into settings contract: %#v", value)
+	}
+}
+
+type recordingSettingsRuntimeFlags struct {
+	setOverrideCalls int
+}
+
+func (r *recordingSettingsRuntimeFlags) ListStates(context.Context) ([]runtimeflags.RuntimeFlagState, error) {
+	return []runtimeflags.RuntimeFlagState{{Key: "features.auth"}}, nil
+}
+
+func (r *recordingSettingsRuntimeFlags) SetOverride(context.Context, string, *bool) ([]runtimeflags.RuntimeFlagState, error) {
+	r.setOverrideCalls++
+	return r.ListStates(context.Background())
+}
+
+func TestRuntimeFlagSettingsCannotMutateAuthenticationEnablement(t *testing.T) {
+	for _, raw := range []string{`true`, `false`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			flags := &recordingSettingsRuntimeFlags{}
+			operations := &settingsOperations{deps: settingsDomainDependencies{runtimeFlags: flags}}
+
+			_, err := operations.updateRuntimeFlag(context.Background(), "features.auth", map[string]json.RawMessage{
+				"override": json.RawMessage(raw),
+			})
+			if err == nil {
+				t.Fatal("authentication runtime flag mutation was accepted")
+			}
+			if flags.setOverrideCalls != 0 {
+				t.Fatalf("SetOverride calls = %d, want 0", flags.setOverrideCalls)
+			}
+		})
+	}
+}
+
+type recordingStorageSettings struct {
+	getCalls   int
+	saveCalls  int
+	patchCalls int
+	patched    map[string]json.RawMessage
+}
+
+func (s *recordingStorageSettings) GetSettings(context.Context) (storage.StorageMaintenanceSettings, error) {
+	s.getCalls++
+	return storage.DefaultSettings(), nil
+}
+
+func (s *recordingStorageSettings) SaveSettingsWithConfirmations(context.Context, storage.StorageMaintenanceSettings, storage.SaveConfirmations) (storage.StorageMaintenanceSettings, error) {
+	s.saveCalls++
+	return storage.DefaultSettings(), nil
+}
+
+func (s *recordingStorageSettings) PatchSettingsWithConfirmations(_ context.Context, changes map[string]json.RawMessage, _ storage.SaveConfirmations) (storage.StorageMaintenanceSettings, error) {
+	s.patchCalls++
+	s.patched = changes
+	updated := storage.DefaultSettings()
+	updated.Enabled = true
+	return updated, nil
+}
+
+func TestStorageSettingsUpdateUsesAtomicStoragePatch(t *testing.T) {
+	store := &recordingStorageSettings{}
+	operations := &settingsOperations{deps: settingsDomainDependencies{storage: store}}
+
+	updated, err := operations.updateStorageSettings(context.Background(), map[string]json.RawMessage{
+		"enabled":                    json.RawMessage(`true`),
+		"docker.build_cache_enabled": json.RawMessage(`false`),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.patchCalls != 1 || store.getCalls != 0 || store.saveCalls != 0 {
+		t.Fatalf("storage calls = patch:%d get:%d save:%d, want one atomic patch only", store.patchCalls, store.getCalls, store.saveCalls)
+	}
+	if len(store.patched) != 2 || updated == nil {
+		t.Fatalf("patched changes = %#v, updated = %#v", store.patched, updated)
 	}
 }
 

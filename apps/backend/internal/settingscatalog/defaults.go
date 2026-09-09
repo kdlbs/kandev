@@ -313,10 +313,21 @@ func agentDomain() DomainDescriptor {
 }
 
 func supportedDomain(domain, resourceType, label, description, owner string, scope Scope, target TargetRules, fields ...FieldDescriptor) DomainDescriptor {
+	authority := ""
+	for _, field := range fields {
+		if field.Writable && field.Authority != "" {
+			authority = field.Authority
+			break
+		}
+	}
+	operations := []OperationDescriptor(nil)
+	if authority != "" {
+		operations = []OperationDescriptor{{Name: "update", Binding: owner + "." + resourceType + ".update", Authority: authority}}
+	}
 	return DomainDescriptor{
 		Domain: domain, ResourceType: resourceType, Label: label, Description: description, Owner: owner,
 		Scope: scope, Target: target, Fields: fields,
-		Operations:   []OperationDescriptor{{Name: "update", Binding: owner + "." + resourceType + ".update", Authority: "domain.owner"}},
+		Operations:   operations,
 		SettingsHref: "/settings",
 	}
 }
@@ -367,7 +378,7 @@ func workflowStepDomain() DomainDescriptor {
 		lifecycleException("workflow_step", "position", "Position", "Step ordering is controlled by the workflow reorder action.", "integer", owner, "Use the workflow step reorder action."),
 		domainWritable("workflow_step", "color", "Color", "Step display color.", "string", owner, "workspace.manage"),
 		domainWritable("workflow_step", "prompt", "Prompt", "Step instructions.", "string", owner, "workspace.manage"),
-		domainWritable("workflow_step", "events", "Events", "Validated step event actions and bindings.", "object", owner, "workspace.manage"),
+		workflowEventsField(owner),
 		domainWritable("workflow_step", "allow_manual_move", "Manual move", "Whether users may move tasks into this step.", "boolean", owner, "workspace.manage"),
 		domainWritable("workflow_step", "is_start_step", "Start step", "Whether this is the workflow start step.", "boolean", owner, "workspace.manage"),
 		domainWritable("workflow_step", "show_in_command_panel", "Command panel", "Whether the step appears in the command panel.", "boolean", owner, "workspace.manage"),
@@ -382,6 +393,27 @@ func workflowStepDomain() DomainDescriptor {
 		domainWritable("workflow_step", "cancel_triggers_turn_complete", "Cancel transition", "Whether cancellation runs turn-complete actions.", "boolean", owner, "workspace.manage"),
 	}
 	return supportedDomain("workflows", "workflow_step", "Workflow steps", "Editable steps in a saved workflow.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+}
+
+func workflowEventsField(owner string) FieldDescriptor {
+	field := domainWritable("workflow_step", "events", "Events", "Validated step event actions and bindings.", "object", owner, "workspace.manage")
+	triggers := []string{
+		"on_enter", "on_turn_start", "on_turn_complete", "on_exit", "on_comment",
+		"on_blocker_resolved", "on_children_completed", "on_approval_resolved", "on_heartbeat",
+		"on_budget_alert", "on_agent_error",
+	}
+	properties := make(map[string]any, len(triggers))
+	for _, trigger := range triggers {
+		properties[trigger] = map[string]any{
+			"type": "array",
+			"items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+				"type":   map[string]any{"type": "string"},
+				"config": map[string]any{"type": "object", "additionalProperties": true},
+			}},
+		}
+	}
+	field.Schema = map[string]any{"type": "object", "additionalProperties": false, "properties": properties}
+	return field
 }
 
 func targetRulesResourceWorkspace() TargetRules {
@@ -581,7 +613,16 @@ func storageMaintenanceDomain() DomainDescriptor {
 	for _, item := range paths {
 		fields = append(fields, domainWritable("storage_maintenance", item.path, item.label, "Storage maintenance policy.", item.typ, owner, "org.settings.manage"))
 	}
-	return supportedDomain("storage", "storage_maintenance", "Storage maintenance", "Install-wide storage maintenance policy.", owner, ScopeInstallation, target, fields...)
+	domain := supportedDomain("storage", "storage_maintenance", "Storage maintenance", "Install-wide storage maintenance policy.", owner, ScopeInstallation, target, fields...)
+	domain.Operations[0].Options = map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"confirm_dedicated_docker": map[string]any{"type": "boolean"},
+			"adopt_go_cache":           map[string]any{"type": "boolean"},
+		},
+	}
+	return domain
 }
 
 func userSettingsDomain() DomainDescriptor {
@@ -599,7 +640,7 @@ func userSettingsDomain() DomainDescriptor {
 		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
-		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "task_create_last_used", "last task create values", "object",
+		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
 		"jira_saved_views", "Jira saved views", "object", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
 		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
@@ -613,6 +654,15 @@ func userSettingsDomain() DomainDescriptor {
 	for index := 0; index+2 < len(values); index += 3 {
 		field := preferenceField(values[index], values[index+1], values[index+2])
 		switch values[index] {
+		case "keyboard_shortcuts":
+			field.Schema = keyboardShortcutsSchema()
+		case "sidebar_task_color_patch":
+			field.Schema = map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+				"if_missing": map[string]any{"type": "boolean"},
+				"colors":     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string", "nullable": true}},
+			}}
+		}
+		switch values[index] {
 		case "sidebar_draft", "thread_view_draft", "jira_saved_views", "jira_task_presets", "github_saved_presets", "github_default_query_presets", "gitlab_saved_presets", "azure_devops_browse_preferences":
 			field.Nullable = true
 		}
@@ -622,7 +672,7 @@ func userSettingsDomain() DomainDescriptor {
 		Domain: "user_preferences", ResourceType: "user_settings", Label: "Personal preferences",
 		Description: "Portable settings belonging to the authenticated user.", Owner: "user-settings", Scope: ScopeCaller,
 		Target: TargetRules{Scope: ScopeCaller, Singleton: true}, SettingsHref: "/settings/preferences", Fields: fields,
-		Operations: []OperationDescriptor{{Name: "update", Binding: "user-settings.update"}},
+		Operations: []OperationDescriptor{{Name: "update", Binding: "user-settings.update", Authority: "user.self"}},
 	}
 }
 
@@ -632,6 +682,30 @@ func preferenceField(path, label, jsonType string) FieldDescriptor {
 		Description: "Portable preference owned by the current user.", JSONType: jsonType,
 		Support: SupportSupported, Classification: ClassificationWritable, Owner: "user-settings", Writable: true,
 		Validator: "user-settings", Authority: "user.self", ChangeTiming: "future_views", SettingsHref: "/settings/preferences",
+	}
+}
+
+func keyboardShortcutsSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"additionalProperties": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string"},
+				"modifiers": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"alt":     map[string]any{"type": "boolean"},
+						"ctrl":    map[string]any{"type": "boolean"},
+						"meta":    map[string]any{"type": "boolean"},
+						"shift":   map[string]any{"type": "boolean"},
+						"command": map[string]any{"type": "boolean"},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -650,9 +724,16 @@ func profileDomain() DomainDescriptor {
 		Target:       TargetRules{Scope: ScopeResource, RequiresResourceID: true, AllowsWorkspaceID: true},
 		SettingsHref: "/settings/agents",
 		Operations: []OperationDescriptor{{
-			Name:        "update",
-			Binding:     "agent-settings.profile.update",
-			Authority:   "org.config.manage",
+			Name:      "update",
+			Binding:   "agent-settings.profile.update",
+			Authority: "org.config.manage",
+			Options: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"force": map[string]any{"type": "boolean"},
+				},
+			},
 			Description: "Validate and update one saved profile through the agent settings controller.",
 		}},
 		Fields: []FieldDescriptor{
@@ -694,7 +775,7 @@ func profileMCPDomain() DomainDescriptor {
 }
 
 func profileWritable(key, path, label, jsonType, description string, replacement bool) FieldDescriptor {
-	return FieldDescriptor{
+	field := FieldDescriptor{
 		Key:            key,
 		FieldPath:      path,
 		Label:          label,
@@ -710,6 +791,14 @@ func profileWritable(key, path, label, jsonType, description string, replacement
 		ChangeTiming:   "future_sessions",
 		SettingsHref:   "/settings/agents",
 	}
+	if path == "config_options" {
+		field.Schema = map[string]any{
+			"type":                 "object",
+			"additionalProperties": map[string]any{"type": "string"},
+			"x-kandev-dynamic":     "provider_config_options",
+		}
+	}
+	return field
 }
 
 func profileWritableSensitive(key, path, label, jsonType, description string, replacement bool) FieldDescriptor {

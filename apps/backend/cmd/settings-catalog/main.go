@@ -8,10 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 
 	agentcatalog "github.com/kandev/kandev/internal/agent/settings/catalog"
+	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/settingscatalog"
+	userdto "github.com/kandev/kandev/internal/user/dto"
 )
 
 const schemaVersion = "settings-catalog.v1"
@@ -20,6 +24,7 @@ type snapshot struct {
 	SchemaVersion string                             `json:"schema_version"`
 	GeneratedBy   string                             `json:"generated_by"`
 	Domains       []settingscatalog.DomainDescriptor `json:"domains"`
+	MutableFields map[string][]string                `json:"mutable_fields"`
 }
 
 func main() {
@@ -77,29 +82,65 @@ func snapshots() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	all, err := marshalSnapshot(allRegistry)
+	mutableFields := mutableFieldInventory()
+	all, err := marshalSnapshot(allRegistry, mutableFields)
 	if err != nil {
 		return nil, nil, err
 	}
-	profile, err := marshalSnapshot(profileRegistry)
+	profile, err := marshalSnapshot(profileRegistry, mutableFields)
 	if err != nil {
 		return nil, nil, err
 	}
 	return all, profile, nil
 }
 
-func marshalSnapshot(registry *settingscatalog.Registry) ([]byte, error) {
+func marshalSnapshot(registry *settingscatalog.Registry, mutableFields map[string][]string) ([]byte, error) {
 	domains := registry.Domains()
 	sort.Slice(domains, func(i, j int) bool { return domains[i].ResourceType < domains[j].ResourceType })
 	payload, err := json.MarshalIndent(snapshot{
 		SchemaVersion: schemaVersion,
 		GeneratedBy:   "cmd/settings-catalog",
 		Domains:       domains,
+		MutableFields: mutableFields,
 	}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(payload, '\n'), nil
+}
+
+func mutableFieldInventory() map[string][]string {
+	userFields := jsonFieldPaths(reflect.TypeFor[userdto.UpdateUserSettingsRequest](), nil)
+	// sidebar_task_colors is the public patch alias. The DTO stores its
+	// normalized form as sidebar_task_color_patch before calling the service.
+	userFields = append(userFields, "sidebar_task_colors")
+	sort.Strings(userFields)
+	return map[string][]string{
+		"agent_profile": jsonFieldPaths(reflect.TypeFor[agentsettingsdto.ProfileUpdateRequest](), map[string]struct{}{
+			"id": {}, "force": {},
+		}),
+		"user_settings": userFields,
+	}
+}
+
+func jsonFieldPaths(valueType reflect.Type, excluded map[string]struct{}) []string {
+	if valueType.Kind() == reflect.Pointer {
+		valueType = valueType.Elem()
+	}
+	paths := make([]string, 0, valueType.NumField())
+	for index := 0; index < valueType.NumField(); index++ {
+		field := valueType.Field(index)
+		jsonName := strings.Split(field.Tag.Get("json"), ",")[0]
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+		if _, skip := excluded[jsonName]; skip {
+			continue
+		}
+		paths = append(paths, jsonName)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func moduleRoot() (string, error) {

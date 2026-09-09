@@ -16,6 +16,7 @@ import (
 const (
 	maxSettingsPayloadBytes = 256 * 1024
 	jsonNull                = "null"
+	settingsReadOperation   = "read"
 )
 
 // SettingsOperations is the domain-owned execution boundary for compact
@@ -26,6 +27,30 @@ type SettingsOperations interface {
 	ReadSettings(context.Context, settingscatalog.ResourceTarget, []string) (any, error)
 	UpdateSettings(context.Context, settingscatalog.ResourceTarget, map[string]json.RawMessage, map[string]json.RawMessage) (any, error)
 	ListSettingsResources(context.Context, string, *string, string, int, string) (any, error)
+}
+
+// SettingDescriptionRequest carries the authorized target and contextual
+// inputs needed by a domain-owned schema resolver.
+type SettingDescriptionRequest struct {
+	Key                   string
+	Target                *settingscatalog.ResourceTarget
+	Context               map[string]any
+	Operation             string
+	IncludeResourceSchema bool
+}
+
+// SettingDescription contains executable schema and choice data. Domain
+// adapters may fill the dynamic portions after validating the target.
+type SettingDescription struct {
+	Schema         map[string]any
+	ResourceSchema map[string]any
+	Choices        []map[string]any
+}
+
+// SettingsDescriber is optional for simple adapters. When present, the
+// generic handler delegates target-aware schemas and contextual choices to it.
+type SettingsDescriber interface {
+	DescribeSetting(context.Context, SettingDescriptionRequest) (SettingDescription, error)
 }
 
 type settingsUpdateRequest struct {
@@ -127,6 +152,7 @@ func validateSettingsPatch(registry *settingscatalog.Registry, target settingsca
 		if !ok {
 			return &settingsRequestError{Code: "unknown_setting", Key: key, Cause: fmt.Errorf("unknown setting %q", key)}
 		}
+		field = settingscatalog.FieldForTarget(field, &target)
 		if !field.Writable || field.Support != settingscatalog.SupportSupported {
 			return &settingsRequestError{Code: "setting_not_writable", Key: field.Key, FieldPath: field.FieldPath, Cause: fmt.Errorf("setting %q is not writable", key)}
 		}
@@ -231,30 +257,155 @@ func (h *Handlers) handleDescribeSetting(ctx context.Context, msg *ws.Message) (
 	if !ok {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "setting was not found", map[string]interface{}{"code": "setting_not_found", "key": request.Key})
 	}
-	if request.Target != nil {
-		if err := h.settingsRegistry.ValidateTarget(*request.Target); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-		}
-		if request.Target.ResourceType != domain.ResourceType {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target resource_type does not match setting", nil)
-		}
+	if err := validateDescriptionTarget(h.settingsRegistry, domain, request.Target); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	operation := request.Operation
-	if operation == "" {
-		operation = "update"
+	operation := descriptionOperation(domain, request.Operation)
+	if !supportedSettingsOperation(domain, operation) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported settings operation", map[string]interface{}{"operation": operation})
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	field = settingscatalog.FieldForTarget(field, request.Target)
+	description, err := h.resolveSettingDescription(ctx, request, operation, field, domain)
+	if err != nil {
+		return h.settingsOperationError(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, describeSettingResponse(field, domain, operation, request.IncludeResourceSchema, description))
+}
+
+func validateDescriptionTarget(
+	registry *settingscatalog.Registry,
+	domain settingscatalog.DomainDescriptor,
+	target *settingscatalog.ResourceTarget,
+) error {
+	if target == nil {
+		return nil
+	}
+	if err := registry.ValidateTarget(*target); err != nil {
+		return err
+	}
+	if target.ResourceType != domain.ResourceType {
+		return errors.New("target resource_type does not match setting")
+	}
+	return nil
+}
+
+func descriptionOperation(domain settingscatalog.DomainDescriptor, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	if len(domain.Operations) == 0 {
+		return settingsReadOperation
+	}
+	return "update"
+}
+
+func (h *Handlers) resolveSettingDescription(
+	ctx context.Context,
+	request settingsDescribeRequest,
+	operation string,
+	field settingscatalog.FieldDescriptor,
+	domain settingscatalog.DomainDescriptor,
+) (SettingDescription, error) {
+	description := SettingDescription{Schema: fieldSchema(field)}
+	if request.IncludeResourceSchema {
+		description.ResourceSchema = resourceSchema(domain, request.Target)
+	}
+	describer, ok := h.settingsOperations.(SettingsDescriber)
+	if !ok {
+		if len(request.Context) > 0 {
+			return SettingDescription{}, errors.New("setting context is not supported for this setting")
+		}
+		return description, nil
+	}
+	resolved, err := describer.DescribeSetting(ctx, SettingDescriptionRequest{
+		Key: request.Key, Target: request.Target, Context: request.Context,
+		Operation: operation, IncludeResourceSchema: request.IncludeResourceSchema,
+	})
+	if err != nil {
+		return SettingDescription{}, err
+	}
+	if resolved.Schema != nil {
+		description.Schema = resolved.Schema
+	}
+	if resolved.ResourceSchema != nil {
+		description.ResourceSchema = resolved.ResourceSchema
+	}
+	description.Choices = resolved.Choices
+	return description, nil
+}
+
+func describeSettingResponse(
+	field settingscatalog.FieldDescriptor,
+	domain settingscatalog.DomainDescriptor,
+	operation string,
+	includeResourceSchema bool,
+	description SettingDescription,
+) map[string]interface{} {
+	response := map[string]interface{}{
 		"key": field.Key, "field_path": field.FieldPath, "domain": domain.Domain, "resource_type": domain.ResourceType,
 		"support": field.Support, "classification": field.Classification, "description": field.Description,
-		"schema": fieldSchema(field), "target": domain.Target, "operations": domain.Operations,
+		"schema": description.Schema, "target": domain.Target, "operations": domain.Operations,
 		"operation": operation, "settings_href": field.SettingsHref, "dependencies": field.Dependencies,
 		"default_behavior": field.DefaultBehavior, "change_timing": field.ChangeTiming, "sensitive": field.Sensitive,
-		"include_resource_schema": request.IncludeResourceSchema, "context": request.Context,
-	})
+		"writable": field.Writable, "include_resource_schema": includeResourceSchema,
+	}
+	if includeResourceSchema {
+		response["resource_schema"] = description.ResourceSchema
+	}
+	if len(description.Choices) > 0 {
+		response["choices"] = description.Choices
+	}
+	return response
 }
 
 func fieldSchema(field settingscatalog.FieldDescriptor) map[string]interface{} {
-	return map[string]interface{}{"type": field.JSONType, "nullable": field.Nullable, "replacement": field.Replacement, "writable": field.Writable}
+	schema := make(map[string]interface{}, len(field.Schema)+4)
+	for key, value := range field.Schema {
+		schema[key] = value
+	}
+	if _, exists := schema["type"]; !exists {
+		schema["type"] = field.JSONType
+	}
+	schema["nullable"] = field.Nullable
+	schema["replacement"] = field.Replacement
+	schema["writable"] = field.Writable
+	return schema
+}
+
+func supportedSettingsOperation(domain settingscatalog.DomainDescriptor, operation string) bool {
+	for _, candidate := range domain.Operations {
+		if candidate.Name == operation {
+			return true
+		}
+	}
+	return operation == settingsReadOperation && len(domain.Operations) == 0
+}
+
+func resourceSchema(domain settingscatalog.DomainDescriptor, target *settingscatalog.ResourceTarget) map[string]any {
+	root := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}}
+	properties := root["properties"].(map[string]any)
+	for _, field := range domain.Fields {
+		field = settingscatalog.FieldForTarget(field, target)
+		setSchemaPath(properties, field.FieldPath, fieldSchema(field))
+	}
+	return root
+}
+
+func setSchemaPath(properties map[string]any, path string, schema map[string]interface{}) {
+	parts := strings.Split(path, ".")
+	current := properties
+	for index, part := range parts {
+		if index == len(parts)-1 {
+			current[part] = schema
+			return
+		}
+		nested, ok := current[part].(map[string]any)
+		if !ok {
+			nested = map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}}
+			current[part] = nested
+		}
+		current = nested["properties"].(map[string]any)
+	}
 }
 
 func (h *Handlers) handleGetSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -311,11 +462,8 @@ func (h *Handlers) handleListSettingsResources(ctx context.Context, msg *ws.Mess
 	if !ok {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "resource type was not found", nil)
 	}
-	if domain.Target.RequiresWorkspaceID && (request.WorkspaceID == nil || strings.TrimSpace(*request.WorkspaceID) == "") {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required for resource lookup", nil)
-	}
-	if !domain.Target.AllowsWorkspaceID && request.WorkspaceID != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "resource type does not accept workspace_id", nil)
+	if err := validateResourceListWorkspace(domain, request.WorkspaceID); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	limit := request.Limit
 	if limit == 0 {
@@ -329,6 +477,16 @@ func (h *Handlers) handleListSettingsResources(ctx context.Context, msg *ws.Mess
 		return h.settingsOperationError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func validateResourceListWorkspace(domain settingscatalog.DomainDescriptor, workspaceID *string) error {
+	if domain.Target.RequiresWorkspaceID && (workspaceID == nil || strings.TrimSpace(*workspaceID) == "") {
+		return errors.New("workspace_id is required for resource lookup")
+	}
+	if !domain.Target.AllowsWorkspaceID && !domain.Target.RequiresWorkspaceID && workspaceID != nil {
+		return errors.New("resource type does not accept workspace_id")
+	}
+	return nil
 }
 
 func (h *Handlers) settingsUnavailable(msg *ws.Message) (*ws.Message, error) {

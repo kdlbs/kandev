@@ -1,3 +1,5 @@
+import contract from "./contract.generated.json";
+
 export type SettingsCoverageStatus = "supported" | "exception" | "pending";
 
 export type SettingsExceptionCategory =
@@ -121,7 +123,7 @@ const exception = ({
 // This list is intentionally maintained from UI and domain inputs rather than
 // generated from the runtime catalog. The adapter slices in this change bind
 // each listed eligible control to the compact settings contract.
-export const SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
+const UI_SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
   supported(
     "agent-definition-fields",
     "agents",
@@ -526,6 +528,84 @@ export const SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
     sourcePaths: source("apps/backend/internal/office"),
   }),
 ];
+
+const ACTUAL_MUTABLE_FIELD_SOURCES: Record<string, { sourcePaths: string[]; owner: string }> = {
+  agent_profile: {
+    sourcePaths: [PROFILE_DTO_SOURCE, PROFILE_CRUD_SOURCE],
+    owner: PROFILE_TASK,
+  },
+  user_settings: {
+    sourcePaths: [USER_DTO_SOURCE, "apps/backend/internal/user/controller/controller.go"],
+    owner: USER_TASK,
+  },
+};
+
+const actualMutableFields = (
+  contract as typeof contract & {
+    mutable_fields?: Record<string, string[]>;
+  }
+).mutable_fields;
+const generatedMutableCoverage: SettingsCoverageEvidence[] = Object.entries(
+  actualMutableFields ?? {},
+).flatMap(([resourceType, fieldPaths]) => {
+  const sourceInfo = ACTUAL_MUTABLE_FIELD_SOURCES[resourceType];
+  if (!sourceInfo) return [];
+  return fieldPaths.map((fieldPath) =>
+    supported(
+      `dto-contract-${resourceType}-${fieldPath}`,
+      resourceType,
+      fieldPath,
+      sourceInfo.sourcePaths,
+      sourceInfo.owner,
+    ),
+  );
+});
+
+export const SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
+  ...UI_SETTINGS_COVERAGE_INVENTORY,
+  ...generatedMutableCoverage.filter(
+    (generated) =>
+      !UI_SETTINGS_COVERAGE_INVENTORY.some(
+        (existing) =>
+          existing.domain === generated.domain && existing.fieldPath === generated.fieldPath,
+      ),
+  ),
+];
+
+type SettingsContractDomain = {
+  resource_type: string;
+  fields: Array<{ field_path: string; support: string; writable?: boolean }>;
+};
+
+export function validateMutableFieldParity(
+  actualFields: Record<string, string[]>,
+  domains: SettingsContractDomain[],
+): string[] {
+  const errors: string[] = [];
+  for (const [resourceType, fields] of Object.entries(actualFields)) {
+    const domain = domains.find((candidate) => candidate.resource_type === resourceType);
+    if (!domain) {
+      errors.push(`${resourceType}: mutable DTO has no catalog domain`);
+      continue;
+    }
+    const catalogFields = new Set(
+      domain.fields
+        .filter((field) => field.support === "supported" && field.writable)
+        .map((field) => field.field_path),
+    );
+    for (const fieldPath of fields) {
+      if (!catalogFields.has(fieldPath)) {
+        errors.push(`${resourceType}.${fieldPath}: mutable DTO field is missing from catalog`);
+      }
+    }
+    for (const fieldPath of catalogFields) {
+      if (!fields.includes(fieldPath)) {
+        errors.push(`${resourceType}.${fieldPath}: catalog field is missing from mutable DTO`);
+      }
+    }
+  }
+  return errors;
+}
 
 export function validateSettingsCoverageInventory(entries: SettingsCoverageEvidence[]): string[] {
   const errors: string[] = [];

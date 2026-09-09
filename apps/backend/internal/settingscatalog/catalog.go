@@ -92,6 +92,7 @@ type FieldDescriptor struct {
 	SettingsHref    string         `json:"settings_href,omitempty"`
 	ExceptionReason string         `json:"exception_reason,omitempty"`
 	Recovery        string         `json:"recovery,omitempty"`
+	Schema          map[string]any `json:"schema,omitempty"`
 }
 
 type OperationDescriptor struct {
@@ -340,6 +341,29 @@ func (r *Registry) ValidateTarget(target ResourceTarget) error {
 	return nil
 }
 
+// RuntimeFlagAgentMutable reports whether the compact settings boundary may
+// persist an override for a runtime flag. Interactive administration retains
+// the separate ability to change installation authentication settings.
+func RuntimeFlagAgentMutable(key string) bool {
+	return strings.TrimSpace(key) != "features.auth"
+}
+
+// FieldForTarget applies target-specific policy to a catalog field. The
+// runtime flag catalog is shared across keys, but authentication enablement is
+// intentionally interactive-only for agent mutations.
+func FieldForTarget(field FieldDescriptor, target *ResourceTarget) FieldDescriptor {
+	if target == nil || target.ResourceType != "runtime_flag" || target.ResourceID == nil ||
+		field.FieldPath != "override" || RuntimeFlagAgentMutable(*target.ResourceID) {
+		return field
+	}
+	field.Support = SupportException
+	field.Classification = ClassificationException
+	field.Writable = false
+	field.ExceptionReason = "Authentication enablement requires the interactive administration flow."
+	field.Recovery = "Use the interactive authentication settings control and restart the installation."
+	return field
+}
+
 func (r *Registry) domainForField(key string) (DomainDescriptor, bool) {
 	domain, ok := r.domainByField[key]
 	return domain, ok
@@ -419,7 +443,34 @@ func parseCursor(cursor string) (int, error) {
 func cloneField(field FieldDescriptor) FieldDescriptor {
 	field.Aliases = append([]string(nil), field.Aliases...)
 	field.Dependencies = append([]string(nil), field.Dependencies...)
+	field.Schema = cloneJSONMap(field.Schema)
 	return field
+}
+
+func cloneJSONMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = cloneJSONValue(value)
+	}
+	return result
+}
+
+func cloneJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneJSONMap(typed)
+	case []any:
+		result := make([]any, len(typed))
+		for index, item := range typed {
+			result[index] = cloneJSONValue(item)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 func cloneDomain(domain DomainDescriptor) DomainDescriptor {

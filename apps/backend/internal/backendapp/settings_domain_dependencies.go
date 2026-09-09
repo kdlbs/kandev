@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -98,6 +99,7 @@ type settingsRuntimeFlagsService interface {
 type settingsStorageService interface {
 	GetSettings(context.Context) (storage.StorageMaintenanceSettings, error)
 	SaveSettingsWithConfirmations(context.Context, storage.StorageMaintenanceSettings, storage.SaveConfirmations) (storage.StorageMaintenanceSettings, error)
+	PatchSettingsWithConfirmations(context.Context, map[string]json.RawMessage, storage.SaveConfirmations) (storage.StorageMaintenanceSettings, error)
 }
 
 type settingsAutomationService interface {

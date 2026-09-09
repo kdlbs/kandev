@@ -39,3 +39,38 @@ func TestDefaultProfileFieldsAreWritableAndBound(t *testing.T) {
 		}
 	}
 }
+
+func TestWritableDomainsExposeConcreteOperationAuthorities(t *testing.T) {
+	registry, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, domain := range registry.Domains() {
+		writable := false
+		for _, field := range domain.Fields {
+			writable = writable || field.Writable
+		}
+		if !writable {
+			continue
+		}
+		for _, operation := range domain.Operations {
+			if operation.Name == "update" && (operation.Authority == "" || operation.Authority == "domain.owner") {
+				t.Errorf("%s update authority = %q, want concrete field authority", domain.ResourceType, operation.Authority)
+			}
+		}
+	}
+}
+
+func TestCatalogOperationsNeverUsePlaceholderAuthorities(t *testing.T) {
+	registry, err := DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, domain := range registry.Domains() {
+		for _, operation := range domain.Operations {
+			if operation.Authority == "domain.owner" {
+				t.Fatalf("%s operation %q uses placeholder authority", domain.ResourceType, operation.Name)
+			}
+		}
+	}
+}

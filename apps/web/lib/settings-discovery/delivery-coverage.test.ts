@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SETTINGS_COVERAGE_INVENTORY,
   SETTINGS_COVERAGE_RESOURCE_TYPES,
+  validateMutableFieldParity,
   validateSettingsCoverageInventory,
 } from "./coverage-inventory";
 import contract from "./contract.generated.json";
@@ -29,5 +30,55 @@ describe("settings delivery coverage", () => {
         expect(catalogTypes.has(resourceType), resourceType).toBe(true);
       }
     }
+  });
+
+  it("compares catalog fields with independently reflected mutable DTO fields", () => {
+    const mutableFields = (
+      contract as typeof contract & {
+        mutable_fields?: Record<string, string[]>;
+      }
+    ).mutable_fields;
+    expect(mutableFields).toBeDefined();
+
+    expect(validateMutableFieldParity(mutableFields ?? {}, contract.domains)).toEqual([]);
+    for (const resourceType of ["agent_profile", "user_settings"]) {
+      for (const fieldPath of mutableFields?.[resourceType] ?? []) {
+        expect(
+          SETTINGS_COVERAGE_INVENTORY.some(
+            (entry) => entry.domain === resourceType && entry.fieldPath === fieldPath,
+          ),
+          `${resourceType}.${fieldPath} missing from coverage inventory`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("detects added DTO fields and removed catalog descriptors", () => {
+    const mutableFields = (
+      contract as typeof contract & {
+        mutable_fields: Record<string, string[]>;
+      }
+    ).mutable_fields;
+    const userDomain = contract.domains.find((item) => item.resource_type === "user_settings");
+    expect(userDomain).toBeDefined();
+    const addedField = {
+      ...mutableFields,
+      user_settings: [...mutableFields.user_settings, "future_mutable_field"],
+    };
+    expect(validateMutableFieldParity(addedField, contract.domains)).toContain(
+      "user_settings.future_mutable_field: mutable DTO field is missing from catalog",
+    );
+
+    const catalogWithoutDescriptor = contract.domains.map((domain) =>
+      domain.resource_type === "user_settings"
+        ? {
+            ...domain,
+            fields: domain.fields.filter((field) => field.field_path !== "keyboard_shortcuts"),
+          }
+        : domain,
+    );
+    expect(validateMutableFieldParity(mutableFields, catalogWithoutDescriptor)).toContain(
+      "user_settings.keyboard_shortcuts: mutable DTO field is missing from catalog",
+    );
   });
 });

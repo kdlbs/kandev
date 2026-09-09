@@ -313,6 +313,197 @@ func (s *settingsOperations) ReadSettings(ctx context.Context, target settingsca
 	}
 }
 
+func (s *settingsOperations) DescribeSetting(ctx context.Context, request mcphandlers.SettingDescriptionRequest) (mcphandlers.SettingDescription, error) {
+	field, domain, ok := s.registry.Find(request.Key)
+	if !ok {
+		return mcphandlers.SettingDescription{}, fmt.Errorf("setting %q was not found", request.Key)
+	}
+	field, err := s.targetDescriptionField(field, domain, request.Target)
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	if len(request.Context) == 0 {
+		return mcphandlers.SettingDescription{}, nil
+	}
+	if err := validateDescriptionContext(request.Key, field, request.Target, request.Context); err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	return s.describeProfileOptions(ctx, request)
+}
+
+func (s *settingsOperations) targetDescriptionField(
+	field settingscatalog.FieldDescriptor,
+	domain settingscatalog.DomainDescriptor,
+	target *settingscatalog.ResourceTarget,
+) (settingscatalog.FieldDescriptor, error) {
+	if target == nil {
+		return field, nil
+	}
+	if err := s.registry.ValidateTarget(*target); err != nil {
+		return settingscatalog.FieldDescriptor{}, err
+	}
+	if target.ResourceType != domain.ResourceType {
+		return settingscatalog.FieldDescriptor{}, fmt.Errorf("target resource_type does not match setting")
+	}
+	return settingscatalog.FieldForTarget(field, target), nil
+}
+
+func validateDescriptionContext(
+	key string,
+	field settingscatalog.FieldDescriptor,
+	target *settingscatalog.ResourceTarget,
+	contextValues map[string]any,
+) error {
+	if field.Key != "agent_profile.config_options" || target == nil || target.ResourceID == nil {
+		return fmt.Errorf("setting context is not supported for %q", key)
+	}
+	for contextKey := range contextValues {
+		switch contextKey {
+		case "model", "mode", "config_options", "refresh":
+		default:
+			return fmt.Errorf("unsupported setting context %q", contextKey)
+		}
+	}
+	return nil
+}
+
+func (s *settingsOperations) describeProfileOptions(
+	ctx context.Context,
+	request mcphandlers.SettingDescriptionRequest,
+) (mcphandlers.SettingDescription, error) {
+	profile, err := s.findProfile(ctx, *request.Target)
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	agentName, err := s.profileAgentName(ctx, profile.ID)
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	refresh, err := descriptionBoolContext(request.Context, "refresh")
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	caps, err := s.profiles.FetchDynamicModels(ctx, agentName, refresh)
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	choices := make([]map[string]any, 0, len(caps.Models)+len(caps.Modes))
+	for _, model := range caps.Models {
+		choices = append(choices, map[string]any{"kind": "model", "id": model.ID, "label": model.Name, "description": model.Description})
+	}
+	for _, mode := range caps.Modes {
+		choices = append(choices, map[string]any{"kind": "mode", "id": mode.ID, "label": mode.Name, "description": mode.Description})
+	}
+	model, err := descriptionModelContext(request.Context, profile.Model)
+	if err != nil {
+		return mcphandlers.SettingDescription{}, err
+	}
+	configOptions := []agentsettingsdto.ConfigOptionDTO{}
+	if model != "" {
+		mode, err := descriptionStringContext(request.Context, "mode")
+		if err != nil {
+			return mcphandlers.SettingDescription{}, err
+		}
+		selectedOptions, err := descriptionConfigOptionsContext(request.Context, "config_options")
+		if err != nil {
+			return mcphandlers.SettingDescription{}, err
+		}
+		resolution, err := s.profiles.ResolveAgentModelConfig(ctx, agentName, agentsettingsdto.ResolveAgentModelConfigRequest{
+			Model: model, Mode: mode, ConfigOptions: selectedOptions, Refresh: refresh,
+		})
+		if err != nil {
+			return mcphandlers.SettingDescription{}, err
+		}
+		configOptions = resolution.ConfigOptions
+	}
+	for _, option := range configOptions {
+		item := map[string]any{
+			"kind": "config_option", "id": option.ID, "label": option.Name,
+			"type": option.Type, "current_value": option.CurrentValue, "description": option.Description,
+		}
+		if len(option.Options) > 0 {
+			values := make([]map[string]any, 0, len(option.Options))
+			for _, value := range option.Options {
+				values = append(values, map[string]any{"value": value.Value, "label": value.Name, "description": value.Description})
+			}
+			item["options"] = values
+		}
+		choices = append(choices, item)
+	}
+	return mcphandlers.SettingDescription{Choices: choices}, nil
+}
+
+func descriptionModelContext(contextValues map[string]any, fallback string) (string, error) {
+	value, ok := contextValues["model"]
+	if !ok {
+		return fallback, nil
+	}
+	model, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("setting context %q must be a string", "model")
+	}
+	return model, nil
+}
+
+func descriptionStringContext(contextValues map[string]any, key string) (string, error) {
+	value, ok := contextValues[key]
+	if !ok {
+		return "", nil
+	}
+	parsed, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("setting context %q must be a string", key)
+	}
+	return parsed, nil
+}
+
+func descriptionConfigOptionsContext(contextValues map[string]any, key string) (map[string]string, error) {
+	value, ok := contextValues[key]
+	if !ok {
+		return nil, nil
+	}
+	entries, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("setting context %q must be an object", key)
+	}
+	result := make(map[string]string, len(entries))
+	for entryKey, entryValue := range entries {
+		parsed, ok := entryValue.(string)
+		if !ok {
+			return nil, fmt.Errorf("setting context %q values must be strings", key)
+		}
+		result[entryKey] = parsed
+	}
+	return result, nil
+}
+
+func descriptionBoolContext(contextValues map[string]any, key string) (bool, error) {
+	value, ok := contextValues[key]
+	if !ok {
+		return false, nil
+	}
+	parsed, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("setting context %q must be boolean", key)
+	}
+	return parsed, nil
+}
+
+func (s *settingsOperations) profileAgentName(ctx context.Context, profileID string) (string, error) {
+	response, err := s.profiles.ListAgents(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, agent := range response.Agents {
+		for _, profile := range agent.Profiles {
+			if profile.ID == profileID {
+				return agent.Name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("agent profile %q is not visible", profileID)
+}
+
 func (s *settingsOperations) UpdateSettings(ctx context.Context, target settingscatalog.ResourceTarget, changes map[string]json.RawMessage, options map[string]json.RawMessage) (any, error) {
 	if err := s.authorizeSettingsMutation(ctx, target, changes); err != nil {
 		return nil, err

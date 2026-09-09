@@ -336,6 +336,9 @@ func (s *settingsOperations) readRuntimeFlag(ctx context.Context, key string) (a
 }
 
 func (s *settingsOperations) updateRuntimeFlag(ctx context.Context, key string, changes map[string]json.RawMessage) (any, error) {
+	if !settingscatalog.RuntimeFlagAgentMutable(key) {
+		return nil, fmt.Errorf("runtime flag %q is interactive-only", key)
+	}
 	raw, ok := changes["override"]
 	if !ok {
 		return nil, fmt.Errorf("override is required")
@@ -511,71 +514,23 @@ func (s *settingsOperations) validateDomainWorkspace(ctx context.Context, target
 	return nil
 }
 
-//nolint:cyclop // Complete-document storage updates keep validation and confirmation atomic.
 func (s *settingsOperations) updateStorageSettings(ctx context.Context, changes map[string]json.RawMessage, options map[string]json.RawMessage) (any, error) {
-	current, err := s.deps.storage.GetSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	payload, err := json.Marshal(current)
-	if err != nil {
-		return nil, err
-	}
-	var document map[string]any
-	if err := json.Unmarshal(payload, &document); err != nil {
-		return nil, err
-	}
-	for key, raw := range changes {
-		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return nil, fmt.Errorf("invalid storage setting %q: %w", key, err)
-		}
-		if err := setNestedJSONValue(document, key, value); err != nil {
-			return nil, err
-		}
-	}
-	nextPayload, err := json.Marshal(document)
-	if err != nil {
-		return nil, err
-	}
-	var next storage.StorageMaintenanceSettings
-	if err := json.Unmarshal(nextPayload, &next); err != nil {
-		return nil, fmt.Errorf("invalid storage settings: %w", err)
-	}
 	dedicatedDocker, adoptGoCache := false, false
-	if raw, ok := options["confirm_dedicated_docker"]; ok {
-		if err := json.Unmarshal(raw, &dedicatedDocker); err != nil {
-			return nil, fmt.Errorf("confirm_dedicated_docker must be boolean")
-		}
-	}
-	if raw, ok := options["adopt_go_cache"]; ok {
-		if err := json.Unmarshal(raw, &adoptGoCache); err != nil {
-			return nil, fmt.Errorf("adopt_go_cache must be boolean")
-		}
-	}
-	for key := range options {
-		if key != "confirm_dedicated_docker" && key != "adopt_go_cache" {
+	for key, raw := range options {
+		switch key {
+		case "confirm_dedicated_docker":
+			if err := json.Unmarshal(raw, &dedicatedDocker); err != nil {
+				return nil, fmt.Errorf("confirm_dedicated_docker must be boolean")
+			}
+		case "adopt_go_cache":
+			if err := json.Unmarshal(raw, &adoptGoCache); err != nil {
+				return nil, fmt.Errorf("adopt_go_cache must be boolean")
+			}
+		default:
 			return nil, fmt.Errorf("unsupported storage option %q", key)
 		}
 	}
-	return s.deps.storage.SaveSettingsWithConfirmations(ctx, next, storage.NewSaveConfirmations(dedicatedDocker, adoptGoCache))
-}
-
-func setNestedJSONValue(document map[string]any, path string, value any) error {
-	parts := strings.Split(path, ".")
-	if len(parts) == 0 || parts[0] == "" {
-		return fmt.Errorf("storage setting path %q is invalid", path)
-	}
-	current := document
-	for _, part := range parts[:len(parts)-1] {
-		nested, ok := current[part].(map[string]any)
-		if !ok {
-			return fmt.Errorf("storage setting path %q is invalid", path)
-		}
-		current = nested
-	}
-	current[parts[len(parts)-1]] = value
-	return nil
+	return s.deps.storage.PatchSettingsWithConfirmations(ctx, changes, storage.NewSaveConfirmations(dedicatedDocker, adoptGoCache))
 }
 
 func decodeOptionalChange(changes map[string]json.RawMessage, key string, target any) error {
@@ -596,20 +551,30 @@ func (s *settingsOperations) listDomainSettingsResources(ctx context.Context, re
 	}
 	resources := make([]map[string]any, 0)
 	needle := strings.ToLower(strings.TrimSpace(query))
+	var targetError error
 	add := func(id, label, wsID string, extra map[string]any) {
-		if id == "" || (workspaceID != nil && strings.TrimSpace(*workspaceID) != "" && wsID != strings.TrimSpace(*workspaceID)) {
+		if targetError != nil || id == "" || (workspaceID != nil && strings.TrimSpace(*workspaceID) != "" && wsID != strings.TrimSpace(*workspaceID)) {
 			return
 		}
 		if needle != "" && !strings.Contains(strings.ToLower(id), needle) && !strings.Contains(strings.ToLower(label), needle) {
 			return
 		}
+		target := settingscatalog.ResourceTarget{ResourceType: resourceType, ResourceID: settingsStringPointer(id)}
+		if s.registry != nil {
+			if domain, ok := s.registry.Domain(resourceType); ok &&
+				(domain.Target.AllowsWorkspaceID || domain.Target.RequiresWorkspaceID) {
+				target.WorkspaceID = nonEmptyPointer(wsID)
+			}
+		}
+		if s.registry != nil {
+			if err := s.registry.ValidateTarget(target); err != nil {
+				targetError = err
+				return
+			}
+		}
 		item := map[string]any{
-			"target": settingscatalog.ResourceTarget{
-				ResourceType: resourceType,
-				ResourceID:   settingsStringPointer(id),
-				WorkspaceID:  nonEmptyPointer(wsID),
-			},
-			"label": label,
+			"target": target,
+			"label":  label,
 		}
 		for key, value := range extra {
 			item[key] = value
@@ -777,7 +742,14 @@ func (s *settingsOperations) listDomainSettingsResources(ctx context.Context, re
 		items, listErr := s.deps.runtimeFlags.ListStates(ctx)
 		err = listErr
 		for _, item := range items {
-			add(item.Key, item.Label, "", map[string]any{"env_locked": item.EnvLocked})
+			agentMutable := settingscatalog.RuntimeFlagAgentMutable(item.Key)
+			add(item.Key, item.Label, "", map[string]any{
+				"env_locked":     item.EnvLocked,
+				"agent_mutable":  agentMutable,
+				"support":        runtimeFlagSupport(agentMutable),
+				"classification": runtimeFlagClassification(agentMutable),
+				"writable":       agentMutable,
+			})
 		}
 	default:
 		return nil, fmt.Errorf("resource lookup is not implemented for resource type %q", resourceType)
@@ -785,10 +757,27 @@ func (s *settingsOperations) listDomainSettingsResources(ctx context.Context, re
 	if err != nil {
 		return nil, err
 	}
+	if targetError != nil {
+		return nil, fmt.Errorf("resource lookup returned invalid target: %w", targetError)
+	}
 	sort.Slice(resources, func(i, j int) bool {
 		return fmt.Sprint(resources[i]["label"]) < fmt.Sprint(resources[j]["label"])
 	})
 	return pageSettingsResources(resources, limit, cursor), nil
+}
+
+func runtimeFlagSupport(agentMutable bool) settingscatalog.SupportStatus {
+	if agentMutable {
+		return settingscatalog.SupportSupported
+	}
+	return settingscatalog.SupportException
+}
+
+func runtimeFlagClassification(agentMutable bool) settingscatalog.Classification {
+	if agentMutable {
+		return settingscatalog.ClassificationWritable
+	}
+	return settingscatalog.ClassificationException
 }
 
 func pageSettingsResources(resources []map[string]any, limit int, cursor string) map[string]any {
