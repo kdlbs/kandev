@@ -39,6 +39,12 @@ test.describe("executor-authoritative model selection on mobile", () => {
           .locator('[data-slot="drawer-content"][data-state="open"]')
           .filter({ hasText: warningText }),
       ).toBeVisible();
+      expect(
+        await testPage
+          .locator('[data-slot="drawer-content"][data-state="open"]')
+          .filter({ hasText: warningText })
+          .evaluate((element) => getComputedStyle(element).zIndex),
+      ).toBe("80");
       await assertNoDocumentHorizontalOverflow(testPage, "mobile model mismatch selector");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});

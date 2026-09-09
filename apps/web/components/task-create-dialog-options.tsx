@@ -71,7 +71,7 @@ function ModelProbeWarning({ note }: { note: string }) {
     return (
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent>
+        <DrawerContent style={{ zIndex: 80 }}>
           <DrawerHeader>
             <DrawerTitle className="sr-only">{note}</DrawerTitle>
             <DrawerDescription>{note}</DrawerDescription>
@@ -84,7 +84,9 @@ function ModelProbeWarning({ note }: { note: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent side="top">{note}</TooltipContent>
+      <TooltipContent side="top" style={{ zIndex: 80 }}>
+        {note}
+      </TooltipContent>
     </Tooltip>
   );
 }
