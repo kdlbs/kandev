@@ -85,13 +85,19 @@ func TestPostgresTerminalRouteAtomicallySettlesStateAndPendingRow(t *testing.T) 
 		CREATE TABLE pending_moves (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL UNIQUE,
-			task_id TEXT NOT NULL
+			task_id TEXT NOT NULL,
+			move_id TEXT NOT NULL
 		)
 	`)
 	require.NoError(t, err)
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: "pg-deferred-terminal-operation", TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerDeferredMove, ExpectedStepID: "pg-step-pr", TargetStepID: "pg-step-target",
+		Outcome: routing.OutcomePending,
+	}))
 	_, err = repo.db.ExecContext(ctx, `
-		INSERT INTO pending_moves (id, session_id, task_id)
-		VALUES ('pg-pending', 'pg-session', 'pg-terminal-task')
+		INSERT INTO pending_moves (id, session_id, task_id, move_id)
+		VALUES ('pg-pending', 'pg-session', 'pg-terminal-task', 'pg-deferred-terminal-operation')
 	`)
 	require.NoError(t, err)
 	task.WorkflowStepID = "pg-step-done"
@@ -113,6 +119,11 @@ func TestPostgresTerminalRouteAtomicallySettlesStateAndPendingRow(t *testing.T) 
 	require.NoError(t, repo.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pending_moves WHERE task_id = $1`, task.ID).Scan(&pending))
 	require.Zero(t, pending)
+	operation, found, err := repo.GetWorkflowRouteOperation(ctx, "pg-deferred-terminal-operation")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, routing.OutcomeStaleSource, operation.Outcome)
+	require.Equal(t, "pg-step-done", operation.ObservedStepID)
 }
 
 // TestPostgresWorkflowRouteOperationPendingToCommittedFillsIdentity mirrors

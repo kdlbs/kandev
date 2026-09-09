@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -129,9 +130,14 @@ func TestHandleMoveTask_ActiveSessionTerminalMoveCommitsBeforeResponse(t *testin
 	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
 	require.NoError(t, err)
 	queue := messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger(t))
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: "mcp-move:obsolete-pending", TaskID: "task-terminal", WorkspaceID: "ws-terminal",
+		Producer: routing.ProducerDeferredMove, ExpectedStepID: "step-pr", TargetStepID: "step-obsolete",
+		SessionID: "sess-terminal", ActorKind: "agent", ActorID: "sess-terminal", Outcome: routing.OutcomePending,
+	}))
 	require.NoError(t, queue.SetPendingMove(ctx, "sess-terminal", &messagequeue.PendingMove{
-		ID: "pending-terminal", MoveID: "move-terminal", TaskID: "task-terminal",
-		WorkflowID: "wf-terminal", WorkflowStepID: "step-done",
+		ID: "pending-terminal", MoveID: "mcp-move:obsolete-pending", TaskID: "task-terminal",
+		WorkflowID: "wf-terminal", WorkflowStepID: "step-obsolete",
 		ExpectedWorkflowStepID: "step-pr",
 	}))
 	h := &Handlers{
@@ -150,6 +156,18 @@ func TestHandleMoveTask_ActiveSessionTerminalMoveCommitsBeforeResponse(t *testin
 	require.NoError(t, err)
 	assert.False(t, present, "terminal success must settle its deferred route in the task transaction")
 	assert.Nil(t, pending)
+
+	// The terminal route wins over the earlier deferred request. Its exact retry
+	// must return the stored stale outcome rather than recreating an obsolete
+	// synthetic destination.
+	staleRetry := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id": "task-terminal", "workflow_id": "wf-terminal",
+		"workflow_step_id": "step-obsolete", "sender_session_id": "sess-terminal",
+	})
+	staleRetry.ID = "obsolete-pending"
+	staleResponse, err := h.handleMoveTask(ctx, staleRetry)
+	require.NoError(t, err)
+	assertWSError(t, staleResponse, ws.ErrorCodeValidation)
 
 	stored, err := svc.GetTask(ctx, "task-terminal")
 	require.NoError(t, err)

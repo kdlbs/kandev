@@ -18,13 +18,19 @@ func TestWorkflowStoreTerminalRouteCommitsTaskStateAndPendingSettlement(t *testi
 		CREATE TABLE pending_moves (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL UNIQUE,
-			task_id TEXT NOT NULL
+			task_id TEXT NOT NULL,
+			move_id TEXT NOT NULL
 		)
 	`)
 	require.NoError(t, err)
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: "deferred-terminal-operation", TaskID: "terminal-task", WorkspaceID: "ws1",
+		Producer: routing.ProducerDeferredMove, ExpectedStepID: "step-pr", TargetStepID: "step-target",
+		Outcome: routing.OutcomePending,
+	}))
 	_, err = repo.DB().ExecContext(ctx, `
-		INSERT INTO pending_moves (id, session_id, task_id)
-		VALUES ('pending-terminal', 'terminal-session', 'terminal-task')
+		INSERT INTO pending_moves (id, session_id, task_id, move_id)
+		VALUES ('pending-terminal', 'terminal-session', 'terminal-task', 'deferred-terminal-operation')
 	`)
 	require.NoError(t, err)
 
@@ -52,4 +58,11 @@ func TestWorkflowStoreTerminalRouteCommitsTaskStateAndPendingSettlement(t *testi
 	require.NoError(t, repo.DB().QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pending_moves WHERE task_id = ?`, task.ID).Scan(&pending))
 	require.Zero(t, pending, "terminal commit must settle pending routes in the same transaction")
+
+	operation, found, err := repo.GetWorkflowRouteOperation(ctx, "deferred-terminal-operation")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, routing.OutcomeStaleSource, operation.Outcome,
+		"a retry of a terminally discarded deferred route must not synthesize its obsolete target")
+	require.Equal(t, "step-done", operation.ObservedStepID)
 }

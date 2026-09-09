@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -731,9 +732,22 @@ func (r *Repository) settleTerminalPendingMovesTx(ctx context.Context, tx *sql.T
 	}
 	// Pending workflow routes are part of the same task generation as the task
 	// row. SetPendingMove locks that row before admitting a deferred route, so
-	// terminal settlement either deletes an earlier row or makes later
-	// admission reject the committed terminal generation.
-	_, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), task.ID)
+	// terminal settlement either absorbs an earlier route or makes later
+	// admission reject the committed terminal generation. The move ID is also
+	// the durable operation identity used by exact MCP retries, so it must be
+	// settled before the matching pending row is deleted.
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_operations
+		SET observed_step_id = ?, outcome = ?, updated_at = ?
+		WHERE task_id = ? AND outcome = ? AND id IN (
+			SELECT move_id FROM pending_moves WHERE task_id = ?
+		)
+	`), task.WorkflowStepID, string(routing.OutcomeStaleSource), task.UpdatedAt,
+		task.ID, string(routing.OutcomePending), task.ID)
+	if err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("settle terminal route operations: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), task.ID)
 	if err != nil && !internaldb.IsMissingTableError(err) {
 		return fmt.Errorf("settle terminal pending moves: %w", err)
 	}
